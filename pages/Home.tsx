@@ -10,11 +10,26 @@ type SortOption = 'newest' | 'views' | 'price';
 export default function Home() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [sortOption, setSortOption] = useState<SortOption>('newest');
+  const [purchases, setPurchases] = useState<string[]>([]);
   const { user } = useAuth();
 
   useEffect(() => {
-    setVideos(db.getAllVideos());
+    db.getAllVideos().then(setVideos);
   }, []);
+
+  // Fetch purchases separately to avoid async issues in loop
+  useEffect(() => {
+    if (user && videos.length > 0) {
+        // Check all purchases
+        // Optimization: In real app, endpoint returns list of purchased IDs
+        // Here we just parallel check for UI
+        Promise.all(videos.map(v => db.hasPurchased(user.id, v.id)))
+            .then(results => {
+                const p = videos.filter((_, i) => results[i]).map(v => v.id);
+                setPurchases(p);
+            });
+    }
+  }, [user, videos]);
 
   const sortedVideos = useMemo(() => {
     const sorted = [...videos];
@@ -69,7 +84,7 @@ export default function Home() {
           <VideoCard 
             key={video.id} 
             video={video} 
-            isUnlocked={user ? db.hasPurchased(user.id, video.id) : false}
+            isUnlocked={purchases.includes(video.id) || (user?.id === video.creatorId)}
           />
         ))}
       </div>

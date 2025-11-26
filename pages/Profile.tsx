@@ -3,7 +3,7 @@ import { useAuth } from '../App';
 import { db } from '../services/db';
 import { Wallet, History, Settings2, Clock, PlayCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { Video } from '../types';
+import { Video, Transaction } from '../types';
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
@@ -11,19 +11,24 @@ export default function Profile() {
   const [showBulk, setShowBulk] = useState(false);
   const [autoLimit, setAutoLimit] = useState<number>(1);
   const [watchLaterVideos, setWatchLaterVideos] = useState<Video[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [myVideos, setMyVideos] = useState<Video[]>([]);
 
   useEffect(() => {
     if (user) {
       setAutoLimit(user.autoPurchaseLimit);
-      const videos = user.watchLater.map(id => db.getVideo(id)).filter(v => v !== undefined) as Video[];
-      setWatchLaterVideos(videos);
+      
+      // Async fetches
+      Promise.all(user.watchLater.map(id => db.getVideo(id))).then(res => {
+          setWatchLaterVideos(res.filter(v => !!v) as Video[]);
+      });
+
+      db.getUserTransactions(user.id).then(setTransactions);
+      db.getVideosByCreator(user.id).then(setMyVideos);
     }
   }, [user]);
 
   if (!user) return null;
-
-  const transactions = db.getUserTransactions(user.id);
-  const myVideos = db.getVideosByCreator(user.id);
 
   const handleBulkUpdate = async () => {
      if (confirm(`Are you sure you want to set ALL your videos to ${bulkPrice} Saldo?`)) {

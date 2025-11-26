@@ -11,7 +11,7 @@ export default function Admin() {
   const [amount, setAmount] = useState<number>(10);
 
   useEffect(() => {
-    setUsers(db.getAllUsers());
+    db.getAllUsers().then(setUsers);
   }, []);
 
   const handleAddCredit = async (targetId: string) => {
@@ -19,7 +19,8 @@ export default function Admin() {
     try {
       await db.adminAddBalance(currentUser.id, targetId, amount);
       // Refresh list
-      setUsers([...db.getAllUsers()]);
+      const u = await db.getAllUsers();
+      setUsers(u);
       alert(`Added ${amount} Saldo to user.`);
     } catch (e: any) {
       alert(e.message);

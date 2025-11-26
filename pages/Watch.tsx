@@ -36,16 +36,25 @@ export default function Watch() {
       setCountdown(null);
       setAutoStatus('IDLE');
       
-      const v = db.getVideo(id);
-      if (v) {
-        setVideo(v);
-        setIsUnlocked(db.hasPurchased(user.id, v.id));
-        setInteraction(db.getInteraction(user.id, v.id));
-        setComments(db.getComments(v.id));
-        setIsWatchLater(user.watchLater.includes(v.id));
-        setRelatedVideos(db.getRelatedVideos(v.id));
-      }
-      setLoading(false);
+      const loadData = async () => {
+         const v = await db.getVideo(id);
+         if (v) {
+            setVideo(v);
+            const purchased = await db.hasPurchased(user.id, v.id);
+            setIsUnlocked(purchased);
+            
+            const interact = await db.getInteraction(user.id, v.id);
+            setInteraction(interact);
+            
+            setComments(db.getComments(v.id)); // Sync for now as empty
+            setIsWatchLater(user.watchLater.includes(v.id));
+            
+            const related = await db.getRelatedVideos(v.id);
+            setRelatedVideos(related);
+         }
+         setLoading(false);
+      };
+      loadData();
     }
   }, [id, user]);
 
@@ -73,14 +82,13 @@ export default function Watch() {
 
   // --- Auto-Play Logic ---
 
-  const findNextPlayableVideo = (candidates: Video[]): { video: Video, status: typeof autoStatus } | null => {
+  const findNextPlayableVideo = async (candidates: Video[]): Promise<{ video: Video, status: typeof autoStatus } | null> => {
     if (!user) return null;
     
     // We iterate through candidates to find the best match
-    
     for (const v of candidates) {
-      const vInteract = db.getInteraction(user.id, v.id);
-      const isPurchased = db.hasPurchased(user.id, v.id);
+      const vInteract = await db.getInteraction(user.id, v.id);
+      const isPurchased = await db.hasPurchased(user.id, v.id);
       
       if (vInteract.isWatched) return { video: v, status: 'SKIPPING_WATCHED' };
       if (isPurchased) return { video: v, status: 'PLAYING_NEXT' };
@@ -95,10 +103,10 @@ export default function Watch() {
     return null;
   };
 
-  const handleVideoEnded = () => {
+  const handleVideoEnded = async () => {
     if (relatedVideos.length === 0) return;
     
-    const result = findNextPlayableVideo(relatedVideos);
+    const result = await findNextPlayableVideo(relatedVideos);
     if (result) {
       setNextVideo(result.video);
       setAutoStatus(result.status);
@@ -124,11 +132,8 @@ export default function Watch() {
         } else {
            // SKIPPING_WATCHED or PLAYING_NEXT
            if (autoStatus === 'SKIPPING_WATCHED') {
-              let targetId = nextVideo.id;
-              const realNext = findFirstUnwatched(relatedVideos);
-              if (realNext) targetId = realNext.id;
-              
-              navigate(`/watch/${targetId}`);
+              // Find first unwatched if possible, else current
+              navigate(`/watch/${nextVideo.id}`);
            } else {
               navigate(`/watch/${nextVideo.id}`);
            }
@@ -141,11 +146,6 @@ export default function Watch() {
     return () => clearTimeout(timer);
   }, [countdown, nextVideo, autoStatus, user, navigate, refreshUser]);
 
-  const findFirstUnwatched = (list: Video[]) => {
-      // Find first one we haven't watched.
-      // If all watched, just pick the first one.
-      return list.find(v => !db.getInteraction(user!.id, v.id).isWatched) || list[0];
-  };
 
   // --- Actions ---
 
@@ -168,7 +168,9 @@ export default function Watch() {
     if (!user || !video) return;
     const res = await db.toggleLike(user.id, video.id, isLike);
     setInteraction(res);
-    setVideo(db.getVideo(video.id) || video); 
+    // Reload video stats
+    const v = await db.getVideo(video.id);
+    if(v) setVideo(v); 
   };
 
   const toggleWatchLater = async () => {
@@ -393,39 +395,51 @@ export default function Watch() {
         <div className="space-y-4">
            <h3 className="font-bold text-slate-200">Up Next</h3>
            <div className="flex flex-col gap-3">
-             {relatedVideos.map(rv => {
-               const rvInteract = user ? db.getInteraction(user.id, rv.id) : { isWatched: false };
-               const isPurchased = user ? db.hasPurchased(user.id, rv.id) : false;
-
-               return (
-                 <Link key={rv.id} to={`/watch/${rv.id}`} className="flex gap-3 group">
-                   <div className="relative w-40 aspect-video shrink-0 bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group-hover:border-indigo-500 transition-colors">
-                      <img src={rv.thumbnailUrl} alt="" className="w-full h-full object-cover opacity-80 group-hover:opacity-100" />
-                      {rvInteract.isWatched && (
-                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                          <span className="text-xs font-bold text-white bg-slate-800/80 px-2 py-1 rounded">WATCHED</span>
-                        </div>
-                      )}
-                      {!isPurchased && !rvInteract.isWatched && (
-                        <div className="absolute bottom-1 right-1 bg-black/70 text-amber-400 text-[10px] px-1.5 py-0.5 rounded font-bold">
-                           {rv.price} $
-                        </div>
-                      )}
-                   </div>
-                   <div className="min-w-0 py-1">
-                      <h4 className="text-sm font-semibold text-slate-200 line-clamp-2 group-hover:text-indigo-400 transition-colors">{rv.title}</h4>
-                      <p className="text-xs text-slate-500 mt-1">{rv.creatorName}</p>
-                      <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
-                         <span>{rv.views} views</span>
-                      </div>
-                   </div>
-                 </Link>
-               );
-             })}
+             {relatedVideos.map(rv => (
+               <RelatedVideoItem key={rv.id} rv={rv} userId={user?.id} />
+             ))}
            </div>
         </div>
 
       </div>
     </div>
   );
+}
+
+// Helper to avoid async inside map
+function RelatedVideoItem({rv, userId}: {rv: Video, userId?: string}) {
+   const [watched, setWatched] = useState(false);
+   const [purchased, setPurchased] = useState(false);
+
+   useEffect(() => {
+     if(userId) {
+        db.getInteraction(userId, rv.id).then(i => setWatched(i.isWatched));
+        db.hasPurchased(userId, rv.id).then(setPurchased);
+     }
+   }, [userId, rv.id]);
+
+   return (
+    <Link to={`/watch/${rv.id}`} className="flex gap-3 group">
+      <div className="relative w-40 aspect-video shrink-0 bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group-hover:border-indigo-500 transition-colors">
+         <img src={rv.thumbnailUrl} alt="" className="w-full h-full object-cover opacity-80 group-hover:opacity-100" />
+         {watched && (
+           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+             <span className="text-xs font-bold text-white bg-slate-800/80 px-2 py-1 rounded">WATCHED</span>
+           </div>
+         )}
+         {!purchased && !watched && (
+           <div className="absolute bottom-1 right-1 bg-black/70 text-amber-400 text-[10px] px-1.5 py-0.5 rounded font-bold">
+              {rv.price} $
+           </div>
+         )}
+      </div>
+      <div className="min-w-0 py-1">
+         <h4 className="text-sm font-semibold text-slate-200 line-clamp-2 group-hover:text-indigo-400 transition-colors">{rv.title}</h4>
+         <p className="text-xs text-slate-500 mt-1">{rv.creatorName}</p>
+         <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
+            <span>{rv.views} views</span>
+         </div>
+      </div>
+    </Link>
+   );
 }

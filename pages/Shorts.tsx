@@ -23,9 +23,9 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
   // Load Interaction Data
   useEffect(() => {
     if (user) {
-      setInteraction(db.getInteraction(user.id, video.id));
-      setIsUnlocked(db.hasPurchased(user.id, video.id));
-      setComments(db.getComments(video.id));
+      db.getInteraction(user.id, video.id).then(setInteraction);
+      db.hasPurchased(user.id, video.id).then(setIsUnlocked);
+      // setComments(db.getComments(video.id)); // Not implemented in PHP yet
     }
   }, [user, video.id]);
 
@@ -267,8 +267,9 @@ export default function Shorts() {
 
   useEffect(() => {
     // Randomize videos for the feed feel
-    const allVideos = db.getAllVideos().sort(() => Math.random() - 0.5);
-    setVideos(allVideos);
+    db.getAllVideos().then(all => {
+        setVideos(all.sort(() => Math.random() - 0.5));
+    });
   }, []);
 
   // Track active video for autoplay

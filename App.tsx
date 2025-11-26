@@ -32,19 +32,17 @@ export const useAuth = () => {
 const AuthProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   
-  // Persist login state simply using localStorage id
+  // Persist login state
   useEffect(() => {
     const savedId = localStorage.getItem('sp_current_user_id');
     if (savedId) {
-      const found = db.getAllUsers().find(u => u.id === savedId);
-      if (found) setUser(found);
+      db.getUser(savedId).then(u => setUser(u)).catch(() => localStorage.removeItem('sp_current_user_id'));
     }
   }, []);
 
   const refreshUser = () => {
      if (user) {
-        const updated = db.getAllUsers().find(u => u.id === user.id);
-        if (updated) setUser({...updated});
+        db.getUser(user.id).then(u => setUser(u));
      }
   };
 
@@ -76,7 +74,8 @@ const AuthProvider: React.FC<PropsWithChildren> = ({ children }) => {
 
 const ProtectedRoute = ({ children }: PropsWithChildren) => {
   const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
+  // Simple check, in real app might need loading state
+  if (!user && !localStorage.getItem('sp_current_user_id')) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
@@ -87,7 +86,19 @@ const AdminRoute = ({ children }: PropsWithChildren) => {
 };
 
 const SetupGuard = ({ children }: PropsWithChildren) => {
-  if (db.needsSetup()) {
+  const [checkDone, setCheckDone] = useState(false);
+  const [needs, setNeeds] = useState(false);
+
+  useEffect(() => {
+    db.checkInstallation().then(() => {
+       setNeeds(db.needsSetup());
+       setCheckDone(true);
+    });
+  }, []);
+
+  if (!checkDone) return null; // Or a spinner
+
+  if (needs) {
     return <Navigate to="/setup" replace />;
   }
   return <>{children}</>;
@@ -96,13 +107,11 @@ const SetupGuard = ({ children }: PropsWithChildren) => {
 // --- App ---
 
 export default function App() {
-  const [isSetup, setIsSetup] = useState(!db.needsSetup());
-
   return (
     <AuthProvider>
       <HashRouter>
         <Routes>
-          <Route path="/setup" element={!db.needsSetup() ? <Navigate to="/" /> : <Setup />} />
+          <Route path="/setup" element={<Setup />} />
           
           <Route path="/login" element={
             <SetupGuard>
