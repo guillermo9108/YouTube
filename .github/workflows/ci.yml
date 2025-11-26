@@ -43,9 +43,15 @@ jobs:
         path: streampay-release.zip
 
     - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
+      # Ejecutar si es un Tag O si es la rama main/master
+      if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
       uses: softprops/action-gh-release@v2
       with:
         files: streampay-release.zip
+        # Si es un tag usa su nombre, si es main usa 'latest'
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+        name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Latest Build' }}
+        # Marcar como prerelease si no es un tag de versión
+        prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
