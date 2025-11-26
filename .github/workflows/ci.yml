@@ -25,11 +25,22 @@ jobs:
     - name: Build project
       run: npm run build
 
-    - name: Zip Build
+    - name: Check Build Output
+      run: |
+        if [ ! -d "dist" ]; then
+          echo "Error: dist directory was not created!"
+          exit 1
+        fi
+        echo "Contents of dist:"
+        ls -la dist
+
+    - name: Create Zip
       run: |
         cd dist
         zip -r ../streampay-release.zip .
         cd ..
+        echo "Zip created successfully:"
+        ls -lh streampay-release.zip
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
