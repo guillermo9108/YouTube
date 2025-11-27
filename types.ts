@@ -77,4 +77,9 @@ export interface SystemSettings {
   downloadStartTime: string; // "01:00"
   downloadEndTime: string;   // "06:00"
   isQueuePaused: boolean;
+  batchSize: number;         // Videos to download per run
+  maxDuration: number;       // Seconds
+  maxResolution: number;     // Height (e.g. 720, 1080)
+  pexelsKey: string;
+  pixabayKey: string;
 }
