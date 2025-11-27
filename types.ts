@@ -1,3 +1,4 @@
+
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -60,4 +61,20 @@ export interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+}
+
+export interface ContentRequest {
+  id: string;
+  userId: string;
+  username: string;
+  query: string;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'MANUAL_UPLOAD';
+  createdAt: number;
+  useLocalNetwork: boolean; // If true, backend skips download, user uploads manually
+}
+
+export interface SystemSettings {
+  downloadStartTime: string; // "01:00"
+  downloadEndTime: string;   // "06:00"
+  isQueuePaused: boolean;
 }

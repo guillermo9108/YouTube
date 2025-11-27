@@ -1,27 +1,36 @@
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
-import { User } from '../types';
+import { User, ContentRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
   const { user: currentUser } = useAuth();
   const [search, setSearch] = useState('');
   const [amount, setAmount] = useState<number>(10);
+  
+  // Maintenance State
+  const [repairing, setRepairing] = useState(false);
+  const [requests, setRequests] = useState<ContentRequest[]>([]);
+  const [diag, setDiag] = useState<{ytdlp: boolean; python: boolean; msg: string} | null>(null);
 
   useEffect(() => {
-    db.getAllUsers().then(setUsers);
+    loadData();
   }, []);
+
+  const loadData = async () => {
+    db.getAllUsers().then(setUsers);
+    db.getRequests().then(setRequests);
+  };
 
   const handleAddCredit = async (targetId: string, username: string) => {
     if (!currentUser) return;
     if (confirm(`Add ${amount} Saldo to ${username}?`)) {
       try {
         await db.adminAddBalance(currentUser.id, targetId, amount);
-        // Refresh list
-        const u = await db.getAllUsers();
-        setUsers(u);
+        loadData();
         alert(`Successfully added ${amount} Saldo.`);
       } catch (e: any) {
         alert(e.message);
@@ -29,15 +38,117 @@ export default function Admin() {
     }
   };
 
+  const handleRepairDb = async () => {
+    if (confirm("This will attempt to create any missing tables. Data will NOT be lost. Continue?")) {
+      setRepairing(true);
+      try {
+         await db.adminRepairDb();
+         alert("Database schema updated successfully.");
+      } catch (e: any) {
+         alert("Repair failed: " + e.message);
+      } finally {
+         setRepairing(false);
+      }
+    }
+  };
+
+  const checkDependencies = async () => {
+     try {
+       const res = await db.adminCheckDependencies();
+       setDiag(res);
+     } catch (e) {
+       alert("Failed to check dependencies");
+     }
+  };
+
+  const triggerDownload = async () => {
+     if(confirm("Force queue processing now?")) {
+       try {
+         const res = await db.triggerQueueProcessing();
+         alert(res.message);
+         loadData();
+       } catch (e) {
+         alert("Trigger failed");
+       }
+     }
+  };
+
   const filteredUsers = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="space-y-6 pb-24">
-      <div className="bg-red-900/20 border border-red-500/30 p-4 rounded-xl">
-        <h2 className="text-xl font-bold text-red-200 mb-1">Admin Dashboard</h2>
-        <p className="text-red-300/70 text-sm">Manage user balances. Use with caution.</p>
+    <div className="space-y-8 pb-24">
+      
+      {/* Header */}
+      <div className="bg-red-900/20 border border-red-500/30 p-4 rounded-xl flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-red-200 mb-1">Admin Dashboard</h2>
+          <p className="text-red-300/70 text-sm">Manage users and system health.</p>
+        </div>
+        <div className="flex gap-2">
+           <button onClick={handleRepairDb} disabled={repairing} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 border border-slate-700">
+             <Database size={16} /> {repairing ? 'Repairing...' : 'Update DB Schema'}
+           </button>
+        </div>
       </div>
 
+      {/* System Status / Queue */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+         {/* Download Queue */}
+         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+            <div className="flex justify-between items-center mb-4">
+               <h3 className="font-bold text-slate-200 flex items-center gap-2">
+                 <DownloadCloud className="text-indigo-400" /> Download Queue
+               </h3>
+               <button onClick={triggerDownload} className="text-xs bg-indigo-600 px-2 py-1 rounded text-white hover:bg-indigo-500">
+                 Force Process
+               </button>
+            </div>
+            
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+               {requests.length === 0 ? (
+                 <p className="text-slate-500 text-sm">No active requests.</p>
+               ) : (
+                 requests.map(r => (
+                   <div key={r.id} className="flex justify-between items-center bg-slate-950 p-2 rounded text-sm border border-slate-800">
+                      <div>
+                        <span className="font-bold text-slate-300 block">{r.query}</span>
+                        <span className="text-xs text-slate-500">{r.username} • {r.status}</span>
+                      </div>
+                      <span className="text-xs font-mono text-slate-600">{r.useLocalNetwork ? 'LOCAL' : 'SERVER'}</span>
+                   </div>
+                 ))
+               )}
+            </div>
+         </div>
+
+         {/* Server Diagnostics */}
+         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+            <h3 className="font-bold text-slate-200 flex items-center gap-2 mb-4">
+               <Shield className="text-emerald-400" /> Server Diagnostics
+            </h3>
+            <button onClick={checkDependencies} className="bg-slate-800 text-slate-300 px-3 py-1.5 rounded text-sm mb-4 border border-slate-700">
+               Test Dependencies
+            </button>
+            
+            {diag && (
+              <div className="space-y-2 text-sm">
+                 <div className={`flex items-center gap-2 ${diag.python ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <div className={`w-2 h-2 rounded-full ${diag.python ? 'bg-emerald-400' : 'bg-red-400'}`}></div>
+                    Python Installed
+                 </div>
+                 <div className={`flex items-center gap-2 ${diag.ytdlp ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <div className={`w-2 h-2 rounded-full ${diag.ytdlp ? 'bg-emerald-400' : 'bg-red-400'}`}></div>
+                    yt-dlp Binary
+                 </div>
+                 <pre className="mt-2 bg-black/50 p-2 rounded text-xs text-slate-500 whitespace-pre-wrap">
+                    {diag.msg}
+                 </pre>
+              </div>
+            )}
+         </div>
+      </div>
+
+      {/* User Management */}
       <div className="flex flex-col md:flex-row gap-4 bg-slate-900 p-4 rounded-xl border border-slate-800 sticky top-0 md:top-auto z-10 shadow-lg md:shadow-none">
          <div className="flex-1 relative">
            <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />

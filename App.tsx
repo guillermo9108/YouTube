@@ -1,3 +1,4 @@
+
 import React, { Suspense, PropsWithChildren, useState, useEffect } from 'react';
 import Login from './pages/Login';
 import Home from './pages/Home';
@@ -7,6 +8,7 @@ import Profile from './pages/Profile';
 import Admin from './pages/Admin';
 import Shorts from './pages/Shorts';
 import Setup from './pages/Setup';
+import Requests from './pages/Requests';
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { db } from './services/db';
@@ -70,6 +72,7 @@ export default function App() {
               <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
               <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
               <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
+              <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
               <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
             </Route>
 

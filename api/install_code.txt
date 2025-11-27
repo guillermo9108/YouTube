@@ -1,7 +1,7 @@
+
 <?php
 // install.php - Script de instalación para StreamPay
 
-// Habilitar reporte de errores para depuración
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -25,7 +25,6 @@ function respond($success, $data = null, $error = null) {
     exit();
 }
 
-// Acción de prueba simple para verificar que el script responde
 if ($action === 'ping') {
     respond(true, ['message' => 'pong']);
 }
@@ -129,6 +128,22 @@ if ($action === 'install') {
             isWatched TINYINT(1) DEFAULT 0,
             PRIMARY KEY (userId, videoId)
         )");
+        
+        $pdo->exec("CREATE TABLE IF NOT EXISTS requests (
+            id VARCHAR(50) PRIMARY KEY,
+            userId VARCHAR(50),
+            query VARCHAR(255),
+            status ENUM('PENDING','PROCESSING','COMPLETED','FAILED','MANUAL_UPLOAD') DEFAULT 'PENDING',
+            createdAt BIGINT,
+            useLocalNetwork TINYINT(1) DEFAULT 0
+        )");
+        
+        $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (
+            id INT PRIMARY KEY DEFAULT 1,
+            downloadStartTime VARCHAR(10) DEFAULT '01:00',
+            downloadEndTime VARCHAR(10) DEFAULT '06:00',
+            isQueuePaused TINYINT(1) DEFAULT 0
+        )");
 
         $adminId = 'u_' . uniqid();
         $hash = password_hash($adminUser['password'], PASSWORD_DEFAULT);
@@ -149,12 +164,8 @@ if ($action === 'install') {
         ];
         file_put_contents($configFile, json_encode($configData));
 
-        if (!file_exists('uploads/videos')) {
-            mkdir('uploads/videos', 0777, true);
-        }
-        if (!file_exists('uploads/thumbnails')) {
-            mkdir('uploads/thumbnails', 0777, true);
-        }
+        if (!file_exists('uploads/videos')) mkdir('uploads/videos', 0777, true);
+        if (!file_exists('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
 
         respond(true, ['message' => 'Installation successful']);
 

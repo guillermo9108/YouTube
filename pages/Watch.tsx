@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat, Wallet } from 'lucide-react';
 import { db } from '../services/db';
@@ -358,7 +359,7 @@ export default function Watch() {
                   <button 
                     onClick={handlePurchase}
                     disabled={purchasing || !canAfford}
-                    className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all shadow-xl border-t border-white/10 ${
+                    className={`w-full py-3 rounded-xl font-bold text-base flex items-center justify-center gap-2 transition-all shadow-xl border-t border-white/10 ${
                       !canAfford 
                         ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                         : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-black shadow-amber-900/40 hover:scale-105 hover:shadow-2xl active:scale-95 animate-pulse'
@@ -367,7 +368,7 @@ export default function Watch() {
                      {purchasing ? (
                         <span className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-black/50 border-t-black rounded-full animate-spin"/> Processing...</span>
                      ) : (
-                        <><ShoppingCart size={22} fill="currentColor" /> BUY NOW</>
+                        <><ShoppingCart size={20} fill="currentColor" /> BUY NOW</>
                      )}
                   </button>
                   
