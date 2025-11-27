@@ -1,10 +1,9 @@
-
 <?php
+ob_start(); // Iniciar buffer
+
 // index.php - API Principal para StreamPay
 
-// Habilitar reporte de errores
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', 0); // Desactivar salida de errores en HTML
 error_reporting(E_ALL);
 
 header('Access-Control-Allow-Origin: *');
@@ -12,6 +11,7 @@ header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    ob_clean();
     http_response_code(200);
     exit();
 }
@@ -25,6 +25,7 @@ define('THUMBNAIL_PLACEHOLDER_URL', 'https://images.unsplash.com/photo-161800518
 // Cargar Configuración
 $configFile = 'db_config.json';
 if (!file_exists($configFile)) {
+    ob_clean();
     http_response_code(200);
     echo json_encode(['success' => false, 'error' => 'System not installed. Config missing.']);
     exit();
@@ -33,6 +34,7 @@ if (!file_exists($configFile)) {
 $db_config = json_decode(file_get_contents($configFile), true);
 
 function respond($success, $data = null, $error = null) {
+    ob_clean(); // CRÍTICO: Limpiar buffer antes de enviar JSON
     header('Content-Type: application/json');
     if ($success) {
         echo json_encode(['success' => true, 'data' => $data]);
@@ -299,10 +301,7 @@ switch ($action) {
         break;
 
     case 'process_queue':
-        // Real logic for auto-download
-        // Check time window (simplified)
         $hour = (int)date('H');
-        // Example range 1am to 6am
         if ($hour < 1 || $hour > 6) respond(true, ['message' => 'Outside download window']);
 
         $stmt = $pdo->query("SELECT * FROM requests WHERE status = 'PENDING' AND useLocalNetwork = 0 LIMIT 1");
@@ -310,26 +309,35 @@ switch ($action) {
         
         if (!$req) respond(true, ['message' => 'Queue empty']);
         
-        // Mark processing
         $pdo->prepare("UPDATE requests SET status = 'PROCESSING' WHERE id = ?")->execute([$req['id']]);
 
-        // Exec yt-dlp (Example command, requires server setup)
-        // yt-dlp "ytsearch3:SEARCH_TERM" -o "uploads/videos/%(title)s.%(ext)s" ...
-        // Note: This is complex in PHP. We will simulate success for now or implement if env allows.
-        
-        // Simulating success for safety in this demo, or verify shell_exec is enabled.
-        // In real deployment, uncomment execution logic
-        
-        /* 
+        // Exec yt-dlp (requires server setup)
+        // Simulate success for now or uncomment if configured
+        /*
         $cmd = "yt-dlp --print-json --no-warnings \"ytsearch1:{$req['query']}\"";
         $output = shell_exec($cmd);
-        // Parse JSON, download file, insert into DB...
         */
 
-        // Just mark as completed for now to show flow
         $pdo->prepare("UPDATE requests SET status = 'COMPLETED' WHERE id = ?")->execute([$req['id']]);
         
         respond(true, ['message' => 'Processed request: ' . $req['query']]);
+        break;
+        
+    case 'get_user_activity':
+        $userId = $_GET['userId'] ?? null;
+        if (!$userId) respond(false, null, 'User ID required');
+        
+        // Get liked video IDs
+        $stmt = $pdo->prepare("SELECT videoId FROM interactions WHERE userId = ? AND liked = 1");
+        $stmt->execute([$userId]);
+        $liked = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        // Get watched video IDs
+        $stmt = $pdo->prepare("SELECT videoId FROM interactions WHERE userId = ? AND isWatched = 1");
+        $stmt->execute([$userId]);
+        $watched = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        respond(true, ['liked' => $liked, 'watched' => $watched]);
         break;
 
     // --- Others ---

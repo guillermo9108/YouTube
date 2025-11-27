@@ -1,9 +1,9 @@
-
 <?php
+ob_start(); // Iniciar buffer para capturar cualquier salida no deseada (warnings, espacios)
+
 // install.php - Script de instalación para StreamPay
 
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', 0); // Desactivar impresión directa de errores para no romper JSON
 error_reporting(E_ALL);
 
 header('Access-Control-Allow-Origin: *');
@@ -11,6 +11,7 @@ header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    ob_clean(); // Limpiar buffer antes de responder
     http_response_code(200);
     exit();
 }
@@ -20,6 +21,7 @@ $input = json_decode(file_get_contents('php://input'), true);
 $configFile = 'db_config.json';
 
 function respond($success, $data = null, $error = null) {
+    ob_clean(); // CRÍTICO: Borrar cualquier warning previo
     header('Content-Type: application/json');
     echo json_encode(['success' => $success, 'data' => $data, 'error' => $error]);
     exit();
