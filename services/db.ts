@@ -2,15 +2,56 @@ import { User, Video, Transaction, Comment, UserInteraction, UserRole } from '..
 
 const API_BASE = '/api';
 
+// --- MOCK DATA FOR DEMO MODE ---
+const MOCK_VIDEOS: Video[] = [
+  {
+    id: 'demo_1',
+    title: 'Cyberpunk City Run',
+    description: 'A futuristic run through the neon streets.',
+    price: 5,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1533907650686-705761a08656',
+    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    creatorId: 'demo_creator',
+    creatorName: 'NeoArtist',
+    views: 1205,
+    createdAt: Date.now(),
+    likes: 450,
+    dislikes: 12
+  },
+  {
+    id: 'demo_2',
+    title: 'Nature Documentary: Forests',
+    description: 'Relaxing views of the deep forest.',
+    price: 2,
+    thumbnailUrl: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e',
+    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+    creatorId: 'demo_creator',
+    creatorName: 'NatureChannel',
+    views: 890,
+    createdAt: Date.now() - 10000000,
+    likes: 230,
+    dislikes: 5
+  }
+];
+
 class DatabaseService {
   private isInstalled: boolean = false;
+  private isDemoMode: boolean = false;
 
   constructor() {
-    // No mock initialization. We rely on the backend.
+    // Check if demo mode was enabled previously
+    if (localStorage.getItem('sp_demo_mode') === 'true') {
+        this.isDemoMode = true;
+        this.isInstalled = true;
+    }
   }
 
   // --- Helper for API Requests ---
   private async request<T>(endpoint: string, method: string = 'GET', body?: any, silent: boolean = false): Promise<T> {
+    if (this.isDemoMode) {
+       return this.handleMockRequest<T>(endpoint, method, body);
+    }
+
     const headers: HeadersInit = {};
     let requestBody: BodyInit | undefined;
     
@@ -35,7 +76,7 @@ class DatabaseService {
         const text = await response.text();
         
         if (!text || text.trim().length === 0) {
-            throw new Error("Empty response from API");
+            throw new Error("Empty response from API. PHP file might be empty.");
         }
 
         let json;
@@ -43,7 +84,8 @@ class DatabaseService {
             json = JSON.parse(text);
         } catch (e) {
             if (!silent) console.error("Invalid API Response:", text.substring(0, 100));
-            throw new Error("API returned invalid data.");
+            // Return raw text if debugging, or throw generic error
+            throw new Error(`Invalid JSON from API: ${text.substring(0, 50)}...`);
         }
         
         if (!json.success) {
@@ -57,17 +99,51 @@ class DatabaseService {
     }
   }
 
+  // --- Mock Handler ---
+  private async handleMockRequest<T>(endpoint: string, method: string, body: any): Promise<T> {
+    await new Promise(r => setTimeout(r, 500)); // Simulate delay
+    
+    if (endpoint.includes('login') || endpoint.includes('register') || endpoint.includes('get_user')) {
+        return {
+            id: 'demo_user',
+            username: 'DemoUser',
+            role: 'ADMIN',
+            balance: 500,
+            autoPurchaseLimit: 10,
+            watchLater: []
+        } as T;
+    }
+    if (endpoint.includes('get_videos')) return MOCK_VIDEOS as T;
+    if (endpoint.includes('get_video')) return MOCK_VIDEOS[0] as T;
+    if (endpoint.includes('has_purchased')) return { hasPurchased: true } as T;
+    if (endpoint.includes('get_interaction')) return { liked: false, disliked: false, isWatched: false, userId: 'demo', videoId: 'demo' } as T;
+    
+    // Default success for actions
+    return {} as T;
+  }
+
   // --- Setup & Config Methods ---
 
   public async checkInstallation() {
+    if (this.isDemoMode) {
+        this.isInstalled = true;
+        return;
+    }
+
     try {
         const response = await fetch(`${API_BASE}/install.php?action=check`);
         if (!response.ok) throw new Error("Backend unreachable");
         
-        const json = await response.json();
-        if (json.success) {
-            this.isInstalled = json.data.installed;
-        } else {
+        const text = await response.text();
+        if (!text) {
+            this.isInstalled = false; // Empty file means not installed
+            return;
+        }
+
+        try {
+            const json = JSON.parse(text);
+            this.isInstalled = json.success && json.data.installed;
+        } catch {
             this.isInstalled = false;
         }
     } catch (e) {
@@ -91,8 +167,10 @@ class DatabaseService {
   }
 
   public enableDemoMode() {
-      // Disabled. User requires real connection.
-      alert("Demo mode is disabled. Please configure the database.");
+      this.isDemoMode = true;
+      this.isInstalled = true;
+      localStorage.setItem('sp_demo_mode', 'true');
+      window.location.reload();
   }
 
   // --- Auth ---
@@ -174,6 +252,10 @@ class DatabaseService {
   }
 
   async uploadVideo(title: string, description: string, price: number, creator: User, file: File | null): Promise<void> {
+    if (this.isDemoMode) {
+        await new Promise(r => setTimeout(r, 1500));
+        return;
+    }
     const formData = new FormData();
     formData.append('title', title);
     formData.append('description', description);

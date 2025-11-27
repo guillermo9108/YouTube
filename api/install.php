@@ -1,6 +1,11 @@
 <?php
 // install.php - Script de instalación para StreamPay
 
+// Habilitar reporte de errores para depuración
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
@@ -20,35 +25,31 @@ function respond($success, $data = null, $error = null) {
     exit();
 }
 
-// 1. Check Installation Status
+// Acción de prueba simple para verificar que el script responde
+if ($action === 'ping') {
+    respond(true, ['message' => 'pong']);
+}
+
 if ($action === 'check') {
     if (file_exists($configFile)) {
-        // Try to connect to verify
         $config = json_decode(file_get_contents($configFile), true);
         try {
             $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['name']}";
             $pdo = new PDO($dsn, $config['user'], $config['password']);
-            
-            // Check if tables exist
             $stmt = $pdo->query("SHOW TABLES LIKE 'users'");
             if ($stmt->rowCount() > 0) {
                 respond(true, ['installed' => true]);
             }
-        } catch (Exception $e) {
-            // Config exists but db might be down or invalid
-        }
+        } catch (Exception $e) { }
     }
     respond(true, ['installed' => false]);
 }
 
-// 2. Verify DB Connection Credentials
 if ($action === 'verify_db') {
     $host = $input['host'] ?? 'localhost';
     $port = $input['port'] ?? '3306';
     $user = $input['username'] ?? 'root';
     $pass = $input['password'] ?? '';
-    
-    // We try to connect to server without selecting DB first
     try {
         $pdo = new PDO("mysql:host=$host;port=$port", $user, $pass);
         respond(true, ['message' => 'Connection successful']);
@@ -57,7 +58,6 @@ if ($action === 'verify_db') {
     }
 }
 
-// 3. Install System
 if ($action === 'install') {
     $dbConfig = $input['dbConfig'];
     $adminUser = $input['adminUser'];
@@ -69,15 +69,12 @@ if ($action === 'install') {
     $dbname = $dbConfig['database'];
 
     try {
-        // Connect to Server
         $pdo = new PDO("mysql:host=$host;port=$port", $user, $pass);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-        // Create Database if not exists
         $pdo->exec("CREATE DATABASE IF NOT EXISTS `$dbname` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         $pdo->exec("USE `$dbname`");
 
-        // Create Users Table
         $pdo->exec("CREATE TABLE IF NOT EXISTS users (
             id VARCHAR(50) PRIMARY KEY,
             username VARCHAR(50) UNIQUE NOT NULL,
@@ -88,7 +85,6 @@ if ($action === 'install') {
             watchLater JSON
         )");
 
-        // Create Videos Table
         $pdo->exec("CREATE TABLE IF NOT EXISTS videos (
             id VARCHAR(50) PRIMARY KEY,
             title VARCHAR(255) NOT NULL,
@@ -103,7 +99,6 @@ if ($action === 'install') {
             dislikes INT DEFAULT 0
         )");
 
-        // Create Transactions Table
         $pdo->exec("CREATE TABLE IF NOT EXISTS transactions (
             id VARCHAR(50) PRIMARY KEY,
             buyerId VARCHAR(50),
@@ -114,7 +109,6 @@ if ($action === 'install') {
             type VARCHAR(20)
         )");
 
-        // Create Comments Table
         $pdo->exec("CREATE TABLE IF NOT EXISTS comments (
             id VARCHAR(50) PRIMARY KEY,
             videoId VARCHAR(50),
@@ -123,7 +117,6 @@ if ($action === 'install') {
             timestamp BIGINT
         )");
 
-        // Create Interactions Table
         $pdo->exec("CREATE TABLE IF NOT EXISTS interactions (
             userId VARCHAR(50),
             videoId VARCHAR(50),
@@ -133,11 +126,9 @@ if ($action === 'install') {
             PRIMARY KEY (userId, videoId)
         )");
 
-        // Create Admin User
         $adminId = 'u_' . uniqid();
         $hash = password_hash($adminUser['password'], PASSWORD_DEFAULT);
         
-        // Check if admin exists
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
         $stmt->execute([$adminUser['username']]);
         if ($stmt->fetchColumn() == 0) {
@@ -145,7 +136,6 @@ if ($action === 'install') {
             $stmt->execute([$adminId, $adminUser['username'], $hash]);
         }
 
-        // Save Config File
         $configData = [
             'host' => $host,
             'port' => $port,
@@ -155,7 +145,6 @@ if ($action === 'install') {
         ];
         file_put_contents($configFile, json_encode($configData));
 
-        // Create uploads directory
         if (!file_exists('../uploads/videos')) {
             mkdir('../uploads/videos', 0777, true);
         }
