@@ -13,7 +13,7 @@ export default function Setup() {
   
   // Form State
   const [dbConfig, setDbConfig] = useState({
-    host: 'localhost',
+    host: '127.0.0.1', // Default to IP to force TCP/IP and avoid socket errors
     port: '3306',
     username: 'root',
     password: '',
@@ -41,7 +41,11 @@ export default function Setup() {
         setStep('ADMIN_CREATION');
       }
     } catch (err: any) {
-      setError(err.message || 'Could not connect to MariaDB server. Check your credentials.');
+      let msg = err.message || 'Could not connect to MariaDB server.';
+      if (msg.includes('2002') || msg.includes('No such file')) {
+          msg += " Try changing Host to 127.0.0.1";
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }

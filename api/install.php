@@ -54,7 +54,11 @@ if ($action === 'verify_db') {
         $pdo = new PDO("mysql:host=$host;port=$port", $user, $pass);
         respond(true, ['message' => 'Connection successful']);
     } catch (PDOException $e) {
-        respond(false, null, 'Connection failed: ' . $e->getMessage());
+        $msg = $e->getMessage();
+        if (strpos($msg, '2002') !== false && $host === 'localhost') {
+            $msg .= " (Try using 127.0.0.1 instead of localhost)";
+        }
+        respond(false, null, 'Connection failed: ' . $msg);
     }
 }
 
