@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Server, User, CheckCircle, ShieldCheck, Terminal, Loader2, ArrowRight } from 'lucide-react';
+import { Database, Server, CheckCircle, ShieldCheck, Loader2, ArrowRight, AlertTriangle, Layers } from 'lucide-react';
 import { db } from '../services/db';
 
 type Step = 'DB_CONFIG' | 'ADMIN_CREATION' | 'INSTALLING' | 'DONE';
@@ -40,10 +40,17 @@ export default function Setup() {
       if (isConnected) {
         setStep('ADMIN_CREATION');
       }
-    } catch (err) {
-      setError('Could not connect to MariaDB server. Check your credentials.');
+    } catch (err: any) {
+      setError(err.message || 'Could not connect to MariaDB server. Check your credentials.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDemoMode = () => {
+    if (window.confirm("Switching to Demo Mode will use your browser's local storage instead of a real database. This is perfect for testing the UI.\n\nProceed?")) {
+        db.enableDemoMode();
+        navigate('/login');
     }
   };
 
@@ -85,12 +92,16 @@ export default function Setup() {
        setInstallLog(prev => [...prev, logs[i]]);
     }
 
-    await db.initializeSystem(dbConfig, { 
-      username: adminConfig.username, 
-      password: adminConfig.password 
-    });
-    
-    setStep('DONE');
+    try {
+        await db.initializeSystem(dbConfig, { 
+            username: adminConfig.username, 
+            password: adminConfig.password 
+        });
+        setStep('DONE');
+    } catch (e: any) {
+        setStep('DB_CONFIG');
+        setError("Installation failed: " + e.message);
+    }
   };
 
   // --- Render Helpers ---
@@ -166,10 +177,29 @@ export default function Setup() {
                 </div>
               </div>
 
-              {error && <div className="text-red-400 text-sm bg-red-900/20 p-3 rounded">{error}</div>}
+              {error && (
+                <div className="bg-red-900/20 border border-red-500/20 rounded-lg p-4 space-y-3 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex gap-2 text-red-400 text-sm font-semibold">
+                        <AlertTriangle size={18} />
+                        <span>Connection Failed</span>
+                    </div>
+                    <p className="text-xs text-red-300/80">{error}</p>
+                    
+                    <div className="pt-2 border-t border-red-500/20">
+                        <button 
+                            type="button" 
+                            onClick={handleDemoMode}
+                            className="flex items-center gap-2 text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                            <Layers size={14} />
+                            Skip connection & Use Demo Mode (Local Storage)
+                        </button>
+                    </div>
+                </div>
+              )}
 
               <div className="flex justify-end pt-4">
-                 <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-8 rounded-lg flex items-center gap-2">
+                 <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-8 rounded-lg flex items-center gap-2 shadow-lg shadow-indigo-500/20 transition-transform active:scale-95">
                     {loading ? <Loader2 className="animate-spin" size={20} /> : <Server size={20} />}
                     {loading ? 'Verifying...' : 'Connect Database'}
                  </button>
