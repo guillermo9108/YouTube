@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../App';
+import { useAuth, Link } from '../App';
 import { db } from '../services/db';
 import { Wallet, History, Settings2, Clock, PlayCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { Video, Transaction } from '../types';
 
 export default function Profile() {

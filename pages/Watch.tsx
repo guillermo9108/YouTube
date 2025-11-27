@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
-import { useAuth } from '../App';
+import { useAuth, Link, useParams, useNavigate } from '../App';
 
 const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) => {
    const [watched, setWatched] = useState(false);
@@ -43,7 +42,7 @@ const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) 
 };
 
 export default function Watch() {
-  const { id } = useParams();
+  const { id } = useParams() as { id: string };
   const navigate = useNavigate();
   const { user, refreshUser } = useAuth();
   

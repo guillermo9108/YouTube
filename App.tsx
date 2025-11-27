@@ -1,16 +1,127 @@
-import React, { createContext, useContext, useEffect, useState, PropsWithChildren } from 'react';
-import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import React, { createContext, useContext, useEffect, useState, PropsWithChildren, Suspense } from 'react';
 import { User } from './types';
 import { db } from './services/db';
 import Login from './pages/Login';
 import Home from './pages/Home';
-import Layout from './components/Layout';
 import Watch from './pages/Watch';
 import Upload from './pages/Upload';
 import Profile from './pages/Profile';
 import Admin from './pages/Admin';
 import Shorts from './pages/Shorts';
 import Setup from './pages/Setup';
+
+// Lazy load Layout to avoid circular dependency with Link/Outlet exports
+const Layout = React.lazy(() => import('./components/Layout'));
+
+// --- Custom Router Implementation ---
+
+const RouterContext = createContext<{ pathname: string }>({ pathname: '/' });
+const OutletContext = createContext<React.ReactNode>(null);
+
+export function useLocation() {
+  return useContext(RouterContext);
+}
+
+export function useNavigate() {
+  return (to: string, options?: { replace?: boolean }) => {
+    window.location.hash = to;
+  };
+}
+
+export function useParams() {
+  const { pathname } = useLocation();
+  const match = pathname.match(/\/watch\/([^/?]+)/);
+  return match ? { id: match[1] } : {};
+}
+
+export const Link: React.FC<{ to: string, children?: React.ReactNode, className?: string }> = ({ to, children, className }) => {
+  return (
+    <a href={`#${to}`} className={className}>
+      {children}
+    </a>
+  );
+};
+
+export function Outlet() {
+  return useContext(OutletContext);
+}
+
+export function Navigate({ to }: { to: string, replace?: boolean }) {
+  useEffect(() => {
+    window.location.hash = to;
+  }, [to]);
+  return null;
+}
+
+function HashRouter({ children }: { children?: React.ReactNode }) {
+  const [pathname, setPathname] = useState(window.location.hash.slice(1) || '/');
+
+  useEffect(() => {
+    const handler = () => {
+      let p = window.location.hash.slice(1);
+      if (!p) p = '/';
+      setPathname(p);
+    };
+    window.addEventListener('hashchange', handler);
+    return () => window.removeEventListener('hashchange', handler);
+  }, []);
+
+  return (
+    <RouterContext.Provider value={{ pathname }}>
+      {children}
+    </RouterContext.Provider>
+  );
+}
+
+function Routes({ children }: { children?: React.ReactNode }) {
+  const { pathname } = useLocation();
+  const routes = React.Children.toArray(children) as React.ReactElement[];
+
+  for (const route of routes) {
+    const { path, element, children: nested } = route.props;
+
+    // Handle Nested Routes (Layout)
+    if (!path && nested) {
+      const childRoutes = React.Children.toArray(nested) as React.ReactElement[];
+      for (const child of childRoutes) {
+        const cp = child.props.path;
+        let isMatch = false;
+
+        if (cp === '*') isMatch = true;
+        else if (cp === pathname) isMatch = true;
+        else if (cp && cp.includes(':')) {
+           // Basic prefix match for params
+           const prefix = cp.split(':')[0];
+           if (pathname.startsWith(prefix)) isMatch = true;
+        }
+
+        if (isMatch) {
+          return (
+            <OutletContext.Provider value={child.props.element}>
+              {element}
+            </OutletContext.Provider>
+          );
+        }
+      }
+    } else {
+      // Handle Top Level Routes
+      let isMatch = false;
+      if (path === '*') isMatch = true;
+      else if (path === pathname) isMatch = true;
+      else if (path && path.includes(':')) {
+           const prefix = path.split(':')[0];
+           if (pathname.startsWith(prefix)) isMatch = true;
+      }
+
+      if (isMatch) return element;
+    }
+  }
+  return null;
+}
+
+function Route(props: { path?: string, element: React.ReactNode, children?: React.ReactNode }) {
+  return null;
+}
 
 // --- Auth Context ---
 interface AuthContextType {
@@ -29,7 +140,7 @@ export const useAuth = () => {
   return context;
 };
 
-const AuthProvider: React.FC<PropsWithChildren> = ({ children }) => {
+const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   
   // Persist login state
@@ -110,26 +221,28 @@ export default function App() {
   return (
     <AuthProvider>
       <HashRouter>
-        <Routes>
-          <Route path="/setup" element={<Setup />} />
-          
-          <Route path="/login" element={
-            <SetupGuard>
-              <Login />
-            </SetupGuard>
-          } />
-          
-          <Route element={<Layout />}>
-            <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
-            <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
-            <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
-            <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
-            <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
-            <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
-          </Route>
+        <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>
+          <Routes>
+            <Route path="/setup" element={<Setup />} />
+            
+            <Route path="/login" element={
+              <SetupGuard>
+                <Login />
+              </SetupGuard>
+            } />
+            
+            <Route element={<Layout />}>
+              <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
+              <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
+              <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
+              <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
+              <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
+              <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+            </Route>
 
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </Suspense>
       </HashRouter>
     </AuthProvider>
   );

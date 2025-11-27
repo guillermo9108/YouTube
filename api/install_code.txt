@@ -14,7 +14,6 @@ $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true);
 $configFile = 'db_config.json';
 
-
 function respond($success, $data = null, $error = null) {
     header('Content-Type: application/json');
     echo json_encode(['success' => $success, 'data' => $data, 'error' => $error]);
