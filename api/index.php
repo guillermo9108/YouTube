@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // Constantes
-define('UPLOAD_DIR', '../api/uploads/videos/');
+define('UPLOAD_DIR', '../uploads/videos/');
 define('VIDEO_PLACEHOLDER_URL', 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
 define('THUMBNAIL_PLACEHOLDER_URL', 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&q=80');
 

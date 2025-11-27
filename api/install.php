@@ -149,8 +149,8 @@ if ($action === 'install') {
         ];
         file_put_contents($configFile, json_encode($configData));
 
-        if (!file_exists('../api/uploads/videos')) {
-            mkdir('../api/uploads/videos', 0777, true);
+        if (!file_exists('../uploads/videos')) {
+            mkdir('../uploads/videos', 0777, true);
         }
 
         respond(true, ['message' => 'Installation successful']);
