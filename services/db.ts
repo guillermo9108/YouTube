@@ -35,6 +35,17 @@ const MOCK_VIDEOS: Video[] = [
   }
 ];
 
+export interface VideoResult {
+  id: string;
+  source: 'Pexels' | 'Pixabay';
+  thumbnail: string;
+  title: string;
+  duration?: number;
+  downloadUrl: string;
+  author: string;
+  originalUrl: string;
+}
+
 class DatabaseService {
   private isInstalled: boolean = false;
   private isDemoMode: boolean = false;
@@ -355,6 +366,11 @@ class DatabaseService {
 
   async triggerQueueProcessing(): Promise<{ processed: number, message: string }> {
       return this.request<{ processed: number, message: string }>('/index.php?action=process_queue', 'POST', {});
+  }
+
+  // --- External Search Proxy ---
+  async searchExternal(query: string): Promise<VideoResult[]> {
+     return this.request<VideoResult[]>('/index.php?action=search_external', 'POST', { query });
   }
 }
 

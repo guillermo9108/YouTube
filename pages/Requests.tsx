@@ -1,44 +1,18 @@
 
-import React, { useState, useEffect } from 'react';
-import { DownloadCloud, Search, Check, AlertCircle, Loader2, Settings, Key, Image as ImageIcon, ExternalLink, Layers, Link as LinkIcon } from 'lucide-react';
-import { db } from '../services/db';
+import React, { useState } from 'react';
+import { DownloadCloud, Search, Check, Loader2, Link as LinkIcon } from 'lucide-react';
+import { db, VideoResult } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from '../components/Router';
 import { generateThumbnail } from './Upload';
-
-interface VideoResult {
-  id: string;
-  source: 'Pexels' | 'Pixabay';
-  thumbnail: string;
-  title: string;
-  duration?: number;
-  downloadUrl: string;
-  author: string;
-  originalUrl: string;
-}
 
 export default function Requests() {
   const { user } = useAuth();
   const navigate = useNavigate();
   
-  // -- Settings State --
-  const [showSettings, setShowSettings] = useState(false);
-  const [apiKeys, setApiKeys] = useState({
-    pexels: localStorage.getItem('sp_pexels_key') || '',
-    pixabay: localStorage.getItem('sp_pixabay_key') || ''
-  });
-
-  const saveKeys = () => {
-     localStorage.setItem('sp_pexels_key', apiKeys.pexels);
-     localStorage.setItem('sp_pixabay_key', apiKeys.pixabay);
-     setShowSettings(false);
-     alert("Keys saved!");
-  };
-
   // -- Search State --
   const [mode, setMode] = useState<'SEARCH' | 'LINK'>('SEARCH');
   const [query, setQuery] = useState('');
-  const [directLink, setDirectLink] = useState('');
   const [results, setResults] = useState<VideoResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -49,7 +23,7 @@ export default function Requests() {
   const [progressMsg, setProgressMsg] = useState('');
   const [uploadPercent, setUploadPercent] = useState(0);
 
-  // -- Search Logic --
+  // -- Search Logic (Server Proxy) --
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
@@ -58,73 +32,19 @@ export default function Requests() {
     setResults([]);
     setError('');
     
-    const hits: VideoResult[] = [];
-    const errors: string[] = [];
-
-    // 1. Search Pexels
-    if (apiKeys.pexels) {
-       try {
-         const res = await fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=12`, {
-            headers: { Authorization: apiKeys.pexels }
-         });
-         if (res.ok) {
-            const data = await res.json();
-            if (data.videos) {
-                hits.push(...data.videos.map((v: any) => {
-                    // Filter for SD/HD quality to ensure audio, avoid "tiny"
-                    const files = v.video_files || [];
-                    let chosen = files.find((f: any) => f.quality === 'sd') || 
-                                 files.find((f: any) => f.quality === 'hd' && f.width < 1300) ||
-                                 files[0];
-
-                    return {
-                        id: `pex-${v.id}`,
-                        source: 'Pexels',
-                        thumbnail: v.image,
-                        title: `Video ${v.id}`,
-                        duration: v.duration,
-                        author: v.user.name,
-                        downloadUrl: chosen?.link,
-                        originalUrl: v.url
-                    } as VideoResult;
-                }));
-            }
-         }
-       } catch (e: any) { console.error(e); }
+    try {
+        // Use DB service to proxy search to backend
+        const hits = await db.searchExternal(query);
+        if (hits && hits.length > 0) {
+            setResults(hits);
+        } else {
+            setError("No results found. Ensure Admin has configured API Keys.");
+        }
+    } catch (e: any) {
+        setError("Search failed: " + e.message);
+    } finally {
+        setLoading(false);
     }
-
-    // 2. Search Pixabay
-    if (apiKeys.pixabay) {
-       try {
-         const res = await fetch(`https://pixabay.com/api/videos/?key=${apiKeys.pixabay}&q=${encodeURIComponent(query)}&per_page=12`);
-         if (res.ok) {
-             const data = await res.json();
-             if (data.hits) {
-                hits.push(...data.hits.map((v: any) => {
-                    // Prefer Medium or Small over Tiny (Tiny is usually silent)
-                    const variant = v.videos.medium || v.videos.small || v.videos.tiny;
-                    return {
-                        id: `pix-${v.id}`,
-                        source: 'Pixabay',
-                        thumbnail: `https://i.vimeocdn.com/video/${v.picture_id}_640x360.jpg`,
-                        title: v.tags || `Pixabay ${v.id}`,
-                        duration: v.duration,
-                        author: v.user,
-                        downloadUrl: variant.url,
-                        originalUrl: v.pageURL
-                    } as VideoResult;
-                }));
-             }
-         }
-       } catch (e: any) { console.error(e); }
-    }
-
-    if (!apiKeys.pexels && !apiKeys.pixabay) {
-        setError("Please configure API Keys in settings.");
-    }
-
-    setResults(hits.sort(() => Math.random() - 0.5));
-    setLoading(false);
   };
 
   const toggleSelection = (id: string) => {
@@ -144,15 +64,18 @@ export default function Requests() {
             const videoData = results.find(r => r.id === id);
             if (!videoData) continue;
 
+            // Simple sanitation
             const safeTitle = (query + ' ' + count).replace(/[^a-z0-9 ]/gi, '');
             
             setUploadPercent(0);
-            setProgressMsg(`(${count}/${total}) Downloading...`);
+            setProgressMsg(`(${count}/${total}) Downloading source...`);
             
+            // Download from Pexels/Pixabay via Browser
             const response = await fetch(videoData.downloadUrl);
-            if (!response.ok) throw new Error(`Failed to fetch video`);
+            if (!response.ok) throw new Error(`Failed to download video file`);
             const blob = await response.blob();
             
+            // Create File object
             const file = new File([blob], `${safeTitle}.mp4`, { type: 'video/mp4' });
             
             setProgressMsg(`(${count}/${total}) Generating Thumbnail...`);
@@ -176,7 +99,7 @@ export default function Requests() {
         navigate('/');
 
      } catch (e: any) {
-         alert("Error: " + e.message);
+         alert("Error during import: " + e.message);
      } finally {
          setProcessing(false);
          setProgressMsg('');
@@ -191,35 +114,9 @@ export default function Requests() {
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                <DownloadCloud className="text-emerald-400" /> Content Import
             </h2>
-            <p className="text-slate-400 text-sm">Download stock footage (Pexels/Pixabay)</p>
+            <p className="text-slate-400 text-sm">Download stock footage using your connection</p>
          </div>
-         <button 
-           onClick={() => setShowSettings(!showSettings)}
-           className={`p-2 rounded-lg border transition-colors ${showSettings ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'}`}
-         >
-            <Settings size={20} />
-         </button>
       </div>
-
-      {showSettings && (
-         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-xl">
-            <h3 className="font-bold text-slate-200 mb-4 flex items-center gap-2">
-               <Key size={18} /> Browser API Configuration
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">These keys are used for the browser-based downloader below.</p>
-            <div className="space-y-4">
-               <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pexels Key</label>
-                  <input type="text" value={apiKeys.pexels} onChange={e => setApiKeys({...apiKeys, pexels: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm font-mono" />
-               </div>
-               <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pixabay Key</label>
-                  <input type="text" value={apiKeys.pixabay} onChange={e => setApiKeys({...apiKeys, pixabay: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm font-mono" />
-               </div>
-               <button onClick={saveKeys} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg">Save Configuration</button>
-            </div>
-         </div>
-      )}
 
       {/* Tabs */}
       <div className="flex gap-4 border-b border-slate-800">
@@ -227,7 +124,7 @@ export default function Requests() {
             onClick={() => setMode('SEARCH')} 
             className={`pb-2 text-sm font-bold flex items-center gap-2 ${mode === 'SEARCH' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}
           >
-             <Search size={16}/> Search APIs
+             <Search size={16}/> Search Pexels/Pixabay
           </button>
       </div>
 
@@ -284,7 +181,7 @@ export default function Requests() {
             <div className="sticky bottom-4 z-30">
                <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4">
                   <div className="text-sm text-slate-300">
-                     Import <strong className="text-white">{selectedVideos.length}</strong> videos.
+                     Import <strong className="text-white">{selectedVideos.length}</strong> videos via your network.
                   </div>
                   <button 
                      onClick={processDownloads}
@@ -313,7 +210,7 @@ export default function Requests() {
                  </div>
                )}
                {uploadPercent > 0 && <p className="text-xs text-emerald-300 font-mono">{uploadPercent}% uploaded</p>}
-               <p className="text-xs text-slate-500 mt-6">Searching for SD/Medium quality (with Audio).</p>
+               <p className="text-xs text-slate-500 mt-6">Searching for SD/Medium quality (Audio Safe).</p>
             </div>
          </div>
       )}

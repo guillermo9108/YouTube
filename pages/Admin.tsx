@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, AlertTriangle } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, AlertTriangle, ExternalLink, Key } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -130,15 +130,25 @@ export default function Admin() {
 
              <div className="space-y-6">
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
-                    <h3 className="font-bold text-white flex items-center gap-2"><Settings size={18} /> Server API Keys</h3>
-                    <p className="text-xs text-slate-500">Required for the Server to download automatically (Pexels/Pixabay).</p>
+                    <div className="flex items-center justify-between">
+                         <h3 className="font-bold text-white flex items-center gap-2"><Key size={18} /> Server API Keys</h3>
+                         <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded">Stored Safely in DB</span>
+                    </div>
+                    <p className="text-xs text-slate-500">Provide keys to allow the server and users to search/download stock content.</p>
+                    
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pexels Key</label>
-                        <input type="text" value={settings.pexelsKey} onChange={e => setSettings({...settings, pexelsKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono"/>
+                        <div className="flex justify-between mb-1">
+                            <label className="block text-xs font-bold text-slate-500 uppercase">Pexels Key</label>
+                            <a href="https://www.pexels.com/api/new/" target="_blank" rel="noreferrer" className="text-xs text-indigo-400 flex items-center gap-1 hover:underline"><ExternalLink size={10}/> Get Key</a>
+                        </div>
+                        <input type="text" value={settings.pexelsKey} onChange={e => setSettings({...settings, pexelsKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="Your Pexels API Key"/>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pixabay Key</label>
-                        <input type="text" value={settings.pixabayKey} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono"/>
+                        <div className="flex justify-between mb-1">
+                            <label className="block text-xs font-bold text-slate-500 uppercase">Pixabay Key</label>
+                            <a href="https://pixabay.com/api/docs/" target="_blank" rel="noreferrer" className="text-xs text-indigo-400 flex items-center gap-1 hover:underline"><ExternalLink size={10}/> Get Key</a>
+                        </div>
+                        <input type="text" value={settings.pixabayKey} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="Your Pixabay API Key"/>
                     </div>
                 </div>
 
