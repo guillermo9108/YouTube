@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat } from 'lucide-react';
+import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat, Wallet } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -26,7 +26,7 @@ const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) 
            </div>
          )}
          {!purchased && !watched && (
-           <div className="absolute bottom-1 right-1 bg-black/70 text-amber-400 text-[10px] px-1.5 py-0.5 rounded font-bold">
+           <div className="absolute bottom-1 right-1 bg-amber-400 text-black text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm">
               {rv.price} $
            </div>
          )}
@@ -230,6 +230,8 @@ export default function Watch() {
   if (loading) return <div className="p-10 text-center text-slate-500">Loading video...</div>;
   if (!video) return <div className="p-10 text-center text-red-500">Video not found</div>;
 
+  const canAfford = (user?.balance || 0) >= video.price;
+
   return (
     <div className="max-w-5xl mx-auto pb-10">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -316,32 +318,54 @@ export default function Watch() {
 
               </>
             ) : (
-              /* Locked State */
+              /* Locked State - Optimized Visibility */
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-cover bg-center" style={{ backgroundImage: `url(${video.thumbnailUrl})` }}>
-                <div className="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
-                <div className="relative z-10 text-center p-6 max-w-md w-full">
-                  <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-600">
-                    <Lock size={32} className="text-slate-400" />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/90 to-slate-900/80 backdrop-blur-sm"></div>
+                
+                <div className="relative z-10 text-center p-6 w-full max-w-sm flex flex-col items-center">
+                  <div className="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mb-6 border border-slate-700 shadow-xl">
+                    <Lock size={32} className="text-slate-300" />
                   </div>
-                  <h2 className="text-2xl font-bold text-white mb-2">Unlock Content</h2>
-                  <p className="text-slate-300 mb-6">Support <span className="text-indigo-400 font-semibold">{video.creatorName}</span>.</p>
                   
-                  <div className="flex justify-between items-center bg-slate-900/80 p-4 rounded-lg border border-slate-700 mb-6">
-                    <span className="text-slate-400">Price</span>
-                    <span className="text-2xl font-bold text-amber-400">{video.price} <span className="text-xs">SALDO</span></span>
+                  <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">{video.title}</h2>
+                  <p className="text-slate-400 mb-8 flex items-center gap-2 justify-center">
+                    by <span className="text-indigo-400 font-semibold">{video.creatorName}</span>
+                  </p>
+                  
+                  <div className="bg-slate-900/80 p-6 rounded-2xl border border-slate-700 shadow-2xl w-full">
+                    <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-2">Price to Unlock</p>
+                    <div className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br from-amber-300 to-amber-500 drop-shadow-sm mb-6">
+                       {video.price} <span className="text-lg text-amber-100 font-bold tracking-wider">SALDO</span>
+                    </div>
+
+                    {error && <div className="text-red-400 text-sm bg-red-950/50 border border-red-900 p-3 rounded-lg mb-4 flex items-center justify-center gap-2 animate-pulse"><AlertCircle size={16}/>{error}</div>}
+                    
+                    {!canAfford && !error && (
+                         <div className="text-red-400 text-xs bg-red-950/30 p-2 rounded mb-4 border border-red-900/50 flex items-center justify-center gap-1">
+                             <AlertCircle size={12} /> Insufficient Funds (Bal: {user?.balance})
+                         </div>
+                    )}
+
+                    <button 
+                      onClick={handlePurchase}
+                      disabled={purchasing || !canAfford}
+                      className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all shadow-xl ${
+                        !canAfford 
+                          ? 'bg-slate-700 text-slate-400 cursor-not-allowed border border-slate-600' 
+                          : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-amber-900/20 hover:scale-105 hover:shadow-2xl active:scale-95 animate-pulse-slow'
+                      }`}
+                    >
+                       {purchasing ? (
+                          <span className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"/> Processing...</span>
+                       ) : (
+                          <><ShoppingCart size={22} fill="currentColor" /> UNLOCK NOW</>
+                       )}
+                    </button>
+                    
+                    <p className="text-[10px] text-slate-500 mt-4 text-center">
+                       Instant access • No hidden fees • Supports Creator
+                    </p>
                   </div>
-
-                  {error && <div className="text-red-400 text-sm bg-red-900/20 p-3 rounded-lg mb-4 flex items-center gap-2"><AlertCircle size={16}/>{error}</div>}
-
-                  <button 
-                    onClick={handlePurchase}
-                    disabled={purchasing || (user?.balance || 0) < video.price}
-                    className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
-                      (user?.balance || 0) < video.price ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/20 active:scale-95'
-                    }`}
-                  >
-                     {purchasing ? 'Processing...' : (user?.balance || 0) < video.price ? 'Insufficient Balance' : <><ShoppingCart size={18} /> Buy Now</>}
-                  </button>
                 </div>
               </div>
             )}
