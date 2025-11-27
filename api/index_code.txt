@@ -36,6 +36,7 @@ function download_file($url, $path) {
     curl_setopt($ch, CURLOPT_TIMEOUT, 300);
     curl_setopt($ch, CURLOPT_FILE, $fp); 
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0');
     curl_exec($ch); 
     curl_close($ch);
     fclose($fp);
@@ -46,7 +47,6 @@ $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
 switch ($action) {
-    // ... LOGIN/REGISTER/ETC (Standard Endpoints) ...
     case 'login':
         $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
         $stmt->execute([$input['username']]);
@@ -125,11 +125,12 @@ switch ($action) {
             $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY DEFAULT 1, downloadStartTime VARCHAR(10) DEFAULT '01:00', downloadEndTime VARCHAR(10) DEFAULT '06:00', isQueuePaused TINYINT(1) DEFAULT 0, batchSize INT DEFAULT 5, maxDuration INT DEFAULT 600, maxResolution INT DEFAULT 1080, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255))");
             $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
             
-            // Add columns if missing
-            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN batchSize INT DEFAULT 5"); } catch(E) {}
-            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN pexelsKey VARCHAR(255)"); } catch(E) {}
-            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN pixabayKey VARCHAR(255)"); } catch(E) {}
-            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN maxDuration INT DEFAULT 600"); } catch(E) {}
+            // Add columns if missing, using correct Exception catching
+            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN batchSize INT DEFAULT 5"); } catch(Exception $e) {}
+            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN pexelsKey VARCHAR(255)"); } catch(Exception $e) {}
+            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN pixabayKey VARCHAR(255)"); } catch(Exception $e) {}
+            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN maxDuration INT DEFAULT 600"); } catch(Exception $e) {}
+            try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN maxResolution INT DEFAULT 1080"); } catch(Exception $e) {}
             
             respond(true);
         } catch (Exception $e) { respond(false, null, $e->getMessage()); }
@@ -163,18 +164,17 @@ switch ($action) {
         respond(true);
         break;
 
+    case 'delete_request':
+        $pdo->prepare("DELETE FROM requests WHERE id = ?")->execute([$input['requestId']]);
+        respond(true);
+        break;
+
     // --- AUTO DOWNLOADER SERVER-SIDE ---
     case 'process_queue':
         $settings = $pdo->query("SELECT * FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
         if ($settings['isQueuePaused']) respond(true, ['message' => 'Queue paused']);
         
-        $start = (int)str_replace(':', '', $settings['downloadStartTime']);
-        $end = (int)str_replace(':', '', $settings['downloadEndTime']);
-        $now = (int)date('Hi');
-        
-        // Basic time check (only if not forcing via manual trigger)
-        // Note: For 'Force Run' button, we might skip this check.
-        
+        // Find a pending request
         $reqs = $pdo->query("SELECT * FROM requests WHERE status='PENDING' AND useLocalNetwork=0 ORDER BY createdAt ASC LIMIT 1")->fetchAll(PDO::FETCH_ASSOC);
         if (empty($reqs)) respond(true, ['message' => 'No pending requests']);
         
@@ -196,20 +196,17 @@ switch ($action) {
                 foreach ($res['videos'] as $vid) {
                     if ($vid['duration'] > $settings['maxDuration']) continue;
                     
-                    // Select Best Quality (SD/HD) to ensure Audio
+                    // Select Best Quality (SD/HD)
                     $files = $vid['video_files'];
-                    // Sort by width descending to get best quality first, then filter
                     usort($files, function($a, $b) { return $b['width'] - $a['width']; });
-                    
                     $target = null;
                     foreach($files as $f) {
-                        // Look for SD or HD, avoid tiny
                         if (($f['quality'] == 'sd' || $f['quality'] == 'hd') && $f['width'] <= $settings['maxResolution']) {
                             $target = $f;
                             break;
                         }
                     }
-                    if (!$target && !empty($files)) $target = $files[0]; // Fallback
+                    if (!$target && !empty($files)) $target = $files[0];
                     
                     if ($target) {
                         $vName = uniqid('auto_').'.mp4';
@@ -224,6 +221,37 @@ switch ($action) {
                     }
                 }
             }
+        }
+
+        // PIXABAY DOWNLOAD
+        if (!empty($settings['pixabayKey'])) {
+             $ch = curl_init("https://pixabay.com/api/videos/?key=".$settings['pixabayKey']."&q=".urlencode($req['query'])."&per_page=".$settings['batchSize']);
+             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+             $res = json_decode(curl_exec($ch), true);
+             curl_close($ch);
+             
+             if (!empty($res['hits'])) {
+                 foreach ($res['hits'] as $hit) {
+                     if ($hit['duration'] > $settings['maxDuration']) continue;
+                     
+                     // Prefer Medium/Small over Tiny
+                     $variant = $hit['videos']['medium'] ?? $hit['videos']['small'] ?? $hit['videos']['tiny'];
+                     
+                     if ($variant && $variant['width'] <= $settings['maxResolution']) {
+                         $vName = uniqid('auto_').'.mp4';
+                         if (download_file($variant['url'], UPLOAD_DIR.$vName)) {
+                             $tName = uniqid('thumb_').'.jpg';
+                             // Use medium thumbnail
+                             $thumbUrl = "https://i.vimeocdn.com/video/{$hit['picture_id']}_640x360.jpg";
+                             download_file($thumbUrl, THUMB_DIR.$tName);
+                             
+                             $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes) VALUES (?, ?, ?, 1, ?, ?, ?, 0, ?, 0, 0)")
+                                 ->execute(['v_'.uniqid(), "Pixabay: " . ($hit['tags'] ?? $req['query']), "Auto-imported from Pixabay", '/api/'.THUMB_DIR.$tName, '/api/'.UPLOAD_DIR.$vName, $admin, time()*1000]);
+                             $processed++;
+                         }
+                     }
+                 }
+             }
         }
         
         $pdo->prepare("UPDATE requests SET status='COMPLETED' WHERE id=?")->execute([$req['id']]);
