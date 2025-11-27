@@ -1,35 +1,58 @@
-import { User, Video, Transaction, UserRole, Comment, UserInteraction } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole } from '../types';
 
-// Mock Database Service using LocalStorage
+const API_BASE = '/api';
+
 class DatabaseService {
   private isInstalled: boolean = false;
-  private delayMs = 500;
 
-  constructor() {
-    this.checkInstallation();
-  }
+  // --- Helper for API Requests ---
+  private async request<T>(endpoint: string, method: string = 'GET', body?: any): Promise<T> {
+    const headers: HeadersInit = {};
+    
+    let requestBody: BodyInit | undefined;
+    
+    if (body instanceof FormData) {
+        requestBody = body;
+    } else if (body) {
+        headers['Content-Type'] = 'application/json';
+        requestBody = JSON.stringify(body);
+    }
 
-  // --- Helper Methods ---
-  private async delay() {
-    return new Promise(resolve => setTimeout(resolve, this.delayMs));
-  }
+    try {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            method,
+            headers,
+            body: requestBody
+        });
 
-  private load<T>(key: string, defaultVal: T): T {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultVal;
-  }
+        if (!response.ok) {
+            throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+        }
 
-  private save(key: string, data: any) {
-    localStorage.setItem(key, JSON.stringify(data));
+        const json = await response.json();
+        
+        if (!json.success) {
+            throw new Error(json.error || 'Operation failed');
+        }
+
+        return json.data as T;
+    } catch (error: any) {
+        console.error("API Request Failed:", endpoint, error);
+        throw error;
+    }
   }
 
   // --- Setup & Config Methods ---
 
   public async checkInstallation() {
-    await this.delay();
-    const users = this.load<User[]>('sp_users', []);
-    // valid if at least one admin exists
-    this.isInstalled = users.some(u => u.role === UserRole.ADMIN);
+    try {
+        // Ping the API to see if it's installed
+        const result = await this.request<{ installed: boolean }>('/install.php?action=check');
+        this.isInstalled = result.installed;
+    } catch (e) {
+        // If API is unreachable (404 etc), assume not installed or server down
+        this.isInstalled = false;
+    }
   }
 
   public needsSetup(): boolean {
@@ -37,389 +60,126 @@ class DatabaseService {
   }
 
   public async verifyDbConnection(config: any): Promise<boolean> {
-     await this.delay();
-     return true; // Mock connection always success
+     // Sends the DB credentials to the backend to attempt a connection
+     await this.request<any>('/install.php?action=verify_db', 'POST', config);
+     return true;
   }
 
   public async initializeSystem(dbConfig: any, adminUser: Partial<User>): Promise<void> {
-    await this.delay();
-    const newUser: User = {
-        id: 'admin-' + Date.now(),
-        username: adminUser.username || 'admin',
-        password: adminUser.password, // In real app, hash this
-        role: UserRole.ADMIN,
-        balance: 1000,
-        autoPurchaseLimit: 5,
-        watchLater: []
-    };
-    
-    this.save('sp_users', [newUser]);
-    
-    // Seed some initial data
-    const seedVideos: Video[] = [
-        {
-            id: 'v1',
-            title: 'Welcome to StreamPay',
-            description: 'An introduction to our platform.',
-            price: 0, // Free
-            thumbnailUrl: 'https://picsum.photos/id/48/800/450',
-            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-            creatorId: newUser.id,
-            creatorName: newUser.username,
-            views: 120,
-            createdAt: Date.now(),
-            likes: 10,
-            dislikes: 0
-        },
-        {
-            id: 'v2',
-            title: 'Premium Masterclass',
-            description: 'Learn advanced techniques in this exclusive video.',
-            price: 50,
-            thumbnailUrl: 'https://picsum.photos/id/20/800/450',
-            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-            creatorId: newUser.id,
-            creatorName: newUser.username,
-            views: 45,
-            createdAt: Date.now() - 100000,
-            likes: 5,
-            dislikes: 0
-        }
-    ];
-    this.save('sp_videos', seedVideos);
-    this.save('sp_transactions', []);
-    this.save('sp_interactions', []);
-    this.save('sp_comments', []);
-
+    // Tells backend to create tables and admin user
+    await this.request<any>('/install.php?action=install', 'POST', { dbConfig, adminUser });
     this.isInstalled = true;
   }
 
   // --- Auth ---
 
   async login(username: string, password: string): Promise<User> {
-    await this.delay();
-    const users = this.load<User[]>('sp_users', []);
-    const user = users.find(u => u.username === username && u.password === password);
-    if (!user) throw new Error("Invalid credentials");
-    return user;
+    return this.request<User>('/index.php?action=login', 'POST', { username, password });
   }
 
   async register(username: string, password: string): Promise<User> {
-    await this.delay();
-    const users = this.load<User[]>('sp_users', []);
-    if (users.find(u => u.username === username)) throw new Error("Username taken");
-
-    const newUser: User = {
-        id: crypto.randomUUID(),
-        username,
-        password,
-        role: UserRole.USER,
-        balance: 100, // Sign up bonus
-        autoPurchaseLimit: 1,
-        watchLater: []
-    };
-    
-    users.push(newUser);
-    this.save('sp_users', users);
-    
-    // Log deposit transaction for bonus
-    const txs = this.load<Transaction[]>('sp_transactions', []);
-    txs.push({
-        id: crypto.randomUUID(),
-        buyerId: 'system',
-        creatorId: newUser.id,
-        videoId: null,
-        amount: 100,
-        timestamp: Date.now(),
-        type: 'DEPOSIT'
-    });
-    this.save('sp_transactions', txs);
-
-    return newUser;
+    return this.request<User>('/index.php?action=register', 'POST', { username, password });
   }
 
   async getUser(id: string): Promise<User | null> {
-    await this.delay();
-    const users = this.load<User[]>('sp_users', []);
-    return users.find(u => u.id === id) || null;
+    try {
+        return await this.request<User>(`/index.php?action=get_user&id=${id}`);
+    } catch (e) {
+        return null;
+    }
   }
 
   async updateUserProfile(userId: string, updates: Partial<User>): Promise<void> {
-    await this.delay();
-    const users = this.load<User[]>('sp_users', []);
-    const idx = users.findIndex(u => u.id === userId);
-    if (idx !== -1) {
-        users[idx] = { ...users[idx], ...updates };
-        this.save('sp_users', users);
-    }
+    await this.request('/index.php?action=update_user', 'POST', { userId, updates });
   }
 
   // --- Video & Interaction ---
 
   async getAllVideos(): Promise<Video[]> {
-    await this.delay();
-    return this.load<Video[]>('sp_videos', []);
+    return this.request<Video[]>('/index.php?action=get_videos');
   }
 
   async getVideo(id: string): Promise<Video | undefined> {
-    await this.delay();
-    const videos = this.load<Video[]>('sp_videos', []);
-    return videos.find(v => v.id === id);
+    try {
+        return await this.request<Video>(`/index.php?action=get_video&id=${id}`);
+    } catch {
+        return undefined;
+    }
   }
 
   async getRelatedVideos(currentVideoId: string): Promise<Video[]> {
-    const all = await this.getAllVideos();
-    return all.filter(v => v.id !== currentVideoId).slice(0, 5);
+    return this.request<Video[]>(`/index.php?action=get_related_videos&id=${currentVideoId}`);
   }
 
   async hasPurchased(userId: string, videoId: string): Promise<boolean> {
-    await this.delay();
-    // Creator always owns
-    const video = (await this.getVideo(videoId));
-    if (video?.creatorId === userId) return true;
-
-    // Check transactions
-    const txs = this.load<Transaction[]>('sp_transactions', []);
-    return txs.some(t => t.buyerId === userId && t.videoId === videoId && t.type === 'PURCHASE');
+    const res = await this.request<{ hasPurchased: boolean }>(`/index.php?action=has_purchased&userId=${userId}&videoId=${videoId}`);
+    return res.hasPurchased;
   }
 
   async getInteraction(userId: string, videoId: string): Promise<UserInteraction> {
-    await this.delay();
-    const interactions = this.load<UserInteraction[]>('sp_interactions', []);
-    const found = interactions.find(i => i.userId === userId && i.videoId === videoId);
-    return found || { userId, videoId, liked: false, disliked: false, isWatched: false };
+    return this.request<UserInteraction>(`/index.php?action=get_interaction&userId=${userId}&videoId=${videoId}`);
   }
 
   async toggleLike(userId: string, videoId: string, isLike: boolean): Promise<UserInteraction> {
-    await this.delay();
-    let interactions = this.load<UserInteraction[]>('sp_interactions', []);
-    let idx = interactions.findIndex(i => i.userId === userId && i.videoId === videoId);
-    
-    let current = idx !== -1 ? interactions[idx] : { userId, videoId, liked: false, disliked: false, isWatched: false };
-    
-    // Logic: Toggle. If clicking like and already liked -> unlike. If clicking like and disliked -> like (remove dislike).
-    if (isLike) {
-        current.liked = !current.liked;
-        if (current.liked) current.disliked = false;
-    } else {
-        current.disliked = !current.disliked;
-        if (current.disliked) current.liked = false;
-    }
-
-    if (idx !== -1) interactions[idx] = current;
-    else interactions.push(current);
-    
-    this.save('sp_interactions', interactions);
-
-    // Update video counters
-    const videos = this.load<Video[]>('sp_videos', []);
-    const vIdx = videos.findIndex(v => v.id === videoId);
-    if (vIdx !== -1) {
-       // Recalculate totals
-       const relevant = interactions.filter(i => i.videoId === videoId);
-       videos[vIdx].likes = relevant.filter(i => i.liked).length;
-       videos[vIdx].dislikes = relevant.filter(i => i.disliked).length;
-       this.save('sp_videos', videos);
-    }
-
-    return current;
+    return this.request<UserInteraction>('/index.php?action=toggle_like', 'POST', { userId, videoId, isLike });
   }
 
   async markWatched(userId: string, videoId: string): Promise<void> {
-     // Don't delay for this one to feel snappy
-     let interactions = this.load<UserInteraction[]>('sp_interactions', []);
-     let idx = interactions.findIndex(i => i.userId === userId && i.videoId === videoId);
-     if (idx !== -1) {
-         if (!interactions[idx].isWatched) {
-             interactions[idx].isWatched = true;
-             // Update View Count
-             const videos = this.load<Video[]>('sp_videos', []);
-             const v = videos.find(v => v.id === videoId);
-             if (v) { v.views++; this.save('sp_videos', videos); }
-         }
-     } else {
-         interactions.push({ userId, videoId, liked: false, disliked: false, isWatched: true });
-         // Update View Count
-         const videos = this.load<Video[]>('sp_videos', []);
-         const v = videos.find(v => v.id === videoId);
-         if (v) { v.views++; this.save('sp_videos', videos); }
-     }
-     this.save('sp_interactions', interactions);
+    await this.request('/index.php?action=mark_watched', 'POST', { userId, videoId });
   }
 
   async toggleWatchLater(userId: string, videoId: string): Promise<string[]> {
-    await this.delay();
-    const users = this.load<User[]>('sp_users', []);
-    const idx = users.findIndex(u => u.id === userId);
-    if (idx === -1) return [];
-
-    let list = users[idx].watchLater || [];
-    if (list.includes(videoId)) {
-        list = list.filter(id => id !== videoId);
-    } else {
-        list.push(videoId);
-    }
-    users[idx].watchLater = list;
-    this.save('sp_users', users);
-    return list;
+    const res = await this.request<{ list: string[] }>('/index.php?action=toggle_watch_later', 'POST', { userId, videoId });
+    return res.list;
   }
 
   // --- Comments ---
 
   async getComments(videoId: string): Promise<Comment[]> {
-    await this.delay();
-    const all = this.load<Comment[]>('sp_comments', []);
-    return all.filter(c => c.videoId === videoId).sort((a,b) => b.timestamp - a.timestamp);
+    return this.request<Comment[]>(`/index.php?action=get_comments&videoId=${videoId}`);
   }
 
   async addComment(userId: string, videoId: string, text: string): Promise<Comment> {
-    await this.delay();
-    const user = await this.getUser(userId);
-    if (!user) throw new Error("User not found");
-
-    const newComment: Comment = {
-        id: crypto.randomUUID(),
-        videoId,
-        userId,
-        username: user.username,
-        text,
-        timestamp: Date.now()
-    };
-    
-    const comments = this.load<Comment[]>('sp_comments', []);
-    comments.push(newComment);
-    this.save('sp_comments', comments);
-    
-    return newComment;
+    return this.request<Comment>('/index.php?action=add_comment', 'POST', { userId, videoId, text });
   }
 
   // --- Transactions ---
 
   async purchaseVideo(userId: string, videoId: string): Promise<void> {
-    await this.delay();
-    const users = this.load<User[]>('sp_users', []);
-    const videos = this.load<Video[]>('sp_videos', []);
-    
-    const userIdx = users.findIndex(u => u.id === userId);
-    const video = videos.find(v => v.id === videoId);
-    
-    if (userIdx === -1 || !video) throw new Error("Invalid Request");
-    const user = users[userIdx];
-
-    if (await this.hasPurchased(userId, videoId)) return; // Already bought
-    
-    if (user.balance < video.price) throw new Error("Insufficient Balance");
-
-    // Deduct
-    user.balance -= video.price;
-    users[userIdx] = user;
-    
-    // Add to creator
-    const creatorIdx = users.findIndex(u => u.id === video.creatorId);
-    if (creatorIdx !== -1) {
-        users[creatorIdx].balance += video.price;
-    }
-    
-    this.save('sp_users', users);
-
-    // Record Transaction
-    const txs = this.load<Transaction[]>('sp_transactions', []);
-    txs.push({
-        id: crypto.randomUUID(),
-        buyerId: userId,
-        creatorId: video.creatorId,
-        videoId: video.id,
-        amount: video.price,
-        timestamp: Date.now(),
-        type: 'PURCHASE'
-    });
-    this.save('sp_transactions', txs);
+    await this.request('/index.php?action=purchase_video', 'POST', { userId, videoId });
   }
 
   async uploadVideo(title: string, description: string, price: number, creator: User, file: File | null): Promise<void> {
-    await this.delay();
-    const videos = this.load<Video[]>('sp_videos', []);
-    
-    // Simulate Video URL (Random selection from sample clips)
-    const samples = [
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4"
-    ];
-    const randomVideo = samples[Math.floor(Math.random() * samples.length)];
+    const formData = new FormData();
+    formData.append('title', title);
+    formData.append('description', description);
+    formData.append('price', price.toString());
+    formData.append('creatorId', creator.id);
+    if (file) {
+        formData.append('video', file);
+    }
 
-    const newVideo: Video = {
-        id: crypto.randomUUID(),
-        title,
-        description,
-        price,
-        thumbnailUrl: `https://picsum.photos/seed/${Date.now()}/800/450`,
-        videoUrl: randomVideo,
-        creatorId: creator.id,
-        creatorName: creator.username,
-        views: 0,
-        createdAt: Date.now(),
-        likes: 0,
-        dislikes: 0
-    };
-    
-    videos.push(newVideo);
-    this.save('sp_videos', videos);
+    await this.request('/index.php?action=upload_video', 'POST', formData);
   }
 
   async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> {
-    await this.delay();
-    const videos = this.load<Video[]>('sp_videos', []);
-    let changed = false;
-    const updated = videos.map(v => {
-        if (v.creatorId === creatorId) {
-            changed = true;
-            return { ...v, price: newPrice };
-        }
-        return v;
-    });
-    
-    if (changed) this.save('sp_videos', updated);
+    await this.request('/index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice });
   }
 
   async getAllUsers(): Promise<User[]> { 
-    await this.delay();
-    return this.load<User[]>('sp_users', []);
+    return this.request<User[]>('/index.php?action=get_all_users');
   }
   
   async adminAddBalance(adminId: string, targetUserId: string, amount: number): Promise<void> {
-      await this.delay();
-      const users = this.load<User[]>('sp_users', []);
-      const idx = users.findIndex(u => u.id === targetUserId);
-      if (idx !== -1) {
-          users[idx].balance += amount;
-          this.save('sp_users', users);
-          
-          const txs = this.load<Transaction[]>('sp_transactions', []);
-          txs.push({
-            id: crypto.randomUUID(),
-            buyerId: adminId,
-            creatorId: targetUserId, // Receiver
-            videoId: null,
-            amount: amount,
-            timestamp: Date.now(),
-            type: 'DEPOSIT'
-        });
-        this.save('sp_transactions', txs);
-      }
+      await this.request('/index.php?action=admin_add_balance', 'POST', { adminId, targetUserId, amount });
   }
 
   async getUserTransactions(userId: string): Promise<Transaction[]> {
-    await this.delay();
-    const txs = this.load<Transaction[]>('sp_transactions', []);
-    return txs.filter(t => t.buyerId === userId || t.creatorId === userId).sort((a,b) => b.timestamp - a.timestamp);
+    return this.request<Transaction[]>(`/index.php?action=get_transactions&userId=${userId}`);
   }
 
   async getVideosByCreator(creatorId: string): Promise<Video[]> {
-    await this.delay();
-    const videos = this.load<Video[]>('sp_videos', []);
-    return videos.filter(v => v.creatorId === creatorId);
+    return this.request<Video[]>(`/index.php?action=get_creator_videos&creatorId=${creatorId}`);
   }
 }
 
