@@ -39,12 +39,6 @@ jobs:
         cp api/index_code.txt dist/api/index.php
         cp api/install_code.txt dist/api/install.php
         
-        # Download yt-dlp binary (Linux x64)
-        curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o dist/api/yt-dlp
-        
-        # Make executable
-        chmod +x dist/api/yt-dlp
-        
         # Create uploads directories structure
         mkdir -p dist/api/uploads/videos
         mkdir -p dist/api/uploads/thumbnails

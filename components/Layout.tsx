@@ -28,6 +28,7 @@ export default function Layout() {
           )}
           <Link to="/" className={isActive('/')}>Browse</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
+          <Link to="/requests" className={isActive('/requests')}>Requests</Link>
           <Link to="/upload" className={isActive('/upload')}>Upload</Link>
           <Link to="/profile" className={isActive('/profile')}>Profile</Link>
         </div>

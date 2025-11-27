@@ -151,7 +151,7 @@ export default function Watch() {
       setAutoStatus(result.status);
       
       if (result.status !== 'WAITING_CONFIRMATION') {
-        setCountdown(5); // Start 5s timer
+        setCountdown(3); // Start 3s timer
       }
     }
   };
@@ -256,7 +256,7 @@ export default function Watch() {
                 
                 {/* Auto-Play Overlay */}
                 {countdown !== null && countdown > 0 && nextVideo && (
-                  <div className="absolute inset-0 z-20 bg-black/80 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
+                  <div className="absolute inset-0 z-20 bg-black/90 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
                     <p className="text-slate-400 text-sm mb-2 uppercase tracking-widest font-bold">
                        {autoStatus === 'SKIPPING_WATCHED' ? 'Skipping Watched Video' : 
                         autoStatus === 'AUTO_BUYING' ? 'Auto-Purchasing Next' : 'Up Next'}
@@ -266,7 +266,7 @@ export default function Watch() {
                     <div className="relative w-16 h-16 flex items-center justify-center mb-6">
                        <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
                          <path className="text-slate-700" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="2" />
-                         <path className="text-indigo-500 transition-all duration-1000 ease-linear" strokeDasharray={`${(countdown / 5) * 100}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="2" />
+                         <path className="text-indigo-500 transition-all duration-1000 ease-linear" strokeDasharray={`${(countdown / 3) * 100}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="2" />
                        </svg>
                        <span className="text-2xl font-mono font-bold text-white">{countdown}</span>
                     </div>
@@ -318,54 +318,62 @@ export default function Watch() {
 
               </>
             ) : (
-              /* Locked State - Optimized Visibility */
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-cover bg-center" style={{ backgroundImage: `url(${video.thumbnailUrl})` }}>
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/90 to-slate-900/80 backdrop-blur-sm"></div>
+              /* Locked State - REFINED VISIBILITY */
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-50">
                 
-                <div className="relative z-10 text-center p-6 w-full max-w-sm flex flex-col items-center">
-                  <div className="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mb-6 border border-slate-700 shadow-xl">
+                {/* Background Image with heavy blur */}
+                <div className="absolute inset-0 bg-cover bg-center opacity-30 blur-xl scale-110" style={{ backgroundImage: `url(${video.thumbnailUrl})` }}></div>
+                <div className="absolute inset-0 bg-slate-950/80"></div>
+                
+                <div className="relative z-20 flex flex-col items-center justify-center p-6 w-full max-w-sm">
+                  <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4 border-2 border-slate-700 shadow-2xl">
                     <Lock size={32} className="text-slate-300" />
                   </div>
                   
-                  <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">{video.title}</h2>
-                  <p className="text-slate-400 mb-8 flex items-center gap-2 justify-center">
-                    by <span className="text-indigo-400 font-semibold">{video.creatorName}</span>
+                  <h2 className="text-2xl font-bold text-white mb-1 text-center shadow-black drop-shadow-md">{video.title}</h2>
+                  <p className="text-slate-400 text-sm mb-8 text-center">
+                    Locked Content by <span className="text-indigo-300 font-semibold">{video.creatorName}</span>
                   </p>
                   
-                  <div className="bg-slate-900/80 p-6 rounded-2xl border border-slate-700 shadow-2xl w-full">
-                    <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-2">Price to Unlock</p>
-                    <div className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-br from-amber-300 to-amber-500 drop-shadow-sm mb-6">
-                       {video.price} <span className="text-lg text-amber-100 font-bold tracking-wider">SALDO</span>
+                  {/* Price Tag */}
+                  <div className="mb-8 text-center">
+                    <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Price to Unlock</p>
+                    <div className="text-6xl font-black text-amber-400 drop-shadow-lg">
+                       {video.price} <span className="text-xl text-amber-200/80 font-bold tracking-wider">SALDO</span>
                     </div>
-
-                    {error && <div className="text-red-400 text-sm bg-red-950/50 border border-red-900 p-3 rounded-lg mb-4 flex items-center justify-center gap-2 animate-pulse"><AlertCircle size={16}/>{error}</div>}
-                    
-                    {!canAfford && !error && (
-                         <div className="text-red-400 text-xs bg-red-950/30 p-2 rounded mb-4 border border-red-900/50 flex items-center justify-center gap-1">
-                             <AlertCircle size={12} /> Insufficient Funds (Bal: {user?.balance})
-                         </div>
-                    )}
-
-                    <button 
-                      onClick={handlePurchase}
-                      disabled={purchasing || !canAfford}
-                      className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all shadow-xl ${
-                        !canAfford 
-                          ? 'bg-slate-700 text-slate-400 cursor-not-allowed border border-slate-600' 
-                          : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-amber-900/20 hover:scale-105 hover:shadow-2xl active:scale-95 animate-pulse-slow'
-                      }`}
-                    >
-                       {purchasing ? (
-                          <span className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"/> Processing...</span>
-                       ) : (
-                          <><ShoppingCart size={22} fill="currentColor" /> UNLOCK NOW</>
-                       )}
-                    </button>
-                    
-                    <p className="text-[10px] text-slate-500 mt-4 text-center">
-                       Instant access • No hidden fees • Supports Creator
-                    </p>
                   </div>
+
+                  {error && (
+                    <div className="w-full text-red-400 text-sm bg-red-950/80 border border-red-900/50 p-3 rounded-lg mb-4 flex items-center justify-center gap-2 animate-pulse">
+                        <AlertCircle size={16}/>{error}
+                    </div>
+                  )}
+                  
+                  {!canAfford && !error && (
+                      <div className="w-full text-red-300 text-xs bg-red-950/60 p-3 rounded-lg mb-4 border border-red-900/50 flex items-center justify-center gap-2">
+                          <AlertCircle size={14} /> Insufficient Balance (Have: {user?.balance})
+                      </div>
+                  )}
+
+                  <button 
+                    onClick={handlePurchase}
+                    disabled={purchasing || !canAfford}
+                    className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all shadow-xl border-t border-white/10 ${
+                      !canAfford 
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                        : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-black shadow-amber-900/40 hover:scale-105 hover:shadow-2xl active:scale-95 animate-pulse'
+                    }`}
+                  >
+                     {purchasing ? (
+                        <span className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-black/50 border-t-black rounded-full animate-spin"/> Processing...</span>
+                     ) : (
+                        <><ShoppingCart size={22} fill="currentColor" /> BUY NOW</>
+                     )}
+                  </button>
+                  
+                  <p className="text-[10px] text-slate-500 mt-4 text-center">
+                     Instant access • Supports Creator
+                  </p>
                 </div>
               </div>
             )}

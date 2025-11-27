@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from '../components/Router';
 import { db } from '../services/db';
-import { Wallet, History, Settings2, Clock, PlayCircle } from 'lucide-react';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight } from 'lucide-react';
 import { Video, Transaction } from '../types';
 
 export default function Profile() {
@@ -66,6 +66,22 @@ export default function Profile() {
           <p className="text-xs text-slate-400 mt-2">ID: <span className="font-mono text-slate-500">{user.id}</span></p>
         </div>
       </div>
+
+      {/* Request Content Button */}
+      <Link to="/requests" className="block bg-slate-900 p-5 rounded-2xl border border-slate-800 hover:border-red-500/50 hover:bg-slate-900/80 transition-all group shadow-lg">
+          <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-full bg-red-600/20 text-red-500 flex items-center justify-center border border-red-500/20 group-hover:scale-110 transition-transform">
+                      <DownloadCloud size={24} />
+                  </div>
+                  <div>
+                      <h3 className="font-bold text-white text-lg">Request Content</h3>
+                      <p className="text-slate-400 text-sm">Ask for videos from YouTube</p>
+                  </div>
+              </div>
+              <ChevronRight className="text-slate-600 group-hover:text-white transition-colors" />
+          </div>
+      </Link>
 
       {/* Settings Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
