@@ -5,6 +5,43 @@ import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../App';
 
+const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) => {
+   const [watched, setWatched] = useState(false);
+   const [purchased, setPurchased] = useState(false);
+
+   useEffect(() => {
+     if(userId) {
+        db.getInteraction(userId, rv.id).then(i => setWatched(i.isWatched));
+        db.hasPurchased(userId, rv.id).then(setPurchased);
+     }
+   }, [userId, rv.id]);
+
+   return (
+    <Link to={`/watch/${rv.id}`} className="flex gap-3 group">
+      <div className="relative w-40 aspect-video shrink-0 bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group-hover:border-indigo-500 transition-colors">
+         <img src={rv.thumbnailUrl} alt="" className="w-full h-full object-cover opacity-80 group-hover:opacity-100" />
+         {watched && (
+           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+             <span className="text-xs font-bold text-white bg-slate-800/80 px-2 py-1 rounded">WATCHED</span>
+           </div>
+         )}
+         {!purchased && !watched && (
+           <div className="absolute bottom-1 right-1 bg-black/70 text-amber-400 text-[10px] px-1.5 py-0.5 rounded font-bold">
+              {rv.price} $
+           </div>
+         )}
+      </div>
+      <div className="min-w-0 py-1">
+         <h4 className="text-sm font-semibold text-slate-200 line-clamp-2 group-hover:text-indigo-400 transition-colors">{rv.title}</h4>
+         <p className="text-xs text-slate-500 mt-1">{rv.creatorName}</p>
+         <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
+            <span>{rv.views} views</span>
+         </div>
+      </div>
+    </Link>
+   );
+};
+
 export default function Watch() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -46,7 +83,9 @@ export default function Watch() {
             const interact = await db.getInteraction(user.id, v.id);
             setInteraction(interact);
             
-            setComments(db.getComments(v.id)); // Sync for now as empty
+            const comms = await db.getComments(v.id);
+            setComments(comms);
+
             setIsWatchLater(user.watchLater.includes(v.id));
             
             const related = await db.getRelatedVideos(v.id);
@@ -404,42 +443,4 @@ export default function Watch() {
       </div>
     </div>
   );
-}
-
-// Helper to avoid async inside map
-function RelatedVideoItem({rv, userId}: {rv: Video, userId?: string}) {
-   const [watched, setWatched] = useState(false);
-   const [purchased, setPurchased] = useState(false);
-
-   useEffect(() => {
-     if(userId) {
-        db.getInteraction(userId, rv.id).then(i => setWatched(i.isWatched));
-        db.hasPurchased(userId, rv.id).then(setPurchased);
-     }
-   }, [userId, rv.id]);
-
-   return (
-    <Link to={`/watch/${rv.id}`} className="flex gap-3 group">
-      <div className="relative w-40 aspect-video shrink-0 bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group-hover:border-indigo-500 transition-colors">
-         <img src={rv.thumbnailUrl} alt="" className="w-full h-full object-cover opacity-80 group-hover:opacity-100" />
-         {watched && (
-           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-             <span className="text-xs font-bold text-white bg-slate-800/80 px-2 py-1 rounded">WATCHED</span>
-           </div>
-         )}
-         {!purchased && !watched && (
-           <div className="absolute bottom-1 right-1 bg-black/70 text-amber-400 text-[10px] px-1.5 py-0.5 rounded font-bold">
-              {rv.price} $
-           </div>
-         )}
-      </div>
-      <div className="min-w-0 py-1">
-         <h4 className="text-sm font-semibold text-slate-200 line-clamp-2 group-hover:text-indigo-400 transition-colors">{rv.title}</h4>
-         <p className="text-xs text-slate-500 mt-1">{rv.creatorName}</p>
-         <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
-            <span>{rv.views} views</span>
-         </div>
-      </div>
-    </Link>
-   );
 }

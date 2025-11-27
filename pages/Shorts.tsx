@@ -25,7 +25,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     if (user) {
       db.getInteraction(user.id, video.id).then(setInteraction);
       db.hasPurchased(user.id, video.id).then(setIsUnlocked);
-      // setComments(db.getComments(video.id)); // Not implemented in PHP yet
+      db.getComments(video.id).then(setComments);
     }
   }, [user, video.id]);
 
