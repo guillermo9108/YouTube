@@ -2,7 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Heart, MessageCircle, MoreVertical, Share2, DollarSign, Send, X, Lock, Volume2, VolumeX, Smartphone } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
-import { useAuth, Link } from '../App';
+import { useAuth } from '../context/AuthContext';
+import { Link } from '../components/Router';
 
 // --- Individual Short Component ---
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Database, Server, CheckCircle, ShieldCheck, Loader2, ArrowRight, AlertTriangle, Layers } from 'lucide-react';
 import { db } from '../services/db';
-import { useNavigate } from '../App';
+import { useNavigate } from '../components/Router';
 
 type Step = 'DB_CONFIG' | 'ADMIN_CREATION' | 'INSTALLING' | 'DONE';
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth, Link } from '../App';
+import { useAuth } from '../context/AuthContext';
+import { Link } from '../components/Router';
 import { db } from '../services/db';
 import { Wallet, History, Settings2, Clock, PlayCircle } from 'lucide-react';
 import { Video, Transaction } from '../types';

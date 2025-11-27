@@ -2,7 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
-import { useAuth, Link, useParams, useNavigate } from '../App';
+import { useAuth } from '../context/AuthContext';
+import { Link, useParams, useNavigate } from '../components/Router';
 
 const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) => {
    const [watched, setWatched] = useState(false);

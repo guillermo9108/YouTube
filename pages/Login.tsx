@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../App';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from '../components/Router';
 import { Layout as LayoutIcon } from 'lucide-react';
 
 export default function Login() {

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus } from 'lucide-react';
 import { db } from '../services/db';
-import { useAuth, useNavigate } from '../App';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from '../components/Router';
 
 export default function Upload() {
   const { user } = useAuth();

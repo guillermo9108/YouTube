@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { ArrowDownWideNarrow } from 'lucide-react';
 import { db } from '../services/db';
 import { Video } from '../types';
-import { useAuth } from '../App';
+import { useAuth } from '../context/AuthContext';
 import VideoCard from '../components/VideoCard';
 
 type SortOption = 'newest' | 'views' | 'price';
@@ -20,9 +20,6 @@ export default function Home() {
   // Fetch purchases separately to avoid async issues in loop
   useEffect(() => {
     if (user && videos.length > 0) {
-        // Check all purchases
-        // Optimization: In real app, endpoint returns list of purchased IDs
-        // Here we just parallel check for UI
         Promise.all(videos.map(v => db.hasPurchased(user.id, v.id)))
             .then(results => {
                 const p = videos.filter((_, i) => results[i]).map(v => v.id);

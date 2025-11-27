@@ -1,7 +1,7 @@
 import React from 'react';
 import { Lock, Play, CircleDollarSign } from 'lucide-react';
 import { Video } from '../types';
-import { Link } from '../App';
+import { Link } from './Router';
 
 interface VideoCardProps {
   video: Video;

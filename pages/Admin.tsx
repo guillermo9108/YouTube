@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User } from '../types';
-import { useAuth } from '../App';
+import { useAuth } from '../context/AuthContext';
 import { Search, PlusCircle } from 'lucide-react';
 
 export default function Admin() {

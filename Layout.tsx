@@ -1,6 +1,7 @@
 import React from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone } from 'lucide-react';
-import { useAuth, Link, useLocation, Outlet } from '../App';
+import { useAuth } from './context/AuthContext';
+import { Link, useLocation, Outlet } from './components/Router';
 
 export default function Layout() {
   const location = useLocation();
