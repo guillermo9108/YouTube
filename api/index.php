@@ -87,7 +87,7 @@ switch ($action) {
     case 'login':
         $username = $input['username'] ?? '';
         $password = $input['password'] ?? '';
-
+        
         $stmt = $pdo->prepare("SELECT id, username, password_hash, role, balance, autoPurchaseLimit, watchLater FROM users WHERE username = ?");
         $stmt->execute([$username]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -106,7 +106,7 @@ switch ($action) {
     case 'register':
         $username = $input['username'] ?? '';
         $password = $input['password'] ?? '';
-
+        
         if (empty($username) || empty($password)) respond(false, null, 'Username and password required.');
 
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
@@ -115,7 +115,7 @@ switch ($action) {
 
         $id = 'u_' . uniqid();
         $password_hash = password_hash($password, PASSWORD_DEFAULT);
-
+        
         $stmt = $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater) VALUES (?, ?, ?, 'USER', 100.00, 1.00, '[]')");
         $stmt->execute([$id, $username, $password_hash]);
 
@@ -129,7 +129,7 @@ switch ($action) {
         if (!$user) respond(false, null, 'User not found.');
         respond(true, $user);
         break;
-
+        
     case 'get_videos':
         $stmt = $pdo->query("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id ORDER BY v.createdAt DESC");
         $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -156,7 +156,7 @@ switch ($action) {
         $userId = $_GET['userId'] ?? null;
         $videoId = $_GET['videoId'] ?? null;
         if (!$userId || !$videoId) respond(false, null, 'Missing params.');
-
+        
         // Check if user is creator
         $v = get_video_by_id($pdo, $videoId);
         if ($v && $v['creatorId'] === $userId) {
@@ -181,7 +181,7 @@ switch ($action) {
         if (!$user || !$video) respond(false, null, 'User or Video not found.');
         if ($user['id'] === $video['creatorId']) respond(true); // Creator owns it
         if ($user['balance'] < $video['price']) respond(false, null, 'Insufficient balance.');
-
+        
         // Check if already purchased
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
         $stmt->execute([$userId, $videoId]);
@@ -189,15 +189,15 @@ switch ($action) {
 
         try {
             $pdo->beginTransaction();
-
+            
             // Deduct from buyer
             $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")
                 ->execute([$video['price'], $userId]);
-
+                
             // Add to creator
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")
                 ->execute([$video['price'], $video['creatorId']]);
-
+            
             // Transaction Record
             $txId = 'tx_' . uniqid();
             $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'PURCHASE')")
@@ -225,17 +225,17 @@ switch ($action) {
 
         if ($file && $file['error'] === UPLOAD_ERR_OK) {
             if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
-
+            
             $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
             $fileName = uniqid('vid_') . '.' . $ext;
             $targetPath = UPLOAD_DIR . $fileName;
-
+            
             if (move_uploaded_file($file['tmp_name'], $targetPath)) {
                 // Return relative path for frontend
                 $videoUrl = '/api/uploads/videos/' . $fileName; 
             }
         }
-
+        
         $videoId = 'v_' . uniqid();
         $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)");
         $stmt->execute([
@@ -244,7 +244,7 @@ switch ($action) {
 
         respond(true, ['message' => 'Video uploaded.']);
         break;
-
+        
     case 'toggle_watch_later':
         $userId = $input['userId'] ?? null;
         $videoId = $input['videoId'] ?? null;
@@ -252,24 +252,24 @@ switch ($action) {
 
         $user = get_user_by_id($pdo, $userId);
         $list = $user['watchLater'];
-
+        
         $key = array_search($videoId, $list);
         if ($key !== false) {
             array_splice($list, $key, 1);
         } else {
             $list[] = $videoId;
         }
-
+        
         $pdo->prepare("UPDATE users SET watchLater = ? WHERE id = ?")
             ->execute([json_encode(array_values($list)), $userId]);
-
+        
         respond(true, ['list' => $list]);
         break;
-
+        
     case 'get_comments':
         $videoId = $_GET['videoId'] ?? null;
         if (!$videoId) respond(false, null, 'Video ID required.');
-
+        
         $stmt = $pdo->prepare("SELECT c.id, c.videoId, c.userId, u.username, c.text, c.timestamp FROM comments c JOIN users u ON c.userId = u.id WHERE c.videoId = ? ORDER BY c.timestamp DESC");
         $stmt->execute([$videoId]);
         $comments = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -283,19 +283,19 @@ switch ($action) {
         $userId = $input['userId'] ?? null;
         $videoId = $input['videoId'] ?? null;
         $text = $input['text'] ?? null;
-
+        
         if (!$userId || !$videoId || !$text) respond(false, null, 'Missing data.');
 
         $commentId = 'c_' . uniqid();
         $timestamp = time() * 1000;
-
+        
         $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")
             ->execute([$commentId, $videoId, $userId, $text, $timestamp]);
 
         $user = get_user_by_id($pdo, $userId);
         respond(true, ['id' => $commentId, 'videoId' => $videoId, 'userId' => $userId, 'username' => $user['username'], 'text' => $text, 'timestamp' => $timestamp]);
         break;
-
+        
     case 'admin_add_balance':
         $adminId = $input['adminId'] ?? null;
         $targetUserId = $input['targetUserId'] ?? null;
@@ -303,14 +303,14 @@ switch ($action) {
 
         $admin = get_user_by_id($pdo, $adminId);
         if (!$admin || $admin['role'] !== 'ADMIN') respond(false, null, 'Unauthorized.');
-
+        
         $pdo->beginTransaction();
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetUserId]);
-
+        
         $txId = 'tx_' . uniqid();
         $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'DEPOSIT')")
             ->execute([$txId, $adminId, $amount, time() * 1000]); // Admin is "buyer" (sender) in deposit
-
+        
         $pdo->commit();
         respond(true);
         break;
@@ -318,11 +318,11 @@ switch ($action) {
     case 'get_interaction':
         $userId = $_GET['userId'] ?? null;
         $videoId = $_GET['videoId'] ?? null;
-
+        
         $stmt = $pdo->prepare("SELECT liked, disliked, isWatched FROM interactions WHERE userId = ? AND videoId = ?");
         $stmt->execute([$userId, $videoId]);
         $res = $stmt->fetch(PDO::FETCH_ASSOC);
-
+        
         if (!$res) {
             $res = ['liked' => false, 'disliked' => false, 'isWatched' => false, 'userId' => $userId, 'videoId' => $videoId];
         } else {
@@ -339,18 +339,18 @@ switch ($action) {
         $userId = $input['userId'] ?? null;
         $videoId = $input['videoId'] ?? null;
         $isLike = $input['isLike'] ?? true;
-
+        
         // Upsert interaction
         $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?");
         $stmt->execute([$userId, $videoId]);
         $current = $stmt->fetch(PDO::FETCH_ASSOC);
-
+        
         $liked = $current ? (bool)$current['liked'] : false;
-
+        
         if ($isLike) {
             $liked = !$liked;
         }
-
+        
         if ($current) {
             $pdo->prepare("UPDATE interactions SET liked = ? WHERE userId = ? AND videoId = ?")
                 ->execute([$liked ? 1 : 0, $userId, $videoId]);
@@ -358,11 +358,11 @@ switch ($action) {
             $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked, isWatched) VALUES (?, ?, ?, 0, 0)")
                 ->execute([$userId, $videoId, $liked ? 1 : 0]);
         }
-
+        
         // Recalc video stats
         $pdo->prepare("UPDATE videos SET likes = (SELECT COUNT(*) FROM interactions WHERE videoId = ? AND liked = 1) WHERE id = ?")
             ->execute([$videoId, $videoId]);
-
+            
         // Return updated interaction
         $stmt = $pdo->prepare("SELECT liked, disliked, isWatched FROM interactions WHERE userId = ? AND videoId = ?");
         $stmt->execute([$userId, $videoId]);
@@ -370,14 +370,14 @@ switch ($action) {
         $res['liked'] = (bool)$res['liked'];
         $res['disliked'] = (bool)$res['disliked'];
         $res['isWatched'] = (bool)$res['isWatched'];
-
+        
         respond(true, $res);
         break;
 
     case 'mark_watched':
         $userId = $input['userId'] ?? null;
         $videoId = $input['videoId'] ?? null;
-
+        
         $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?");
         $stmt->execute([$userId, $videoId]);
         if ($stmt->fetch()) {
@@ -385,7 +385,7 @@ switch ($action) {
         } else {
              $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked, isWatched) VALUES (?, ?, 0, 0, 1)")->execute([$userId, $videoId]);
         }
-
+        
         $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$videoId]);
         respond(true);
         break;
@@ -393,7 +393,7 @@ switch ($action) {
     case 'update_user':
         $userId = $input['userId'] ?? null;
         $updates = $input['updates'] ?? [];
-
+        
         if (isset($updates['autoPurchaseLimit'])) {
             $pdo->prepare("UPDATE users SET autoPurchaseLimit = ? WHERE id = ?")
                 ->execute([$updates['autoPurchaseLimit'], $userId]);
@@ -404,7 +404,7 @@ switch ($action) {
     case 'update_prices_bulk':
         $creatorId = $input['creatorId'] ?? null;
         $newPrice = $input['newPrice'] ?? null;
-
+        
         if ($creatorId && $newPrice !== null) {
             $pdo->prepare("UPDATE videos SET price = ? WHERE creatorId = ?")->execute([$newPrice, $creatorId]);
             respond(true);

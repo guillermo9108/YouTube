@@ -28,7 +28,7 @@ if ($action === 'check') {
         try {
             $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['name']}";
             $pdo = new PDO($dsn, $config['user'], $config['password']);
-
+            
             // Check if tables exist
             $stmt = $pdo->query("SHOW TABLES LIKE 'users'");
             if ($stmt->rowCount() > 0) {
@@ -47,7 +47,7 @@ if ($action === 'verify_db') {
     $port = $input['port'] ?? '3306';
     $user = $input['username'] ?? 'root';
     $pass = $input['password'] ?? '';
-
+    
     // We try to connect to server without selecting DB first
     try {
         $pdo = new PDO("mysql:host=$host;port=$port", $user, $pass);
@@ -136,7 +136,7 @@ if ($action === 'install') {
         // Create Admin User
         $adminId = 'u_' . uniqid();
         $hash = password_hash($adminUser['password'], PASSWORD_DEFAULT);
-
+        
         // Check if admin exists
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
         $stmt->execute([$adminUser['username']]);
