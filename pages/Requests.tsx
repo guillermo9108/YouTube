@@ -1,402 +1,367 @@
 
 import React, { useState, useEffect } from 'react';
-import { DownloadCloud, Wifi, Search, Check, Clock, AlertCircle, Trash2, Upload, Play, Loader2, Link as LinkIcon, Youtube } from 'lucide-react';
+import { DownloadCloud, Search, Check, AlertCircle, Loader2, Settings, Key, Image as ImageIcon, ExternalLink, Layers } from 'lucide-react';
 import { db } from '../services/db';
-import { ContentRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from '../components/Router';
-import { generateThumbnail } from './Upload'; // Reuse logic
+import { generateThumbnail } from './Upload';
 
-interface PipedVideo {
-  url: string; // /watch?v=ID
-  title: string;
+interface VideoResult {
+  id: string;
+  source: 'Pexels' | 'Pixabay';
   thumbnail: string;
-  uploaderName: string;
-  duration: number;
+  title: string;
+  duration?: number;
+  downloadUrl: string; // URL to the smallest video file
+  author: string;
+  originalUrl: string;
 }
-
-// List of Piped instances to try in case one is down
-const PIPED_INSTANCES = [
-  'https://pipedapi.kavin.rocks',
-  'https://api.piped.otton.uk',
-  'https://pipedapi.drgns.space'
-];
 
 export default function Requests() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [query, setQuery] = useState('');
-  const [directLink, setDirectLink] = useState('');
-  const [useLocal, setUseLocal] = useState(false);
-  const [searchMode, setSearchMode] = useState<'SEARCH' | 'LINK'>('SEARCH');
-  const [requests, setRequests] = useState<ContentRequest[]>([]);
-  const [loading, setLoading] = useState(false);
   
-  // Local Processing State
-  const [searchResults, setSearchResults] = useState<PipedVideo[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  // -- Settings State --
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeys, setApiKeys] = useState({
+    pexels: localStorage.getItem('sp_pexels_key') || '',
+    pixabay: localStorage.getItem('sp_pixabay_key') || ''
+  });
+
+  const saveKeys = () => {
+     localStorage.setItem('sp_pexels_key', apiKeys.pexels);
+     localStorage.setItem('sp_pixabay_key', apiKeys.pixabay);
+     setShowSettings(false);
+     alert("Keys saved!");
+  };
+
+  // -- Search State --
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<VideoResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  // -- Processing State --
+  const [selectedVideos, setSelectedVideos] = useState<string[]>([]); // Array of IDs
   const [processing, setProcessing] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
-  const [selectedVideos, setSelectedVideos] = useState<string[]>([]); // URLs
-  const [activeInstance, setActiveInstance] = useState(PIPED_INSTANCES[0]);
+  const [uploadPercent, setUploadPercent] = useState(0);
 
-  useEffect(() => {
-    loadRequests();
-  }, []);
-
-  const loadRequests = () => {
-    setLoading(true);
-    db.getRequests().then(res => {
-      setRequests(res);
-      setLoading(false);
-    });
-  };
-
-  const handleServerRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim() || !user) return;
-    try {
-      await db.requestContent(user.id, query, false); // useLocal = false
-      setQuery('');
-      loadRequests();
-    } catch (e) {
-      alert("Failed to submit request.");
-    }
-  };
-
-  // Helper to try fetching from multiple instances
-  const fetchFromPiped = async (path: string) => {
-    let lastError;
-    for (const instance of PIPED_INSTANCES) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-        
-        const res = await fetch(`${instance}${path}`, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (res.ok) {
-          setActiveInstance(instance); 
-          return await res.json();
-        }
-      } catch (e) {
-        lastError = e;
-        console.warn(`Instance ${instance} failed`, e);
-      }
-    }
-    throw new Error("Public APIs are currently busy. Please try 'Paste Link' or wait.");
-  };
-
-  const handleLocalSearch = async (e: React.FormEvent) => {
+  // -- Search Logic --
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
     
-    setIsSearching(true);
-    setSearchResults([]);
+    setLoading(true);
+    setResults([]);
+    setError('');
     
-    try {
-      const data = await fetchFromPiped(`/search?q=${encodeURIComponent(query)}&filter=videos`);
-      if (data && data.items) {
-        setSearchResults(data.items.slice(0, 8)); // Top 8 results
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
-      setIsSearching(false);
+    const hits: VideoResult[] = [];
+    const errors: string[] = [];
+
+    // 1. Search Pexels
+    if (apiKeys.pexels) {
+       try {
+         const res = await fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=12`, {
+            headers: { Authorization: apiKeys.pexels }
+         });
+         if (res.ok) {
+            const data = await res.json();
+            if (data.videos) {
+                hits.push(...data.videos.map((v: any) => {
+                    // Find smallest file (sort by size: width * height)
+                    const sortedFiles = v.video_files.sort((a: any, b: any) => (a.width * a.height) - (b.width * b.height));
+                    const smallest = sortedFiles[0];
+                    return {
+                        id: `pex-${v.id}`,
+                        source: 'Pexels',
+                        thumbnail: v.image,
+                        title: `Video ${v.id}`, // Pexels doesn't always have titles
+                        duration: v.duration,
+                        author: v.user.name,
+                        downloadUrl: smallest.link,
+                        originalUrl: v.url
+                    } as VideoResult;
+                }));
+            }
+         } else {
+             errors.push(`Pexels Error: ${res.status}`);
+         }
+       } catch (e: any) {
+           errors.push(`Pexels: ${e.message}`);
+       }
     }
-  };
-  
-  const handleLinkProcess = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!directLink.trim()) return;
-      
-      // Extract ID
-      let videoId = '';
-      const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
-      const match = directLink.match(regex);
-      if (match) videoId = match[1];
-      
-      if (!videoId) {
-          alert("Invalid YouTube URL");
-          return;
-      }
 
-      setProcessing(true);
-      setProgressMsg("Resolving link...");
-      
-      try {
-          // Process single ID
-          await downloadAndUpload(videoId, `YouTube Video ${videoId}`);
-          alert("Video imported successfully!");
-          navigate('/');
-      } catch (e: any) {
-          alert("Failed to process link: " + e.message);
-      } finally {
-          setProcessing(false);
-          setDirectLink('');
-      }
+    // 2. Search Pixabay
+    if (apiKeys.pixabay) {
+       try {
+         const res = await fetch(`https://pixabay.com/api/videos/?key=${apiKeys.pixabay}&q=${encodeURIComponent(query)}&per_page=12`);
+         if (res.ok) {
+             const data = await res.json();
+             if (data.hits) {
+                hits.push(...data.hits.map((v: any) => {
+                    // Pixabay structure: v.videos.tiny, v.videos.small, etc.
+                    // Prefer tiny, then small.
+                    const variant = v.videos.tiny || v.videos.small || v.videos.medium;
+                    return {
+                        id: `pix-${v.id}`,
+                        source: 'Pixabay',
+                        thumbnail: `https://i.vimeocdn.com/video/${v.picture_id}_640x360.jpg`,
+                        title: v.tags || `Pixabay ${v.id}`,
+                        duration: v.duration,
+                        author: v.user,
+                        downloadUrl: variant.url,
+                        originalUrl: v.pageURL
+                    } as VideoResult;
+                }));
+             }
+         } else {
+             errors.push(`Pixabay Error: ${res.status}`);
+         }
+       } catch (e: any) {
+           errors.push(`Pixabay: ${e.message}`);
+       }
+    }
+
+    if (!apiKeys.pexels && !apiKeys.pixabay) {
+        setError("Please configure at least one API Key in settings.");
+    } else if (hits.length === 0 && errors.length > 0) {
+        setError(errors.join(', '));
+    }
+
+    // Shuffle results slightly to mix sources
+    setResults(hits.sort(() => Math.random() - 0.5));
+    setLoading(false);
   };
 
-  const downloadAndUpload = async (videoId: string, titleHint: string) => {
-     setProgressMsg(`Getting stream info for ${videoId}...`);
-     const streamData = await fetchFromPiped(`/streams/${videoId}`);
+  // -- Selection --
+  const toggleSelection = (id: string) => {
+      setSelectedVideos(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  // -- Download & Upload --
+  const processDownloads = async () => {
+     if (!user || selectedVideos.length === 0) return;
      
-     const title = streamData.title || titleHint;
-     
-     // Find best mp4 video
-     const videoStream = streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4' && s.quality === '720p') || 
-                         streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4');
+     setProcessing(true);
+     setUploadPercent(0);
+     try {
+        let count = 1;
+        const total = selectedVideos.length;
 
-     if (!videoStream) throw new Error("No MP4 stream found.");
+        for (const id of selectedVideos) {
+            const videoData = results.find(r => r.id === id);
+            if (!videoData) continue;
 
-     setProgressMsg(`Downloading: ${title} ...`);
-     const vidResponse = await fetch(videoStream.url);
-     const blob = await vidResponse.blob();
-     const file = new File([blob], `${title}.mp4`, { type: 'video/mp4' });
+            const safeTitle = (query + ' ' + count).replace(/[^a-z0-9 ]/gi, '');
+            
+            // 1. Download Blob
+            setUploadPercent(0);
+            setProgressMsg(`(${count}/${total}) Downloading: ${videoData.source}...`);
+            
+            const response = await fetch(videoData.downloadUrl);
+            if (!response.ok) throw new Error(`Failed to fetch ${videoData.downloadUrl}`);
+            const blob = await response.blob();
+            
+            // 2. Create File
+            const file = new File([blob], `${safeTitle}.mp4`, { type: 'video/mp4' });
+            
+            // 3. Generate Thumbnail
+            setProgressMsg(`(${count}/${total}) Generating Thumbnail...`);
+            const thumb = await generateThumbnail(file);
 
-     setProgressMsg(`Generating thumbnail...`);
-     const thumb = await generateThumbnail(file);
+            // 4. Upload
+            setProgressMsg(`(${count}/${total}) Uploading to server...`);
+            await db.uploadVideo(
+                videoData.title || safeTitle, 
+                `Imported from ${videoData.source}. By ${videoData.author}.`, 
+                1, // Default Price
+                user, 
+                file, 
+                thumb,
+                (pct) => setUploadPercent(pct) // Update progress bar
+            );
+            
+            count++;
+        }
 
-     setProgressMsg(`Uploading to server...`);
-     if (!user) throw new Error("User not found");
-     await db.uploadVideo(title, `Imported from YouTube: ${videoId}`, 1, user, file, thumb);
-  };
+        alert("Import successful!");
+        navigate('/');
 
-  const toggleSelection = (url: string) => {
-    if (selectedVideos.includes(url)) {
-      setSelectedVideos(prev => prev.filter(v => v !== url));
-    } else {
-      setSelectedVideos(prev => [...prev, url]);
-    }
-  };
-
-  const processLocalDownloads = async () => {
-    if (!user || selectedVideos.length === 0) return;
-    setProcessing(true);
-    try {
-      let count = 1;
-      for (const videoPath of selectedVideos) {
-         const videoId = videoPath.replace('/watch?v=', '');
-         const title = searchResults.find(v => v.url === videoPath)?.title || 'Downloaded Video';
-         setProgressMsg(`Processing ${count}/${selectedVideos.length}: ${title}`);
-         await downloadAndUpload(videoId, title);
-         count++;
-      }
-      alert("All selected videos processed successfully!");
-      navigate('/');
-    } catch (e: any) {
-      alert("Error: " + e.message);
-    } finally {
-      setProcessing(false);
-      setProgressMsg('');
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (confirm('Delete this request?')) {
-      await db.deleteRequest(id);
-      loadRequests();
-    }
+     } catch (e: any) {
+         alert("Error during import: " + e.message);
+     } finally {
+         setProcessing(false);
+         setProgressMsg('');
+         setUploadPercent(0);
+     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-2">
-          <DownloadCloud className="text-indigo-400" /> Content Requests
-        </h2>
-        <p className="text-slate-400 text-sm">
-          Import content from YouTube.
-        </p>
-      </div>
-
-      {/* Mode Switcher */}
-      <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-800">
+    <div className="max-w-4xl mx-auto space-y-6 pb-20">
+      
+      {/* Header */}
+      <div className="flex items-center justify-between">
+         <div>
+            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+               <DownloadCloud className="text-emerald-400" /> Content Import
+            </h2>
+            <p className="text-slate-400 text-sm">Download stock footage (Pexels/Pixabay)</p>
+         </div>
          <button 
-           onClick={() => setUseLocal(false)} 
-           className={`flex-1 py-2 text-sm font-bold rounded-md transition-colors ${!useLocal ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+           onClick={() => setShowSettings(!showSettings)}
+           className={`p-2 rounded-lg border transition-colors ${showSettings ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'}`}
          >
-           Server Queue (Auto)
-         </button>
-         <button 
-           onClick={() => setUseLocal(true)} 
-           className={`flex-1 py-2 text-sm font-bold rounded-md transition-colors ${useLocal ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
-         >
-           <div className="flex items-center justify-center gap-2">
-             <Wifi size={16} /> Use My Device (Instant)
-           </div>
+            <Settings size={20} />
          </button>
       </div>
 
-      {/* Forms */}
-      <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-lg">
-        
-        {/* Mode 1: Server Queue */}
-        {!useLocal && (
-          <form onSubmit={handleServerRequest} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Topic</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
-                <input 
-                  type="text" 
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  placeholder="E.g. 'Funny Cat Shorts'"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500"
-                  required
-                />
-              </div>
+      {/* Settings Panel */}
+      {showSettings && (
+         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-xl animate-in slide-in-from-top-2">
+            <h3 className="font-bold text-slate-200 mb-4 flex items-center gap-2">
+               <Key size={18} /> API Configuration
+            </h3>
+            <div className="space-y-4">
+               <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pexels API Key</label>
+                  <input 
+                     type="text" 
+                     value={apiKeys.pexels}
+                     onChange={e => setApiKeys({...apiKeys, pexels: e.target.value})}
+                     className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm font-mono focus:ring-1 focus:ring-indigo-500 outline-none"
+                     placeholder="Your Pexels Key"
+                  />
+                  <a href="https://www.pexels.com/api/" target="_blank" className="text-[10px] text-indigo-400 hover:underline flex items-center gap-1 mt-1">Get Key <ExternalLink size={10}/></a>
+               </div>
+               <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pixabay API Key</label>
+                  <input 
+                     type="text" 
+                     value={apiKeys.pixabay}
+                     onChange={e => setApiKeys({...apiKeys, pixabay: e.target.value})}
+                     className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm font-mono focus:ring-1 focus:ring-indigo-500 outline-none"
+                     placeholder="Your Pixabay Key"
+                  />
+                  <a href="https://pixabay.com/api/docs/" target="_blank" className="text-[10px] text-indigo-400 hover:underline flex items-center gap-1 mt-1">Get Key <ExternalLink size={10}/></a>
+               </div>
+               <button onClick={saveKeys} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg">
+                  Save Configuration
+               </button>
             </div>
-            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg">
-              Submit to Queue
-            </button>
-            <p className="text-xs text-slate-500 text-center">
-               The server will try to download these overnight.
-            </p>
-          </form>
-        )}
-
-        {/* Mode 2: Client Side */}
-        {useLocal && (
-          <div className="space-y-4">
-             {/* Sub-tabs for Search vs Link */}
-             <div className="flex border-b border-slate-800 mb-4">
-                <button 
-                  onClick={() => setSearchMode('SEARCH')}
-                  className={`pb-2 px-4 text-sm font-medium ${searchMode === 'SEARCH' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500'}`}
-                >
-                   Search
-                </button>
-                <button 
-                  onClick={() => setSearchMode('LINK')}
-                  className={`pb-2 px-4 text-sm font-medium ${searchMode === 'LINK' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500'}`}
-                >
-                   Paste Link
-                </button>
-             </div>
-
-             {searchMode === 'LINK' && (
-                 <form onSubmit={handleLinkProcess}>
-                    <div className="relative mb-4">
-                      <LinkIcon className="absolute left-3 top-3.5 text-slate-500" size={18} />
-                      <input 
-                        type="url" 
-                        value={directLink}
-                        onChange={e => setDirectLink(e.target.value)}
-                        placeholder="https://www.youtube.com/watch?v=..."
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500"
-                        required
-                      />
-                    </div>
-                    <button type="submit" disabled={processing} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50">
-                       <DownloadCloud size={18} /> Import Link
-                    </button>
-                 </form>
-             )}
-
-             {searchMode === 'SEARCH' && !isSearching && searchResults.length === 0 && (
-               <form onSubmit={handleLocalSearch}>
-                  <div className="relative mb-4">
-                    <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
-                    <input 
-                      type="text" 
-                      value={query}
-                      onChange={e => setQuery(e.target.value)}
-                      placeholder="Search YouTube..."
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500"
-                      required
-                    />
-                  </div>
-                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                     <Search size={18} /> Search
-                  </button>
-               </form>
-             )}
-
-             {isSearching && (
-               <div className="py-10 text-center text-indigo-400">
-                  <Loader2 size={32} className="animate-spin mx-auto mb-2" />
-                  Searching public APIs...
-               </div>
-             )}
-
-             {/* Results Grid */}
-             {searchResults.length > 0 && !processing && (
-               <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                     {searchResults.map((vid) => {
-                        const isSelected = selectedVideos.includes(vid.url);
-                        return (
-                          <div 
-                             key={vid.url} 
-                             onClick={() => toggleSelection(vid.url)}
-                             className={`p-3 rounded-lg border cursor-pointer transition-all flex gap-3 ${isSelected ? 'bg-indigo-900/30 border-indigo-500 ring-1 ring-indigo-500' : 'bg-slate-950 border-slate-700 hover:bg-slate-800'}`}
-                          >
-                             <img src={vid.thumbnail} className="w-24 h-16 object-cover rounded bg-slate-800" />
-                             <div className="flex-1 min-w-0">
-                                <h4 className="text-sm font-bold text-white line-clamp-2">{vid.title}</h4>
-                                <p className="text-xs text-slate-400">{vid.uploaderName}</p>
-                             </div>
-                             {isSelected && <Check size={20} className="text-indigo-400 shrink-0" />}
-                          </div>
-                        );
-                     })}
-                  </div>
-                  
-                  <div className="flex gap-3">
-                     <button onClick={() => { setSearchResults([]); setQuery(''); }} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-bold">
-                        Cancel
-                     </button>
-                     <button 
-                       onClick={processLocalDownloads} 
-                       disabled={selectedVideos.length === 0}
-                       className="flex-[2] py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                     >
-                        <DownloadCloud size={20} /> Import {selectedVideos.length} Videos
-                     </button>
-                  </div>
-               </div>
-             )}
-
-             {/* Processing UI */}
-             {processing && (
-               <div className="text-center py-10 bg-slate-950 rounded-lg border border-slate-800">
-                  <Loader2 size={40} className="animate-spin text-emerald-500 mx-auto mb-4" />
-                  <h3 className="text-lg font-bold text-white mb-2">Processing on Device</h3>
-                  <p className="text-slate-400 text-sm animate-pulse">{progressMsg}</p>
-                  <p className="text-xs text-slate-600 mt-4">Do not close this tab.</p>
-               </div>
-             )}
-          </div>
-        )}
-
-      </div>
-
-      {/* Requests List (Server Queue Only) */}
-      {!useLocal && (
-        <div>
-          <h3 className="font-bold text-slate-300 mb-4">Server Queue Status</h3>
-          <div className="space-y-3">
-            {requests.map(req => (
-              <div key={req.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
-                <div className="flex items-start gap-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${req.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
-                      {req.status === 'COMPLETED' ? <Check size={20} /> : <Clock size={20} />}
-                  </div>
-                  <div>
-                      <h4 className="font-bold text-white text-lg">{req.query}</h4>
-                      <span className="text-xs text-slate-400">{req.status}</span>
-                  </div>
-                </div>
-                {req.status === 'PENDING' && (
-                  <button onClick={() => handleDelete(req.id)} className="text-slate-500 hover:text-red-400"><Trash2 size={18}/></button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+         </div>
       )}
+
+      {/* Search Bar */}
+      <form onSubmit={handleSearch} className="relative">
+         <Search className="absolute left-4 top-3.5 text-slate-500" size={20} />
+         <input 
+            type="text" 
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-lg placeholder:text-slate-600"
+            placeholder="Search for videos (e.g. 'Ocean', 'City')..."
+         />
+         <button type="submit" disabled={loading} className="absolute right-2 top-2 bottom-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-lg font-bold disabled:opacity-50 transition-colors">
+            {loading ? <Loader2 className="animate-spin" /> : 'Search'}
+         </button>
+      </form>
+
+      {/* Error Message */}
+      {error && (
+         <div className="bg-red-900/20 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-center gap-2 text-sm">
+            <AlertCircle size={18} /> {error}
+         </div>
+      )}
+
+      {/* Results Grid */}
+      {results.length > 0 && (
+         <div className="space-y-4">
+            <div className="flex justify-between items-center">
+               <span className="text-slate-400 text-sm">Found {results.length} results</span>
+               {selectedVideos.length > 0 && (
+                  <span className="text-indigo-400 font-bold text-sm">{selectedVideos.length} selected</span>
+               )}
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+               {results.map(vid => {
+                  const isSelected = selectedVideos.includes(vid.id);
+                  return (
+                     <div 
+                        key={vid.id}
+                        onClick={() => toggleSelection(vid.id)}
+                        className={`group relative aspect-video rounded-xl overflow-hidden border-2 cursor-pointer transition-all ${isSelected ? 'border-indigo-500 shadow-lg shadow-indigo-500/20' : 'border-slate-800 hover:border-slate-600'}`}
+                     >
+                        <img src={vid.thumbnail} alt={vid.title} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                        
+                        {/* Overlay Info */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent opacity-100 flex flex-col justify-end p-3">
+                           <div className="flex justify-between items-end">
+                              <div>
+                                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${vid.source === 'Pexels' ? 'bg-emerald-500 text-emerald-950' : 'bg-blue-500 text-blue-950'}`}>
+                                    {vid.source}
+                                 </span>
+                                 <h4 className="text-xs font-bold text-white mt-1 line-clamp-1">{vid.title}</h4>
+                                 <p className="text-[10px] text-slate-400">{vid.author}</p>
+                              </div>
+                              {isSelected ? (
+                                 <div className="bg-indigo-600 text-white p-1 rounded-full shadow-lg scale-110 transition-transform"><Check size={14} /></div>
+                              ) : (
+                                 <div className="border border-white/30 rounded-full w-6 h-6"></div>
+                              )}
+                           </div>
+                        </div>
+                     </div>
+                  );
+               })}
+            </div>
+
+            {/* Action Bar */}
+            <div className="sticky bottom-4 z-30">
+               <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4">
+                  <div className="text-sm text-slate-300">
+                     Ready to import <strong className="text-white">{selectedVideos.length}</strong> videos using local network.
+                  </div>
+                  <button 
+                     onClick={processDownloads}
+                     disabled={selectedVideos.length === 0 || processing}
+                     className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-emerald-900/20 active:scale-95 transition-transform"
+                  >
+                     {processing ? <Loader2 className="animate-spin" size={20} /> : <DownloadCloud size={20} />}
+                     {processing ? 'Processing...' : 'Import Selected'}
+                  </button>
+               </div>
+            </div>
+         </div>
+      )}
+
+      {/* Processing Full Screen Overlay */}
+      {processing && (
+         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 p-8 rounded-2xl border border-slate-700 text-center max-w-sm w-full shadow-2xl">
+               <Loader2 size={48} className="text-emerald-500 animate-spin mx-auto mb-6" />
+               <h3 className="text-xl font-bold text-white mb-2">Importing Content</h3>
+               <p className="text-emerald-400 font-mono text-sm mb-4">{progressMsg}</p>
+               
+               {uploadPercent > 0 && (
+                 <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden mb-2 border border-slate-700">
+                    <div 
+                       className="h-full bg-emerald-500 transition-all duration-300 ease-out flex items-center justify-center" 
+                       style={{ width: `${uploadPercent}%` }}
+                    >
+                    </div>
+                 </div>
+               )}
+               {uploadPercent > 0 && <p className="text-xs text-emerald-300 font-mono">{uploadPercent}% uploaded</p>}
+
+               <p className="text-xs text-slate-500 mt-6">
+                  Downloading lowest resolution for speed.<br/>Do not close this window.
+               </p>
+            </div>
+         </div>
+      )}
+
     </div>
   );
 }

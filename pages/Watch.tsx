@@ -222,8 +222,8 @@ export default function Watch() {
   const canAfford = (user?.balance || 0) >= video.price;
 
   return (
-    <div className="max-w-5xl mx-auto pb-10">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+    <div className="max-w-5xl mx-auto pb-4"> {/* Reduced padding bottom */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-6"> {/* Reduced gap */}
         
         {/* Left Column: Player & Info */}
         <div className="lg:col-span-2 space-y-3">

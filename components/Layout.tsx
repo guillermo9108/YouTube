@@ -35,8 +35,8 @@ export default function Layout() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : 'flex-1 container mx-auto px-4 pt-6 md:pt-8 max-w-5xl'}>
+      {/* Main Content - Reduced pt for mobile from 6 to 2 */}
+      <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : 'flex-1 container mx-auto px-4 pt-2 md:pt-8 max-w-5xl'}>
         <Outlet />
       </main>
 
