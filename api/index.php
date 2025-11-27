@@ -15,8 +15,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// Constantes
-define('UPLOAD_DIR', '../uploads/videos/');
+// Constantes - Rutas relativas a la carpeta /api/ donde se ejecuta este script
+define('UPLOAD_DIR', 'uploads/videos/');
+define('THUMB_DIR', 'uploads/thumbnails/');
 define('VIDEO_PLACEHOLDER_URL', 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4');
 define('THUMBNAIL_PLACEHOLDER_URL', 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&q=80');
 
@@ -207,20 +208,35 @@ switch ($action) {
         $description = $_POST['description'] ?? null;
         $price = (float)($_POST['price'] ?? 0);
         $creatorId = $_POST['creatorId'] ?? null;
-        $file = $_FILES['video'] ?? null;
+        $videoFile = $_FILES['video'] ?? null;
+        $thumbFile = $_FILES['thumbnail'] ?? null;
 
         if (!$title || !$creatorId) respond(false, null, 'Missing fields.');
 
         $videoUrl = VIDEO_PLACEHOLDER_URL;
         $thumbnailUrl = THUMBNAIL_PLACEHOLDER_URL;
 
-        if ($file && $file['error'] === UPLOAD_ERR_OK) {
+        // 1. Process Video
+        if ($videoFile && $videoFile['error'] === UPLOAD_ERR_OK) {
             if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
-            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $ext = pathinfo($videoFile['name'], PATHINFO_EXTENSION);
             $fileName = uniqid('vid_') . '.' . $ext;
             $targetPath = UPLOAD_DIR . $fileName;
-            if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                $videoUrl = '/api/uploads/videos/' . $fileName; 
+            if (move_uploaded_file($videoFile['tmp_name'], $targetPath)) {
+                // The public URL includes /api/ because the frontend requests are relative or absolute to root
+                // UPLOAD_DIR is 'uploads/videos/', so the file is at /api/uploads/videos/xxx
+                $videoUrl = '/api/' . $targetPath; 
+            }
+        }
+
+        // 2. Process Thumbnail
+        if ($thumbFile && $thumbFile['error'] === UPLOAD_ERR_OK) {
+            if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
+            $ext = 'jpg'; // We enforced jpeg in frontend
+            $fileName = uniqid('thumb_') . '.' . $ext;
+            $targetPath = THUMB_DIR . $fileName;
+            if (move_uploaded_file($thumbFile['tmp_name'], $targetPath)) {
+                $thumbnailUrl = '/api/' . $targetPath;
             }
         }
         

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload as UploadIcon, FileVideo, X, Plus } from 'lucide-react';
+import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon } from 'lucide-react';
 import { db } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from '../components/Router';
@@ -11,6 +11,7 @@ export default function Upload() {
   // Batch State
   const [files, setFiles] = useState<File[]>([]);
   const [titles, setTitles] = useState<string[]>([]); // Synced with files index
+  const [thumbnails, setThumbnails] = useState<(File | null)[]>([]); // Synced with files index
   
   // Shared State
   const [desc, setDesc] = useState('');
@@ -18,20 +19,94 @@ export default function Upload() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Helper to generate thumbnail from video file
+  const generateThumbnail = async (file: File): Promise<File | null> => {
+    return new Promise((resolve) => {
+      try {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.src = URL.createObjectURL(file);
+        video.muted = true;
+        video.playsInline = true;
+        video.currentTime = 1.0; // Seek to 1 second
+
+        video.onloadeddata = () => {
+             // Ready to seek
+        };
+
+        video.onseeked = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            // Limit thumbnail size if video is huge (optional optimization)
+            if (canvas.width > 1280) {
+                const scale = 1280 / canvas.width;
+                canvas.width = 1280;
+                canvas.height = video.videoHeight * scale;
+            }
+
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            canvas.toBlob((blob) => {
+              if (blob) {
+                const thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
+                resolve(thumbFile);
+              } else {
+                resolve(null);
+              }
+              URL.revokeObjectURL(video.src); // Cleanup
+            }, 'image/jpeg', 0.75); // 75% quality
+          } catch (e) {
+            console.warn("Canvas draw failed", e);
+            resolve(null);
+          }
+        };
+
+        video.onerror = () => {
+            console.warn("Video load error for thumb");
+            resolve(null);
+        };
+      } catch (e) {
+         resolve(null);
+      }
+    });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles = Array.from(e.target.files) as File[];
-      setFiles(prev => [...prev, ...newFiles]);
       
-      // Initialize titles for new files
-      const newTitles = newFiles.map(f => f.name.replace(/\.[^/.]+$/, ""));
+      // Initialize titles
+      const newTitles = newFiles.map(f => {
+          // Remove extension for title
+          return f.name.replace(/\.[^/.]+$/, "");
+      });
+
+      // Optimistically update UI first
+      setFiles(prev => [...prev, ...newFiles]);
       setTitles(prev => [...prev, ...newTitles]);
+      setThumbnails(prev => [...prev, ...new Array(newFiles.length).fill(null)]); // placeholders
+
+      // Generate thumbnails in background
+      const startIdx = files.length;
+      for (let i = 0; i < newFiles.length; i++) {
+         const thumb = await generateThumbnail(newFiles[i]);
+         setThumbnails(prev => {
+            const next = [...prev];
+            next[startIdx + i] = thumb;
+            return next;
+         });
+      }
     }
   };
 
   const removeFile = (index: number) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
     setTitles(prev => prev.filter((_, i) => i !== index));
+    setThumbnails(prev => prev.filter((_, i) => i !== index));
   };
 
   const updateTitle = (index: number, val: string) => {
@@ -49,8 +124,9 @@ export default function Upload() {
     setIsSubmitting(true);
     try {
       for (let i = 0; i < files.length; i++) {
-        setUploadProgress(`Uploading ${i + 1} of ${files.length}...`);
-        await db.uploadVideo(titles[i], desc, price, user, files[i]);
+        setUploadProgress(`Uploading ${i + 1} of ${files.length}: ${titles[i]}...`);
+        // Upload video AND its generated thumbnail
+        await db.uploadVideo(titles[i], desc, price, user, files[i], thumbnails[i]);
       }
       navigate('/');
     } catch (error) {
@@ -86,7 +162,7 @@ export default function Upload() {
                   <Plus size={24} className="text-indigo-400" />
                 </div>
                 <span className="text-slate-400 text-sm font-medium">Add Videos</span>
-                <span className="text-slate-600 text-xs">Supports multiple files</span>
+                <span className="text-slate-600 text-xs">Auto-generates thumbnails</span>
             </div>
           </div>
           
@@ -129,7 +205,7 @@ export default function Upload() {
            <form onSubmit={handleSubmit} className="bg-slate-900 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col h-full max-h-[600px]">
               <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
                  <h3 className="font-bold text-slate-200">Selected Videos ({files.length})</h3>
-                 {files.length > 0 && <button type="button" onClick={() => { setFiles([]); setTitles([]); }} className="text-xs text-red-400 hover:text-red-300">Clear All</button>}
+                 {files.length > 0 && <button type="button" onClick={() => { setFiles([]); setTitles([]); setThumbnails([]); }} className="text-xs text-red-400 hover:text-red-300">Clear All</button>}
               </div>
               
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -141,9 +217,17 @@ export default function Upload() {
                 ) : (
                   files.map((file, idx) => (
                     <div key={`${file.name}-${idx}`} className="flex gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800 items-start animate-in fade-in slide-in-from-bottom-2">
-                       <div className="w-10 h-10 rounded bg-slate-800 flex items-center justify-center shrink-0">
-                         <FileVideo size={20} className="text-indigo-400" />
+                       {/* Thumbnail Preview */}
+                       <div className="w-16 h-10 rounded bg-slate-800 shrink-0 overflow-hidden relative border border-slate-700">
+                         {thumbnails[idx] ? (
+                           <img src={URL.createObjectURL(thumbnails[idx]!)} alt="Thumb" className="w-full h-full object-cover" />
+                         ) : (
+                           <div className="w-full h-full flex items-center justify-center">
+                             <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                           </div>
+                         )}
                        </div>
+                       
                        <div className="flex-1 min-w-0">
                           <input 
                             type="text" 
@@ -153,7 +237,10 @@ export default function Upload() {
                             placeholder="Video Title"
                             required
                           />
-                          <p className="text-xs text-slate-500 truncate">{file.name} • {(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                             <span>{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                             {thumbnails[idx] && <span className="text-emerald-500 flex items-center gap-1"><ImageIcon size={10}/> Thumb Ready</span>}
+                          </div>
                        </div>
                        <button 
                          type="button" 

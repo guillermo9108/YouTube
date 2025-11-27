@@ -251,7 +251,7 @@ class DatabaseService {
     await this.request('/index.php?action=purchase_video', 'POST', { userId, videoId });
   }
 
-  async uploadVideo(title: string, description: string, price: number, creator: User, file: File | null): Promise<void> {
+  async uploadVideo(title: string, description: string, price: number, creator: User, file: File | null, thumbnail: File | null = null): Promise<void> {
     if (this.isDemoMode) {
         await new Promise(r => setTimeout(r, 1500));
         return;
@@ -263,6 +263,9 @@ class DatabaseService {
     formData.append('creatorId', creator.id);
     if (file) {
         formData.append('video', file);
+    }
+    if (thumbnail) {
+        formData.append('thumbnail', thumbnail);
     }
 
     await this.request('/index.php?action=upload_video', 'POST', formData);
