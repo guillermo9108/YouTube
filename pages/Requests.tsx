@@ -1,10 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
-import { DownloadCloud, Wifi, Search, Check, Clock, AlertCircle, Trash2, Upload } from 'lucide-react';
+import { DownloadCloud, Wifi, Search, Check, Clock, AlertCircle, Trash2, Upload, Play, Loader2 } from 'lucide-react';
 import { db } from '../services/db';
 import { ContentRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from '../components/Router';
+import { generateThumbnail } from './Upload'; // Reuse logic
+
+interface PipedVideo {
+  url: string; // /watch?v=ID
+  title: string;
+  thumbnail: string;
+  uploaderName: string;
+  duration: number;
+}
 
 export default function Requests() {
   const { user } = useAuth();
@@ -13,40 +22,121 @@ export default function Requests() {
   const [useLocal, setUseLocal] = useState(false);
   const [requests, setRequests] = useState<ContentRequest[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Local Processing State
+  const [searchResults, setSearchResults] = useState<PipedVideo[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [progressMsg, setProgressMsg] = useState('');
+  const [selectedVideos, setSelectedVideos] = useState<string[]>([]); // URLs
 
   useEffect(() => {
     loadRequests();
-    const interval = setInterval(loadRequests, 10000); // Refresh every 10s
-    return () => clearInterval(interval);
   }, []);
 
   const loadRequests = () => {
     setLoading(true);
     db.getRequests().then(res => {
-      // Filter only my requests if not admin? Or show all? Let's show all for community feel, or just mine.
-      // For now, let's show all so people see what's trending, but usually per user.
-      // Let's filter client side for now if needed, but API returns all.
-      // Assuming we only want to see OUR requests for now unless admin.
-      const myRequests = user?.role === 'ADMIN' ? res : res.filter(r => r.userId === user?.id);
-      setRequests(myRequests);
+      setRequests(res);
       setLoading(false);
     });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleServerRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim() || !user) return;
-
-    setIsSubmitting(true);
     try {
-      await db.requestContent(user.id, query, useLocal);
+      await db.requestContent(user.id, query, false); // useLocal = false
       setQuery('');
       loadRequests();
     } catch (e) {
       alert("Failed to submit request.");
+    }
+  };
+
+  const handleLocalSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+    
+    setIsSearching(true);
+    setSearchResults([]);
+    
+    try {
+      // Use Piped API (public instance)
+      const res = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(query)}&filter=videos`);
+      const data = await res.json();
+      if (data && data.items) {
+        setSearchResults(data.items.slice(0, 8)); // Top 8 results
+      }
+    } catch (e) {
+      alert("Failed to search videos. Piped API might be down.");
     } finally {
-      setIsSubmitting(false);
+      setIsSearching(false);
+    }
+  };
+
+  const toggleSelection = (url: string) => {
+    if (selectedVideos.includes(url)) {
+      setSelectedVideos(prev => prev.filter(v => v !== url));
+    } else {
+      setSelectedVideos(prev => [...prev, url]);
+    }
+  };
+
+  const processLocalDownloads = async () => {
+    if (!user || selectedVideos.length === 0) return;
+    
+    setProcessing(true);
+    
+    try {
+      let count = 1;
+      for (const videoPath of selectedVideos) {
+         const videoId = videoPath.replace('/watch?v=', '');
+         const title = searchResults.find(v => v.url === videoPath)?.title || 'Downloaded Video';
+         
+         setProgressMsg(`Processing ${count}/${selectedVideos.length}: Getting streams...`);
+         
+         // 1. Get Stream URL
+         const streamRes = await fetch(`https://pipedapi.kavin.rocks/streams/${videoId}`);
+         const streamData = await streamRes.json();
+         
+         // Find best mp4 video (usually 720p or 360p)
+         const videoStream = streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4' && s.quality === '720p') || 
+                             streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4');
+
+         if (!videoStream) {
+           console.warn("No MP4 stream found for " + videoId);
+           continue;
+         }
+
+         // 2. Download File to RAM (Client Side)
+         setProgressMsg(`Downloading: ${title} ...`);
+         const vidResponse = await fetch(videoStream.url);
+         const blob = await vidResponse.blob();
+         const file = new File([blob], `${title}.mp4`, { type: 'video/mp4' });
+
+         // 3. Generate Thumbnail locally
+         setProgressMsg(`Generating thumbnail...`);
+         const thumb = await generateThumbnail(file);
+
+         // 4. Upload to Server
+         setProgressMsg(`Uploading to server...`);
+         await db.uploadVideo(title, `Imported from YouTube: ${videoId}`, 1, user, file, thumb);
+         
+         count++;
+      }
+      
+      alert("All selected videos processed successfully!");
+      setSearchResults([]);
+      setQuery('');
+      setSelectedVideos([]);
+      navigate('/');
+      
+    } catch (e: any) {
+      alert("Error processing videos: " + e.message);
+    } finally {
+      setProcessing(false);
+      setProgressMsg('');
     }
   };
 
@@ -68,114 +158,158 @@ export default function Requests() {
         </p>
       </div>
 
-      {/* Request Form */}
+      {/* Mode Switcher */}
+      <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-800">
+         <button 
+           onClick={() => setUseLocal(false)} 
+           className={`flex-1 py-2 text-sm font-bold rounded-md transition-colors ${!useLocal ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+         >
+           Server Request (Queue)
+         </button>
+         <button 
+           onClick={() => setUseLocal(true)} 
+           className={`flex-1 py-2 text-sm font-bold rounded-md transition-colors ${useLocal ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+         >
+           <div className="flex items-center justify-center gap-2">
+             <Wifi size={16} /> Use My Device (Instant)
+           </div>
+         </button>
+      </div>
+
+      {/* Forms */}
       <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-lg">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Search Query / Topic</label>
-            <div className="relative">
-              <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
-              <input 
-                type="text" 
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder="E.g. 'Funny Cat Shorts' or 'Coding Tutorials'"
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500"
-                required
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 p-3 bg-slate-950 rounded-lg border border-slate-800 cursor-pointer" onClick={() => setUseLocal(!useLocal)}>
-            <div className={`w-5 h-5 rounded border flex items-center justify-center ${useLocal ? 'bg-indigo-600 border-indigo-600' : 'border-slate-600'}`}>
-              {useLocal && <Check size={14} className="text-white" />}
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 text-sm font-bold text-slate-300">
-                <Wifi size={16} /> Use my device network
-              </div>
-              <p className="text-xs text-slate-500">
-                I will download/upload the videos myself. Do not use server bandwidth.
-              </p>
-            </div>
-          </div>
-
-          <button 
-            type="submit" 
-            disabled={isSubmitting || !query.trim()}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-colors"
-          >
-            {isSubmitting ? 'Submitting...' : 'Submit Request'}
-          </button>
-        </form>
-      </div>
-
-      {/* Requests List */}
-      <div>
-        <h3 className="font-bold text-slate-300 mb-4">My Requests History</h3>
         
-        <div className="space-y-3">
-          {requests.length === 0 && !loading && (
-            <div className="text-center py-10 text-slate-500 border border-dashed border-slate-800 rounded-xl">
-              No active requests.
-            </div>
-          )}
-
-          {requests.map(req => (
-            <div key={req.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-start gap-4">
-                 <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 
-                    ${req.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400' : 
-                      req.status === 'FAILED' ? 'bg-red-500/20 text-red-400' : 
-                      req.status === 'MANUAL_UPLOAD' ? 'bg-amber-500/20 text-amber-400' :
-                      'bg-indigo-500/20 text-indigo-400'}`}>
-                    {req.status === 'COMPLETED' ? <Check size={20} /> : 
-                     req.status === 'FAILED' ? <AlertCircle size={20} /> :
-                     req.status === 'MANUAL_UPLOAD' ? <Upload size={20} /> :
-                     <Clock size={20} />}
-                 </div>
-                 <div>
-                    <h4 className="font-bold text-white text-lg">{req.query}</h4>
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                       <span>{new Date(req.createdAt).toLocaleDateString()}</span>
-                       <span>•</span>
-                       <span className={`font-bold ${
-                         req.status === 'PENDING' ? 'text-amber-400' : 
-                         req.status === 'PROCESSING' ? 'text-blue-400' : 
-                         req.status === 'COMPLETED' ? 'text-emerald-400' :
-                         req.status === 'MANUAL_UPLOAD' ? 'text-amber-300' : 'text-red-400'
-                       }`}>
-                         {req.status.replace('_', ' ')}
-                       </span>
-                    </div>
-                 </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                 {/* Action for Manual Upload */}
-                 {(req.status === 'MANUAL_UPLOAD' || req.useLocalNetwork) && req.status !== 'COMPLETED' && (
-                    <button 
-                      onClick={() => navigate('/upload')}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-lg flex items-center gap-2"
-                    >
-                      <Upload size={16} /> Upload Now
-                    </button>
-                 )}
-
-                 {req.status === 'PENDING' && (
-                   <button 
-                     onClick={() => handleDelete(req.id)}
-                     className="p-2 text-slate-500 hover:text-red-400 transition-colors"
-                     title="Cancel Request"
-                   >
-                     <Trash2 size={18} />
-                   </button>
-                 )}
+        {/* Mode 1: Server Queue */}
+        {!useLocal && (
+          <form onSubmit={handleServerRequest} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Topic</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
+                <input 
+                  type="text" 
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="E.g. 'Funny Cat Shorts'"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                  required
+                />
               </div>
             </div>
-          ))}
-        </div>
+            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg">
+              Submit to Queue
+            </button>
+            <p className="text-xs text-slate-500 text-center">
+               Your request will be processed by the server during scheduled hours.
+            </p>
+          </form>
+        )}
+
+        {/* Mode 2: Client Side */}
+        {useLocal && (
+          <div className="space-y-4">
+             {!isSearching && searchResults.length === 0 && (
+               <form onSubmit={handleLocalSearch}>
+                  <div className="relative mb-4">
+                    <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
+                    <input 
+                      type="text" 
+                      value={query}
+                      onChange={e => setQuery(e.target.value)}
+                      placeholder="Search YouTube..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                      required
+                    />
+                  </div>
+                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                     <Search size={18} /> Search & Select
+                  </button>
+               </form>
+             )}
+
+             {isSearching && (
+               <div className="py-10 text-center text-indigo-400">
+                  <Loader2 size={32} className="animate-spin mx-auto mb-2" />
+                  Searching public APIs...
+               </div>
+             )}
+
+             {/* Results Grid */}
+             {searchResults.length > 0 && !processing && (
+               <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                     {searchResults.map((vid) => {
+                        const isSelected = selectedVideos.includes(vid.url);
+                        return (
+                          <div 
+                             key={vid.url} 
+                             onClick={() => toggleSelection(vid.url)}
+                             className={`p-3 rounded-lg border cursor-pointer transition-all flex gap-3 ${isSelected ? 'bg-indigo-900/30 border-indigo-500 ring-1 ring-indigo-500' : 'bg-slate-950 border-slate-700 hover:bg-slate-800'}`}
+                          >
+                             <img src={vid.thumbnail} className="w-24 h-16 object-cover rounded bg-slate-800" />
+                             <div className="flex-1 min-w-0">
+                                <h4 className="text-sm font-bold text-white line-clamp-2">{vid.title}</h4>
+                                <p className="text-xs text-slate-400">{vid.uploaderName}</p>
+                             </div>
+                             {isSelected && <Check size={20} className="text-indigo-400 shrink-0" />}
+                          </div>
+                        );
+                     })}
+                  </div>
+                  
+                  <div className="flex gap-3">
+                     <button onClick={() => { setSearchResults([]); setQuery(''); }} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-bold">
+                        Cancel
+                     </button>
+                     <button 
+                       onClick={processLocalDownloads} 
+                       disabled={selectedVideos.length === 0}
+                       className="flex-[2] py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                     >
+                        <DownloadCloud size={20} /> Import {selectedVideos.length} Videos
+                     </button>
+                  </div>
+               </div>
+             )}
+
+             {/* Processing UI */}
+             {processing && (
+               <div className="text-center py-10 bg-slate-950 rounded-lg border border-slate-800">
+                  <Loader2 size={40} className="animate-spin text-emerald-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-bold text-white mb-2">Processing on Device</h3>
+                  <p className="text-slate-400 text-sm animate-pulse">{progressMsg}</p>
+                  <p className="text-xs text-slate-600 mt-4">Do not close this tab.</p>
+               </div>
+             )}
+          </div>
+        )}
+
       </div>
+
+      {/* Requests List (Server Queue Only) */}
+      {!useLocal && (
+        <div>
+          <h3 className="font-bold text-slate-300 mb-4">Server Queue Status</h3>
+          <div className="space-y-3">
+            {requests.map(req => (
+              <div key={req.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
+                <div className="flex items-start gap-4">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${req.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+                      {req.status === 'COMPLETED' ? <Check size={20} /> : <Clock size={20} />}
+                  </div>
+                  <div>
+                      <h4 className="font-bold text-white text-lg">{req.query}</h4>
+                      <span className="text-xs text-slate-400">{req.status}</span>
+                  </div>
+                </div>
+                {req.status === 'PENDING' && (
+                  <button onClick={() => handleDelete(req.id)} className="text-slate-500 hover:text-red-400"><Trash2 size={18}/></button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
