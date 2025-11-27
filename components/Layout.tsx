@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -35,7 +36,7 @@ export default function Layout() {
       </header>
 
       {/* Main Content */}
-      <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : 'flex-1 container mx-auto px-4 py-4 md:py-8 max-w-5xl'}>
+      <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : 'flex-1 container mx-auto px-4 pt-6 md:pt-8 max-w-5xl'}>
         <Outlet />
       </main>
 

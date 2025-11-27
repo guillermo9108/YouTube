@@ -223,10 +223,10 @@ export default function Watch() {
 
   return (
     <div className="max-w-5xl mx-auto pb-10">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         
         {/* Left Column: Player & Info */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-3">
           
           {/* Player Container */}
           <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800 group select-none">
@@ -270,133 +270,126 @@ export default function Watch() {
                 )}
               </>
             ) : (
-              /* Locked State - FULL OVERLAY BUTTON */
+              /* Locked State - REFACTORED FOR BETTER VISIBILITY */
               <div 
                 onClick={canAfford ? handlePurchase : undefined}
-                className={`absolute inset-0 z-50 flex flex-col items-center justify-center transition-all ${canAfford ? 'cursor-pointer active:scale-[0.98] hover:bg-black/10' : 'cursor-not-allowed'}`}
+                className={`absolute inset-0 z-50 flex flex-col items-center justify-center transition-all ${canAfford ? 'cursor-pointer' : 'cursor-not-allowed'}`}
               >
-                {/* Background Image with Blur */}
-                <div className="absolute inset-0 bg-cover bg-center opacity-40 blur-lg scale-105" style={{ backgroundImage: `url(${video.thumbnailUrl})` }}></div>
-                {/* Dark Overlay Gradient */}
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-slate-900/60"></div>
+                {/* Background Image - NO BLUR, just clean */}
+                <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${video.thumbnailUrl})` }}></div>
+                {/* Subtle Gradient only at bottom to make text readable, not full overlay */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
                 
-                {/* Content */}
-                <div className="relative z-20 flex flex-col items-center justify-center p-6 w-full max-w-sm text-center">
+                {/* Compact Center Card */}
+                <div className="relative z-20 bg-black/60 backdrop-blur-md border border-white/10 p-4 rounded-2xl shadow-2xl w-auto min-w-[200px] text-center transform transition-transform active:scale-95 hover:bg-black/70">
                   
-                  {/* Huge Price */}
-                  <div className="mb-4 animate-pulse">
-                     <span className="text-7xl font-black text-amber-400 drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)] tracking-tighter">
+                  {/* Price */}
+                  <div className="mb-2">
+                     <span className="text-4xl font-black text-amber-400 drop-shadow-md tracking-tight">
                        {video.price}
                      </span>
-                     <div className="text-amber-200/80 font-bold uppercase tracking-widest text-xs mt-1">Saldo to Unlock</div>
+                     <span className="text-amber-200/80 font-bold uppercase text-[10px] ml-1">Saldo</span>
                   </div>
 
-                  {/* Lock & Action Text */}
-                  <div className="flex items-center gap-3 bg-slate-900/80 border border-slate-700/50 backdrop-blur-md px-6 py-3 rounded-full shadow-xl mb-4">
+                  {/* Action Button */}
+                  <div className="flex items-center justify-center gap-2 text-white mb-2">
                      {purchasing ? (
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
                      ) : (
-                        <Lock size={20} className="text-slate-200" />
+                        <Lock size={16} className="text-slate-300" />
                      )}
-                     <span className="font-bold text-white uppercase tracking-wide text-sm">
-                       {purchasing ? 'Unlocking...' : (canAfford ? 'Tap to Unlock' : 'Locked Content')}
+                     <span className="font-bold text-sm">
+                       {purchasing ? 'Unlocking...' : (canAfford ? 'Tap to Unlock' : 'Locked')}
                      </span>
                   </div>
 
-                  {/* Errors or Balance Warning */}
+                  {/* Errors */}
                   {error && (
-                    <div className="text-red-400 text-xs bg-red-950/80 border border-red-900/50 px-3 py-1.5 rounded-lg flex items-center gap-2">
-                        <AlertCircle size={14}/>{error}
+                    <div className="text-red-400 text-[10px] bg-red-950/80 px-2 py-1 rounded flex items-center justify-center gap-1 mt-2">
+                        <AlertCircle size={10}/>{error}
                     </div>
                   )}
                   
                   {!canAfford && !error && (
-                      <div className="text-red-300 text-xs bg-red-950/60 px-3 py-1.5 rounded-lg border border-red-900/50 flex items-center gap-2">
-                          <AlertCircle size={14} /> Low Balance ({user?.balance})
+                      <div className="text-red-300 text-[10px] bg-red-950/60 px-2 py-1 rounded border border-red-900/50 mt-2">
+                          Low Balance ({user?.balance})
                       </div>
                   )}
-
                 </div>
               </div>
             )}
           </div>
 
           {/* Info Bar */}
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-slate-100">{video.title}</h1>
-            <div className="flex flex-wrap justify-between items-center mt-3 gap-4">
-               <div className="flex items-center gap-4 text-xs md:text-sm text-slate-400">
-                  <span className="font-medium text-slate-200">{video.views} views</span>
-                  <span>{new Date(video.createdAt).toLocaleDateString()}</span>
+          <div className="px-1">
+            <h1 className="text-lg md:text-xl font-bold text-slate-100 leading-tight">{video.title}</h1>
+            <div className="flex flex-wrap justify-between items-center mt-2 gap-3">
+               <div className="flex items-center gap-3 text-xs text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-[10px] text-white">{video.creatorName[0]}</div>
+                    <span className="font-semibold text-slate-300">{video.creatorName}</span>
+                  </div>
+                  <span>•</span>
+                  <span>{video.views} views</span>
                </div>
                
                {/* Actions */}
                <div className="flex items-center gap-2">
                   <button 
                     onClick={() => toggleLike(true)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors text-xs font-medium ${interaction?.liked ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full transition-colors text-xs font-medium ${interaction?.liked ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
                   >
                     <ThumbsUp size={14} /> {video.likes}
                   </button>
                   <button 
-                    onClick={() => toggleLike(false)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors text-xs font-medium ${interaction?.disliked ? 'bg-red-500/20 text-red-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-                  >
-                    <ThumbsDown size={14} />
-                  </button>
-                  <button 
                     onClick={toggleWatchLater}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors text-xs font-medium ${isWatchLater ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full transition-colors text-xs font-medium ${isWatchLater ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
                   >
-                    <Clock size={14} /> {isWatchLater ? 'Saved' : 'Save'}
+                    <Clock size={14} />
                   </button>
                </div>
             </div>
           </div>
 
-          <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-             <div className="flex items-center gap-2 mb-2">
-               <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-xs">{video.creatorName[0]}</div>
-               <span className="font-semibold text-slate-200 text-sm">{video.creatorName}</span>
-             </div>
-             <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">{video.description}</p>
+          <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+             <p className="text-slate-300 text-xs md:text-sm leading-relaxed whitespace-pre-wrap">{video.description}</p>
           </div>
 
           {/* Comments Section */}
-          <div className="mt-8">
-            <h3 className="font-bold text-base text-slate-200 mb-4 flex items-center gap-2">
-              <MessageSquare size={16} /> Comments ({comments.length})
+          <div className="mt-6">
+            <h3 className="font-bold text-sm text-slate-200 mb-3 flex items-center gap-2">
+              <MessageSquare size={14} /> Comments ({comments.length})
             </h3>
             
-            <form onSubmit={postComment} className="flex gap-3 mb-6">
+            <form onSubmit={postComment} className="flex gap-2 mb-4">
               <input 
                 type="text" 
                 value={newComment}
                 onChange={e => setNewComment(e.target.value)}
                 placeholder="Add a comment..." 
-                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 focus:outline-none focus:border-indigo-500 text-white text-sm"
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500 text-white text-sm"
               />
               <button 
                  type="submit" 
                  disabled={!newComment.trim()}
                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white p-2 rounded-lg"
               >
-                <Send size={18} />
+                <Send size={16} />
               </button>
             </form>
 
-            <div className="space-y-4">
+            <div className="space-y-3">
               {comments.map(c => (
-                <div key={c.id} className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 shrink-0">
+                <div key={c.id} className="flex gap-2">
+                  <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">
                     {c.username[0].toUpperCase()}
                   </div>
                   <div>
                     <div className="flex items-baseline gap-2">
-                       <span className="text-sm font-semibold text-slate-300">{c.username}</span>
+                       <span className="text-xs font-semibold text-slate-300">{c.username}</span>
                        <span className="text-[10px] text-slate-500">{new Date(c.timestamp).toLocaleDateString()}</span>
                     </div>
-                    <p className="text-sm text-slate-400 mt-1">{c.text}</p>
+                    <p className="text-xs text-slate-400">{c.text}</p>
                   </div>
                 </div>
               ))}
@@ -405,9 +398,9 @@ export default function Watch() {
         </div>
 
         {/* Right Column: Related Videos */}
-        <div className="space-y-4">
-           <h3 className="font-bold text-slate-200 text-sm">Up Next</h3>
-           <div className="flex flex-col gap-3">
+        <div className="space-y-2 mt-4 lg:mt-0">
+           <h3 className="font-bold text-slate-200 text-sm px-1">Up Next</h3>
+           <div className="flex flex-col gap-2">
              {relatedVideos.map(rv => (
                <RelatedVideoItem key={rv.id} rv={rv} userId={user?.id} />
              ))}

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { DownloadCloud, Wifi, Search, Check, Clock, AlertCircle, Trash2, Upload, Play, Loader2 } from 'lucide-react';
+import { DownloadCloud, Wifi, Search, Check, Clock, AlertCircle, Trash2, Upload, Play, Loader2, Link as LinkIcon, Youtube } from 'lucide-react';
 import { db } from '../services/db';
 import { ContentRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -17,16 +17,18 @@ interface PipedVideo {
 
 // List of Piped instances to try in case one is down
 const PIPED_INSTANCES = [
-  'https://pipedapi.drgns.space',
   'https://pipedapi.kavin.rocks',
-  'https://api.piped.otton.uk'
+  'https://api.piped.otton.uk',
+  'https://pipedapi.drgns.space'
 ];
 
 export default function Requests() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
+  const [directLink, setDirectLink] = useState('');
   const [useLocal, setUseLocal] = useState(false);
+  const [searchMode, setSearchMode] = useState<'SEARCH' | 'LINK'>('SEARCH');
   const [requests, setRequests] = useState<ContentRequest[]>([]);
   const [loading, setLoading] = useState(false);
   
@@ -64,18 +66,25 @@ export default function Requests() {
 
   // Helper to try fetching from multiple instances
   const fetchFromPiped = async (path: string) => {
+    let lastError;
     for (const instance of PIPED_INSTANCES) {
       try {
-        const res = await fetch(`${instance}${path}`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+        
+        const res = await fetch(`${instance}${path}`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
         if (res.ok) {
-          setActiveInstance(instance); // Remember working instance
+          setActiveInstance(instance); 
           return await res.json();
         }
       } catch (e) {
+        lastError = e;
         console.warn(`Instance ${instance} failed`, e);
       }
     }
-    throw new Error("All Piped instances are unavailable.");
+    throw new Error("Public APIs are currently busy. Please try 'Paste Link' or wait.");
   };
 
   const handleLocalSearch = async (e: React.FormEvent) => {
@@ -91,10 +100,66 @@ export default function Requests() {
         setSearchResults(data.items.slice(0, 8)); // Top 8 results
       }
     } catch (e: any) {
-      alert("Failed to search videos: " + e.message);
+      alert(e.message);
     } finally {
       setIsSearching(false);
     }
+  };
+  
+  const handleLinkProcess = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!directLink.trim()) return;
+      
+      // Extract ID
+      let videoId = '';
+      const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+      const match = directLink.match(regex);
+      if (match) videoId = match[1];
+      
+      if (!videoId) {
+          alert("Invalid YouTube URL");
+          return;
+      }
+
+      setProcessing(true);
+      setProgressMsg("Resolving link...");
+      
+      try {
+          // Process single ID
+          await downloadAndUpload(videoId, `YouTube Video ${videoId}`);
+          alert("Video imported successfully!");
+          navigate('/');
+      } catch (e: any) {
+          alert("Failed to process link: " + e.message);
+      } finally {
+          setProcessing(false);
+          setDirectLink('');
+      }
+  };
+
+  const downloadAndUpload = async (videoId: string, titleHint: string) => {
+     setProgressMsg(`Getting stream info for ${videoId}...`);
+     const streamData = await fetchFromPiped(`/streams/${videoId}`);
+     
+     const title = streamData.title || titleHint;
+     
+     // Find best mp4 video
+     const videoStream = streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4' && s.quality === '720p') || 
+                         streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4');
+
+     if (!videoStream) throw new Error("No MP4 stream found.");
+
+     setProgressMsg(`Downloading: ${title} ...`);
+     const vidResponse = await fetch(videoStream.url);
+     const blob = await vidResponse.blob();
+     const file = new File([blob], `${title}.mp4`, { type: 'video/mp4' });
+
+     setProgressMsg(`Generating thumbnail...`);
+     const thumb = await generateThumbnail(file);
+
+     setProgressMsg(`Uploading to server...`);
+     if (!user) throw new Error("User not found");
+     await db.uploadVideo(title, `Imported from YouTube: ${videoId}`, 1, user, file, thumb);
   };
 
   const toggleSelection = (url: string) => {
@@ -107,54 +172,20 @@ export default function Requests() {
 
   const processLocalDownloads = async () => {
     if (!user || selectedVideos.length === 0) return;
-    
     setProcessing(true);
-    
     try {
       let count = 1;
       for (const videoPath of selectedVideos) {
          const videoId = videoPath.replace('/watch?v=', '');
          const title = searchResults.find(v => v.url === videoPath)?.title || 'Downloaded Video';
-         
-         setProgressMsg(`Processing ${count}/${selectedVideos.length}: Getting streams...`);
-         
-         // 1. Get Stream URL using the active instance
-         const streamData = await fetchFromPiped(`/streams/${videoId}`);
-         
-         // Find best mp4 video (usually 720p or 360p)
-         const videoStream = streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4' && s.quality === '720p') || 
-                             streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4');
-
-         if (!videoStream) {
-           console.warn("No MP4 stream found for " + videoId);
-           continue;
-         }
-
-         // 2. Download File to RAM (Client Side)
-         setProgressMsg(`Downloading: ${title} ...`);
-         const vidResponse = await fetch(videoStream.url);
-         const blob = await vidResponse.blob();
-         const file = new File([blob], `${title}.mp4`, { type: 'video/mp4' });
-
-         // 3. Generate Thumbnail locally
-         setProgressMsg(`Generating thumbnail...`);
-         const thumb = await generateThumbnail(file);
-
-         // 4. Upload to Server
-         setProgressMsg(`Uploading to server...`);
-         await db.uploadVideo(title, `Imported from YouTube: ${videoId}`, 1, user, file, thumb);
-         
+         setProgressMsg(`Processing ${count}/${selectedVideos.length}: ${title}`);
+         await downloadAndUpload(videoId, title);
          count++;
       }
-      
       alert("All selected videos processed successfully!");
-      setSearchResults([]);
-      setQuery('');
-      setSelectedVideos([]);
       navigate('/');
-      
     } catch (e: any) {
-      alert("Error processing videos: " + e.message);
+      alert("Error: " + e.message);
     } finally {
       setProcessing(false);
       setProgressMsg('');
@@ -175,7 +206,7 @@ export default function Requests() {
           <DownloadCloud className="text-indigo-400" /> Content Requests
         </h2>
         <p className="text-slate-400 text-sm">
-          Request content from YouTube to be added to the platform.
+          Import content from YouTube.
         </p>
       </div>
 
@@ -185,7 +216,7 @@ export default function Requests() {
            onClick={() => setUseLocal(false)} 
            className={`flex-1 py-2 text-sm font-bold rounded-md transition-colors ${!useLocal ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
          >
-           Server Request (Queue)
+           Server Queue (Auto)
          </button>
          <button 
            onClick={() => setUseLocal(true)} 
@@ -221,7 +252,7 @@ export default function Requests() {
               Submit to Queue
             </button>
             <p className="text-xs text-slate-500 text-center">
-               Your request will be processed by the server during scheduled hours.
+               The server will try to download these overnight.
             </p>
           </form>
         )}
@@ -229,7 +260,42 @@ export default function Requests() {
         {/* Mode 2: Client Side */}
         {useLocal && (
           <div className="space-y-4">
-             {!isSearching && searchResults.length === 0 && (
+             {/* Sub-tabs for Search vs Link */}
+             <div className="flex border-b border-slate-800 mb-4">
+                <button 
+                  onClick={() => setSearchMode('SEARCH')}
+                  className={`pb-2 px-4 text-sm font-medium ${searchMode === 'SEARCH' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500'}`}
+                >
+                   Search
+                </button>
+                <button 
+                  onClick={() => setSearchMode('LINK')}
+                  className={`pb-2 px-4 text-sm font-medium ${searchMode === 'LINK' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500'}`}
+                >
+                   Paste Link
+                </button>
+             </div>
+
+             {searchMode === 'LINK' && (
+                 <form onSubmit={handleLinkProcess}>
+                    <div className="relative mb-4">
+                      <LinkIcon className="absolute left-3 top-3.5 text-slate-500" size={18} />
+                      <input 
+                        type="url" 
+                        value={directLink}
+                        onChange={e => setDirectLink(e.target.value)}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                        required
+                      />
+                    </div>
+                    <button type="submit" disabled={processing} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50">
+                       <DownloadCloud size={18} /> Import Link
+                    </button>
+                 </form>
+             )}
+
+             {searchMode === 'SEARCH' && !isSearching && searchResults.length === 0 && (
                <form onSubmit={handleLocalSearch}>
                   <div className="relative mb-4">
                     <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
@@ -243,7 +309,7 @@ export default function Requests() {
                     />
                   </div>
                   <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                     <Search size={18} /> Search & Select
+                     <Search size={18} /> Search
                   </button>
                </form>
              )}
