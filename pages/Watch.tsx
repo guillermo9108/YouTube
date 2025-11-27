@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat, Wallet } from 'lucide-react';
+import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat, Wallet, Unlock } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -172,7 +172,14 @@ export default function Watch() {
 
   // --- Actions ---
   const handlePurchase = async () => {
-    if (!user || !video) return;
+    if (!user || !video || purchasing) return;
+    
+    // Prevent purchase if low balance, handled visually but safety check here
+    if ((user.balance || 0) < video.price) {
+        setError("Insufficient Balance to Unlock");
+        return;
+    }
+
     setPurchasing(true);
     setError('');
     try {
@@ -222,7 +229,7 @@ export default function Watch() {
         <div className="lg:col-span-2 space-y-4">
           
           {/* Player Container */}
-          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800 group">
+          <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800 group select-none">
             {isUnlocked ? (
               <>
                 <video 
@@ -263,53 +270,52 @@ export default function Watch() {
                 )}
               </>
             ) : (
-              /* Locked State - UPDATED COMPACT UI */
-              <div className="absolute inset-0 flex flex-col items-center justify-center z-50">
-                <div className="absolute inset-0 bg-cover bg-center opacity-30 blur-xl scale-110" style={{ backgroundImage: `url(${video.thumbnailUrl})` }}></div>
-                <div className="absolute inset-0 bg-slate-950/80"></div>
+              /* Locked State - FULL OVERLAY BUTTON */
+              <div 
+                onClick={canAfford ? handlePurchase : undefined}
+                className={`absolute inset-0 z-50 flex flex-col items-center justify-center transition-all ${canAfford ? 'cursor-pointer active:scale-[0.98] hover:bg-black/10' : 'cursor-not-allowed'}`}
+              >
+                {/* Background Image with Blur */}
+                <div className="absolute inset-0 bg-cover bg-center opacity-40 blur-lg scale-105" style={{ backgroundImage: `url(${video.thumbnailUrl})` }}></div>
+                {/* Dark Overlay Gradient */}
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-slate-900/60"></div>
                 
-                <div className="relative z-20 flex flex-col items-center justify-center p-6 w-full max-w-sm">
-                  <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mb-3 border-2 border-slate-700 shadow-xl">
-                    <Lock size={24} className="text-slate-300" />
-                  </div>
+                {/* Content */}
+                <div className="relative z-20 flex flex-col items-center justify-center p-6 w-full max-w-sm text-center">
                   
-                  <h2 className="text-xl font-bold text-white mb-1 text-center shadow-black drop-shadow-md line-clamp-2">{video.title}</h2>
-                  
-                  <div className="my-6 text-center">
-                    <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Price</p>
-                    <div className="text-5xl font-black text-amber-400 drop-shadow-lg tracking-tight">
-                       {video.price} <span className="text-lg text-amber-200/80 font-bold tracking-wider">SALDO</span>
-                    </div>
+                  {/* Huge Price */}
+                  <div className="mb-4 animate-pulse">
+                     <span className="text-7xl font-black text-amber-400 drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)] tracking-tighter">
+                       {video.price}
+                     </span>
+                     <div className="text-amber-200/80 font-bold uppercase tracking-widest text-xs mt-1">Saldo to Unlock</div>
                   </div>
 
+                  {/* Lock & Action Text */}
+                  <div className="flex items-center gap-3 bg-slate-900/80 border border-slate-700/50 backdrop-blur-md px-6 py-3 rounded-full shadow-xl mb-4">
+                     {purchasing ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
+                     ) : (
+                        <Lock size={20} className="text-slate-200" />
+                     )}
+                     <span className="font-bold text-white uppercase tracking-wide text-sm">
+                       {purchasing ? 'Unlocking...' : (canAfford ? 'Tap to Unlock' : 'Locked Content')}
+                     </span>
+                  </div>
+
+                  {/* Errors or Balance Warning */}
                   {error && (
-                    <div className="w-full text-red-400 text-xs bg-red-950/80 border border-red-900/50 p-2 rounded mb-3 flex items-center justify-center gap-2">
+                    <div className="text-red-400 text-xs bg-red-950/80 border border-red-900/50 px-3 py-1.5 rounded-lg flex items-center gap-2">
                         <AlertCircle size={14}/>{error}
                     </div>
                   )}
                   
                   {!canAfford && !error && (
-                      <div className="w-full text-red-300 text-xs bg-red-950/60 p-2 rounded mb-3 border border-red-900/50 flex items-center justify-center gap-2">
+                      <div className="text-red-300 text-xs bg-red-950/60 px-3 py-1.5 rounded-lg border border-red-900/50 flex items-center gap-2">
                           <AlertCircle size={14} /> Low Balance ({user?.balance})
                       </div>
                   )}
 
-                  {/* Compact Button */}
-                  <button 
-                    onClick={handlePurchase}
-                    disabled={purchasing || !canAfford}
-                    className={`w-full max-w-[200px] py-2.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-xl border-t border-white/10 ${
-                      !canAfford 
-                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
-                        : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-black shadow-amber-900/40 hover:scale-105 active:scale-95 animate-pulse'
-                    }`}
-                  >
-                     {purchasing ? (
-                        <span className="flex items-center gap-2"><div className="w-3 h-3 border-2 border-black/50 border-t-black rounded-full animate-spin"/> processing</span>
-                     ) : (
-                        <><ShoppingCart size={16} fill="currentColor" /> BUY NOW</>
-                     )}
-                  </button>
                 </div>
               </div>
             )}

@@ -15,6 +15,13 @@ interface PipedVideo {
   duration: number;
 }
 
+// List of Piped instances to try in case one is down
+const PIPED_INSTANCES = [
+  'https://pipedapi.drgns.space',
+  'https://pipedapi.kavin.rocks',
+  'https://api.piped.otton.uk'
+];
+
 export default function Requests() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -29,6 +36,7 @@ export default function Requests() {
   const [processing, setProcessing] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [selectedVideos, setSelectedVideos] = useState<string[]>([]); // URLs
+  const [activeInstance, setActiveInstance] = useState(PIPED_INSTANCES[0]);
 
   useEffect(() => {
     loadRequests();
@@ -54,6 +62,22 @@ export default function Requests() {
     }
   };
 
+  // Helper to try fetching from multiple instances
+  const fetchFromPiped = async (path: string) => {
+    for (const instance of PIPED_INSTANCES) {
+      try {
+        const res = await fetch(`${instance}${path}`);
+        if (res.ok) {
+          setActiveInstance(instance); // Remember working instance
+          return await res.json();
+        }
+      } catch (e) {
+        console.warn(`Instance ${instance} failed`, e);
+      }
+    }
+    throw new Error("All Piped instances are unavailable.");
+  };
+
   const handleLocalSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
@@ -62,14 +86,12 @@ export default function Requests() {
     setSearchResults([]);
     
     try {
-      // Use Piped API (public instance)
-      const res = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(query)}&filter=videos`);
-      const data = await res.json();
+      const data = await fetchFromPiped(`/search?q=${encodeURIComponent(query)}&filter=videos`);
       if (data && data.items) {
         setSearchResults(data.items.slice(0, 8)); // Top 8 results
       }
-    } catch (e) {
-      alert("Failed to search videos. Piped API might be down.");
+    } catch (e: any) {
+      alert("Failed to search videos: " + e.message);
     } finally {
       setIsSearching(false);
     }
@@ -96,9 +118,8 @@ export default function Requests() {
          
          setProgressMsg(`Processing ${count}/${selectedVideos.length}: Getting streams...`);
          
-         // 1. Get Stream URL
-         const streamRes = await fetch(`https://pipedapi.kavin.rocks/streams/${videoId}`);
-         const streamData = await streamRes.json();
+         // 1. Get Stream URL using the active instance
+         const streamData = await fetchFromPiped(`/streams/${videoId}`);
          
          // Find best mp4 video (usually 720p or 360p)
          const videoStream = streamData.videoStreams.find((s: any) => s.mimeType === 'video/mp4' && s.quality === '720p') || 
