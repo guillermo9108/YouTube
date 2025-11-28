@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat, Wallet, Unlock, RefreshCw } from 'lucide-react';
+import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -44,7 +44,9 @@ const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) 
 };
 
 export default function Watch() {
-  const { id } = useParams() as { id: string };
+  // Force re-render when ID changes
+  const params = useParams();
+  const id = params?.id; 
   const navigate = useNavigate();
   const { user, refreshUser } = useAuth();
   
@@ -68,51 +70,56 @@ export default function Watch() {
   const [nextVideo, setNextVideo] = useState<Video | null>(null);
   const [autoStatus, setAutoStatus] = useState<'IDLE' | 'SKIPPING_WATCHED' | 'AUTO_BUYING' | 'PLAYING_NEXT' | 'WAITING_CONFIRMATION'>('IDLE');
 
-  const loadData = async () => {
-     if (!user || !id) return;
-     setLoading(true);
-     setLoadingError(false);
-     setCountdown(null);
-     setAutoStatus('IDLE');
-     
-     // Timeout safety
-     const timeoutId = setTimeout(() => {
-        if (loading) {
-            setLoadingError(true);
-            setLoading(false);
-        }
-     }, 10000);
+  useEffect(() => {
+    let isMounted = true;
 
-     try {
+    const fetchData = async () => {
+      if (!id || !user) {
+          if (isMounted) {
+            setLoading(false);
+            if (!id) setLoadingError(true);
+          }
+          return;
+      }
+
+      setLoading(true);
+      setLoadingError(false);
+      setVideo(null); // Clear previous video immediately
+
+      try {
          const v = await db.getVideo(id);
+         
+         if (!isMounted) return;
+
          if (v) {
             setVideo(v);
-            const purchased = await db.hasPurchased(user.id, v.id);
+            
+            // Parallel fetch for details
+            const [purchased, interact, comms, related] = await Promise.all([
+                db.hasPurchased(user.id, v.id),
+                db.getInteraction(user.id, v.id),
+                db.getComments(v.id),
+                db.getRelatedVideos(v.id)
+            ]);
+            
             setIsUnlocked(purchased);
-            
-            const interact = await db.getInteraction(user.id, v.id);
             setInteraction(interact);
-            
-            const comms = await db.getComments(v.id);
             setComments(comms);
-
             setIsWatchLater(user.watchLater.includes(v.id));
-            
-            const related = await db.getRelatedVideos(v.id);
             setRelatedVideos(related);
          } else {
              setLoadingError(true);
          }
-     } catch (e) {
-         setLoadingError(true);
-     } finally {
-         clearTimeout(timeoutId);
-         setLoading(false);
-     }
-  };
+      } catch (e) {
+         if (isMounted) setLoadingError(true);
+      } finally {
+         if (isMounted) setLoading(false);
+      }
+    };
 
-  useEffect(() => {
-    loadData();
+    fetchData();
+
+    return () => { isMounted = false; };
   }, [id, user]);
 
   // Enforce Auto-Play when video becomes available
@@ -120,7 +127,7 @@ export default function Watch() {
     if (isUnlocked && videoRef.current) {
       const timer = setTimeout(() => {
         videoRef.current?.play().catch(e => console.log("Auto-play prevented:", e));
-      }, 100);
+      }, 500);
       return () => clearTimeout(timer);
     }
   }, [isUnlocked, video]);
@@ -193,7 +200,7 @@ export default function Watch() {
     
     // Prevent purchase if low balance
     if ((user.balance || 0) < video.price) {
-        setError("Insufficient Balance to Unlock");
+        setError("Insufficient Balance");
         return;
     }
 
@@ -233,20 +240,27 @@ export default function Watch() {
     setNewComment('');
   };
 
-  if (loading) return <div className="p-20 text-center text-slate-500 flex flex-col items-center gap-4"><RefreshCw className="animate-spin text-indigo-500" size={32}/> Loading content...</div>;
+  if (loading) return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4 text-slate-500">
+          <RefreshCw className="animate-spin text-indigo-500" size={32}/> 
+          <p>Loading video content...</p>
+      </div>
+  );
   
   if (loadingError || !video) return (
-      <div className="p-20 text-center text-slate-400 flex flex-col items-center gap-4">
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4 text-slate-400">
           <AlertCircle size={48} className="text-red-500" />
-          <p>Failed to load video or video does not exist.</p>
-          <button onClick={loadData} className="px-6 py-2 bg-slate-800 rounded-lg text-white hover:bg-slate-700">Retry</button>
+          <h2 className="text-xl font-bold text-white">Video Unavailable</h2>
+          <p className="max-w-xs text-center">The video ID might be incorrect, deleted, or you may be offline.</p>
+          <div className="text-xs font-mono bg-slate-900 p-2 rounded">ID: {id || 'undefined'}</div>
+          <button onClick={() => window.location.reload()} className="px-6 py-2 bg-slate-800 rounded-lg text-white hover:bg-slate-700 mt-4">Reload Page</button>
       </div>
   );
 
   const canAfford = (user?.balance || 0) >= video.price;
 
   return (
-    <div className="max-w-5xl mx-auto pb-4"> 
+    <div className="max-w-5xl mx-auto pb-4" key={video.id}> 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-6"> 
         
         {/* Left Column: Player & Info */}
@@ -299,44 +313,44 @@ export default function Watch() {
                 onClick={canAfford ? handlePurchase : undefined}
                 className={`absolute inset-0 z-50 flex flex-col items-center justify-center transition-all ${canAfford ? 'cursor-pointer' : 'cursor-not-allowed'}`}
               >
-                {/* Background Image - NO BLUR, just clean */}
+                {/* Background Image - Clean, no blur */}
                 <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${video.thumbnailUrl})` }}></div>
-                {/* Subtle Gradient only at bottom to make text readable, not full overlay */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
+                {/* Subtle Gradient for readability */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20"></div>
                 
-                {/* Compact Center Card */}
-                <div className="relative z-20 bg-black/60 backdrop-blur-md border border-white/10 p-4 rounded-2xl shadow-2xl w-auto min-w-[200px] text-center transform transition-transform active:scale-95 hover:bg-black/70">
+                {/* Center Action Card */}
+                <div className="relative z-20 bg-black/50 backdrop-blur-md border border-white/10 p-4 rounded-xl shadow-2xl min-w-[180px] text-center transform transition-transform active:scale-95 hover:bg-black/60">
                   
                   {/* Price */}
-                  <div className="mb-2">
-                     <span className="text-4xl font-black text-amber-400 drop-shadow-md tracking-tight">
+                  <div className="mb-1 flex items-center justify-center gap-1">
+                     <span className="text-3xl font-black text-amber-400 drop-shadow-md tracking-tight">
                        {video.price}
                      </span>
-                     <span className="text-amber-200/80 font-bold uppercase text-[10px] ml-1">Saldo</span>
+                     <span className="text-amber-200/80 font-bold uppercase text-[10px] mt-2">Saldo</span>
                   </div>
 
-                  {/* Action Button */}
-                  <div className="flex items-center justify-center gap-2 text-white mb-2">
+                  {/* Status */}
+                  <div className="flex items-center justify-center gap-2 text-white mb-1">
                      {purchasing ? (
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
+                        <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"/>
                      ) : (
-                        <Lock size={16} className="text-slate-300" />
+                        <Lock size={14} className="text-slate-300" />
                      )}
-                     <span className="font-bold text-sm">
+                     <span className="font-bold text-xs uppercase tracking-wide">
                        {purchasing ? 'Unlocking...' : (canAfford ? 'Tap to Unlock' : 'Locked')}
                      </span>
                   </div>
 
                   {/* Errors */}
                   {error && (
-                    <div className="text-red-400 text-[10px] bg-red-950/80 px-2 py-1 rounded flex items-center justify-center gap-1 mt-2">
-                        <AlertCircle size={10}/>{error}
+                    <div className="text-red-300 text-[10px] bg-red-950/80 px-2 py-1 rounded mt-2">
+                        {error}
                     </div>
                   )}
                   
                   {!canAfford && !error && (
                       <div className="text-red-300 text-[10px] bg-red-950/60 px-2 py-1 rounded border border-red-900/50 mt-2">
-                          Low Balance ({user?.balance})
+                          Need {video.price - (user?.balance || 0)} more
                       </div>
                   )}
                 </div>

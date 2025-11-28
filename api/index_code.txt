@@ -1,3 +1,4 @@
+
 <?php
 ob_start();
 ini_set('display_errors', 0);
@@ -30,18 +31,20 @@ function download_url($url, $dest) {
     
     $ch = curl_init(str_replace(" ", "%20", $url));
     curl_setopt($ch, CURLOPT_FILE, $fp);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 300); // 5 minutes timeout for large videos
+    curl_setopt($ch, CURLOPT_TIMEOUT, 600); // 10 minutes timeout
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     // User-Agent is critical for Pexels/Pixabay
     curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    curl_setopt($ch, CURLOPT_REFERER, 'https://www.google.com/');
     
     $exec = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
     fclose($fp);
     
-    if ($exec && $code == 200 && filesize($dest) > 0) {
+    // Check if file is valid (larger than 1KB)
+    if ($exec && $code == 200 && filesize($dest) > 1024) {
         return true;
     } else {
         @unlink($dest); // Remove failed file
@@ -72,13 +75,21 @@ function search_provider($pdo, $query, $limit = 5) {
         if (!empty($res['videos'])) {
             foreach ($res['videos'] as $v) {
                 $files = $v['video_files'] ?? [];
-                // Filter: Prioritize Standard Definition (width ~960-1280) to ensure Audio but manageable size
-                // Avoid 'tiny' as they often lack audio.
+                
+                // AUDIO FIX: Pexels often separates audio in high quality, or removes it in tiny.
+                // Strategy: Prefer "SD" (960-1280) first. If not found, take the LARGEST file (HD/4K) as it likely has streams muxed or at least looks good. 
+                // Avoid "tiny" if possible.
+                
                 $target = null;
+                // 1. Try to find SD (Balanced)
                 foreach($files as $f) {
-                    if ($f['width'] >= 960 && $f['width'] <= 1920) { $target=$f; break; }
+                    if ($f['width'] >= 960 && $f['width'] <= 1280) { $target=$f; break; }
                 }
-                if(!$target && !empty($files)) $target=$files[0];
+                // 2. If no SD, take the largest available (likely has audio if original did)
+                if(!$target && !empty($files)) {
+                    usort($files, function($a, $b) { return $b['width'] - $a['width']; });
+                    $target = $files[0];
+                }
                 
                 if($target) {
                     $results[] = [
@@ -104,7 +115,8 @@ function search_provider($pdo, $query, $limit = 5) {
         curl_close($ch);
         if (!empty($res['hits'])) {
             foreach ($res['hits'] as $v) {
-                $var = $v['videos']['medium'] ?? $v['videos']['small'];
+                // Pixabay medium usually has audio if available
+                $var = $v['videos']['medium'] ?? $v['videos']['large'] ?? $v['videos']['small'];
                 $results[] = [
                     'source' => 'Pixabay',
                     'id' => 'pix-'.$v['id'],
@@ -283,7 +295,7 @@ switch ($action) {
         break;
         
     case 'process_queue':
-        set_time_limit(600); // 10 minutes limit
+        set_time_limit(1200); // 20 minutes limit for bulk download
         
         $settings = $pdo->query("SELECT * FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
         if ($settings['isQueuePaused']) respond(true, ['processed' => 0, 'message' => 'Queue paused']);
