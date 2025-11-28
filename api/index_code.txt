@@ -1,4 +1,3 @@
-
 <?php
 ob_start();
 ini_set('display_errors', 0);
@@ -24,6 +23,32 @@ function respond($success, $data = null, $error = null) {
     exit();
 }
 
+// --- Helper: Robust Download via cURL ---
+function download_url($url, $dest) {
+    $fp = fopen($dest, 'w+');
+    if ($fp === false) return false;
+    
+    $ch = curl_init(str_replace(" ", "%20", $url));
+    curl_setopt($ch, CURLOPT_FILE, $fp);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 300); // 5 minutes timeout for large videos
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    // User-Agent is critical for Pexels/Pixabay
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    
+    $exec = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    fclose($fp);
+    
+    if ($exec && $code == 200 && filesize($dest) > 0) {
+        return true;
+    } else {
+        @unlink($dest); // Remove failed file
+        return false;
+    }
+}
+
 try {
     $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']}", $db_config['user'], $db_config['password'], [PDO::ATTR_PERSISTENT => true]);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -32,7 +57,6 @@ try {
 $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
-// --- Helper: Search Logic (Shared) ---
 function search_provider($pdo, $query, $limit = 5) {
     $settings = $pdo->query("SELECT pexelsKey, pixabayKey FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
     $results = [];
@@ -48,10 +72,11 @@ function search_provider($pdo, $query, $limit = 5) {
         if (!empty($res['videos'])) {
             foreach ($res['videos'] as $v) {
                 $files = $v['video_files'] ?? [];
-                // Prioritize SD/HD width < 1300 for audio support if possible
+                // Filter: Prioritize Standard Definition (width ~960-1280) to ensure Audio but manageable size
+                // Avoid 'tiny' as they often lack audio.
                 $target = null;
                 foreach($files as $f) {
-                    if (($f['quality'] == 'sd' || $f['quality'] == 'hd') && $f['width'] < 1300 && $f['width'] > 600) { $target=$f; break; }
+                    if ($f['width'] >= 960 && $f['width'] <= 1920) { $target=$f; break; }
                 }
                 if(!$target && !empty($files)) $target=$files[0];
                 
@@ -132,7 +157,6 @@ switch ($action) {
     case 'get_all_users':
         $stmt = $pdo->query("SELECT id, username, role, balance FROM users ORDER BY username ASC");
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        // Ensure we return an empty array [] instead of null/false if no users
         respond(true, $users ?: []);
         break;
 
@@ -249,7 +273,7 @@ switch ($action) {
 
     case 'request_content':
         $pdo->prepare("INSERT INTO requests (id, userId, query, status, createdAt, useLocalNetwork) VALUES (?, ?, ?, ?, ?, ?)")
-            ->execute(['req_'.uniqid(), $input['userId'], $input['query'], $input['useLocalNetwork']?'MANUAL_UPLOAD':'PENDING', time()*1000, $input['useLocalNetwork']?1:0]);
+            ->execute(['req_'.uniqid(), $input['userId'], $input['query'], 'PENDING', time()*1000, 0]);
         respond(true);
         break;
 
@@ -259,50 +283,41 @@ switch ($action) {
         break;
         
     case 'process_queue':
-        // 1. Get Settings
+        set_time_limit(600); // 10 minutes limit
+        
         $settings = $pdo->query("SELECT * FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
         if ($settings['isQueuePaused']) respond(true, ['processed' => 0, 'message' => 'Queue paused']);
 
-        // 2. Find Pending Request
+        // Find Request
         $req = $pdo->query("SELECT * FROM requests WHERE status='PENDING' AND useLocalNetwork=0 ORDER BY createdAt ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
         if (!$req) respond(true, ['processed' => 0, 'message' => 'No pending requests']);
 
-        // 3. Mark Processing
         $pdo->prepare("UPDATE requests SET status='PROCESSING' WHERE id=?")->execute([$req['id']]);
 
         if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
         if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
 
-        // 4. Search and Download
         $videos = search_provider($pdo, $req['query'], (int)$settings['batchSize']);
         $count = 0;
-        
-        // Admin ID for Creator assignment (or use a System user)
         $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
 
         foreach ($videos as $v) {
             try {
-                // Download Video
                 $vFilename = uniqid('auto_').'.mp4';
                 $vPath = UPLOAD_DIR . $vFilename;
                 
-                // Use copy() to download file from URL
-                if (copy($v['downloadUrl'], $vPath)) {
-                    
-                    // Download Thumbnail
+                // Use robust download_url instead of copy
+                if (download_url($v['downloadUrl'], $vPath)) {
                     $tFilename = uniqid('thumb_').'.jpg';
                     $tPath = THUMB_DIR . $tFilename;
-                    if (!copy($v['thumbnail'], $tPath)) {
-                         $tPath = THUMB_DIR . 'placeholder.jpg'; // Fallback
-                    }
+                    download_url($v['thumbnail'], $tPath); // Try download thumb, ignore fail
 
-                    // Insert into DB
                     $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)")
                     ->execute([
                         'v_'.uniqid(), 
                         $v['title'], 
-                        "Auto-imported from {$v['source']} for request: {$req['query']}", 
-                        1, // Default price
+                        "Imported from {$v['source']} ({$req['query']})", 
+                        1, 
                         '/api/'.$tPath, 
                         '/api/'.$vPath, 
                         $adminId, 
@@ -310,12 +325,9 @@ switch ($action) {
                     ]);
                     $count++;
                 }
-            } catch (Exception $e) {
-                // Continue to next video on error
-            }
+            } catch (Exception $e) {}
         }
 
-        // 5. Complete
         $newStatus = $count > 0 ? 'COMPLETED' : 'FAILED';
         $pdo->prepare("UPDATE requests SET status=? WHERE id=?")->execute([$newStatus, $req['id']]);
 

@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat, Wallet, Unlock } from 'lucide-react';
+import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Repeat, Wallet, Unlock, RefreshCw } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -51,6 +51,7 @@ export default function Watch() {
   const [video, setVideo] = useState<Video | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingError, setLoadingError] = useState(false);
   const [purchasing, setPurchasing] = useState(false);
   const [error, setError] = useState('');
   
@@ -67,14 +68,22 @@ export default function Watch() {
   const [nextVideo, setNextVideo] = useState<Video | null>(null);
   const [autoStatus, setAutoStatus] = useState<'IDLE' | 'SKIPPING_WATCHED' | 'AUTO_BUYING' | 'PLAYING_NEXT' | 'WAITING_CONFIRMATION'>('IDLE');
 
-  // Load Video Data
-  useEffect(() => {
-    if (id && user) {
-      setLoading(true);
-      setCountdown(null);
-      setAutoStatus('IDLE');
-      
-      const loadData = async () => {
+  const loadData = async () => {
+     if (!user || !id) return;
+     setLoading(true);
+     setLoadingError(false);
+     setCountdown(null);
+     setAutoStatus('IDLE');
+     
+     // Timeout safety
+     const timeoutId = setTimeout(() => {
+        if (loading) {
+            setLoadingError(true);
+            setLoading(false);
+        }
+     }, 10000);
+
+     try {
          const v = await db.getVideo(id);
          if (v) {
             setVideo(v);
@@ -91,11 +100,19 @@ export default function Watch() {
             
             const related = await db.getRelatedVideos(v.id);
             setRelatedVideos(related);
+         } else {
+             setLoadingError(true);
          }
+     } catch (e) {
+         setLoadingError(true);
+     } finally {
+         clearTimeout(timeoutId);
          setLoading(false);
-      };
-      loadData();
-    }
+     }
+  };
+
+  useEffect(() => {
+    loadData();
   }, [id, user]);
 
   // Enforce Auto-Play when video becomes available
@@ -174,7 +191,7 @@ export default function Watch() {
   const handlePurchase = async () => {
     if (!user || !video || purchasing) return;
     
-    // Prevent purchase if low balance, handled visually but safety check here
+    // Prevent purchase if low balance
     if ((user.balance || 0) < video.price) {
         setError("Insufficient Balance to Unlock");
         return;
@@ -216,14 +233,21 @@ export default function Watch() {
     setNewComment('');
   };
 
-  if (loading) return <div className="p-10 text-center text-slate-500">Loading video...</div>;
-  if (!video) return <div className="p-10 text-center text-red-500">Video not found</div>;
+  if (loading) return <div className="p-20 text-center text-slate-500 flex flex-col items-center gap-4"><RefreshCw className="animate-spin text-indigo-500" size={32}/> Loading content...</div>;
+  
+  if (loadingError || !video) return (
+      <div className="p-20 text-center text-slate-400 flex flex-col items-center gap-4">
+          <AlertCircle size={48} className="text-red-500" />
+          <p>Failed to load video or video does not exist.</p>
+          <button onClick={loadData} className="px-6 py-2 bg-slate-800 rounded-lg text-white hover:bg-slate-700">Retry</button>
+      </div>
+  );
 
   const canAfford = (user?.balance || 0) >= video.price;
 
   return (
-    <div className="max-w-5xl mx-auto pb-4"> {/* Reduced padding bottom */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-6"> {/* Reduced gap */}
+    <div className="max-w-5xl mx-auto pb-4"> 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-6"> 
         
         {/* Left Column: Player & Info */}
         <div className="lg:col-span-2 space-y-3">

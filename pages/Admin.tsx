@@ -14,6 +14,8 @@ export default function Admin() {
   // Maintenance State
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [repairing, setRepairing] = useState(false);
+  const [processingQueue, setProcessingQueue] = useState(false);
+  const [processResult, setProcessResult] = useState('');
   const [requests, setRequests] = useState<ContentRequest[]>([]);
   const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG'>('USERS');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
@@ -65,13 +67,17 @@ export default function Admin() {
   };
 
   const triggerDownload = async () => {
-     if(confirm("Force queue processing now?")) {
+     if(confirm("Force queue processing now? Server will attempt to download pending videos.")) {
+       setProcessingQueue(true);
+       setProcessResult('');
        try {
          const res = await db.triggerQueueProcessing();
-         alert(res.message);
+         setProcessResult(res.message);
          loadData();
-       } catch (e) {
-         alert("Trigger failed");
+         setTimeout(() => setProcessingQueue(false), 3000);
+       } catch (e: any) {
+         alert("Trigger failed: " + e.message);
+         setProcessingQueue(false);
        }
      }
   };
@@ -87,8 +93,29 @@ export default function Admin() {
   const filteredUsers = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="space-y-6 pb-24">
+    <div className="space-y-6 pb-24 relative">
       
+      {/* Processing Modal */}
+      {processingQueue && (
+         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+             <div className="bg-slate-900 p-8 rounded-2xl border border-slate-700 text-center max-w-sm w-full">
+                 {processResult ? (
+                     <>
+                        <div className="text-emerald-400 font-bold mb-4 text-xl">Completed!</div>
+                        <p className="text-slate-300 mb-6">{processResult}</p>
+                     </>
+                 ) : (
+                     <>
+                        <Loader2 size={48} className="text-indigo-500 animate-spin mx-auto mb-6" />
+                        <h3 className="text-xl font-bold text-white mb-2">Server Processing</h3>
+                        <p className="text-slate-400 mb-4 text-sm">Downloading videos from Pexels/Pixabay...</p>
+                        <p className="text-xs text-slate-500">This may take a minute. Do not close.</p>
+                     </>
+                 )}
+             </div>
+         </div>
+      )}
+
       {/* Header */}
       <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
         <div>
