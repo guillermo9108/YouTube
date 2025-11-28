@@ -75,7 +75,9 @@ if ($action === 'install') {
             views INT DEFAULT 0,
             createdAt BIGINT,
             likes INT DEFAULT 0,
-            dislikes INT DEFAULT 0
+            dislikes INT DEFAULT 0,
+            category VARCHAR(50) DEFAULT 'OTHER',
+            duration INT DEFAULT 0
         )");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS transactions (
@@ -123,7 +125,9 @@ if ($action === 'install') {
             maxDuration INT DEFAULT 600,
             maxResolution INT DEFAULT 1080,
             pexelsKey VARCHAR(255),
-            pixabayKey VARCHAR(255)
+            pixabayKey VARCHAR(255),
+            ytDlpPath VARCHAR(255),
+            enableYoutube TINYINT(1) DEFAULT 0
         )");
         
         $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");

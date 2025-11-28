@@ -33,7 +33,6 @@ function download_url($url, $dest) {
     curl_setopt($ch, CURLOPT_TIMEOUT, 600);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    // Fake User-Agent to avoid blocks from Pexels/Pixabay
     curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     
     $exec = curl_exec($ch);
@@ -57,9 +56,33 @@ try {
 $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
-function search_provider($pdo, $query, $limit = 5) {
-    $settings = $pdo->query("SELECT pexelsKey, pixabayKey FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
+function search_provider($pdo, $query, $limit = 5, $source = 'STOCK') {
+    $settings = $pdo->query("SELECT * FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
     $results = [];
+
+    // YOUTUBE (Server Side)
+    if ($source === 'YOUTUBE' && !empty($settings['enableYoutube'])) {
+        $ytPath = !empty($settings['ytDlpPath']) ? $settings['ytDlpPath'] : './yt-dlp';
+        $cmd = "$ytPath \"ytsearch{$limit}:$query\" --dump-json --flat-playlist --no-warnings 2>&1";
+        $output = shell_exec($cmd);
+        
+        $lines = explode("\n", $output);
+        foreach($lines as $line) {
+            $json = json_decode($line, true);
+            if ($json && isset($json['title'])) {
+                 $results[] = [
+                    'source' => 'YouTube',
+                    'id' => $json['id'],
+                    'title' => $json['title'],
+                    'thumbnail' => "https://i.ytimg.com/vi/{$json['id']}/mqdefault.jpg",
+                    'downloadUrl' => "https://www.youtube.com/watch?v={$json['id']}",
+                    'duration' => $json['duration'] ?? 0,
+                    'author' => $json['uploader'] ?? 'Unknown'
+                ];
+            }
+        }
+        return $results;
+    }
 
     // PEXELS
     if (!empty($settings['pexelsKey'])) {
@@ -72,17 +95,12 @@ function search_provider($pdo, $query, $limit = 5) {
         if (!empty($res['videos'])) {
             foreach ($res['videos'] as $v) {
                 $files = $v['video_files'] ?? [];
-                // FILTER: Prefer SD or HD to ensure audio. Avoid 'tiny'.
-                // Strategy: Sort by Size (width) descending. Pexels usually puts mute files as 'tiny'. 
-                // Large files (HD/4K) or 'sd' usually have audio if the source had it.
+                // FILTER: Prefer SD (audio-safe) or Largest
                 usort($files, function($a, $b) { return $b['width'] - $a['width']; });
                 
-                // Try to find a medium one first (efficient)
                 $target = null;
-                foreach($files as $f) {
-                    if($f['width'] >= 960 && $f['width'] <= 1920) { $target = $f; break; }
-                }
-                // If no medium, take the largest available
+                // Look for SD
+                foreach($files as $f) { if($f['width'] >= 960 && $f['width'] <= 1920) { $target = $f; break; } }
                 if(!$target && count($files) > 0) $target = $files[0];
 
                 if($target) {
@@ -109,7 +127,6 @@ function search_provider($pdo, $query, $limit = 5) {
         curl_close($ch);
         if (!empty($res['hits'])) {
             foreach ($res['hits'] as $v) {
-                // Use 'medium' or 'large' to ensure quality/audio
                 $var = $v['videos']['medium'] ?? $v['videos']['large'] ?? $v['videos']['small'];
                 $results[] = [
                     'source' => 'Pixabay',
@@ -188,7 +205,7 @@ switch ($action) {
         break;
         
     case 'get_video':
-        $id = trim($_GET['id'] ?? ''); // TRIM IS CRITICAL
+        $id = trim($_GET['id'] ?? ''); 
         if (!$id) respond(false, null, "Missing ID");
         $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id = ?");
         $stmt->execute([$id]);
@@ -199,7 +216,6 @@ switch ($action) {
     
     case 'get_related_videos':
         $id = $_GET['id'];
-        // Simple logic: random 5 videos that aren't this one
         $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? ORDER BY RAND() LIMIT 5");
         $stmt->execute([$id]);
         respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -306,8 +322,11 @@ switch ($action) {
         if (!empty($_FILES['thumbnail']['tmp_name'])) move_uploaded_file($_FILES['thumbnail']['tmp_name'], THUMB_DIR . $tName);
         else $tName = 'placeholder.jpg'; 
         
-        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)")
-            ->execute(['v_'.uniqid(), $_POST['title'], $_POST['description'], $_POST['price'], '/api/'.THUMB_DIR.$tName, '/api/'.UPLOAD_DIR.$vName, $_POST['creatorId'], time()*1000]);
+        $category = $_POST['category'] ?? 'OTHER';
+        $duration = $_POST['duration'] ?? 0;
+
+        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?)")
+            ->execute(['v_'.uniqid(), $_POST['title'], $_POST['description'], $_POST['price'], '/api/'.THUMB_DIR.$tName, '/api/'.UPLOAD_DIR.$vName, $_POST['creatorId'], time()*1000, $category, $duration]);
         respond(true);
         break;
     
@@ -333,17 +352,21 @@ switch ($action) {
 
     case 'admin_repair_db':
         try {
-            $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY DEFAULT 1, downloadStartTime VARCHAR(10) DEFAULT '01:00', downloadEndTime VARCHAR(10) DEFAULT '06:00', isQueuePaused TINYINT(1) DEFAULT 0, batchSize INT DEFAULT 5, maxDuration INT DEFAULT 600, maxResolution INT DEFAULT 1080, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255))");
+            $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY DEFAULT 1, downloadStartTime VARCHAR(10) DEFAULT '01:00', downloadEndTime VARCHAR(10) DEFAULT '06:00', isQueuePaused TINYINT(1) DEFAULT 0, batchSize INT DEFAULT 5, maxDuration INT DEFAULT 600, maxResolution INT DEFAULT 1080, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255), ytDlpPath VARCHAR(255), enableYoutube TINYINT(1) DEFAULT 0)");
             $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
             $pdo->exec("CREATE TABLE IF NOT EXISTS requests (id VARCHAR(50) PRIMARY KEY, userId VARCHAR(50), query VARCHAR(255), status ENUM('PENDING','PROCESSING','COMPLETED','FAILED','MANUAL_UPLOAD') DEFAULT 'PENDING', createdAt BIGINT, useLocalNetwork TINYINT(1) DEFAULT 0)");
             
             // Add columns safely
             $cols = [
                 "ALTER TABLE system_settings ADD COLUMN batchSize INT DEFAULT 5",
-                "ALTER TABLE system_settings ADD COLUMN pexelsKey VARCHAR(255",
+                "ALTER TABLE system_settings ADD COLUMN pexelsKey VARCHAR(255)",
                 "ALTER TABLE system_settings ADD COLUMN pixabayKey VARCHAR(255)",
                 "ALTER TABLE system_settings ADD COLUMN maxDuration INT DEFAULT 600",
-                "ALTER TABLE system_settings ADD COLUMN maxResolution INT DEFAULT 1080"
+                "ALTER TABLE system_settings ADD COLUMN maxResolution INT DEFAULT 1080",
+                "ALTER TABLE system_settings ADD COLUMN ytDlpPath VARCHAR(255)",
+                "ALTER TABLE system_settings ADD COLUMN enableYoutube TINYINT(1) DEFAULT 0",
+                "ALTER TABLE videos ADD COLUMN category VARCHAR(50) DEFAULT 'OTHER'",
+                "ALTER TABLE videos ADD COLUMN duration INT DEFAULT 0"
             ];
             foreach($cols as $c) { try { $pdo->exec($c); } catch(Exception $e) {} }
             
@@ -355,6 +378,7 @@ switch ($action) {
         $res = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
         if ($res) {
             $res['isQueuePaused'] = (bool)$res['isQueuePaused'];
+            $res['enableYoutube'] = (bool)$res['enableYoutube'];
             $res['batchSize'] = (int)$res['batchSize'];
             $res['maxDuration'] = (int)$res['maxDuration'];
             $res['maxResolution'] = (int)$res['maxResolution'];
@@ -364,14 +388,64 @@ switch ($action) {
 
     case 'update_system_settings':
         $s = $input['settings'];
-        $pdo->prepare("UPDATE system_settings SET downloadStartTime=?, downloadEndTime=?, isQueuePaused=?, batchSize=?, maxDuration=?, maxResolution=?, pexelsKey=?, pixabayKey=? WHERE id=1")
-            ->execute([$s['downloadStartTime'], $s['downloadEndTime'], $s['isQueuePaused']?1:0, $s['batchSize'], $s['maxDuration'], $s['maxResolution'], $s['pexelsKey'], $s['pixabayKey']]);
+        $pdo->prepare("UPDATE system_settings SET downloadStartTime=?, downloadEndTime=?, isQueuePaused=?, batchSize=?, maxDuration=?, maxResolution=?, pexelsKey=?, pixabayKey=?, ytDlpPath=?, enableYoutube=? WHERE id=1")
+            ->execute([$s['downloadStartTime'], $s['downloadEndTime'], $s['isQueuePaused']?1:0, $s['batchSize'], $s['maxDuration'], $s['maxResolution'], $s['pexelsKey'], $s['pixabayKey'], $s['ytDlpPath'], $s['enableYoutube']?1:0]);
         respond(true);
         break;
 
     case 'search_external':
-        $results = search_provider($pdo, $input['query'], 6);
+        $source = $input['source'] ?? 'STOCK';
+        $results = search_provider($pdo, $input['query'], 6, $source);
         respond(true, $results);
+        break;
+    
+    case 'server_import_video':
+        set_time_limit(600);
+        $settings = $pdo->query("SELECT * FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
+        $url = $input['url'];
+        $ytPath = !empty($settings['ytDlpPath']) ? $settings['ytDlpPath'] : './yt-dlp';
+        $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+        
+        if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
+        if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
+        
+        // Use yt-dlp to download
+        $vName = uniqid('yt_');
+        $vPath = UPLOAD_DIR . $vName . '.mp4';
+        
+        $cmd = "$ytPath -f \"bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best\" -o \"$vPath\" --write-thumbnail --convert-thumbnails jpg \"$url\" 2>&1";
+        exec($cmd);
+        
+        if (file_exists($vPath)) {
+            // Find thumbnail (yt-dlp might name it differently)
+            $tPath = THUMB_DIR . $vName . '.jpg';
+            // yt-dlp usually outputs .jpg or .webp next to video if -o matches, but let's just find matches
+            $matches = glob(UPLOAD_DIR . $vName . ".*");
+            $thumbFound = false;
+            foreach($matches as $m) {
+                if (strpos($m, '.jpg') !== false || strpos($m, '.webp') !== false) {
+                     rename($m, $tPath);
+                     $thumbFound = true;
+                     break;
+                }
+            }
+            if (!$thumbFound) copy('https://via.placeholder.com/640x360', $tPath);
+
+            $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', 0)")
+            ->execute([
+                'v_'.uniqid(), 
+                'Imported from YouTube', 
+                "Source: $url", 
+                1, 
+                '/api/'.$tPath, 
+                '/api/'.$vPath, 
+                $adminId, 
+                time()*1000
+            ]);
+            respond(true);
+        } else {
+            respond(false, null, "Download failed");
+        }
         break;
 
     case 'get_requests':
@@ -394,7 +468,6 @@ switch ($action) {
         set_time_limit(1200); 
         $settings = $pdo->query("SELECT * FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
         
-        // Find Request
         $req = $pdo->query("SELECT * FROM requests WHERE status='PENDING' AND useLocalNetwork=0 ORDER BY createdAt ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
         if (!$req) respond(true, ['processed' => 0, 'message' => 'No pending requests']);
 
@@ -403,34 +476,56 @@ switch ($action) {
         if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
         if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
 
-        $videos = search_provider($pdo, $req['query'], (int)$settings['batchSize']);
-        $count = 0;
-        $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+        // If it looks like a YouTube URL and YT is enabled
+        if (!empty($settings['enableYoutube']) && (strpos($req['query'], 'youtube.com') !== false || strpos($req['query'], 'youtu.be') !== false)) {
+             // YT-DLP Logic
+             $ytPath = !empty($settings['ytDlpPath']) ? $settings['ytDlpPath'] : './yt-dlp';
+             $vName = uniqid('auto_yt_');
+             $vPath = UPLOAD_DIR . $vName . '.mp4';
+             $cmd = "$ytPath -f \"bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best\" -o \"$vPath\" --write-thumbnail --convert-thumbnails jpg \"{$req['query']}\"";
+             exec($cmd);
+             $count = 0;
+             if (file_exists($vPath)) {
+                 $tPath = THUMB_DIR . $vName . '.jpg';
+                 $matches = glob(UPLOAD_DIR . $vName . ".*");
+                 foreach($matches as $m) { if (strpos($m, '.jpg') !== false || strpos($m, '.webp') !== false) { rename($m, $tPath); break; } }
+                 
+                 $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', 0)")
+                    ->execute(['v_'.uniqid(), 'Queue Import', "Source: {$req['query']}", 1, '/api/'.$tPath, '/api/'.$vPath, $adminId, time()*1000]);
+                 $count = 1;
+             }
+        } else {
+            // PEXELS / PIXABAY Logic
+            $videos = search_provider($pdo, $req['query'], (int)$settings['batchSize'], 'STOCK');
+            $count = 0;
+            $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
 
-        foreach ($videos as $v) {
-            try {
-                $vFilename = uniqid('auto_').'.mp4';
-                $vPath = UPLOAD_DIR . $vFilename;
-                
-                if (download_url($v['downloadUrl'], $vPath)) {
-                    $tFilename = uniqid('thumb_').'.jpg';
-                    $tPath = THUMB_DIR . $tFilename;
-                    download_url($v['thumbnail'], $tPath); 
+            foreach ($videos as $v) {
+                try {
+                    $vFilename = uniqid('auto_').'.mp4';
+                    $vPath = UPLOAD_DIR . $vFilename;
+                    
+                    if (download_url($v['downloadUrl'], $vPath)) {
+                        $tFilename = uniqid('thumb_').'.jpg';
+                        $tPath = THUMB_DIR . $tFilename;
+                        download_url($v['thumbnail'], $tPath); 
 
-                    $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)")
-                    ->execute([
-                        'v_'.uniqid(), 
-                        $v['title'], 
-                        "Imported from {$v['source']} ({$req['query']})", 
-                        1, 
-                        '/api/'.$tPath, 
-                        '/api/'.$vPath, 
-                        $adminId, 
-                        time()*1000
-                    ]);
-                    $count++;
-                }
-            } catch (Exception $e) {}
+                        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', ?)")
+                        ->execute([
+                            'v_'.uniqid(), 
+                            $v['title'], 
+                            "Imported from {$v['source']} ({$req['query']})", 
+                            1, 
+                            '/api/'.$tPath, 
+                            '/api/'.$vPath, 
+                            $adminId, 
+                            time()*1000,
+                            $v['duration']
+                        ]);
+                        $count++;
+                    }
+                } catch (Exception $e) {}
+            }
         }
 
         $newStatus = $count > 0 ? 'COMPLETED' : 'FAILED';

@@ -25,7 +25,7 @@ const MOCK_VIDEOS: Video[] = [
 
 export interface VideoResult {
   id: string;
-  source: 'Pexels' | 'Pixabay';
+  source: 'Pexels' | 'Pixabay' | 'YouTube';
   thumbnail: string;
   title: string;
   duration?: number;
@@ -211,7 +211,14 @@ class DatabaseService {
   async getSystemSettings(): Promise<SystemSettings> { return this.request<SystemSettings>('/index.php?action=get_system_settings'); }
   async updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> { await this.request('/index.php?action=update_system_settings', 'POST', { settings }); }
   async triggerQueueProcessing(): Promise<{ processed: number, message: string }> { return this.request<{ processed: number, message: string }>('/index.php?action=process_queue', 'POST', {}); }
-  async searchExternal(query: string): Promise<VideoResult[]> { return this.request<VideoResult[]>('/index.php?action=search_external', 'POST', { query }); }
+  
+  async searchExternal(query: string, source: 'STOCK' | 'YOUTUBE' = 'STOCK'): Promise<VideoResult[]> { 
+    return this.request<VideoResult[]>('/index.php?action=search_external', 'POST', { query, source }); 
+  }
+  
+  async serverImportVideo(url: string): Promise<void> {
+    await this.request('/index.php?action=server_import_video', 'POST', { url });
+  }
 }
 
 export const db = new DatabaseService();

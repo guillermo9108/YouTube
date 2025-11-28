@@ -94,4 +94,6 @@ export interface SystemSettings {
   maxResolution: number;     
   pexelsKey: string;
   pixabayKey: string;
+  ytDlpPath: string;    // New: Path to yt-dlp binary
+  enableYoutube: boolean; // New: Toggle for YouTube features
 }
