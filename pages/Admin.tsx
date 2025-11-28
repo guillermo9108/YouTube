@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, AlertTriangle, ExternalLink, Key } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2 } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -12,6 +12,7 @@ export default function Admin() {
   const [amount, setAmount] = useState<number>(10);
   
   // Maintenance State
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [repairing, setRepairing] = useState(false);
   const [requests, setRequests] = useState<ContentRequest[]>([]);
   const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG'>('USERS');
@@ -23,8 +24,17 @@ export default function Admin() {
   }, []);
 
   const loadData = async () => {
-    db.getAllUsers().then(setUsers);
-    db.getRequests().then(setRequests);
+    setLoadingUsers(true);
+    try {
+        const u = await db.getAllUsers();
+        setUsers(u || []);
+        const r = await db.getRequests();
+        setRequests(r || []);
+    } catch(e) {
+        console.error("Admin Load Error", e);
+    } finally {
+        setLoadingUsers(false);
+    }
   };
 
   const handleAddCredit = async (targetId: string, username: string) => {
@@ -214,19 +224,43 @@ export default function Admin() {
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                    {filteredUsers.map(u => (
-                    <tr key={u.id}>
-                        <td className="p-4 font-bold text-slate-200">{u.username}</td>
-                        <td className="p-4 text-right font-mono text-indigo-300">{u.balance}</td>
-                        <td className="p-4 flex justify-center">
-                            <button onClick={() => handleAddCredit(u.id, u.username)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-2">
-                                <PlusCircle size={16} /> Add {amount}
-                            </button>
-                        </td>
-                    </tr>
-                    ))}
+                    {loadingUsers ? (
+                         <tr><td colSpan={3} className="p-10 text-center text-slate-500"><Loader2 className="animate-spin mx-auto"/> Loading users...</td></tr>
+                    ) : (
+                        filteredUsers.length === 0 ? (
+                            <tr><td colSpan={3} className="p-10 text-center text-slate-500">No users found.</td></tr>
+                        ) : (
+                            filteredUsers.map(u => (
+                            <tr key={u.id}>
+                                <td className="p-4 font-bold text-slate-200 flex items-center gap-2"><UserIcon size={16}/> {u.username} <span className="text-[10px] bg-slate-800 px-1 rounded text-slate-500">{u.role}</span></td>
+                                <td className="p-4 text-right font-mono text-indigo-300">{u.balance}</td>
+                                <td className="p-4 flex justify-center">
+                                    <button onClick={() => handleAddCredit(u.id, u.username)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-2">
+                                        <PlusCircle size={16} /> Add {amount}
+                                    </button>
+                                </td>
+                            </tr>
+                            ))
+                        )
+                    )}
                 </tbody>
                 </table>
+            </div>
+            
+            {/* Mobile List View */}
+            <div className="md:hidden space-y-4">
+                {loadingUsers && <div className="text-center p-4"><Loader2 className="animate-spin mx-auto text-indigo-500"/></div>}
+                {!loadingUsers && filteredUsers.map(u => (
+                     <div key={u.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                         <div className="flex justify-between items-center mb-3">
+                             <span className="font-bold text-white">{u.username}</span>
+                             <span className="font-mono text-indigo-400">{u.balance} Saldo</span>
+                         </div>
+                         <button onClick={() => handleAddCredit(u.id, u.username)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
+                             <PlusCircle size={16} /> Add {amount} Credits
+                         </button>
+                     </div>
+                ))}
             </div>
         </>
       )}

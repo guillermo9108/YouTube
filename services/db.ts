@@ -43,7 +43,7 @@ export interface VideoResult {
   duration?: number;
   downloadUrl: string;
   author: string;
-  originalUrl: string;
+  originalUrl?: string;
 }
 
 class DatabaseService {
@@ -96,7 +96,6 @@ class DatabaseService {
             json = JSON.parse(text);
         } catch (e) {
             if (!silent) console.error("Invalid API Response:", text.substring(0, 100));
-            // Return raw text if debugging, or throw generic error
             throw new Error(`Invalid JSON from API: ${text.substring(0, 50)}...`);
         }
         
@@ -129,7 +128,8 @@ class DatabaseService {
     if (endpoint.includes('get_video')) return MOCK_VIDEOS[0] as T;
     if (endpoint.includes('has_purchased')) return { hasPurchased: true } as T;
     if (endpoint.includes('get_interaction')) return { liked: false, disliked: false, isWatched: false, userId: 'demo', videoId: 'demo' } as T;
-    
+    if (endpoint.includes('get_all_users')) return [{id: 'demo', username: 'DemoUser', role: 'ADMIN', balance: 500}] as T;
+
     // Default success for actions
     return {} as T;
   }
@@ -318,7 +318,13 @@ class DatabaseService {
   }
 
   async getAllUsers(): Promise<User[]> { 
-    return this.request<User[]>('/index.php?action=get_all_users');
+    try {
+       const u = await this.request<User[]>('/index.php?action=get_all_users');
+       return Array.isArray(u) ? u : [];
+    } catch (e) {
+       console.warn("Failed to fetch users", e);
+       return [];
+    }
   }
   
   async adminAddBalance(adminId: string, targetUserId: string, amount: number): Promise<void> {

@@ -32,6 +32,69 @@ try {
 $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
+// --- Helper: Search Logic (Shared) ---
+function search_provider($pdo, $query, $limit = 5) {
+    $settings = $pdo->query("SELECT pexelsKey, pixabayKey FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
+    $results = [];
+
+    // PEXELS
+    if (!empty($settings['pexelsKey'])) {
+        $ch = curl_init("https://api.pexels.com/videos/search?query=".urlencode($query)."&per_page=".$limit);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: ".$settings['pexelsKey']]);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        $res = json_decode(curl_exec($ch), true);
+        curl_close($ch);
+        if (!empty($res['videos'])) {
+            foreach ($res['videos'] as $v) {
+                $files = $v['video_files'] ?? [];
+                // Prioritize SD/HD width < 1300 for audio support if possible
+                $target = null;
+                foreach($files as $f) {
+                    if (($f['quality'] == 'sd' || $f['quality'] == 'hd') && $f['width'] < 1300 && $f['width'] > 600) { $target=$f; break; }
+                }
+                if(!$target && !empty($files)) $target=$files[0];
+                
+                if($target) {
+                    $results[] = [
+                        'source' => 'Pexels',
+                        'id' => 'pex-'.$v['id'],
+                        'title' => 'Pexels Video '.$v['id'],
+                        'thumbnail' => $v['image'],
+                        'downloadUrl' => $target['link'],
+                        'duration' => $v['duration'],
+                        'author' => $v['user']['name']
+                    ];
+                }
+            }
+        }
+    }
+
+    // PIXABAY
+    if (!empty($settings['pixabayKey'])) {
+        $ch = curl_init("https://pixabay.com/api/videos/?key=".$settings['pixabayKey']."&q=".urlencode($query)."&per_page=".$limit);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        $res = json_decode(curl_exec($ch), true);
+        curl_close($ch);
+        if (!empty($res['hits'])) {
+            foreach ($res['hits'] as $v) {
+                $var = $v['videos']['medium'] ?? $v['videos']['small'];
+                $results[] = [
+                    'source' => 'Pixabay',
+                    'id' => 'pix-'.$v['id'],
+                    'title' => $v['tags'],
+                    'thumbnail' => "https://i.vimeocdn.com/video/{$v['picture_id']}_640x360.jpg",
+                    'downloadUrl' => $var['url'],
+                    'duration' => $v['duration'],
+                    'author' => $v['user']
+                ];
+            }
+        }
+    }
+    return $results;
+}
+
 switch ($action) {
     case 'login':
         $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
@@ -67,9 +130,10 @@ switch ($action) {
         break;
 
     case 'get_all_users':
-        // Missing endpoint fixed
         $stmt = $pdo->query("SELECT id, username, role, balance FROM users ORDER BY username ASC");
-        respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // Ensure we return an empty array [] instead of null/false if no users
+        respond(true, $users ?: []);
         break;
 
     case 'admin_add_balance':
@@ -121,6 +185,11 @@ switch ($action) {
         if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
         if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
         
+        // Prevent Duplicates
+        $dup = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE title = ? AND creatorId = ?");
+        $dup->execute([$_POST['title'], $_POST['creatorId']]);
+        if ($dup->fetchColumn() > 0) respond(false, null, 'Video already exists');
+        
         $vName = uniqid('vid_') . '.mp4';
         move_uploaded_file($_FILES['video']['tmp_name'], UPLOAD_DIR . $vName);
         
@@ -137,6 +206,8 @@ switch ($action) {
         try {
             $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY DEFAULT 1, downloadStartTime VARCHAR(10) DEFAULT '01:00', downloadEndTime VARCHAR(10) DEFAULT '06:00', isQueuePaused TINYINT(1) DEFAULT 0, batchSize INT DEFAULT 5, maxDuration INT DEFAULT 600, maxResolution INT DEFAULT 1080, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255))");
             $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
+            
+            $pdo->exec("CREATE TABLE IF NOT EXISTS requests (id VARCHAR(50) PRIMARY KEY, userId VARCHAR(50), query VARCHAR(255), status ENUM('PENDING','PROCESSING','COMPLETED','FAILED','MANUAL_UPLOAD') DEFAULT 'PENDING', createdAt BIGINT, useLocalNetwork TINYINT(1) DEFAULT 0)");
             
             try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN batchSize INT DEFAULT 5"); } catch(Exception $e) {}
             try { $pdo->exec("ALTER TABLE system_settings ADD COLUMN pexelsKey VARCHAR(255)"); } catch(Exception $e) {}
@@ -167,69 +238,13 @@ switch ($action) {
         break;
 
     case 'search_external':
-        $query = $input['query'];
-        $settings = $pdo->query("SELECT pexelsKey, pixabayKey FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
-        $results = [];
-
-        // PEXELS
-        if (!empty($settings['pexelsKey'])) {
-            $ch = curl_init("https://api.pexels.com/videos/search?query=".urlencode($query)."&per_page=6");
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: ".$settings['pexelsKey']]);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // FIX: For localhost
-            $res = json_decode(curl_exec($ch), true);
-            curl_close($ch);
-            if (!empty($res['videos'])) {
-                foreach ($res['videos'] as $v) {
-                    $files = $v['video_files'] ?? [];
-                    // Smart Select: SD or Medium to ensure Audio, avoid Tiny
-                    $target = null;
-                    foreach($files as $f) {
-                        if (($f['quality'] == 'sd' || $f['quality'] == 'hd') && $f['width'] < 1300) { $target=$f; break; }
-                    }
-                    if(!$target && !empty($files)) $target=$files[0];
-                    
-                    if($target) {
-                        $results[] = [
-                            'id' => 'pex-'.$v['id'],
-                            'source' => 'Pexels',
-                            'thumbnail' => $v['image'],
-                            'title' => 'Video '.$v['id'],
-                            'downloadUrl' => $target['link'],
-                            'author' => $v['user']['name']
-                        ];
-                    }
-                }
-            }
-        }
-
-        // PIXABAY
-        if (!empty($settings['pixabayKey'])) {
-            $ch = curl_init("https://pixabay.com/api/videos/?key=".$settings['pixabayKey']."&q=".urlencode($query)."&per_page=6");
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // FIX: For localhost
-            $res = json_decode(curl_exec($ch), true);
-            curl_close($ch);
-            if (!empty($res['hits'])) {
-                foreach ($res['hits'] as $v) {
-                    $var = $v['videos']['medium'] ?? $v['videos']['small'] ?? $v['videos']['tiny'];
-                    $results[] = [
-                        'id' => 'pix-'.$v['id'],
-                        'source' => 'Pixabay',
-                        'thumbnail' => "https://i.vimeocdn.com/video/{$v['picture_id']}_640x360.jpg",
-                        'title' => $v['tags'],
-                        'downloadUrl' => $var['url'],
-                        'author' => $v['user']
-                    ];
-                }
-            }
-        }
-        
+        $results = search_provider($pdo, $input['query'], 6);
         respond(true, $results);
         break;
 
     case 'get_requests':
-        respond(true, $pdo->query("SELECT r.*, u.username FROM requests r LEFT JOIN users u ON r.userId = u.id ORDER BY r.createdAt DESC")->fetchAll(PDO::FETCH_ASSOC));
+        $r = $pdo->query("SELECT r.*, u.username FROM requests r LEFT JOIN users u ON r.userId = u.id ORDER BY r.createdAt DESC")->fetchAll(PDO::FETCH_ASSOC);
+        respond(true, $r ?: []);
         break;
 
     case 'request_content':
@@ -244,9 +259,67 @@ switch ($action) {
         break;
         
     case 'process_queue':
-        // Auto download logic handled by server (same CURL logic)
-        // Kept simple here for brevity, assumes configured correctly
-        respond(true, ['processed' => 0, 'message' => 'Queue checked']);
+        // 1. Get Settings
+        $settings = $pdo->query("SELECT * FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
+        if ($settings['isQueuePaused']) respond(true, ['processed' => 0, 'message' => 'Queue paused']);
+
+        // 2. Find Pending Request
+        $req = $pdo->query("SELECT * FROM requests WHERE status='PENDING' AND useLocalNetwork=0 ORDER BY createdAt ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        if (!$req) respond(true, ['processed' => 0, 'message' => 'No pending requests']);
+
+        // 3. Mark Processing
+        $pdo->prepare("UPDATE requests SET status='PROCESSING' WHERE id=?")->execute([$req['id']]);
+
+        if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
+        if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
+
+        // 4. Search and Download
+        $videos = search_provider($pdo, $req['query'], (int)$settings['batchSize']);
+        $count = 0;
+        
+        // Admin ID for Creator assignment (or use a System user)
+        $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+
+        foreach ($videos as $v) {
+            try {
+                // Download Video
+                $vFilename = uniqid('auto_').'.mp4';
+                $vPath = UPLOAD_DIR . $vFilename;
+                
+                // Use copy() to download file from URL
+                if (copy($v['downloadUrl'], $vPath)) {
+                    
+                    // Download Thumbnail
+                    $tFilename = uniqid('thumb_').'.jpg';
+                    $tPath = THUMB_DIR . $tFilename;
+                    if (!copy($v['thumbnail'], $tPath)) {
+                         $tPath = THUMB_DIR . 'placeholder.jpg'; // Fallback
+                    }
+
+                    // Insert into DB
+                    $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0)")
+                    ->execute([
+                        'v_'.uniqid(), 
+                        $v['title'], 
+                        "Auto-imported from {$v['source']} for request: {$req['query']}", 
+                        1, // Default price
+                        '/api/'.$tPath, 
+                        '/api/'.$vPath, 
+                        $adminId, 
+                        time()*1000
+                    ]);
+                    $count++;
+                }
+            } catch (Exception $e) {
+                // Continue to next video on error
+            }
+        }
+
+        // 5. Complete
+        $newStatus = $count > 0 ? 'COMPLETED' : 'FAILED';
+        $pdo->prepare("UPDATE requests SET status=? WHERE id=?")->execute([$newStatus, $req['id']]);
+
+        respond(true, ['processed' => $count, 'message' => "Downloaded $count videos for '{$req['query']}'"]);
         break;
 
     default: respond(false, null, 'Invalid action');
