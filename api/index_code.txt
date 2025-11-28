@@ -166,6 +166,14 @@ switch ($action) {
         respond(true, $users ?: []);
         break;
 
+    case 'update_user':
+        $uid = $input['userId']; $upd = $input['updates'];
+        if (isset($upd['autoPurchaseLimit'])) {
+            $pdo->prepare("UPDATE users SET autoPurchaseLimit = ? WHERE id = ?")->execute([$upd['autoPurchaseLimit'], $uid]);
+        }
+        respond(true);
+        break;
+
     case 'admin_add_balance':
         $aid = $input['adminId']; $tid = $input['targetUserId']; $amt = $input['amount'];
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amt, $tid]);
@@ -188,6 +196,14 @@ switch ($action) {
         if ($v) respond(true, $v);
         else respond(false, null, "Video not found");
         break;
+    
+    case 'get_related_videos':
+        $id = $_GET['id'];
+        // Simple logic: random 5 videos that aren't this one
+        $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? ORDER BY RAND() LIMIT 5");
+        $stmt->execute([$id]);
+        respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        break;
 
     case 'has_purchased':
         $uid = $_GET['userId']; $vid = $_GET['videoId'];
@@ -196,6 +212,51 @@ switch ($action) {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ?");
         $stmt->execute([$uid, $vid]);
         respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);
+        break;
+
+    case 'get_interaction':
+        $uid = $_GET['userId']; $vid = $_GET['videoId'];
+        $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId=? AND videoId=?");
+        $stmt->execute([$uid, $vid]);
+        $res = $stmt->fetch(PDO::FETCH_ASSOC);
+        if(!$res) $res = ['userId'=>$uid, 'videoId'=>$vid, 'liked'=>0, 'disliked'=>0, 'isWatched'=>0];
+        $res['liked'] = (bool)$res['liked'];
+        $res['disliked'] = (bool)$res['disliked'];
+        $res['isWatched'] = (bool)$res['isWatched'];
+        respond(true, $res);
+        break;
+
+    case 'toggle_like':
+        $uid = $input['userId']; $vid = $input['videoId']; $isLike = $input['isLike'];
+        $pdo->prepare("INSERT IGNORE INTO interactions (userId, videoId) VALUES (?, ?)")->execute([$uid, $vid]);
+        $pdo->prepare("UPDATE interactions SET liked = ? WHERE userId = ? AND videoId = ?")->execute([$isLike?1:0, $uid, $vid]);
+        $count = $pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId='$vid' AND liked=1")->fetchColumn();
+        $pdo->prepare("UPDATE videos SET likes = ? WHERE id = ?")->execute([$count, $vid]);
+        $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId=? AND videoId=?");
+        $stmt->execute([$uid, $vid]);
+        $res = $stmt->fetch(PDO::FETCH_ASSOC);
+        $res['liked'] = (bool)$res['liked'];
+        $res['disliked'] = (bool)$res['disliked'];
+        $res['isWatched'] = (bool)$res['isWatched'];
+        respond(true, $res);
+        break;
+
+    case 'mark_watched':
+        $uid = $input['userId']; $vid = $input['videoId'];
+        $pdo->prepare("INSERT IGNORE INTO interactions (userId, videoId) VALUES (?, ?)")->execute([$uid, $vid]);
+        $pdo->prepare("UPDATE interactions SET isWatched = 1 WHERE userId = ? AND videoId = ?")->execute([$uid, $vid]);
+        $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$vid]);
+        respond(true);
+        break;
+
+    case 'toggle_watch_later':
+        $uid = $input['userId']; $vid = $input['videoId'];
+        $user = $pdo->query("SELECT watchLater FROM users WHERE id='$uid'")->fetch(PDO::FETCH_ASSOC);
+        $list = json_decode($user['watchLater'] ?? '[]', true);
+        if (in_array($vid, $list)) { $list = array_values(array_diff($list, [$vid])); } 
+        else { $list[] = $vid; }
+        $pdo->prepare("UPDATE users SET watchLater = ? WHERE id = ?")->execute([json_encode($list), $uid]);
+        respond(true, ['list' => $list]);
         break;
 
     case 'purchase_video':
@@ -213,6 +274,21 @@ switch ($action) {
             respond(true);
         }
         respond(false, null, 'Insufficient balance');
+        break;
+        
+    case 'get_comments':
+        $vid = $_GET['videoId'];
+        $stmt = $pdo->prepare("SELECT c.*, u.username FROM comments c LEFT JOIN users u ON c.userId = u.id WHERE c.videoId = ? ORDER BY c.timestamp DESC");
+        $stmt->execute([$vid]);
+        respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        break;
+
+    case 'add_comment':
+        $cid = 'c_'.uniqid();
+        $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")
+            ->execute([$cid, $input['videoId'], $input['userId'], $input['text'], time()*1000]);
+        $u = $pdo->query("SELECT username FROM users WHERE id='{$input['userId']}'")->fetchColumn();
+        respond(true, ['id'=>$cid, 'videoId'=>$input['videoId'], 'userId'=>$input['userId'], 'username'=>$u, 'text'=>$input['text'], 'timestamp'=>time()*1000]);
         break;
 
     case 'upload_video':
@@ -234,6 +310,26 @@ switch ($action) {
             ->execute(['v_'.uniqid(), $_POST['title'], $_POST['description'], $_POST['price'], '/api/'.THUMB_DIR.$tName, '/api/'.UPLOAD_DIR.$vName, $_POST['creatorId'], time()*1000]);
         respond(true);
         break;
+    
+    case 'get_creator_videos':
+        $cid = $_GET['creatorId'];
+        $stmt = $pdo->prepare("SELECT * FROM videos WHERE creatorId = ? ORDER BY createdAt DESC");
+        $stmt->execute([$cid]);
+        respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        break;
+        
+    case 'update_prices_bulk':
+        $cid = $input['creatorId']; $p = $input['newPrice'];
+        $pdo->prepare("UPDATE videos SET price = ? WHERE creatorId = ?")->execute([$p, $cid]);
+        respond(true);
+        break;
+    
+    case 'get_transactions':
+        $uid = $_GET['userId'];
+        $stmt = $pdo->prepare("SELECT * FROM transactions WHERE buyerId = ? OR creatorId = ? ORDER BY timestamp DESC");
+        $stmt->execute([$uid, $uid]);
+        respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        break;
 
     case 'admin_repair_db':
         try {
@@ -244,7 +340,7 @@ switch ($action) {
             // Add columns safely
             $cols = [
                 "ALTER TABLE system_settings ADD COLUMN batchSize INT DEFAULT 5",
-                "ALTER TABLE system_settings ADD COLUMN pexelsKey VARCHAR(255)",
+                "ALTER TABLE system_settings ADD COLUMN pexelsKey VARCHAR(255",
                 "ALTER TABLE system_settings ADD COLUMN pixabayKey VARCHAR(255)",
                 "ALTER TABLE system_settings ADD COLUMN maxDuration INT DEFAULT 600",
                 "ALTER TABLE system_settings ADD COLUMN maxResolution INT DEFAULT 1080"

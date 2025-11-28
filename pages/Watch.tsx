@@ -12,8 +12,8 @@ const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) 
 
    useEffect(() => {
      if(userId) {
-        db.getInteraction(userId, rv.id).then(i => setWatched(i.isWatched));
-        db.hasPurchased(userId, rv.id).then(setPurchased);
+        db.getInteraction(userId, rv.id).then(i => setWatched(i.isWatched)).catch(() => {});
+        db.hasPurchased(userId, rv.id).then(setPurchased).catch(() => {});
      }
    }, [userId, rv.id]);
 
@@ -77,9 +77,12 @@ export default function Watch() {
         setErrorMsg('No Video ID provided');
         return;
     }
-    if (!user) return; // Wait for auth
-
+    
+    // Reset state
+    setVideo(null);
     setStatus('LOADING');
+    setErrorMsg('');
+
     try {
         const v = await db.getVideo(id);
         if (!v) {
@@ -87,20 +90,35 @@ export default function Watch() {
         }
         setVideo(v);
         
-        // Fetch auxiliary data
-        const [purchased, interact, comms, related] = await Promise.all([
-            db.hasPurchased(user.id, v.id),
-            db.getInteraction(user.id, v.id),
-            db.getComments(v.id),
-            db.getRelatedVideos(v.id)
-        ]);
+        // If user is logged in, fetch extra data carefully
+        // We use individual try-catches or allow failures so the video still plays
+        if (user) {
+            try {
+                const purchased = await db.hasPurchased(user.id, v.id);
+                setIsUnlocked(purchased);
+            } catch(e) { console.warn("Failed to check purchase", e); }
 
-        setIsUnlocked(purchased);
-        setInteraction(interact);
-        setComments(comms);
-        setRelatedVideos(related);
-        setIsWatchLater(user.watchLater.includes(v.id));
+            try {
+                const interact = await db.getInteraction(user.id, v.id);
+                setInteraction(interact);
+            } catch(e) { console.warn("Failed to check interaction", e); }
+            
+            if (user.watchLater) {
+                 setIsWatchLater(user.watchLater.includes(v.id));
+            }
+        }
         
+        // Public data
+        try {
+            const comms = await db.getComments(v.id);
+            setComments(comms || []);
+        } catch(e) { console.warn("Failed to load comments", e); }
+
+        try {
+            const related = await db.getRelatedVideos(v.id);
+            setRelatedVideos(related || []);
+        } catch(e) { console.warn("Failed to load related", e); }
+
         setStatus('READY');
     } catch (e: any) {
         console.error("Watch Load Error:", e);
@@ -282,19 +300,20 @@ export default function Watch() {
                     <div onClick={canAfford ? handlePurchase : undefined} className={`absolute inset-0 z-10 flex flex-col items-center justify-center bg-cover bg-center ${canAfford ? 'cursor-pointer' : ''}`} style={{backgroundImage: `url(${video.thumbnailUrl})`}}>
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity hover:bg-black/50" />
                         
-                        <div className="relative z-20 flex flex-col items-center p-6 bg-black/40 border border-white/10 rounded-2xl backdrop-blur-md shadow-2xl transform transition-transform active:scale-95">
-                             <div className="flex items-center gap-2 mb-2">
-                                <span className="text-4xl font-black text-amber-400 drop-shadow-lg">{video.price}</span>
-                                <span className="text-[10px] font-bold text-amber-200 uppercase mt-2">Saldo</span>
+                        {/* Smaller, centered purchase card */}
+                        <div className="relative z-20 flex flex-col items-center p-4 bg-black/40 border border-white/10 rounded-xl backdrop-blur-md shadow-2xl transform transition-transform active:scale-95">
+                             <div className="flex items-center gap-1 mb-1">
+                                <span className="text-3xl font-black text-amber-400 drop-shadow-lg">{video.price}</span>
+                                <span className="text-[10px] font-bold text-amber-200 uppercase mt-1">Saldo</span>
                              </div>
                              
                              <div className="flex items-center gap-2 text-white/90">
-                                {purchasing ? <RefreshCw className="animate-spin" size={16}/> : <Lock size={16}/>}
-                                <span className="font-bold text-xs uppercase tracking-wider">{purchasing ? 'Unlocking...' : (canAfford ? 'Tap to Unlock' : 'Locked')}</span>
+                                {purchasing ? <RefreshCw className="animate-spin" size={14}/> : <Lock size={14}/>}
+                                <span className="font-bold text-[10px] uppercase tracking-wider">{purchasing ? 'Unlocking...' : (canAfford ? 'Tap to Unlock' : 'Locked')}</span>
                              </div>
                              
                              {!canAfford && (
-                                 <div className="mt-3 text-[10px] bg-red-500/20 text-red-200 px-2 py-1 rounded border border-red-500/20">
+                                 <div className="mt-2 text-[9px] bg-red-500/20 text-red-200 px-2 py-0.5 rounded border border-red-500/20">
                                      Insufficient Funds
                                  </div>
                              )}
