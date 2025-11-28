@@ -63,6 +63,7 @@ class DatabaseService {
     
     if (body instanceof FormData) {
         requestBody = body;
+        // Do NOT set Content-Type header for FormData, browser sets it with boundary
     } else if (body) {
         headers['Content-Type'] = 'application/json';
         requestBody = JSON.stringify(body);
@@ -132,7 +133,8 @@ class DatabaseService {
             balance: 500,
             autoPurchaseLimit: 10,
             watchLater: [],
-            sessionToken: 'demo_token'
+            sessionToken: 'demo_token',
+            avatarUrl: null
         } as T;
     }
     if (endpoint.includes('get_videos')) return MOCK_VIDEOS as T;
@@ -178,9 +180,30 @@ class DatabaseService {
       } catch { return false; }
   }
 
-  async register(username: string, password: string): Promise<User> { return this.request<User>('index.php?action=register', 'POST', { username, password }); }
+  async register(username: string, password: string, avatar?: File | null): Promise<User> { 
+      const formData = new FormData();
+      formData.append('username', username);
+      formData.append('password', password);
+      if (avatar) formData.append('avatar', avatar);
+      
+      return this.request<User>('index.php?action=register', 'POST', formData); 
+  }
+
   async getUser(id: string): Promise<User | null> { try { return await this.request<User>(`index.php?action=get_user&id=${id}`); } catch (e) { return null; } }
+  
   async updateUserProfile(userId: string, updates: Partial<User>): Promise<void> { await this.request('index.php?action=update_user', 'POST', { userId, updates }); }
+  
+  async uploadAvatar(userId: string, file: File): Promise<string> {
+      const formData = new FormData();
+      formData.append('userId', userId);
+      formData.append('avatar', file);
+      const res = await this.request<{avatarUrl: string}>('index.php?action=update_avatar', 'POST', formData);
+      return res.avatarUrl;
+  }
+
+  async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> {
+      await this.request('index.php?action=change_password', 'POST', { userId, oldPass, newPass });
+  }
 
   async getAllVideos(): Promise<Video[]> { return this.request<Video[]>('index.php?action=get_videos'); }
   async getVideo(id: string): Promise<Video | undefined> { 

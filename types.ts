@@ -24,6 +24,7 @@ export interface User {
   autoPurchaseLimit: number; // Default 1
   watchLater: string[]; // Video IDs
   sessionToken?: string; // New: For single session enforcement
+  avatarUrl?: string; // New: Profile Picture
 }
 
 export interface Video {

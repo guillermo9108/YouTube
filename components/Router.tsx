@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const RouterContext = createContext<{ pathname: string }>({ pathname: '/' });
@@ -15,7 +16,8 @@ export function useNavigate() {
 
 export function useParams() {
   const { pathname } = useLocation();
-  const match = pathname.match(/\/watch\/([^/?]+)/);
+  // Fixed Regex to be more robust for URLs like /watch/ID?param=1
+  const match = pathname.match(/\/watch\/([^/?&]+)/);
   return match ? { id: match[1] } : {};
 }
 

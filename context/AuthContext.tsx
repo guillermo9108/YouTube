@@ -6,7 +6,7 @@ import { db } from '../services/db';
 interface AuthContextType {
   user: User | null;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string, avatar?: File | null) => Promise<void>;
   logout: () => void;
   refreshUser: () => void;
   isLoading: boolean;
@@ -97,10 +97,10 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     }
   };
 
-  const register = async (username: string, password: string) => {
+  const register = async (username: string, password: string, avatar?: File | null) => {
     setIsLoading(true);
     try {
-        const u = await db.register(username, password);
+        const u = await db.register(username, password, avatar);
         setUser(u);
         localStorage.setItem('sp_current_user_id', u.id);
         if (u.sessionToken) localStorage.setItem('sp_session_token', u.sessionToken);

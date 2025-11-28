@@ -74,7 +74,8 @@ if ($action === 'install') {
             autoPurchaseLimit DECIMAL(10, 2) DEFAULT 1.00,
             watchLater JSON,
             currentSessionId VARCHAR(64) DEFAULT NULL,
-            lastActive BIGINT DEFAULT 0
+            lastActive BIGINT DEFAULT 0,
+            avatarUrl VARCHAR(255) DEFAULT NULL
         )");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS videos (
@@ -167,6 +168,7 @@ if ($action === 'install') {
 
         if (!file_exists('uploads/videos')) mkdir('uploads/videos', 0777, true);
         if (!file_exists('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
+        if (!file_exists('uploads/avatars')) mkdir('uploads/avatars', 0777, true);
 
         respond(true, ['message' => 'Installation successful']);
 

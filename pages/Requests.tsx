@@ -1,14 +1,16 @@
 
 import React, { useState } from 'react';
-import { DownloadCloud, Search, Check, Loader2, Server, Globe, Clock, Trash2, Youtube, Image as ImageIcon } from 'lucide-react';
+import { DownloadCloud, Search, Check, Loader2, Server, Globe, Clock, Trash2, Youtube, Image as ImageIcon, Layers } from 'lucide-react';
 import { db, VideoResult } from '../services/db';
 import { ContentRequest, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from '../components/Router';
 import { generateThumbnail } from './Upload';
+import { useUpload } from '../context/UploadContext';
 
 export default function Requests() {
   const { user } = useAuth();
+  const { addToQueue } = useUpload();
   const navigate = useNavigate();
   
   const [activeTab, setActiveTab] = useState<'INSTANT' | 'QUEUE'>('INSTANT');
@@ -56,12 +58,13 @@ export default function Requests() {
      try {
         let count = 1;
         const total = selectedVideos.length;
+        const uploadQueue = [];
 
         for (const id of selectedVideos) {
             const videoData = results.find(r => r.id === id);
             if (!videoData) continue;
 
-            // YOUTUBE SERVER SIDE IMPORT
+            // YOUTUBE SERVER SIDE IMPORT (Direct Trigger)
             if (source === 'YOUTUBE') {
                 setProgressMsg(`(${count}/${total}) Requesting server download...`);
                 await db.serverImportVideo(videoData.downloadUrl);
@@ -69,35 +72,42 @@ export default function Requests() {
                 continue;
             }
 
-            // STOCK CLIENT SIDE IMPORT
-            const safeTitle = (query + ' ' + count).replace(/[^a-z0-9 ]/gi, '');
+            // STOCK CLIENT SIDE IMPORT (Prepare for Background Queue)
+            const safeTitle = (videoData.title || query + ' ' + count).replace(/[^a-z0-9 \-_]/gi, '').substring(0, 50);
             setUploadPercent(0);
             setProgressMsg(`(${count}/${total}) Downloading source...`);
             
+            // 1. Download Blob
             const response = await fetch(videoData.downloadUrl);
             if (!response.ok) throw new Error(`Failed to download video file`);
             const blob = await response.blob();
             const file = new File([blob], `${safeTitle}.mp4`, { type: 'video/mp4' });
             
-            setProgressMsg(`(${count}/${total}) Generating Thumbnail...`);
-            // generateThumbnail now returns { thumbnail, duration }
+            // 2. Generate Thumbnail & Duration
+            setProgressMsg(`(${count}/${total}) Generating Metadata...`);
             const { thumbnail, duration } = await generateThumbnail(file);
 
-            setProgressMsg(`(${count}/${total}) Uploading to server...`);
-            await db.uploadVideo(
-                videoData.title || safeTitle, 
-                `Imported from ${videoData.source}. By ${videoData.author}.`, 
-                1, 
-                VideoCategory.OTHER, // Default category for imports
-                duration,
-                user, 
-                file, 
-                thumbnail,
-                (pct) => setUploadPercent(pct)
-            );
+            // 3. Add to Queue Array
+            uploadQueue.push({
+                title: safeTitle,
+                description: `Imported from ${videoData.source}. By ${videoData.author}.`,
+                price: 1,
+                category: VideoCategory.OTHER,
+                duration: duration || videoData.duration || 0,
+                file: file,
+                thumbnail: thumbnail
+            });
+            
             count++;
         }
-        alert("Import successful!");
+
+        // If we have items for the background queue
+        if (uploadQueue.length > 0) {
+            setProgressMsg("Adding to background queue...");
+            await addToQueue(uploadQueue, user);
+        }
+
+        alert(source === 'YOUTUBE' ? "Server import started!" : "Videos added to upload queue! You can browse while they upload.");
         navigate('/');
      } catch (e: any) {
          alert("Error during import: " + e.message);
@@ -203,8 +213,8 @@ export default function Requests() {
                    <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4">
                       <div className="text-sm text-slate-300">Ready to import <strong className="text-white">{selectedVideos.length}</strong> videos.</div>
                       <button onClick={processDownloads} disabled={selectedVideos.length === 0 || processing} className={`px-6 py-3 rounded-lg font-bold disabled:opacity-50 flex items-center gap-2 text-white ${source === 'YOUTUBE' ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
-                         {processing ? <Loader2 className="animate-spin" size={20} /> : (source === 'YOUTUBE' ? <Server size={20}/> : <DownloadCloud size={20} />)}
-                         {processing ? 'Processing...' : (source === 'YOUTUBE' ? 'Server Import' : 'Start Import')}
+                         {processing ? <Loader2 className="animate-spin" size={20} /> : (source === 'YOUTUBE' ? <Server size={20}/> : <Layers size={20} />)}
+                         {processing ? 'Processing...' : (source === 'YOUTUBE' ? 'Server Import' : 'Queue Import')}
                       </button>
                    </div>
                 </div>
@@ -246,9 +256,8 @@ export default function Requests() {
          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-slate-900 p-8 rounded-2xl border border-slate-700 text-center max-w-sm w-full">
                <Loader2 size={48} className="text-emerald-500 animate-spin mx-auto mb-6" />
-               <h3 className="text-xl font-bold text-white mb-2">{source === 'YOUTUBE' ? 'Server Download' : 'Importing'}</h3>
+               <h3 className="text-xl font-bold text-white mb-2">{source === 'YOUTUBE' ? 'Server Download' : 'Preparing Upload'}</h3>
                <p className="text-emerald-400 font-mono text-sm mb-4">{progressMsg}</p>
-               {uploadPercent > 0 && <div className="w-full bg-slate-800 rounded-full h-3 overflow-hidden mb-2"><div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${uploadPercent}%` }}></div></div>}
             </div>
          </div>
       )}

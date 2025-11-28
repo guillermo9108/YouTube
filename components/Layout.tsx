@@ -61,6 +61,14 @@ export default function Layout() {
   // Check if we are in shorts mode to remove padding/container limits
   const isShortsMode = location.pathname === '/shorts';
 
+  const Avatar = ({ size=24, className='' }: {size?: number, className?: string}) => (
+      user?.avatarUrl ? (
+          <img src={user.avatarUrl} alt={user.username} className={`rounded-full object-cover ${className}`} style={{width: size, height: size}} />
+      ) : (
+          <User size={size} className={className} />
+      )
+  );
+
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       {/* Top Bar for Desktop */}
@@ -79,7 +87,10 @@ export default function Layout() {
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
           <Link to="/requests" className={isActive('/requests')}>Requests</Link>
           <Link to="/upload" className={isActive('/upload')}>Upload</Link>
-          <Link to="/profile" className={isActive('/profile')}>Profile</Link>
+          <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>
+            <Avatar size={20} />
+            Profile
+          </Link>
         </div>
       </header>
 
@@ -116,7 +127,7 @@ export default function Layout() {
         )}
 
         <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>
-          <User size={22} />
+          <Avatar size={22} />
           <span className="text-[10px]">Profile</span>
         </Link>
       </nav>
