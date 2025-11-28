@@ -26,7 +26,14 @@ const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) 
       </div>
       <div className="min-w-0 py-1 flex flex-col justify-center">
          <h4 className="text-xs font-semibold text-slate-200 line-clamp-2 leading-tight group-hover:text-indigo-400 transition-colors">{rv.title}</h4>
-         <p className="text-[10px] text-slate-500 mt-1 truncate">{rv.creatorName}</p>
+         <div className="flex items-center gap-1.5 mt-1">
+             {rv.creatorAvatarUrl ? (
+                 <img src={rv.creatorAvatarUrl} className="w-3 h-3 rounded-full object-cover" alt="" />
+             ) : (
+                 <div className="w-3 h-3 rounded-full bg-slate-700 flex items-center justify-center text-[6px] text-white">{rv.creatorName?.[0]}</div>
+             )}
+             <p className="text-[10px] text-slate-500 truncate">{rv.creatorName}</p>
+         </div>
          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400"><span>{rv.views} views</span></div>
       </div>
     </Link>
@@ -209,6 +216,16 @@ export default function Watch() {
       setNewComment('');
   };
 
+  const handleLike = async () => {
+      if (!user || !video) return;
+      const res = await db.toggleLike(user.id, video.id, true);
+      setInteraction(res);
+      // Correctly update video likes from server response
+      if (res.newCount !== undefined) {
+          setVideo(prev => prev ? { ...prev, likes: res.newCount! } : null);
+      }
+  };
+
   // Initial Loading State (Only if no video data exists yet)
   if (loading && !video) return <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 text-slate-500"><RefreshCw className="animate-spin text-indigo-500" size={32} /><p>Loading video...</p></div>;
   
@@ -279,12 +296,21 @@ export default function Watch() {
                  <h1 className="text-lg md:text-xl font-bold text-white leading-tight break-words line-clamp-3 md:line-clamp-none">{video.title}</h1>
                  <div className="flex items-center justify-between mt-2">
                      <div className="flex items-center gap-3 text-xs text-slate-400">
-                         <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] text-white font-bold">{video.creatorName[0]}</div><span className="text-slate-300 font-medium">{video.creatorName}</span></div>
+                         {/* CREATOR AVATAR HERE */}
+                         <div className="flex items-center gap-2">
+                            {video.creatorAvatarUrl ? (
+                                <img src={video.creatorAvatarUrl} className="w-6 h-6 rounded-full object-cover border border-slate-700" alt={video.creatorName} />
+                            ) : (
+                                <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] text-white font-bold">{video.creatorName[0]}</div>
+                            )}
+                            <span className="text-slate-300 font-medium">{video.creatorName}</span>
+                         </div>
+                         
                          <span>{video.views} views</span>
                          <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] font-bold uppercase text-slate-500">{video.category || 'OTHER'}</span>
                      </div>
                      <div className="flex gap-2">
-                         <button onClick={() => user && db.toggleLike(user.id, video.id, true).then(setInteraction)} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${interaction?.liked ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}><ThumbsUp size={14}/> {video.likes + (interaction?.liked ? 1 : 0)}</button>
+                         <button onClick={handleLike} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${interaction?.liked ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}><ThumbsUp size={14}/> {video.likes}</button>
                          <button onClick={() => user && db.toggleWatchLater(user.id, video.id).then(l => setIsWatchLater(l.includes(video.id)))} className={`px-3 py-1.5 rounded-full transition-colors ${isWatchLater ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-800 text-slate-400'}`}><Clock size={14}/></button>
                      </div>
                  </div>
@@ -295,7 +321,7 @@ export default function Watch() {
              <div className="mt-4">
                  <h3 className="font-bold text-sm text-slate-300 mb-3 flex items-center gap-2"><MessageSquare size={14}/> Comments</h3>
                  <form onSubmit={postComment} className="flex gap-2 mb-4"><input type="text" value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Add a comment..." className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"/><button disabled={!newComment.trim()} type="submit" className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-500 disabled:opacity-50"><Send size={16}/></button></form>
-                 <div className="space-y-3">{comments.map(c => (<div key={c.id} className="flex gap-3"><div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500">{c.username[0]}</div><div><div className="flex gap-2 items-baseline"><span className="text-xs font-bold text-slate-300">{c.username}</span><span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span></div><p className="text-xs text-slate-400">{c.text}</p></div></div>))}</div>
+                 <div className="space-y-3">{comments.map(c => (<div key={c.id} className="flex gap-3"><div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 overflow-hidden border border-slate-700">{c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : c.username[0]}</div><div><div className="flex gap-2 items-baseline"><span className="text-xs font-bold text-slate-300">{c.username}</span><span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span></div><p className="text-xs text-slate-400">{c.text}</p></div></div>))}</div>
              </div>
         </div>
         <div>

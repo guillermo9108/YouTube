@@ -23,6 +23,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
   const [comments, setComments] = useState<Comment[]>([]);
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
+  const [likeCount, setLikeCount] = useState(video.likes); // Local state for immediate update
 
   // Load Interaction Data
   useEffect(() => {
@@ -115,6 +116,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     if (!user) return;
     const res = await db.toggleLike(user.id, video.id, true);
     setInteraction(res);
+    if (res.newCount !== undefined) setLikeCount(res.newCount);
   };
 
   const toggleMute = () => {
@@ -204,7 +206,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
              <Heart size={28} fill={interaction?.liked ? "currentColor" : "none"} />
           </button>
           <span className="text-xs font-bold text-white shadow-black drop-shadow-md">
-             {(video.likes || 0) + (interaction?.liked ? 1 : 0) - (interaction?.liked && video.likes > 0 ? 0 : 0)}
+             {likeCount}
           </span>
         </div>
 
@@ -231,9 +233,13 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
       {/* Bottom Info */}
       <div className="absolute bottom-[4.5rem] md:bottom-8 left-4 right-20 z-20 text-white">
          <div className="flex items-center gap-2 mb-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-bold border-2 border-white text-sm shadow-md">
-               {video.creatorName[0]}
-            </div>
+            {video.creatorAvatarUrl ? (
+                <img src={video.creatorAvatarUrl} className="w-10 h-10 rounded-full border-2 border-white object-cover" />
+            ) : (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-bold border-2 border-white text-sm shadow-md">
+                    {video.creatorName[0]}
+                </div>
+            )}
             <span className="font-bold text-sm md:text-base drop-shadow-md">{video.creatorName}</span>
             <button className="text-xs bg-white/20 backdrop-blur-md border border-white/30 px-3 py-1 rounded-full font-medium ml-2 hover:bg-white/30 transition-colors">Follow</button>
          </div>
@@ -243,7 +249,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
 
       {/* Comments Drawer */}
       {showComments && (
-        <div className="fixed inset-0 z-[60] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[100] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
            <div 
              className="w-full bg-slate-900 rounded-t-2xl h-[75%] md:h-[60%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom duration-300"
              onClick={(e) => e.stopPropagation()}
@@ -264,8 +270,8 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                  ) : (
                     comments.map(c => (
                       <div key={c.id} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2">
-                         <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 shrink-0 border border-slate-700">
-                           {c.username[0]}
+                         <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 shrink-0 border border-slate-700 overflow-hidden">
+                           {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : c.username[0]}
                          </div>
                          <div>
                             <div className="flex items-baseline gap-2">
@@ -279,7 +285,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                  )}
               </div>
 
-              <form onSubmit={postComment} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 pb-8 md:pb-4">
+              <form onSubmit={postComment} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 pb-safe">
                  <input 
                    type="text" 
                    value={newComment}
@@ -312,9 +318,9 @@ export default function Shorts() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Randomize videos for the feed feel
+    // Randomize videos for the feed feel, filter shorts (<10 mins)
     db.getAllVideos().then(all => {
-        setVideos(all.sort(() => Math.random() - 0.5));
+        setVideos(all.filter(v => v.duration < 600).sort(() => Math.random() - 0.5));
     });
   }, []);
 

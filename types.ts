@@ -43,6 +43,7 @@ export interface Video {
   category: VideoCategory; // New
   duration: number; // Seconds
   fileHash?: string; // New: MD5 Hash for deduplication
+  creatorAvatarUrl?: string;
 }
 
 export interface Transaction {
@@ -62,6 +63,7 @@ export interface Comment {
   username: string;
   text: string;
   timestamp: number;
+  userAvatarUrl?: string;
 }
 
 export interface UserInteraction {
@@ -70,6 +72,7 @@ export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
   isWatched: boolean;
+  newCount?: number; // Server returned total count
 }
 
 export interface AuthState {

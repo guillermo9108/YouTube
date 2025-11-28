@@ -40,7 +40,10 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, isUnlocked }) => {
         {/* Optimized for long titles: 2 lines max, then ellipsis */}
         <h3 className="font-semibold text-slate-100 line-clamp-2 leading-tight h-10 mb-1" title={video.title}>{video.title}</h3>
         <div className="flex justify-between items-center mt-2 text-xs text-slate-400">
-          <span className="truncate max-w-[60%]">{video.creatorName}</span>
+          <div className="flex items-center gap-2 max-w-[70%]">
+             {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-5 h-5 rounded-full object-cover"/> : <div className="w-5 h-5 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[8px] text-white">{video.creatorName[0]}</div>}
+             <span className="truncate">{video.creatorName}</span>
+          </div>
           <span className={isUnlocked ? 'text-emerald-400' : 'text-amber-400'}>{isUnlocked ? 'Purchased' : 'Locked'}</span>
         </div>
       </div>
