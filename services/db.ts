@@ -1,5 +1,5 @@
 
-import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory } from '../types';
 
 const API_BASE = '/api';
 
@@ -17,21 +17,9 @@ const MOCK_VIDEOS: Video[] = [
     views: 1205,
     createdAt: Date.now(),
     likes: 450,
-    dislikes: 12
-  },
-  {
-    id: 'demo_2',
-    title: 'Nature Documentary: Forests',
-    description: 'Relaxing views of the deep forest.',
-    price: 2,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-    creatorId: 'demo_creator',
-    creatorName: 'NatureChannel',
-    views: 890,
-    createdAt: Date.now() - 10000000,
-    likes: 230,
-    dislikes: 5
+    dislikes: 12,
+    category: VideoCategory.SHORT_FILM,
+    duration: 600
   }
 ];
 
@@ -63,7 +51,7 @@ class DatabaseService {
     }
 
     const headers: HeadersInit = {
-        'Cache-Control': 'no-cache', // Anti-caching header
+        'Cache-Control': 'no-cache', 
         'Pragma': 'no-cache'
     };
     
@@ -76,7 +64,6 @@ class DatabaseService {
         requestBody = JSON.stringify(body);
     }
 
-    // Add timestamp to GET requests to force fresh data
     const url = method === 'GET' 
        ? `${API_BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}_t=${Date.now()}` 
        : `${API_BASE}${endpoint}`;
@@ -188,16 +175,20 @@ class DatabaseService {
   async addComment(userId: string, videoId: string, text: string): Promise<Comment> { return this.request<Comment>('/index.php?action=add_comment', 'POST', { userId, videoId, text }); }
 
   async purchaseVideo(userId: string, videoId: string): Promise<void> { await this.request('/index.php?action=purchase_video', 'POST', { userId, videoId }); }
-  async uploadVideo(title: string, description: string, price: number, creator: User, file: File | null, thumbnail: File | null = null, onProgress?: (percent: number) => void): Promise<void> {
+  
+  async uploadVideo(title: string, description: string, price: number, category: VideoCategory, duration: number, creator: User, file: File | null, thumbnail: File | null = null, onProgress?: (percent: number) => void): Promise<void> {
     if (this.isDemoMode) { await new Promise(r => setTimeout(r, 1000)); return; }
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append('title', title);
         formData.append('description', description);
         formData.append('price', price.toString());
+        formData.append('category', category);
+        formData.append('duration', duration.toString());
         formData.append('creatorId', creator.id);
         if (file) formData.append('video', file);
         if (thumbnail) formData.append('thumbnail', thumbnail);
+        
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_BASE}/index.php?action=upload_video`, true);
         if (onProgress) { xhr.upload.onprogress = (e) => { if (e.lengthComputable) { onProgress(Math.round((e.loaded / e.total) * 100)); } }; }

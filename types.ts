@@ -4,6 +4,17 @@ export enum UserRole {
   ADMIN = 'ADMIN'
 }
 
+export enum VideoCategory {
+  SHORTS = 'SHORTS',
+  MUSIC = 'MUSIC',
+  SHORT_FILM = 'SHORT_FILM',
+  SERIES = 'SERIES',
+  NOVELAS = 'NOVELAS',
+  MOVIE = 'MOVIE',
+  EDUCATION = 'EDUCATION',
+  OTHER = 'OTHER'
+}
+
 export interface User {
   id: string;
   username: string;
@@ -25,9 +36,10 @@ export interface Video {
   creatorName: string;
   views: number;
   createdAt: number;
-  // Computed fields from DB
   likes: number;
   dislikes: number;
+  category: VideoCategory; // New
+  duration: number; // Seconds
 }
 
 export interface Transaction {
@@ -70,16 +82,16 @@ export interface ContentRequest {
   query: string;
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'MANUAL_UPLOAD';
   createdAt: number;
-  useLocalNetwork: boolean; // If true, backend skips download, user uploads manually
+  useLocalNetwork: boolean; 
 }
 
 export interface SystemSettings {
-  downloadStartTime: string; // "01:00"
-  downloadEndTime: string;   // "06:00"
+  downloadStartTime: string; 
+  downloadEndTime: string;   
   isQueuePaused: boolean;
-  batchSize: number;         // Videos to download per run
-  maxDuration: number;       // Seconds
-  maxResolution: number;     // Height (e.g. 720, 1080)
+  batchSize: number;         
+  maxDuration: number;       
+  maxResolution: number;     
   pexelsKey: string;
   pixabayKey: string;
 }

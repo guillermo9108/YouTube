@@ -1,5 +1,6 @@
+
 import React, { useEffect, useState, useMemo } from 'react';
-import { ArrowDownWideNarrow } from 'lucide-react';
+import { ArrowDownWideNarrow, Flame } from 'lucide-react';
 import { db } from '../services/db';
 import { Video } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +29,18 @@ export default function Home() {
     }
   }, [user, videos]);
 
+  // Calculate Trending Videos (Weighted score: Views + Likes * 5)
+  const trendingVideos = useMemo(() => {
+    if (videos.length === 0) return [];
+    return [...videos]
+      .sort((a, b) => {
+        const scoreA = a.views + (a.likes * 5);
+        const scoreB = b.views + (b.likes * 5);
+        return scoreB - scoreA;
+      })
+      .slice(0, 5); // Top 5
+  }, [videos]);
+
   const sortedVideos = useMemo(() => {
     const sorted = [...videos];
     switch (sortOption) {
@@ -42,11 +55,37 @@ export default function Home() {
     }
   }, [videos, sortOption]);
 
+  const isUnlocked = (videoId: string, creatorId: string) => {
+    return purchases.includes(videoId) || (user?.id === creatorId);
+  };
+
   return (
-    <div>
-      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div className="pb-10">
+      
+      {/* Trending Section */}
+      {trendingVideos.length > 0 && (
+        <div className="mb-10 animate-in fade-in slide-in-from-top-4 duration-500">
+          <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+            <Flame className="text-orange-500" fill="currentColor" size={24} /> 
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-orange-400 to-red-500">Trending Now</span>
+          </h2>
+          <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide snap-x -mx-4 px-4 md:mx-0 md:px-0">
+            {trendingVideos.map(video => (
+              <div key={`trend-${video.id}`} className="w-72 shrink-0 snap-start">
+                <VideoCard 
+                  video={video} 
+                  isUnlocked={isUnlocked(video.id, video.creatorId)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Main Grid Header */}
+      <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 border-t border-slate-800 pt-8">
          <div>
-          <h2 className="text-2xl font-bold text-white">Featured Videos</h2>
+          <h2 className="text-2xl font-bold text-white">All Videos</h2>
           <p className="text-slate-400 text-sm">Discover exclusive content using Saldo.</p>
          </div>
          
@@ -81,7 +120,7 @@ export default function Home() {
           <VideoCard 
             key={video.id} 
             video={video} 
-            isUnlocked={purchases.includes(video.id) || (user?.id === video.creatorId)}
+            isUnlocked={isUnlocked(video.id, video.creatorId)}
           />
         ))}
       </div>

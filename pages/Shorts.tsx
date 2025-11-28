@@ -1,5 +1,6 @@
+
 import React, { useEffect, useState, useRef } from 'react';
-import { Heart, MessageCircle, MoreVertical, Share2, DollarSign, Send, X, Lock, Volume2, VolumeX, Smartphone } from 'lucide-react';
+import { Heart, MessageCircle, MoreVertical, Share2, DollarSign, Send, X, Lock, Volume2, VolumeX, Smartphone, RefreshCw } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -10,15 +11,17 @@ import { Link } from '../components/Router';
 const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isActive }) => {
   const { user, refreshUser } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
+  
+  // State
   const [isUnlocked, setIsUnlocked] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false); // Default to sound ON
+  const [purchasing, setPurchasing] = useState(false);
   
   // Social State
   const [interaction, setInteraction] = useState<UserInteraction | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
-  const [purchasing, setPurchasing] = useState(false);
 
   // Load Interaction Data
   useEffect(() => {
@@ -29,36 +32,62 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     }
   }, [user, video.id]);
 
-  // Handle Play/Pause and Autoplay Policies
+  // Handle Play/Pause, Autoplay Policies, and Auto-Purchase
   useEffect(() => {
-    if (!videoRef.current || !isUnlocked) return;
+    // If not active, just pause and exit
+    if (!isActive) {
+      if (videoRef.current) videoRef.current.pause();
+      return;
+    }
 
-    const attemptPlay = async () => {
-      try {
-        if (isActive) {
-          // Reset time if needed, or just play
-          // videoRef.current!.currentTime = 0; 
-          await videoRef.current!.play();
-        } else {
-          videoRef.current!.pause();
-        }
-      } catch (err) {
-        // Autoplay with sound failed
-        console.warn("Autoplay with sound blocked, retrying muted.");
-        setIsMuted(true);
-        if (videoRef.current) {
-          videoRef.current.muted = true;
+    const handleActiveVideo = async () => {
+       if (!user) return;
+
+       // 1. AUTO-PURCHASE LOGIC
+       let currentUnlockedState = isUnlocked;
+
+       // If locked, check if we can/should auto-buy
+       if (!currentUnlockedState && !purchasing) {
+           const canAfford = user.balance >= video.price;
+           const withinLimit = video.price <= user.autoPurchaseLimit;
+
+           if (canAfford && withinLimit) {
+               setPurchasing(true);
+               try {
+                   await db.purchaseVideo(user.id, video.id);
+                   refreshUser();
+                   setIsUnlocked(true);
+                   currentUnlockedState = true; // Mark as unlocked for playback logic below
+               } catch (e) {
+                   console.error("Auto-purchase failed", e);
+               } finally {
+                   setPurchasing(false);
+               }
+           }
+       }
+
+       // 2. PLAYBACK LOGIC
+       if (videoRef.current && currentUnlockedState) {
           try {
+             // Try to play with sound first
+             videoRef.current.muted = false;
+             setIsMuted(false);
              await videoRef.current.play();
-          } catch (e) {
-             console.error("Autoplay failed completely", e);
+          } catch (err) {
+             // Autoplay with sound blocked by browser, fallback to muted
+             console.warn("Autoplay audio blocked, retrying muted.");
+             if (videoRef.current) {
+                videoRef.current.muted = true;
+                setIsMuted(true);
+                try { await videoRef.current.play(); } catch (e) {}
+             }
           }
-        }
-      }
+       }
     };
 
-    attemptPlay();
-  }, [isActive, isUnlocked]);
+    handleActiveVideo();
+
+  }, [isActive, isUnlocked, user?.id]); // Re-run if active state or lock state changes
 
   // Actions
   const handlePurchase = async () => {
@@ -68,9 +97,8 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
       await db.purchaseVideo(user.id, video.id);
       refreshUser();
       setIsUnlocked(true);
-      // Auto play after purchase
+      // Force play after manual purchase
       if (videoRef.current) {
-        // Try to play with sound after user interaction (click)
         videoRef.current.muted = false;
         setIsMuted(false);
         videoRef.current.play();
@@ -112,28 +140,38 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
           <video
             ref={videoRef}
             src={video.videoUrl}
-            poster={video.thumbnailUrl} // Prevents black screen
+            poster={video.thumbnailUrl}
             className="w-full h-full object-cover"
             loop
             playsInline
-            muted={isMuted}
+            muted={isMuted} // Controlled by state
             onClick={toggleMute}
           />
         ) : (
            <div className="w-full h-full relative">
               <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-sm brightness-50" />
               <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
-                 <div className="bg-black/40 backdrop-blur-xl p-8 rounded-2xl border border-white/10 text-center mx-4">
-                    <Lock size={48} className="mx-auto text-slate-300 mb-4" />
-                    <h3 className="text-xl font-bold text-white mb-2">Unlock Video</h3>
-                    <p className="text-slate-300 mb-6 text-sm">Support {video.creatorName} to watch.</p>
-                    <button 
-                       onClick={handlePurchase}
-                       disabled={purchasing}
-                       className="bg-amber-400 hover:bg-amber-500 text-black font-bold py-3 px-8 rounded-full flex items-center gap-2 transition-transform active:scale-95 shadow-lg shadow-amber-400/20"
-                    >
-                       {purchasing ? 'Unlocking...' : <><DollarSign size={20} /> Pay {video.price} Saldo</>}
-                    </button>
+                 <div className="bg-black/40 backdrop-blur-xl p-8 rounded-2xl border border-white/10 text-center mx-4 max-w-sm w-full">
+                    {purchasing ? (
+                        <RefreshCw className="mx-auto text-indigo-400 mb-4 animate-spin" size={48} />
+                    ) : (
+                        <Lock size={48} className="mx-auto text-slate-300 mb-4" />
+                    )}
+                    
+                    <h3 className="text-xl font-bold text-white mb-2">{purchasing ? 'Unlocking...' : 'Unlock Video'}</h3>
+                    <p className="text-slate-300 mb-6 text-sm">
+                        {purchasing ? 'Auto-purchasing content...' : `Support ${video.creatorName} to watch.`}
+                    </p>
+                    
+                    {!purchasing && (
+                        <button 
+                        onClick={handlePurchase}
+                        disabled={purchasing}
+                        className="w-full bg-amber-400 hover:bg-amber-500 text-black font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-lg shadow-amber-400/20"
+                        >
+                            <DollarSign size={20} /> Pay {video.price} Saldo
+                        </button>
+                    )}
                  </div>
               </div>
            </div>
@@ -284,8 +322,6 @@ export default function Shorts() {
       }
     };
 
-    // Use IntersectionObserver as a fallback or optimization if needed, 
-    // but scroll calculation is robust for snap-y containers.
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
   }, [activeIndex]);
