@@ -157,9 +157,10 @@ switch ($action) {
     case 'register':
         $id = 'u_' . uniqid();
         $hash = password_hash($input['password'], PASSWORD_DEFAULT);
-        $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater) VALUES (?, ?, ?, 'USER', 100, 1, '[]')")
+        // Changed balance from 100 to 0
+        $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater) VALUES (?, ?, ?, 'USER', 0, 1, '[]')")
             ->execute([$id, $input['username'], $hash]);
-        respond(true, ['id' => $id, 'username' => $input['username'], 'role' => 'USER', 'balance' => 100, 'autoPurchaseLimit'=>1, 'watchLater'=>[]]);
+        respond(true, ['id' => $id, 'username' => $input['username'], 'role' => 'USER', 'balance' => 0, 'autoPurchaseLimit'=>1, 'watchLater'=>[]]);
         break;
 
     case 'get_user':

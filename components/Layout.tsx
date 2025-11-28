@@ -1,8 +1,56 @@
 
 import React from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, CheckCircle, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useUpload } from '../context/UploadContext';
 import { Link, useLocation, Outlet } from './Router';
+
+const UploadIndicator = () => {
+  const { isUploading, progress, currentFileIndex, totalFiles, uploadSpeed } = useUpload();
+  
+  if (!isUploading) return null;
+
+  const radius = 18;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (progress / 100) * circumference;
+
+  return (
+    <div className="fixed bottom-20 md:bottom-8 right-4 z-50 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom-6">
+       <div className="relative w-12 h-12 flex items-center justify-center">
+          {/* Background Circle */}
+          <svg className="transform -rotate-90 w-12 h-12">
+            <circle
+              className="text-slate-700"
+              strokeWidth="4"
+              stroke="currentColor"
+              fill="transparent"
+              r={radius}
+              cx="24"
+              cy="24"
+            />
+            <circle
+              className="text-indigo-500 transition-all duration-300 ease-in-out"
+              strokeWidth="4"
+              strokeDasharray={circumference}
+              strokeDashoffset={strokeDashoffset}
+              strokeLinecap="round"
+              stroke="currentColor"
+              fill="transparent"
+              r={radius}
+              cx="24"
+              cy="24"
+            />
+          </svg>
+          <span className="absolute text-[10px] font-bold text-white">{Math.round(progress)}%</span>
+       </div>
+       <div className="flex flex-col min-w-[100px]">
+          <span className="text-xs font-bold text-white">Uploading...</span>
+          <span className="text-[10px] text-slate-400">File {currentFileIndex} of {totalFiles}</span>
+          <span className="text-[10px] text-indigo-400 font-mono">{uploadSpeed}</span>
+       </div>
+    </div>
+  );
+};
 
 export default function Layout() {
   const location = useLocation();
@@ -39,6 +87,9 @@ export default function Layout() {
       <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : 'flex-1 container mx-auto px-4 pt-2 md:pt-8 max-w-5xl'}>
         <Outlet />
       </main>
+      
+      {/* Global Upload Widget */}
+      <UploadIndicator />
 
       {/* Bottom Nav for Mobile */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex justify-around items-center py-3 z-50 safe-area-bottom">

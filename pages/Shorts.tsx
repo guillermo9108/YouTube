@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Heart, MessageCircle, MoreVertical, Share2, DollarSign, Send, X, Lock, Volume2, VolumeX, Smartphone, RefreshCw } from 'lucide-react';
+import { Heart, MessageCircle, MoreVertical, DollarSign, Send, X, Lock, Volume2, VolumeX, Smartphone, RefreshCw, Maximize, Minimize } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +16,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isMuted, setIsMuted] = useState(false); // Default to sound ON
   const [purchasing, setPurchasing] = useState(false);
+  const [objectFit, setObjectFit] = useState<'cover' | 'contain'>('cover');
   
   // Social State
   const [interaction, setInteraction] = useState<UserInteraction | null>(null);
@@ -123,6 +124,10 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     }
   };
 
+  const toggleFit = () => {
+      setObjectFit(prev => prev === 'cover' ? 'contain' : 'cover');
+  };
+
   const postComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !newComment.trim()) return;
@@ -135,13 +140,13 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     <div className="relative w-full h-[100dvh] md:h-full snap-start snap-always shrink-0 flex items-center justify-center bg-black overflow-hidden">
       
       {/* Video Layer */}
-      <div className="absolute inset-0 z-0">
+      <div className="absolute inset-0 z-0 bg-black">
         {isUnlocked ? (
           <video
             ref={videoRef}
             src={video.videoUrl}
             poster={video.thumbnailUrl}
-            className="w-full h-full object-cover"
+            className={`w-full h-full object-${objectFit}`}
             loop
             playsInline
             muted={isMuted} // Controlled by state
@@ -214,9 +219,12 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
           <span className="text-xs font-bold text-white shadow-black drop-shadow-md">{comments.length}</span>
         </div>
 
-        {/* Share */}
-        <button className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/20 text-white transition-all active:scale-90">
-           <Share2 size={24} />
+        {/* Fit / Adjust Video */}
+        <button 
+            onClick={toggleFit}
+            className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/20 text-white transition-all active:scale-90"
+        >
+           {objectFit === 'cover' ? <Minimize size={24} /> : <Maximize size={24} />}
         </button>
       </div>
 
@@ -235,9 +243,9 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
 
       {/* Comments Drawer */}
       {showComments && (
-        <div className="absolute inset-0 z-50 flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="absolute inset-0 z-[60] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
            <div 
-             className="w-full bg-slate-900 rounded-t-2xl h-[70%] md:h-[60%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom duration-300 pb-safe"
+             className="w-full bg-slate-900 rounded-t-2xl h-[75%] md:h-[60%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom duration-300"
              onClick={(e) => e.stopPropagation()}
            >
               <div className="flex justify-between items-center p-4 border-b border-slate-800">
@@ -271,7 +279,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                  )}
               </div>
 
-              <form onSubmit={postComment} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 mb-safe">
+              <form onSubmit={postComment} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 pb-safe">
                  <input 
                    type="text" 
                    value={newComment}

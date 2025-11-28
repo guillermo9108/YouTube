@@ -178,7 +178,17 @@ class DatabaseService {
 
   async purchaseVideo(userId: string, videoId: string): Promise<void> { await this.request('/index.php?action=purchase_video', 'POST', { userId, videoId }); }
   
-  async uploadVideo(title: string, description: string, price: number, category: VideoCategory, duration: number, creator: User, file: File | null, thumbnail: File | null = null, onProgress?: (percent: number) => void): Promise<void> {
+  async uploadVideo(
+    title: string, 
+    description: string, 
+    price: number, 
+    category: VideoCategory, 
+    duration: number, 
+    creator: User, 
+    file: File | null, 
+    thumbnail: File | null = null, 
+    onProgress?: (percent: number, loaded: number, total: number) => void
+  ): Promise<void> {
     if (this.isDemoMode) { await new Promise(r => setTimeout(r, 1000)); return; }
     return new Promise((resolve, reject) => {
         const formData = new FormData();
@@ -193,7 +203,13 @@ class DatabaseService {
         
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_BASE}/index.php?action=upload_video`, true);
-        if (onProgress) { xhr.upload.onprogress = (e) => { if (e.lengthComputable) { onProgress(Math.round((e.loaded / e.total) * 100)); } }; }
+        if (onProgress) { 
+            xhr.upload.onprogress = (e) => { 
+                if (e.lengthComputable) { 
+                    onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total); 
+                } 
+            }; 
+        }
         xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) { try { const json = JSON.parse(xhr.responseText); if (json.success) resolve(); else reject(new Error(json.error || 'Upload failed')); } catch (e) { reject(new Error("Invalid server response")); } } else { reject(new Error(`Server error: ${xhr.status}`)); } };
         xhr.onerror = () => reject(new Error("Network connection error"));
         xhr.send(formData);

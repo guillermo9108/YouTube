@@ -39,10 +39,12 @@ export default function Watch() {
   const navigate = useNavigate();
   const { user, refreshUser } = useAuth();
   
+  // Video Data State
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   
+  // Interaction State
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [interaction, setInteraction] = useState<UserInteraction | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -51,13 +53,14 @@ export default function Watch() {
   const [purchasing, setPurchasing] = useState(false);
   const [newComment, setNewComment] = useState('');
 
+  // Playback Control State
   const videoRef = useRef<HTMLVideoElement>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [nextVideo, setNextVideo] = useState<Video | null>(null);
   const [autoStatus, setAutoStatus] = useState<'IDLE' | 'SKIPPING_WATCHED' | 'AUTO_BUYING' | 'PLAYING_NEXT' | 'WAITING_CONFIRMATION'>('IDLE');
   const [showDebug, setShowDebug] = useState(false);
 
-  // Reset state when ID changes
+  // ID Change Handler - Optimized to prevent unmounting of video player
   useEffect(() => {
     if (!id) {
         setErrorMsg("No Video ID provided in URL");
@@ -66,11 +69,14 @@ export default function Watch() {
     }
 
     let isMounted = true;
+    
+    // We do NOT clear video state immediately to keep the player mounted during transition
     setLoading(true);
-    setVideo(null);
     setErrorMsg('');
     setComments([]);
     setRelatedVideos([]);
+    setCountdown(null);
+    setNextVideo(null);
 
     const fetchVideo = async () => {
         try {
@@ -83,9 +89,11 @@ export default function Watch() {
                 setLoading(false);
                 return;
             }
+            
+            // Update Video Data
             setVideo(v);
 
-            // Fetch secondary data concurrently, allowing failures
+            // Fetch secondary data
             if (user) {
                 db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Purchase check failed", e));
                 db.getInteraction(user.id, v.id).then(res => isMounted && setInteraction(res)).catch(e => console.warn("Interaction fetch failed", e));
@@ -108,7 +116,7 @@ export default function Watch() {
     fetchVideo();
 
     return () => { isMounted = false; };
-  }, [id, user]); // Only re-run if ID or User changes
+  }, [id, user]); 
 
   // Auto-play effect
   useEffect(() => {
@@ -201,9 +209,10 @@ export default function Watch() {
       setNewComment('');
   };
 
-  if (loading) return <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 text-slate-500"><RefreshCw className="animate-spin text-indigo-500" size={32} /><p>Loading video...</p></div>;
+  // Initial Loading State (Only if no video data exists yet)
+  if (loading && !video) return <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 text-slate-500"><RefreshCw className="animate-spin text-indigo-500" size={32} /><p>Loading video...</p></div>;
   
-  if (!video || errorMsg) return (
+  if ((!video && !loading) || errorMsg) return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6 text-slate-400">
           <AlertCircle size={48} className="text-red-500" />
           <div className="text-center px-4">
@@ -219,14 +228,25 @@ export default function Watch() {
       </div>
   );
 
-  const canAfford = (user?.balance || 0) >= video.price;
+  const canAfford = (user?.balance || 0) >= (video?.price || 0);
 
+  // We render the layout even if loading is true (using an overlay) to preserve the video element in DOM for fullscreen
   return (
-    <div className="max-w-5xl mx-auto pb-6" key={video.id}>
+    <div className="max-w-5xl mx-auto pb-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-6">
         <div className="lg:col-span-2 space-y-2">
              <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800">
-                {isUnlocked ? (
+                
+                {/* Loader Overlay for Transitions */}
+                {loading && (
+                    <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center">
+                        <RefreshCw className="animate-spin text-indigo-500 mb-2" size={32} />
+                        <span className="text-slate-500 text-xs">Loading next video...</span>
+                    </div>
+                )}
+
+                {video && (
+                  isUnlocked ? (
                     <>
                         <video ref={videoRef} src={video.videoUrl} poster={video.thumbnailUrl} className="w-full h-full" controls playsInline onEnded={handleVideoEnded} onTimeUpdate={(e) => { if (e.currentTarget.currentTime / e.currentTarget.duration > 0.95 && interaction && !interaction.isWatched && user) { db.markWatched(user.id, video.id); setInteraction({...interaction, isWatched: true}); } }} />
                         {countdown !== null && countdown > 0 && nextVideo && (
@@ -241,7 +261,7 @@ export default function Watch() {
                             </div>
                         )}
                     </>
-                ) : (
+                  ) : (
                     <div onClick={canAfford ? handlePurchase : undefined} className={`absolute inset-0 z-10 flex flex-col items-center justify-center bg-cover bg-center ${canAfford ? 'cursor-pointer' : ''}`} style={{backgroundImage: `url(${video.thumbnailUrl})`}}>
                         <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity hover:bg-black/40" />
                         <div className="relative z-20 flex flex-col items-center p-3 bg-black/60 border border-white/10 rounded-xl backdrop-blur-md shadow-2xl transform transition-transform active:scale-95 max-w-[200px]">
@@ -250,9 +270,11 @@ export default function Watch() {
                              {!canAfford && <div className="mt-2 text-[9px] bg-red-500/20 text-red-200 px-2 py-0.5 rounded border border-red-500/20">Insufficient Funds</div>}
                         </div>
                     </div>
+                  )
                 )}
              </div>
              
+             {video && (
              <div className="px-1">
                  <h1 className="text-lg md:text-xl font-bold text-white leading-tight break-words">{video.title}</h1>
                  <div className="flex items-center justify-between mt-2">
@@ -268,6 +290,7 @@ export default function Watch() {
                  </div>
                  <div className="mt-3 bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-xs text-slate-300 whitespace-pre-line leading-relaxed">{video.description}</div>
              </div>
+             )}
 
              <div className="mt-4">
                  <h3 className="font-bold text-sm text-slate-300 mb-3 flex items-center gap-2"><MessageSquare size={14}/> Comments</h3>
