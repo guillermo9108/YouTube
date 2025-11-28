@@ -19,7 +19,8 @@ const MOCK_VIDEOS: Video[] = [
     likes: 450,
     dislikes: 12,
     category: VideoCategory.SHORT_FILM,
-    duration: 600
+    duration: 600,
+    fileHash: ''
   }
 ];
 
@@ -51,8 +52,9 @@ class DatabaseService {
     }
 
     const headers: HeadersInit = {
-        'Cache-Control': 'no-cache', 
-        'Pragma': 'no-cache'
+        'Cache-Control': 'no-cache, no-store, must-revalidate', 
+        'Pragma': 'no-cache',
+        'Expires': '0'
     };
     
     let requestBody: BodyInit | undefined;
@@ -203,8 +205,10 @@ class DatabaseService {
   async adminAddBalance(adminId: string, targetUserId: string, amount: number): Promise<void> { await this.request('/index.php?action=admin_add_balance', 'POST', { adminId, targetUserId, amount }); }
   async getUserTransactions(userId: string): Promise<Transaction[]> { return this.request<Transaction[]>(`/index.php?action=get_transactions&userId=${userId}`); }
   async getVideosByCreator(creatorId: string): Promise<Video[]> { return this.request<Video[]>(`/index.php?action=get_creator_videos&creatorId=${creatorId}`); }
-  async adminRepairDb(): Promise<void> { await this.request('/index.php?action=admin_repair_db', 'POST', {}); }
   
+  async adminRepairDb(): Promise<void> { await this.request('/index.php?action=admin_repair_db', 'POST', {}); }
+  async adminCleanupVideos(): Promise<{deleted: number}> { return this.request<{deleted: number}>('/index.php?action=admin_cleanup_videos', 'POST', {}); }
+
   async getRequests(status?: string): Promise<ContentRequest[]> { const qs = status ? `&status=${status}` : ''; return this.request<ContentRequest[]>(`/index.php?action=get_requests${qs}`); }
   async requestContent(userId: string, query: string, useLocalNetwork: boolean): Promise<ContentRequest> { return this.request<ContentRequest>('/index.php?action=request_content', 'POST', { userId, query, useLocalNetwork }); }
   async deleteRequest(requestId: string): Promise<void> { await this.request('/index.php?action=delete_request', 'POST', { requestId }); }

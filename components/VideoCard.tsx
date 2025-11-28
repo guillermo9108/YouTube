@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Lock, Play, CircleDollarSign } from 'lucide-react';
 import { Video } from '../types';
@@ -36,9 +37,10 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, isUnlocked }) => {
       </div>
 
       <div className="p-4">
-        <h3 className="font-semibold text-slate-100 truncate pr-4">{video.title}</h3>
+        {/* Optimized for long titles: 2 lines max, then ellipsis */}
+        <h3 className="font-semibold text-slate-100 line-clamp-2 leading-tight h-10 mb-1" title={video.title}>{video.title}</h3>
         <div className="flex justify-between items-center mt-2 text-xs text-slate-400">
-          <span>{video.creatorName}</span>
+          <span className="truncate max-w-[60%]">{video.creatorName}</span>
           <span className={isUnlocked ? 'text-emerald-400' : 'text-amber-400'}>{isUnlocked ? 'Purchased' : 'Locked'}</span>
         </div>
       </div>

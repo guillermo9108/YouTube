@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2 } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -64,6 +64,17 @@ export default function Admin() {
          setRepairing(false);
       }
     }
+  };
+
+  const handleCleanup = async () => {
+      if(confirm("This will delete videos from database that have missing files. Continue?")) {
+          try {
+              const res = await db.adminCleanupVideos();
+              alert(`Cleanup complete. Removed ${res.deleted} broken video entries.`);
+          } catch(e: any) {
+              alert("Cleanup error: " + e.message);
+          }
+      }
   };
 
   const triggerDownload = async () => {
@@ -187,6 +198,13 @@ export default function Admin() {
                         </div>
                         <input type="text" value={settings.pixabayKey} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="Your Pixabay API Key"/>
                     </div>
+                </div>
+                
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
+                    <h3 className="font-bold text-white flex items-center gap-2"><Shield size={18} /> Maintenance</h3>
+                     <button onClick={handleCleanup} className="w-full bg-red-600/10 hover:bg-red-600/20 text-red-400 font-bold py-3 rounded-lg flex items-center justify-center gap-2 border border-red-600/20">
+                        <Trash2 size={18}/> Scan & Repair Broken Videos
+                    </button>
                 </div>
 
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">

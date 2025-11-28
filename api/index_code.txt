@@ -95,11 +95,9 @@ function search_provider($pdo, $query, $limit = 5, $source = 'STOCK') {
         if (!empty($res['videos'])) {
             foreach ($res['videos'] as $v) {
                 $files = $v['video_files'] ?? [];
-                // FILTER: Prefer SD (audio-safe) or Largest
                 usort($files, function($a, $b) { return $b['width'] - $a['width']; });
                 
                 $target = null;
-                // Look for SD
                 foreach($files as $f) { if($f['width'] >= 960 && $f['width'] <= 1920) { $target = $f; break; } }
                 if(!$target && count($files) > 0) $target = $files[0];
 
@@ -311,22 +309,47 @@ switch ($action) {
         if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
         if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
         
-        $dup = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE title = ? AND creatorId = ?");
-        $dup->execute([$_POST['title'], $_POST['creatorId']]);
-        if ($dup->fetchColumn() > 0) respond(false, null, 'Video already exists');
+        $hash = md5_file($_FILES['video']['tmp_name']);
         
-        $vName = uniqid('vid_') . '.mp4';
-        move_uploaded_file($_FILES['video']['tmp_name'], UPLOAD_DIR . $vName);
+        // Check for duplicates based on Hash
+        $stmt = $pdo->prepare("SELECT id, videoUrl, creatorId FROM videos WHERE fileHash = ? LIMIT 1");
+        $stmt->execute([$hash]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $category = $_POST['category'] ?? 'OTHER';
+        $duration = $_POST['duration'] ?? 0;
+        $title = $_POST['title'];
+
+        if ($existing) {
+            // SCENARIO 1: Same Creator = Deduplication (Update existing)
+            if ($existing['creatorId'] === $_POST['creatorId']) {
+                $pdo->prepare("UPDATE videos SET price = ?, category = ?, duration = ?, createdAt = ? WHERE id = ?")
+                    ->execute([$_POST['price'], $category, $duration, time()*1000, $existing['id']]);
+                respond(true, ['message' => 'Video already exists. Updated listing.']);
+                return;
+            }
+            // SCENARIO 2: Different Creator = Collaboration (New ID, Same File)
+            // Reuse the existing video file path to save space
+            $vPath = str_replace('/api/', '', $existing['videoUrl']);
+            
+            // Get Creator Name for title append
+            $originalCreator = $pdo->query("SELECT username FROM users WHERE id = '{$existing['creatorId']}'")->fetchColumn();
+            $title = $title . " (Collab with $originalCreator)";
+
+        } else {
+            // SCENARIO 3: New Upload
+            $vName = uniqid('vid_') . '.mp4';
+            $vPath = UPLOAD_DIR . $vName;
+            move_uploaded_file($_FILES['video']['tmp_name'], $vPath);
+        }
         
+        // Handle Thumbnail (Always upload new thumb unless we want to reuse that too, but titles differ)
         $tName = uniqid('thumb_') . '.jpg';
         if (!empty($_FILES['thumbnail']['tmp_name'])) move_uploaded_file($_FILES['thumbnail']['tmp_name'], THUMB_DIR . $tName);
         else $tName = 'placeholder.jpg'; 
-        
-        $category = $_POST['category'] ?? 'OTHER';
-        $duration = $_POST['duration'] ?? 0;
 
-        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?)")
-            ->execute(['v_'.uniqid(), $_POST['title'], $_POST['description'], $_POST['price'], '/api/'.THUMB_DIR.$tName, '/api/'.UPLOAD_DIR.$vName, $_POST['creatorId'], time()*1000, $category, $duration]);
+        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?, ?)")
+            ->execute(['v_'.uniqid(), $title, $_POST['description'], $_POST['price'], '/api/'.THUMB_DIR.$tName, '/api/'.$vPath, $_POST['creatorId'], time()*1000, $category, $duration, $hash]);
         respond(true);
         break;
     
@@ -366,14 +389,33 @@ switch ($action) {
                 "ALTER TABLE system_settings ADD COLUMN ytDlpPath VARCHAR(255)",
                 "ALTER TABLE system_settings ADD COLUMN enableYoutube TINYINT(1) DEFAULT 0",
                 "ALTER TABLE videos ADD COLUMN category VARCHAR(50) DEFAULT 'OTHER'",
-                "ALTER TABLE videos ADD COLUMN duration INT DEFAULT 0"
+                "ALTER TABLE videos ADD COLUMN duration INT DEFAULT 0",
+                "ALTER TABLE videos ADD COLUMN fileHash VARCHAR(32)"
             ];
             foreach($cols as $c) { try { $pdo->exec($c); } catch(Exception $e) {} }
             
             respond(true);
         } catch (Exception $e) { respond(false, null, $e->getMessage()); }
         break;
-        
+    
+    case 'admin_cleanup_videos':
+        // Find videos where file does not exist
+        $stmt = $pdo->query("SELECT id, videoUrl FROM videos");
+        $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $deleted = 0;
+        foreach ($videos as $v) {
+            $path = str_replace('/api/', '', $v['videoUrl']);
+            // Allow for external URLs (placeholders)
+            if (strpos($path, 'http') === 0) continue;
+            
+            if (!file_exists($path)) {
+                $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]);
+                $deleted++;
+            }
+        }
+        respond(true, ['deleted' => $deleted]);
+        break;
+
     case 'get_system_settings':
         $res = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
         if ($res) {
@@ -430,8 +472,10 @@ switch ($action) {
                 }
             }
             if (!$thumbFound) copy('https://via.placeholder.com/640x360', $tPath);
+            
+            $hash = md5_file($vPath);
 
-            $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', 0)")
+            $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', 0, ?)")
             ->execute([
                 'v_'.uniqid(), 
                 'Imported from YouTube', 
@@ -440,7 +484,8 @@ switch ($action) {
                 '/api/'.$tPath, 
                 '/api/'.$vPath, 
                 $adminId, 
-                time()*1000
+                time()*1000,
+                $hash
             ]);
             respond(true);
         } else {
@@ -490,8 +535,10 @@ switch ($action) {
                  $matches = glob(UPLOAD_DIR . $vName . ".*");
                  foreach($matches as $m) { if (strpos($m, '.jpg') !== false || strpos($m, '.webp') !== false) { rename($m, $tPath); break; } }
                  
-                 $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', 0)")
-                    ->execute(['v_'.uniqid(), 'Queue Import', "Source: {$req['query']}", 1, '/api/'.$tPath, '/api/'.$vPath, $adminId, time()*1000]);
+                 $hash = md5_file($vPath);
+                 
+                 $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', 0, ?)")
+                    ->execute(['v_'.uniqid(), 'Queue Import', "Source: {$req['query']}", 1, '/api/'.$tPath, '/api/'.$vPath, $adminId, time()*1000, $hash]);
                  $count = 1;
              }
         } else {
@@ -510,7 +557,9 @@ switch ($action) {
                         $tPath = THUMB_DIR . $tFilename;
                         download_url($v['thumbnail'], $tPath); 
 
-                        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', ?)")
+                        $hash = md5_file($vPath);
+
+                        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', ?, ?)")
                         ->execute([
                             'v_'.uniqid(), 
                             $v['title'], 
@@ -520,7 +569,8 @@ switch ($action) {
                             '/api/'.$vPath, 
                             $adminId, 
                             time()*1000,
-                            $v['duration']
+                            $v['duration'],
+                            $hash
                         ]);
                         $count++;
                     }

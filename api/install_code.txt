@@ -77,7 +77,8 @@ if ($action === 'install') {
             likes INT DEFAULT 0,
             dislikes INT DEFAULT 0,
             category VARCHAR(50) DEFAULT 'OTHER',
-            duration INT DEFAULT 0
+            duration INT DEFAULT 0,
+            fileHash VARCHAR(32)
         )");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS transactions (

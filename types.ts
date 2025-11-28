@@ -40,6 +40,7 @@ export interface Video {
   dislikes: number;
   category: VideoCategory; // New
   duration: number; // Seconds
+  fileHash?: string; // New: MD5 Hash for deduplication
 }
 
 export interface Transaction {
