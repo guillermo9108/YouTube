@@ -232,7 +232,7 @@ export default function Watch() {
 
   // We render the layout even if loading is true (using an overlay) to preserve the video element in DOM for fullscreen
   return (
-    <div className="max-w-5xl mx-auto pb-6">
+    <div className="max-w-5xl mx-auto pb-6" key={video?.id || 'loading'}>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-6">
         <div className="lg:col-span-2 space-y-2">
              <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800">
@@ -276,7 +276,7 @@ export default function Watch() {
              
              {video && (
              <div className="px-1">
-                 <h1 className="text-lg md:text-xl font-bold text-white leading-tight break-words">{video.title}</h1>
+                 <h1 className="text-lg md:text-xl font-bold text-white leading-tight break-words line-clamp-3 md:line-clamp-none">{video.title}</h1>
                  <div className="flex items-center justify-between mt-2">
                      <div className="flex items-center gap-3 text-xs text-slate-400">
                          <div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] text-white font-bold">{video.creatorName[0]}</div><span className="text-slate-300 font-medium">{video.creatorName}</span></div>

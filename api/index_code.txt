@@ -48,6 +48,41 @@ function download_url($url, $dest) {
     }
 }
 
+// Helper to handle duplication logic
+function handle_video_entry($pdo, $title, $desc, $price, $category, $duration, $creatorId, $thumbPath, $videoPath, $hash, $isImport = false) {
+    // Check for duplicates
+    $stmt = $pdo->prepare("SELECT id, videoUrl, creatorId FROM videos WHERE fileHash = ? LIMIT 1");
+    $stmt->execute([$hash]);
+    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($existing) {
+        // If we just downloaded this file and it's a duplicate, delete the new file and use the old path
+        if ($isImport) {
+            @unlink(str_replace('/api/', '', $videoPath)); // Delete new physical file
+            $videoPath = $existing['videoUrl']; // Reuse old path
+        }
+
+        // SCENARIO 1: Same Creator = Update
+        if ($existing['creatorId'] === $creatorId) {
+            $pdo->prepare("UPDATE videos SET price = ?, category = ?, duration = ?, createdAt = ? WHERE id = ?")
+                ->execute([$price, $category, $duration, time()*1000, $existing['id']]);
+            return ['status' => 'updated', 'id' => $existing['id']];
+        }
+        
+        // SCENARIO 2: Different Creator = Collab
+        // Reuse path is already handled above
+        $originalCreator = $pdo->query("SELECT username FROM users WHERE id = '{$existing['creatorId']}'")->fetchColumn();
+        $title = $title . " (Collab with $originalCreator)";
+    }
+
+    // Insert New Record
+    $newId = 'v_'.uniqid();
+    $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?, ?)")
+        ->execute([$newId, $title, $desc, $price, $thumbPath, $videoPath, $creatorId, time()*1000, $category, $duration, $hash]);
+    
+    return ['status' => 'created', 'id' => $newId];
+}
+
 try {
     $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']}", $db_config['user'], $db_config['password'], [PDO::ATTR_PERSISTENT => true]);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -148,24 +183,21 @@ switch ($action) {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($user && password_verify($input['password'], $user['password_hash'])) {
-            // SINGLE SESSION CHECK
             $lastActive = $user['lastActive'] ?? 0;
             $now = time() * 1000;
-            $timeout = 60 * 1000; // 60 seconds timeout
+            $timeout = 60 * 1000;
             
-            // If user was active recently AND didn't logout properly
             if ($lastActive > ($now - $timeout) && !empty($user['currentSessionId'])) {
                 respond(false, null, 'Account is currently active on another device. Please logout there or wait 60 seconds.');
             }
             
-            // Start new session
             $newToken = bin2hex(random_bytes(16));
             $pdo->prepare("UPDATE users SET currentSessionId = ?, lastActive = ? WHERE id = ?")
                 ->execute([$newToken, $now, $user['id']]);
 
             unset($user['password_hash']);
             $user['watchLater'] = json_decode($user['watchLater'] ?? '[]');
-            $user['sessionToken'] = $newToken; // Return token to client
+            $user['sessionToken'] = $newToken;
             respond(true, $user);
         }
         respond(false, null, 'Invalid login');
@@ -181,11 +213,9 @@ switch ($action) {
         $uid = $input['userId'];
         $token = $input['token'];
         $now = time() * 1000;
-        
         $stmt = $pdo->prepare("SELECT currentSessionId FROM users WHERE id = ?");
         $stmt->execute([$uid]);
         $dbToken = $stmt->fetchColumn();
-        
         if ($dbToken === $token) {
             $pdo->prepare("UPDATE users SET lastActive = ? WHERE id = ?")->execute([$now, $uid]);
             respond(true);
@@ -199,11 +229,8 @@ switch ($action) {
         $hash = password_hash($input['password'], PASSWORD_DEFAULT);
         $newToken = bin2hex(random_bytes(16));
         $now = time() * 1000;
-
-        // Changed balance from 100 to 0
         $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater, currentSessionId, lastActive) VALUES (?, ?, ?, 'USER', 0, 1, '[]', ?, ?)")
             ->execute([$id, $input['username'], $hash, $newToken, $now]);
-            
         respond(true, ['id' => $id, 'username' => $input['username'], 'role' => 'USER', 'balance' => 0, 'autoPurchaseLimit'=>1, 'watchLater'=>[], 'sessionToken'=>$newToken]);
         break;
 
@@ -322,7 +349,6 @@ switch ($action) {
         $uid = $input['userId']; $vid = $input['videoId'];
         $user = $pdo->query("SELECT balance FROM users WHERE id='$uid'")->fetch(PDO::FETCH_ASSOC);
         $video = $pdo->query("SELECT price, creatorId FROM videos WHERE id='$vid'")->fetch(PDO::FETCH_ASSOC);
-        
         if ($user['balance'] >= $video['price']) {
             $pdo->beginTransaction();
             $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$video['price'], $uid]);
@@ -355,47 +381,34 @@ switch ($action) {
         if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
         
         $hash = md5_file($_FILES['video']['tmp_name']);
-        
-        // Check for duplicates based on Hash
-        $stmt = $pdo->prepare("SELECT id, videoUrl, creatorId FROM videos WHERE fileHash = ? LIMIT 1");
-        $stmt->execute([$hash]);
-        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
-
         $category = $_POST['category'] ?? 'OTHER';
         $duration = $_POST['duration'] ?? 0;
         $title = $_POST['title'];
 
+        // DEDUPLICATION handled by helper
+        $stmt = $pdo->prepare("SELECT id, videoUrl, creatorId FROM videos WHERE fileHash = ? LIMIT 1");
+        $stmt->execute([$hash]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
         if ($existing) {
-            // SCENARIO 1: Same Creator = Deduplication (Update existing)
-            if ($existing['creatorId'] === $_POST['creatorId']) {
-                $pdo->prepare("UPDATE videos SET price = ?, category = ?, duration = ?, createdAt = ? WHERE id = ?")
-                    ->execute([$_POST['price'], $category, $duration, time()*1000, $existing['id']]);
-                respond(true, ['message' => 'Video already exists. Updated listing.']);
-                return;
-            }
-            // SCENARIO 2: Different Creator = Collaboration (New ID, Same File)
-            // Reuse the existing video file path to save space
-            $vPath = str_replace('/api/', '', $existing['videoUrl']);
-            
-            // Get Creator Name for title append
-            $originalCreator = $pdo->query("SELECT username FROM users WHERE id = '{$existing['creatorId']}'")->fetchColumn();
-            $title = $title . " (Collab with $originalCreator)";
-
+             // Reuse existing file
+             $vPath = '/api/' . $existing['videoUrl']; // Actually existing is stored as /api/uploads..., so we reuse it directly
+             $vPath = $existing['videoUrl'];
+             $res = handle_video_entry($pdo, $title, $_POST['description'], $_POST['price'], $category, $duration, $_POST['creatorId'], 'placeholder.jpg', $vPath, $hash, false);
+             respond(true, $res);
         } else {
-            // SCENARIO 3: New Upload
-            $vName = uniqid('vid_') . '.mp4';
-            $vPath = UPLOAD_DIR . $vName;
-            move_uploaded_file($_FILES['video']['tmp_name'], $vPath);
-        }
-        
-        // Handle Thumbnail (Always upload new thumb unless we want to reuse that too, but titles differ)
-        $tName = uniqid('thumb_') . '.jpg';
-        if (!empty($_FILES['thumbnail']['tmp_name'])) move_uploaded_file($_FILES['thumbnail']['tmp_name'], THUMB_DIR . $tName);
-        else $tName = 'placeholder.jpg'; 
+             // New Upload
+             $vName = uniqid('vid_') . '.mp4';
+             $vPath = UPLOAD_DIR . $vName;
+             move_uploaded_file($_FILES['video']['tmp_name'], $vPath);
+             
+             $tName = uniqid('thumb_') . '.jpg';
+             if (!empty($_FILES['thumbnail']['tmp_name'])) move_uploaded_file($_FILES['thumbnail']['tmp_name'], THUMB_DIR . $tName);
+             else $tName = 'placeholder.jpg'; 
 
-        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?, ?)")
-            ->execute(['v_'.uniqid(), $title, $_POST['description'], $_POST['price'], '/api/'.THUMB_DIR.$tName, '/api/'.$vPath, $_POST['creatorId'], time()*1000, $category, $duration, $hash]);
-        respond(true);
+             $res = handle_video_entry($pdo, $title, $_POST['description'], $_POST['price'], $category, $duration, $_POST['creatorId'], '/api/'.THUMB_DIR.$tName, '/api/'.$vPath, $hash, false);
+             respond(true, $res);
+        }
         break;
     
     case 'get_creator_videos':
@@ -423,8 +436,6 @@ switch ($action) {
             $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY DEFAULT 1, downloadStartTime VARCHAR(10) DEFAULT '01:00', downloadEndTime VARCHAR(10) DEFAULT '06:00', isQueuePaused TINYINT(1) DEFAULT 0, batchSize INT DEFAULT 5, maxDuration INT DEFAULT 600, maxResolution INT DEFAULT 1080, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255), ytDlpPath VARCHAR(255), enableYoutube TINYINT(1) DEFAULT 0)");
             $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
             $pdo->exec("CREATE TABLE IF NOT EXISTS requests (id VARCHAR(50) PRIMARY KEY, userId VARCHAR(50), query VARCHAR(255), status ENUM('PENDING','PROCESSING','COMPLETED','FAILED','MANUAL_UPLOAD') DEFAULT 'PENDING', createdAt BIGINT, useLocalNetwork TINYINT(1) DEFAULT 0)");
-            
-            // Add columns safely
             $cols = [
                 "ALTER TABLE system_settings ADD COLUMN batchSize INT DEFAULT 5",
                 "ALTER TABLE system_settings ADD COLUMN pexelsKey VARCHAR(255)",
@@ -440,21 +451,17 @@ switch ($action) {
                 "ALTER TABLE users ADD COLUMN lastActive BIGINT DEFAULT 0"
             ];
             foreach($cols as $c) { try { $pdo->exec($c); } catch(Exception $e) {} }
-            
             respond(true);
         } catch (Exception $e) { respond(false, null, $e->getMessage()); }
         break;
     
     case 'admin_cleanup_videos':
-        // Find videos where file does not exist
         $stmt = $pdo->query("SELECT id, videoUrl FROM videos");
         $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $deleted = 0;
         foreach ($videos as $v) {
             $path = str_replace('/api/', '', $v['videoUrl']);
-            // Allow for external URLs (placeholders)
             if (strpos($path, 'http') === 0) continue;
-            
             if (!file_exists($path)) {
                 $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]);
                 $deleted++;
@@ -498,7 +505,6 @@ switch ($action) {
         if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
         if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
         
-        // Use yt-dlp to download
         $vName = uniqid('yt_');
         $vPath = UPLOAD_DIR . $vName . '.mp4';
         
@@ -506,9 +512,7 @@ switch ($action) {
         exec($cmd);
         
         if (file_exists($vPath)) {
-            // Find thumbnail (yt-dlp might name it differently)
             $tPath = THUMB_DIR . $vName . '.jpg';
-            // yt-dlp usually outputs .jpg or .webp next to video if -o matches, but let's just find matches
             $matches = glob(UPLOAD_DIR . $vName . ".*");
             $thumbFound = false;
             foreach($matches as $m) {
@@ -521,19 +525,7 @@ switch ($action) {
             if (!$thumbFound) copy('https://via.placeholder.com/640x360', $tPath);
             
             $hash = md5_file($vPath);
-
-            $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', 0, ?)")
-            ->execute([
-                'v_'.uniqid(), 
-                'Imported from YouTube', 
-                "Source: $url", 
-                1, 
-                '/api/'.$tPath, 
-                '/api/'.$vPath, 
-                $adminId, 
-                time()*1000,
-                $hash
-            ]);
+            handle_video_entry($pdo, 'Imported from YouTube', "Source: $url", 1, 'OTHER', 0, $adminId, '/api/'.$tPath, '/api/'.$vPath, $hash, true);
             respond(true);
         } else {
             respond(false, null, "Download failed");
@@ -568,9 +560,7 @@ switch ($action) {
         if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
         if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
 
-        // If it looks like a YouTube URL and YT is enabled
         if (!empty($settings['enableYoutube']) && (strpos($req['query'], 'youtube.com') !== false || strpos($req['query'], 'youtu.be') !== false)) {
-             // YT-DLP Logic
              $ytPath = !empty($settings['ytDlpPath']) ? $settings['ytDlpPath'] : './yt-dlp';
              $vName = uniqid('auto_yt_');
              $vPath = UPLOAD_DIR . $vName . '.mp4';
@@ -583,13 +573,11 @@ switch ($action) {
                  foreach($matches as $m) { if (strpos($m, '.jpg') !== false || strpos($m, '.webp') !== false) { rename($m, $tPath); break; } }
                  
                  $hash = md5_file($vPath);
-                 
-                 $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', 0, ?)")
-                    ->execute(['v_'.uniqid(), 'Queue Import', "Source: {$req['query']}", 1, '/api/'.$tPath, '/api/'.$vPath, $adminId, time()*1000, $hash]);
+                 $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+                 handle_video_entry($pdo, 'Queue Import', "Source: {$req['query']}", 1, 'OTHER', 0, $adminId, '/api/'.$tPath, '/api/'.$vPath, $hash, true);
                  $count = 1;
              }
         } else {
-            // PEXELS / PIXABAY Logic
             $videos = search_provider($pdo, $req['query'], (int)$settings['batchSize'], 'STOCK');
             $count = 0;
             $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
@@ -598,27 +586,12 @@ switch ($action) {
                 try {
                     $vFilename = uniqid('auto_').'.mp4';
                     $vPath = UPLOAD_DIR . $vFilename;
-                    
                     if (download_url($v['downloadUrl'], $vPath)) {
                         $tFilename = uniqid('thumb_').'.jpg';
                         $tPath = THUMB_DIR . $tFilename;
                         download_url($v['thumbnail'], $tPath); 
-
                         $hash = md5_file($vPath);
-
-                        $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, likes, dislikes, category, duration, fileHash) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'OTHER', ?, ?)")
-                        ->execute([
-                            'v_'.uniqid(), 
-                            $v['title'], 
-                            "Imported from {$v['source']} ({$req['query']})", 
-                            1, 
-                            '/api/'.$tPath, 
-                            '/api/'.$vPath, 
-                            $adminId, 
-                            time()*1000,
-                            $v['duration'],
-                            $hash
-                        ]);
+                        handle_video_entry($pdo, $v['title'], "Imported from {$v['source']} ({$req['query']})", 1, 'OTHER', $v['duration'], $adminId, '/api/'.$tPath, '/api/'.$vPath, $hash, true);
                         $count++;
                     }
                 } catch (Exception $e) {}
