@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { DownloadCloud, Search, Check, Loader2, Link as LinkIcon } from 'lucide-react';
+import { DownloadCloud, Search, Check, Loader2, Link as LinkIcon, Settings2 } from 'lucide-react';
 import { db, VideoResult } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from '../components/Router';
@@ -17,13 +17,18 @@ export default function Requests() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
+  // -- Client-Side Keys --
+  const [useClientKeys, setUseClientKeys] = useState(false);
+  const [clientPexelsKey, setClientPexelsKey] = useState(localStorage.getItem('sp_client_pexels') || '');
+  const [clientPixabayKey, setClientPixabayKey] = useState(localStorage.getItem('sp_client_pixabay') || '');
+
   // -- Processing State --
   const [selectedVideos, setSelectedVideos] = useState<string[]>([]);
   const [processing, setProcessing] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [uploadPercent, setUploadPercent] = useState(0);
 
-  // -- Search Logic (Server Proxy) --
+  // -- Search Logic --
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
@@ -33,12 +38,34 @@ export default function Requests() {
     setError('');
     
     try {
-        // Use DB service to proxy search to backend
-        const hits = await db.searchExternal(query);
+        let hits: VideoResult[] = [];
+
+        if (useClientKeys) {
+             // Browser-based search (Bypassing PHP Proxy)
+             localStorage.setItem('sp_client_pexels', clientPexelsKey);
+             localStorage.setItem('sp_client_pixabay', clientPixabayKey);
+             
+             if(clientPexelsKey) {
+                 const res = await fetch(`https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=6`, {
+                     headers: { Authorization: clientPexelsKey }
+                 });
+                 const data = await res.json();
+                 if(data.videos) {
+                     hits = [...hits, ...data.videos.map((v:any) => ({
+                         id: 'pex-'+v.id, source: 'Pexels', thumbnail: v.image, title: 'Video '+v.id,
+                         downloadUrl: v.video_files[0]?.link, author: v.user.name
+                     }))];
+                 }
+             }
+        } else {
+             // Server Proxy Search
+             hits = await db.searchExternal(query);
+        }
+
         if (hits && hits.length > 0) {
             setResults(hits);
         } else {
-            setError("No results found. Ensure Admin has configured API Keys.");
+            setError(useClientKeys ? "No results with provided keys." : "Server returned no results. Try enabling 'Use Custom Keys' to search from browser.");
         }
     } catch (e: any) {
         setError("Search failed: " + e.message);
@@ -64,7 +91,6 @@ export default function Requests() {
             const videoData = results.find(r => r.id === id);
             if (!videoData) continue;
 
-            // Simple sanitation
             const safeTitle = (query + ' ' + count).replace(/[^a-z0-9 ]/gi, '');
             
             setUploadPercent(0);
@@ -130,7 +156,24 @@ export default function Requests() {
 
       {mode === 'SEARCH' && (
       <>
-      <form onSubmit={handleSearch} className="relative">
+      <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+         <div className="flex items-center gap-2 mb-2">
+             <input type="checkbox" checked={useClientKeys} onChange={e => setUseClientKeys(e.target.checked)} id="useClient" className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-indigo-500" />
+             <label htmlFor="useClient" className="text-sm font-bold text-slate-300 flex items-center gap-1 cursor-pointer">
+                 <Settings2 size={14}/> Use Custom/Client Keys
+             </label>
+         </div>
+         {useClientKeys ? (
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 animate-in fade-in slide-in-from-top-2">
+                 <input type="text" value={clientPexelsKey} onChange={e => setClientPexelsKey(e.target.value)} placeholder="Paste Pexels API Key" className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+                 <input type="text" value={clientPixabayKey} onChange={e => setClientPixabayKey(e.target.value)} placeholder="Paste Pixabay API Key" className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white" />
+             </div>
+         ) : (
+             <p className="text-xs text-slate-500 ml-6">Uses Server Proxy (requires Admin config). Enable custom keys if server search fails.</p>
+         )}
+      </div>
+
+      <form onSubmit={handleSearch} className="relative mt-4">
          <Search className="absolute left-4 top-3.5 text-slate-500" size={20} />
          <input 
             type="text" 

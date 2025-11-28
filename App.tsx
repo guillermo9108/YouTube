@@ -12,6 +12,7 @@ import Requests from './pages/Requests';
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { db } from './services/db';
+import { Loader2 } from 'lucide-react';
 
 // Lazy load Layout
 const Layout = React.lazy(() => import('./components/Layout'));
@@ -19,14 +20,19 @@ const Layout = React.lazy(() => import('./components/Layout'));
 // --- Guards ---
 
 const ProtectedRoute = ({ children }: PropsWithChildren) => {
-  const { user } = useAuth();
-  // Simple check, in real app might need loading state
-  if (!user && !localStorage.getItem('sp_current_user_id')) return <Navigate to="/login" replace />;
+  const { user, isLoading } = useAuth();
+  
+  if (isLoading) {
+      return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-indigo-500" size={32} /></div>;
+  }
+
+  if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
 const AdminRoute = ({ children }: PropsWithChildren) => {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+  if (isLoading) return null;
   if (!user || user.role !== 'ADMIN') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
@@ -42,7 +48,7 @@ const SetupGuard = ({ children }: PropsWithChildren) => {
     });
   }, []);
 
-  if (!checkDone) return null; // Or a spinner
+  if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Checking system...</div>;
 
   if (needs) {
     return <Navigate to="/setup" replace />;
