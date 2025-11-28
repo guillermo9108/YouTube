@@ -1,7 +1,9 @@
 
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory } from '../types';
 
-const API_BASE = '/api';
+// CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
+// This ensures it works in subfolders (e.g., 192.168.x.x/streampay/) on Synology/XAMPP
+const API_BASE = 'api';
 
 // --- MOCK DATA FOR DEMO MODE ---
 const MOCK_VIDEOS: Video[] = [
@@ -66,9 +68,11 @@ class DatabaseService {
         requestBody = JSON.stringify(body);
     }
 
+    // Ensure endpoint doesn't start with / if API_BASE doesn't end with /
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
     const url = method === 'GET' 
-       ? `${API_BASE}${endpoint}${endpoint.includes('?') ? '&' : '?'}_t=${Date.now()}` 
-       : `${API_BASE}${endpoint}`;
+       ? `${API_BASE}/${cleanEndpoint}${cleanEndpoint.includes('?') ? '&' : '?'}_t=${Date.now()}` 
+       : `${API_BASE}/${cleanEndpoint}`;
 
     try {
         const response = await fetch(url, {
@@ -77,22 +81,34 @@ class DatabaseService {
             body: requestBody
         });
 
-        if (!response.ok) {
-            throw new Error(`Server Error: ${response.status} ${response.statusText}`);
-        }
-
         const text = await response.text();
+
+        if (!response.ok) {
+            // Try to parse error from JSON if available
+            try {
+                const errJson = JSON.parse(text);
+                throw new Error(errJson.error || `Server Error: ${response.status}`);
+            } catch {
+                throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+            }
+        }
         
         if (!text || text.trim().length === 0) {
-            throw new Error("Empty response from API. PHP file might be empty.");
+            console.error("Empty response received from:", url);
+            throw new Error("Empty response from API. Check PHP logs or file permissions.");
         }
 
         let json;
         try {
             json = JSON.parse(text);
         } catch (e) {
-            if (!silent) console.error("Invalid API Response:", text.substring(0, 100));
-            throw new Error(`Invalid JSON from API: ${text.substring(0, 50)}...`);
+            if (!silent) console.error("Invalid API Response:", text.substring(0, 200));
+            // Check if it's a raw PHP error printed
+            if (text.includes('Fatal error') || text.includes('Parse error')) {
+                 const match = text.match(/(Fatal|Parse) error: (.*?) in/);
+                 throw new Error(`PHP Error: ${match ? match[2] : 'Unknown Syntax Error'}`);
+            }
+            throw new Error(`Invalid JSON from API. Response was not JSON.`);
         }
         
         if (!json.success) {
@@ -149,44 +165,44 @@ class DatabaseService {
   }
 
   public needsSetup(): boolean { return !this.isInstalled; }
-  public async verifyDbConnection(config: any): Promise<boolean> { await this.request<any>('/install.php?action=verify_db', 'POST', config); return true; }
-  public async initializeSystem(dbConfig: any, adminUser: Partial<User>): Promise<void> { await this.request<any>('/install.php?action=install', 'POST', { dbConfig, adminUser }); this.isInstalled = true; }
+  public async verifyDbConnection(config: any): Promise<boolean> { await this.request<any>('install.php?action=verify_db', 'POST', config); return true; }
+  public async initializeSystem(dbConfig: any, adminUser: Partial<User>): Promise<void> { await this.request<any>('install.php?action=install', 'POST', { dbConfig, adminUser }); this.isInstalled = true; }
   public enableDemoMode() { this.isDemoMode = true; this.isInstalled = true; localStorage.setItem('sp_demo_mode', 'true'); window.location.reload(); }
 
-  async login(username: string, password: string): Promise<User> { return this.request<User>('/index.php?action=login', 'POST', { username, password }); }
-  async logout(userId: string): Promise<void> { await this.request('/index.php?action=logout', 'POST', { userId }); }
+  async login(username: string, password: string): Promise<User> { return this.request<User>('index.php?action=login', 'POST', { username, password }); }
+  async logout(userId: string): Promise<void> { await this.request('index.php?action=logout', 'POST', { userId }); }
   async heartbeat(userId: string, token: string): Promise<boolean> { 
       try {
-        await this.request('/index.php?action=heartbeat', 'POST', { userId, token }, true);
+        await this.request('index.php?action=heartbeat', 'POST', { userId, token }, true);
         return true;
       } catch { return false; }
   }
 
-  async register(username: string, password: string): Promise<User> { return this.request<User>('/index.php?action=register', 'POST', { username, password }); }
-  async getUser(id: string): Promise<User | null> { try { return await this.request<User>(`/index.php?action=get_user&id=${id}`); } catch (e) { return null; } }
-  async updateUserProfile(userId: string, updates: Partial<User>): Promise<void> { await this.request('/index.php?action=update_user', 'POST', { userId, updates }); }
+  async register(username: string, password: string): Promise<User> { return this.request<User>('index.php?action=register', 'POST', { username, password }); }
+  async getUser(id: string): Promise<User | null> { try { return await this.request<User>(`index.php?action=get_user&id=${id}`); } catch (e) { return null; } }
+  async updateUserProfile(userId: string, updates: Partial<User>): Promise<void> { await this.request('index.php?action=update_user', 'POST', { userId, updates }); }
 
-  async getAllVideos(): Promise<Video[]> { return this.request<Video[]>('/index.php?action=get_videos'); }
+  async getAllVideos(): Promise<Video[]> { return this.request<Video[]>('index.php?action=get_videos'); }
   async getVideo(id: string): Promise<Video | undefined> { 
       try { 
-          return await this.request<Video>(`/index.php?action=get_video&id=${id}`); 
+          return await this.request<Video>(`index.php?action=get_video&id=${id}`); 
       } catch (e) { 
           console.warn(`Video ${id} fetch failed`, e);
           return undefined; 
       } 
   }
-  async getRelatedVideos(currentVideoId: string): Promise<Video[]> { return this.request<Video[]>(`/index.php?action=get_related_videos&id=${currentVideoId}`); }
-  async hasPurchased(userId: string, videoId: string): Promise<boolean> { const res = await this.request<{ hasPurchased: boolean }>(`/index.php?action=has_purchased&userId=${userId}&videoId=${videoId}`); return res.hasPurchased; }
-  async getInteraction(userId: string, videoId: string): Promise<UserInteraction> { return this.request<UserInteraction>(`/index.php?action=get_interaction&userId=${userId}&videoId=${videoId}`); }
-  async toggleLike(userId: string, videoId: string, isLike: boolean): Promise<UserInteraction> { return this.request<UserInteraction>('/index.php?action=toggle_like', 'POST', { userId, videoId, isLike }); }
-  async markWatched(userId: string, videoId: string): Promise<void> { await this.request('/index.php?action=mark_watched', 'POST', { userId, videoId }); }
-  async toggleWatchLater(userId: string, videoId: string): Promise<string[]> { const res = await this.request<{ list: string[] }>('/index.php?action=toggle_watch_later', 'POST', { userId, videoId }); return res.list; }
-  async getUserActivity(userId: string): Promise<{ liked: string[], watched: string[] }> { return this.request<{ liked: string[], watched: string[] }>(`/index.php?action=get_user_activity&userId=${userId}`); }
+  async getRelatedVideos(currentVideoId: string): Promise<Video[]> { return this.request<Video[]>(`index.php?action=get_related_videos&id=${currentVideoId}`); }
+  async hasPurchased(userId: string, videoId: string): Promise<boolean> { const res = await this.request<{ hasPurchased: boolean }>(`index.php?action=has_purchased&userId=${userId}&videoId=${videoId}`); return res.hasPurchased; }
+  async getInteraction(userId: string, videoId: string): Promise<UserInteraction> { return this.request<UserInteraction>(`index.php?action=get_interaction&userId=${userId}&videoId=${videoId}`); }
+  async toggleLike(userId: string, videoId: string, isLike: boolean): Promise<UserInteraction> { return this.request<UserInteraction>('index.php?action=toggle_like', 'POST', { userId, videoId, isLike }); }
+  async markWatched(userId: string, videoId: string): Promise<void> { await this.request('index.php?action=mark_watched', 'POST', { userId, videoId }); }
+  async toggleWatchLater(userId: string, videoId: string): Promise<string[]> { const res = await this.request<{ list: string[] }>('index.php?action=toggle_watch_later', 'POST', { userId, videoId }); return res.list; }
+  async getUserActivity(userId: string): Promise<{ liked: string[], watched: string[] }> { return this.request<{ liked: string[], watched: string[] }>(`index.php?action=get_user_activity&userId=${userId}`); }
 
-  async getComments(videoId: string): Promise<Comment[]> { return this.request<Comment[]>(`/index.php?action=get_comments&videoId=${videoId}`); }
-  async addComment(userId: string, videoId: string, text: string): Promise<Comment> { return this.request<Comment>('/index.php?action=add_comment', 'POST', { userId, videoId, text }); }
+  async getComments(videoId: string): Promise<Comment[]> { return this.request<Comment[]>(`index.php?action=get_comments&videoId=${videoId}`); }
+  async addComment(userId: string, videoId: string, text: string): Promise<Comment> { return this.request<Comment>('index.php?action=add_comment', 'POST', { userId, videoId, text }); }
 
-  async purchaseVideo(userId: string, videoId: string): Promise<void> { await this.request('/index.php?action=purchase_video', 'POST', { userId, videoId }); }
+  async purchaseVideo(userId: string, videoId: string): Promise<void> { await this.request('index.php?action=purchase_video', 'POST', { userId, videoId }); }
   
   async uploadVideo(
     title: string, 
@@ -212,6 +228,7 @@ class DatabaseService {
         if (thumbnail) formData.append('thumbnail', thumbnail);
         
         const xhr = new XMLHttpRequest();
+        // XHR also needs the relative path fix
         xhr.open('POST', `${API_BASE}/index.php?action=upload_video`, true);
         if (onProgress) { 
             xhr.upload.onprogress = (e) => { 
@@ -220,34 +237,46 @@ class DatabaseService {
                 } 
             }; 
         }
-        xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) { try { const json = JSON.parse(xhr.responseText); if (json.success) resolve(); else reject(new Error(json.error || 'Upload failed')); } catch (e) { reject(new Error("Invalid server response")); } } else { reject(new Error(`Server error: ${xhr.status}`)); } };
+        xhr.onload = () => { 
+            if (xhr.status >= 200 && xhr.status < 300) { 
+                try { 
+                    const json = JSON.parse(xhr.responseText); 
+                    if (json.success) resolve(); else reject(new Error(json.error || 'Upload failed')); 
+                } catch (e) { 
+                    console.error("Upload response error", xhr.responseText);
+                    reject(new Error("Invalid server response")); 
+                } 
+            } else { 
+                reject(new Error(`Server error: ${xhr.status}`)); 
+            } 
+        };
         xhr.onerror = () => reject(new Error("Network connection error"));
         xhr.send(formData);
     });
   }
 
-  async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> { await this.request('/index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice }); }
-  async getAllUsers(): Promise<User[]> { try { const u = await this.request<User[]>('/index.php?action=get_all_users'); return Array.isArray(u) ? u : []; } catch (e) { return []; } }
-  async adminAddBalance(adminId: string, targetUserId: string, amount: number): Promise<void> { await this.request('/index.php?action=admin_add_balance', 'POST', { adminId, targetUserId, amount }); }
-  async getUserTransactions(userId: string): Promise<Transaction[]> { return this.request<Transaction[]>(`/index.php?action=get_transactions&userId=${userId}`); }
-  async getVideosByCreator(creatorId: string): Promise<Video[]> { return this.request<Video[]>(`/index.php?action=get_creator_videos&creatorId=${creatorId}`); }
+  async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> { await this.request('index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice }); }
+  async getAllUsers(): Promise<User[]> { try { const u = await this.request<User[]>('index.php?action=get_all_users'); return Array.isArray(u) ? u : []; } catch (e) { return []; } }
+  async adminAddBalance(adminId: string, targetUserId: string, amount: number): Promise<void> { await this.request('index.php?action=admin_add_balance', 'POST', { adminId, targetUserId, amount }); }
+  async getUserTransactions(userId: string): Promise<Transaction[]> { return this.request<Transaction[]>(`index.php?action=get_transactions&userId=${userId}`); }
+  async getVideosByCreator(creatorId: string): Promise<Video[]> { return this.request<Video[]>(`index.php?action=get_creator_videos&creatorId=${creatorId}`); }
   
-  async adminRepairDb(): Promise<void> { await this.request('/index.php?action=admin_repair_db', 'POST', {}); }
-  async adminCleanupVideos(): Promise<{deleted: number}> { return this.request<{deleted: number}>('/index.php?action=admin_cleanup_videos', 'POST', {}); }
+  async adminRepairDb(): Promise<void> { await this.request('index.php?action=admin_repair_db', 'POST', {}); }
+  async adminCleanupVideos(): Promise<{deleted: number}> { return this.request<{deleted: number}>('index.php?action=admin_cleanup_videos', 'POST', {}); }
 
-  async getRequests(status?: string): Promise<ContentRequest[]> { const qs = status ? `&status=${status}` : ''; return this.request<ContentRequest[]>(`/index.php?action=get_requests${qs}`); }
-  async requestContent(userId: string, query: string, useLocalNetwork: boolean): Promise<ContentRequest> { return this.request<ContentRequest>('/index.php?action=request_content', 'POST', { userId, query, useLocalNetwork }); }
-  async deleteRequest(requestId: string): Promise<void> { await this.request('/index.php?action=delete_request', 'POST', { requestId }); }
-  async getSystemSettings(): Promise<SystemSettings> { return this.request<SystemSettings>('/index.php?action=get_system_settings'); }
-  async updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> { await this.request('/index.php?action=update_system_settings', 'POST', { settings }); }
-  async triggerQueueProcessing(): Promise<{ processed: number, message: string }> { return this.request<{ processed: number, message: string }>('/index.php?action=process_queue', 'POST', {}); }
+  async getRequests(status?: string): Promise<ContentRequest[]> { const qs = status ? `&status=${status}` : ''; return this.request<ContentRequest[]>(`index.php?action=get_requests${qs}`); }
+  async requestContent(userId: string, query: string, useLocalNetwork: boolean): Promise<ContentRequest> { return this.request<ContentRequest>('index.php?action=request_content', 'POST', { userId, query, useLocalNetwork }); }
+  async deleteRequest(requestId: string): Promise<void> { await this.request('index.php?action=delete_request', 'POST', { requestId }); }
+  async getSystemSettings(): Promise<SystemSettings> { return this.request<SystemSettings>('index.php?action=get_system_settings'); }
+  async updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> { await this.request('index.php?action=update_system_settings', 'POST', { settings }); }
+  async triggerQueueProcessing(): Promise<{ processed: number, message: string }> { return this.request<{ processed: number, message: string }>('index.php?action=process_queue', 'POST', {}); }
   
   async searchExternal(query: string, source: 'STOCK' | 'YOUTUBE' = 'STOCK'): Promise<VideoResult[]> { 
-    return this.request<VideoResult[]>('/index.php?action=search_external', 'POST', { query, source }); 
+    return this.request<VideoResult[]>('index.php?action=search_external', 'POST', { query, source }); 
   }
   
   async serverImportVideo(url: string): Promise<void> {
-    await this.request('/index.php?action=server_import_video', 'POST', { url });
+    await this.request('index.php?action=server_import_video', 'POST', { url });
   }
 }
 

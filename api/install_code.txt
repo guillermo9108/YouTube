@@ -11,6 +11,17 @@ header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { ob_clean(); http_response_code(200); exit(); }
 
+// Catch Fatal Errors
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
+        ob_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'error' => 'Critical Install Error: ' . $error['message']]);
+        exit;
+    }
+});
+
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true);
 $configFile = 'db_config.json';
