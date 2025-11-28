@@ -146,21 +146,65 @@ switch ($action) {
         $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
         $stmt->execute([$input['username']]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        
         if ($user && password_verify($input['password'], $user['password_hash'])) {
+            // SINGLE SESSION CHECK
+            $lastActive = $user['lastActive'] ?? 0;
+            $now = time() * 1000;
+            $timeout = 60 * 1000; // 60 seconds timeout
+            
+            // If user was active recently AND didn't logout properly
+            if ($lastActive > ($now - $timeout) && !empty($user['currentSessionId'])) {
+                respond(false, null, 'Account is currently active on another device. Please logout there or wait 60 seconds.');
+            }
+            
+            // Start new session
+            $newToken = bin2hex(random_bytes(16));
+            $pdo->prepare("UPDATE users SET currentSessionId = ?, lastActive = ? WHERE id = ?")
+                ->execute([$newToken, $now, $user['id']]);
+
             unset($user['password_hash']);
             $user['watchLater'] = json_decode($user['watchLater'] ?? '[]');
+            $user['sessionToken'] = $newToken; // Return token to client
             respond(true, $user);
         }
         respond(false, null, 'Invalid login');
         break;
 
+    case 'logout':
+        $uid = $input['userId'];
+        $pdo->prepare("UPDATE users SET currentSessionId = NULL, lastActive = 0 WHERE id = ?")->execute([$uid]);
+        respond(true);
+        break;
+
+    case 'heartbeat':
+        $uid = $input['userId'];
+        $token = $input['token'];
+        $now = time() * 1000;
+        
+        $stmt = $pdo->prepare("SELECT currentSessionId FROM users WHERE id = ?");
+        $stmt->execute([$uid]);
+        $dbToken = $stmt->fetchColumn();
+        
+        if ($dbToken === $token) {
+            $pdo->prepare("UPDATE users SET lastActive = ? WHERE id = ?")->execute([$now, $uid]);
+            respond(true);
+        } else {
+            respond(false, null, 'Session invalid');
+        }
+        break;
+
     case 'register':
         $id = 'u_' . uniqid();
         $hash = password_hash($input['password'], PASSWORD_DEFAULT);
+        $newToken = bin2hex(random_bytes(16));
+        $now = time() * 1000;
+
         // Changed balance from 100 to 0
-        $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater) VALUES (?, ?, ?, 'USER', 0, 1, '[]')")
-            ->execute([$id, $input['username'], $hash]);
-        respond(true, ['id' => $id, 'username' => $input['username'], 'role' => 'USER', 'balance' => 0, 'autoPurchaseLimit'=>1, 'watchLater'=>[]]);
+        $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater, currentSessionId, lastActive) VALUES (?, ?, ?, 'USER', 0, 1, '[]', ?, ?)")
+            ->execute([$id, $input['username'], $hash, $newToken, $now]);
+            
+        respond(true, ['id' => $id, 'username' => $input['username'], 'role' => 'USER', 'balance' => 0, 'autoPurchaseLimit'=>1, 'watchLater'=>[], 'sessionToken'=>$newToken]);
         break;
 
     case 'get_user':
@@ -391,7 +435,9 @@ switch ($action) {
                 "ALTER TABLE system_settings ADD COLUMN enableYoutube TINYINT(1) DEFAULT 0",
                 "ALTER TABLE videos ADD COLUMN category VARCHAR(50) DEFAULT 'OTHER'",
                 "ALTER TABLE videos ADD COLUMN duration INT DEFAULT 0",
-                "ALTER TABLE videos ADD COLUMN fileHash VARCHAR(32)"
+                "ALTER TABLE videos ADD COLUMN fileHash VARCHAR(32)",
+                "ALTER TABLE users ADD COLUMN currentSessionId VARCHAR(64) DEFAULT NULL",
+                "ALTER TABLE users ADD COLUMN lastActive BIGINT DEFAULT 0"
             ];
             foreach($cols as $c) { try { $pdo->exec($c); } catch(Exception $e) {} }
             

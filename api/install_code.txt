@@ -61,7 +61,9 @@ if ($action === 'install') {
             role ENUM('USER', 'ADMIN') DEFAULT 'USER',
             balance DECIMAL(10, 2) DEFAULT 0.00,
             autoPurchaseLimit DECIMAL(10, 2) DEFAULT 1.00,
-            watchLater JSON
+            watchLater JSON,
+            currentSessionId VARCHAR(64) DEFAULT NULL,
+            lastActive BIGINT DEFAULT 0
         )");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS videos (

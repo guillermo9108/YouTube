@@ -23,6 +23,7 @@ export interface User {
   balance: number;
   autoPurchaseLimit: number; // Default 1
   watchLater: string[]; // Video IDs
+  sessionToken?: string; // New: For single session enforcement
 }
 
 export interface Video {

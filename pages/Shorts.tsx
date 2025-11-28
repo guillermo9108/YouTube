@@ -243,7 +243,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
 
       {/* Comments Drawer */}
       {showComments && (
-        <div className="absolute inset-0 z-[60] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[60] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
            <div 
              className="w-full bg-slate-900 rounded-t-2xl h-[75%] md:h-[60%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom duration-300"
              onClick={(e) => e.stopPropagation()}
@@ -279,7 +279,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                  )}
               </div>
 
-              <form onSubmit={postComment} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 pb-safe">
+              <form onSubmit={postComment} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 pb-8 md:pb-4">
                  <input 
                    type="text" 
                    value={newComment}

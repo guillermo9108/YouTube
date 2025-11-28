@@ -115,7 +115,8 @@ class DatabaseService {
             role: 'ADMIN',
             balance: 500,
             autoPurchaseLimit: 10,
-            watchLater: []
+            watchLater: [],
+            sessionToken: 'demo_token'
         } as T;
     }
     if (endpoint.includes('get_videos')) return MOCK_VIDEOS as T;
@@ -123,6 +124,7 @@ class DatabaseService {
     if (endpoint.includes('has_purchased')) return { hasPurchased: true } as T;
     if (endpoint.includes('get_interaction')) return { liked: false, disliked: false, isWatched: false, userId: 'demo', videoId: 'demo' } as T;
     if (endpoint.includes('get_all_users')) return [{id: 'demo', username: 'DemoUser', role: 'ADMIN', balance: 500}] as T;
+    if (endpoint.includes('heartbeat')) return true as T;
     return {} as T;
   }
 
@@ -152,6 +154,14 @@ class DatabaseService {
   public enableDemoMode() { this.isDemoMode = true; this.isInstalled = true; localStorage.setItem('sp_demo_mode', 'true'); window.location.reload(); }
 
   async login(username: string, password: string): Promise<User> { return this.request<User>('/index.php?action=login', 'POST', { username, password }); }
+  async logout(userId: string): Promise<void> { await this.request('/index.php?action=logout', 'POST', { userId }); }
+  async heartbeat(userId: string, token: string): Promise<boolean> { 
+      try {
+        await this.request('/index.php?action=heartbeat', 'POST', { userId, token }, true);
+        return true;
+      } catch { return false; }
+  }
+
   async register(username: string, password: string): Promise<User> { return this.request<User>('/index.php?action=register', 'POST', { username, password }); }
   async getUser(id: string): Promise<User | null> { try { return await this.request<User>(`/index.php?action=get_user&id=${id}`); } catch (e) { return null; } }
   async updateUserProfile(userId: string, updates: Partial<User>): Promise<void> { await this.request('/index.php?action=update_user', 'POST', { userId, updates }); }

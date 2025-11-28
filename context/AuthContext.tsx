@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User } from '../types';
 import { db } from '../services/db';
 
@@ -23,18 +23,27 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const heartbeatRef = useRef<number | null>(null);
   
   useEffect(() => {
     const savedId = localStorage.getItem('sp_current_user_id');
-    if (savedId) {
+    const savedToken = localStorage.getItem('sp_session_token');
+
+    if (savedId && savedToken) {
       db.getUser(savedId)
         .then(u => {
-            if(u) setUser(u);
-            else localStorage.removeItem('sp_current_user_id');
+            if(u) {
+                // Attach the local token to the user object for validation
+                u.sessionToken = savedToken;
+                setUser(u);
+            }
+            else {
+                logout();
+            }
         })
         .catch(err => {
             console.error("Auth check failed:", err);
-            // Don't remove ID immediately on network error, allows retry
+            // Don't logout on network error immediately
         })
         .finally(() => setIsLoading(false));
     } else {
@@ -42,9 +51,37 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     }
   }, []);
 
+  // Heartbeat Logic
+  useEffect(() => {
+    if (user && user.sessionToken) {
+        // Clear existing interval if any
+        if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+        
+        // Initial beat
+        db.heartbeat(user.id, user.sessionToken);
+
+        // Beat every 20 seconds
+        heartbeatRef.current = window.setInterval(async () => {
+            if (user && user.sessionToken) {
+                const isValid = await db.heartbeat(user.id, user.sessionToken);
+                if (!isValid) {
+                    alert("Session Expired. You were logged out because this account was accessed from another device.");
+                    logout();
+                }
+            }
+        }, 20000);
+    } else {
+        if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+    }
+
+    return () => {
+        if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+    };
+  }, [user]);
+
   const refreshUser = () => {
      if (user) {
-        db.getUser(user.id).then(u => { if(u) setUser(u); });
+        db.getUser(user.id).then(u => { if(u) setUser({...u, sessionToken: user.sessionToken}); });
      }
   };
 
@@ -54,6 +91,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         const u = await db.login(username, password);
         setUser(u);
         localStorage.setItem('sp_current_user_id', u.id);
+        if (u.sessionToken) localStorage.setItem('sp_session_token', u.sessionToken);
     } finally {
         setIsLoading(false);
     }
@@ -65,14 +103,20 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         const u = await db.register(username, password);
         setUser(u);
         localStorage.setItem('sp_current_user_id', u.id);
+        if (u.sessionToken) localStorage.setItem('sp_session_token', u.sessionToken);
     } finally {
         setIsLoading(false);
     }
   };
 
   const logout = () => {
+    if (user) {
+        db.logout(user.id).catch(console.error);
+    }
     setUser(null);
     localStorage.removeItem('sp_current_user_id');
+    localStorage.removeItem('sp_session_token');
+    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
   };
 
   return (
