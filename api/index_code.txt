@@ -313,6 +313,13 @@ try {
             if ($user) { $user['watchLater'] = json_decode($user['watchLater'] ?? '[]'); respond(true, $user); }
             respond(false, null, 'User not found');
             break;
+            
+        case 'get_user_activity':
+            $uid = $_GET['userId'];
+            $watched = $pdo->query("SELECT videoId FROM interactions WHERE userId='$uid' AND isWatched=1")->fetchAll(PDO::FETCH_COLUMN);
+            $liked = $pdo->query("SELECT videoId FROM interactions WHERE userId='$uid' AND liked=1")->fetchAll(PDO::FETCH_COLUMN);
+            respond(true, ['watched' => $watched ?: [], 'liked' => $liked ?: []]);
+            break;
 
         case 'get_all_users':
             $users = $pdo->query("SELECT id, username, role, balance FROM users ORDER BY username ASC")->fetchAll(PDO::FETCH_ASSOC);
