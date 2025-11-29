@@ -102,35 +102,37 @@ export default function Layout() {
       {/* Global Upload Widget */}
       <UploadIndicator />
 
-      {/* Bottom Nav for Mobile */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex justify-around items-center py-3 z-50 safe-area-bottom">
-        <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/')}`}>
-          <Home size={22} />
-          <span className="text-[10px]">Home</span>
-        </Link>
-
-        <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}>
-          <Smartphone size={22} />
-          <span className="text-[10px]">Shorts</span>
-        </Link>
-        
-        <Link to="/upload" className={`flex flex-col items-center gap-1 ${isActive('/upload')}`}>
-          <Upload size={22} />
-          <span className="text-[10px]">Upload</span>
-        </Link>
-
-        {user?.role === 'ADMIN' && (
-           <Link to="/admin" className={`flex flex-col items-center gap-1 ${isActive('/admin')}`}>
-            <ShieldCheck size={22} />
-            <span className="text-[10px]">Admin</span>
+      {/* Bottom Nav for Mobile - HIDDEN ON SHORTS */}
+      {!isShortsMode && (
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex justify-around items-center py-3 z-50 safe-area-bottom">
+          <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/')}`}>
+            <Home size={22} />
+            <span className="text-[10px]">Home</span>
           </Link>
-        )}
 
-        <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>
-          <Avatar size={22} />
-          <span className="text-[10px]">Profile</span>
-        </Link>
-      </nav>
+          <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}>
+            <Smartphone size={22} />
+            <span className="text-[10px]">Shorts</span>
+          </Link>
+          
+          <Link to="/upload" className={`flex flex-col items-center gap-1 ${isActive('/upload')}`}>
+            <Upload size={22} />
+            <span className="text-[10px]">Upload</span>
+          </Link>
+
+          {user?.role === 'ADMIN' && (
+             <Link to="/admin" className={`flex flex-col items-center gap-1 ${isActive('/admin')}`}>
+              <ShieldCheck size={22} />
+              <span className="text-[10px]">Admin</span>
+            </Link>
+          )}
+
+          <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>
+            <Avatar size={22} />
+            <span className="text-[10px]">Profile</span>
+          </Link>
+        </nav>
+      )}
     </div>
   );
 }
