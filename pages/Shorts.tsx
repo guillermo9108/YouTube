@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Heart, MessageCircle, MoreVertical, DollarSign, Send, X, Lock, Volume2, VolumeX, Smartphone, RefreshCw, Maximize, Minimize, ThumbsDown } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, UserPlus, Check, Lock, DollarSign, Send, X, Plus } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -16,14 +16,14 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isMuted, setIsMuted] = useState(false); // Default to sound ON
   const [purchasing, setPurchasing] = useState(false);
-  const [objectFit, setObjectFit] = useState<'cover' | 'contain'>('cover');
   
   // Social State
   const [interaction, setInteraction] = useState<UserInteraction | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
-  const [likeCount, setLikeCount] = useState(video.likes); 
+  const [likeCount, setLikeCount] = useState(video.likes);
+  const [isSubscribed, setIsSubscribed] = useState(false); // Visual Only State
 
   // Load Interaction Data
   useEffect(() => {
@@ -36,7 +36,6 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
 
   // Handle Play/Pause, Autoplay Policies, and Auto-Purchase
   useEffect(() => {
-    // If not active, just pause and exit
     if (!isActive) {
       if (videoRef.current) videoRef.current.pause();
       return;
@@ -45,10 +44,9 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     const handleActiveVideo = async () => {
        if (!user) return;
 
-       // 1. AUTO-PURCHASE LOGIC
        let currentUnlockedState = isUnlocked;
 
-       // If locked, check if we can/should auto-buy
+       // Auto-Purchase Logic
        if (!currentUnlockedState && !purchasing) {
            const canAfford = user.balance >= video.price;
            const withinLimit = video.price <= user.autoPurchaseLimit;
@@ -59,7 +57,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                    await db.purchaseVideo(user.id, video.id);
                    refreshUser();
                    setIsUnlocked(true);
-                   currentUnlockedState = true; // Mark as unlocked for playback logic below
+                   currentUnlockedState = true;
                } catch (e) {
                    console.error("Auto-purchase failed", e);
                } finally {
@@ -68,15 +66,13 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
            }
        }
 
-       // 2. PLAYBACK LOGIC
+       // Playback Logic
        if (videoRef.current && currentUnlockedState) {
           try {
-             // Try to play with sound first
              videoRef.current.muted = false;
              setIsMuted(false);
              await videoRef.current.play();
           } catch (err) {
-             // Autoplay with sound blocked by browser, fallback to muted
              console.warn("Autoplay audio blocked, retrying muted.");
              if (videoRef.current) {
                 videoRef.current.muted = true;
@@ -89,7 +85,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
 
     handleActiveVideo();
 
-  }, [isActive, isUnlocked, user?.id]); // Re-run if active state or lock state changes
+  }, [isActive, isUnlocked, user?.id]);
 
   // Actions
   const handlePurchase = async () => {
@@ -99,7 +95,6 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
       await db.purchaseVideo(user.id, video.id);
       refreshUser();
       setIsUnlocked(true);
-      // Force play after manual purchase
       if (videoRef.current) {
         videoRef.current.muted = false;
         setIsMuted(false);
@@ -119,15 +114,21 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
   };
 
+  const handleShare = async () => {
+      const url = `${window.location.origin}/#/watch/${video.id}`;
+      if (navigator.share) {
+          try { await navigator.share({ title: video.title, text: video.description, url }); } catch(e) {}
+      } else {
+          navigator.clipboard.writeText(url);
+          alert("Link copied to clipboard!");
+      }
+  };
+
   const toggleMute = () => {
     if (videoRef.current) {
       videoRef.current.muted = !videoRef.current.muted;
       setIsMuted(videoRef.current.muted);
     }
-  };
-
-  const toggleFit = () => {
-      setObjectFit(prev => prev === 'cover' ? 'contain' : 'cover');
   };
 
   const postComment = async (e: React.FormEvent) => {
@@ -148,13 +149,12 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
             ref={videoRef}
             src={video.videoUrl}
             poster={video.thumbnailUrl}
-            className={`w-full h-full object-${objectFit}`}
+            className="w-full h-full object-cover"
             loop
             playsInline
-            muted={isMuted} // Controlled by state
+            muted={isMuted}
             onClick={toggleMute}
             onTimeUpdate={(e) => { 
-                // ADDED: View Counting Logic for Shorts (30%)
                 if (e.currentTarget.currentTime / e.currentTarget.duration > 0.30 && interaction && !interaction.isWatched && user) { 
                     db.markWatched(user.id, video.id); 
                     setInteraction({...interaction, isWatched: true}); 
@@ -169,21 +169,19 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                     {purchasing ? (
                         <RefreshCw className="mx-auto text-indigo-400 mb-4 animate-spin" size={48} />
                     ) : (
-                        <Lock size={48} className="mx-auto text-slate-300 mb-4" />
+                        <div className="flex flex-col items-center">
+                            <div className="text-4xl font-black text-amber-400 mb-2">{video.price}</div>
+                            <div className="text-xs uppercase font-bold text-amber-200 tracking-widest mb-6">Saldo Required</div>
+                        </div>
                     )}
-                    
-                    <h3 className="text-xl font-bold text-white mb-2">{purchasing ? 'Unlocking...' : 'Unlock Video'}</h3>
-                    <p className="text-slate-300 mb-6 text-sm">
-                        {purchasing ? 'Auto-purchasing content...' : `Support ${video.creatorName} to watch.`}
-                    </p>
                     
                     {!purchasing && (
                         <button 
                         onClick={handlePurchase}
                         disabled={purchasing}
-                        className="w-full bg-amber-400 hover:bg-amber-500 text-black font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-lg shadow-amber-400/20"
+                        className="w-full bg-white text-black font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-xl"
                         >
-                            <DollarSign size={20} /> Pay {video.price} Saldo
+                            Unlock Now
                         </button>
                     )}
                  </div>
@@ -192,89 +190,111 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
         )}
       </div>
       
-      {/* Overlay Gradient */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80 pointer-events-none z-10" />
+      {/* Cinematic Gradient Overlay */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/90 pointer-events-none z-10" />
 
-      {/* Mute Toggle (Top Right) */}
+      {/* Header Controls (Mute) */}
       {isUnlocked && (
-        <button onClick={toggleMute} className="absolute top-20 right-4 z-30 bg-black/30 backdrop-blur-md p-2 rounded-full text-white">
+        <button onClick={toggleMute} className="absolute top-16 right-4 z-30 bg-black/40 backdrop-blur-md p-2 rounded-full text-white hover:bg-black/60 transition-colors">
           {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
         </button>
       )}
 
-      {/* Right Sidebar Controls */}
-      <div className="absolute right-4 bottom-24 md:bottom-12 z-30 flex flex-col items-center gap-6 pb-4">
+      {/* RIGHT ACTION BAR */}
+      <div className="absolute right-2 bottom-20 z-30 flex flex-col items-center gap-5 pb-safe">
+        
+        {/* Avatar - Moved here for easier thumb access */}
+        <Link to={`/channel/${video.creatorId}`} className="relative group mb-2">
+            <div className="w-12 h-12 rounded-full border-2 border-white p-0.5 overflow-hidden bg-black transition-transform active:scale-90 shadow-lg">
+                {video.creatorAvatarUrl ? (
+                    <img src={video.creatorAvatarUrl} className="w-full h-full rounded-full object-cover" />
+                ) : (
+                    <div className="w-full h-full rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white">{video.creatorName[0]}</div>
+                )}
+            </div>
+            {!isSubscribed && (
+                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-600 text-white rounded-full p-0.5 border border-black shadow-sm transform scale-110" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsSubscribed(true); }}>
+                    <Plus size={12} strokeWidth={4} />
+                </div>
+            )}
+        </Link>
+
         {/* Like */}
         <div className="flex flex-col items-center gap-1">
           <button 
             onClick={() => handleRate('like')}
-            className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/20 transition-all active:scale-90 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}
+            className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-all active:scale-90 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}
           >
-             <Heart size={28} fill={interaction?.liked ? "currentColor" : "none"} />
+             <Heart size={26} fill={interaction?.liked ? "currentColor" : "white"} fillOpacity={interaction?.liked ? 1 : 0.2} strokeWidth={interaction?.liked ? 0 : 2} />
           </button>
-          <span className="text-xs font-bold text-white shadow-black drop-shadow-md">
-             {likeCount}
-          </span>
+          <span className="text-xs font-bold text-white drop-shadow-md">{likeCount}</span>
         </div>
 
         {/* Dislike */}
         <div className="flex flex-col items-center gap-1">
           <button 
             onClick={() => handleRate('dislike')}
-            className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/20 transition-all active:scale-90 ${interaction?.disliked ? 'text-white bg-white/20' : 'text-white'}`}
+            className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-all active:scale-90 ${interaction?.disliked ? 'text-red-500' : 'text-white'}`}
           >
-             <ThumbsDown size={24} fill={interaction?.disliked ? "currentColor" : "none"} />
+             <ThumbsDown size={26} fill={interaction?.disliked ? "currentColor" : "white"} fillOpacity={interaction?.disliked ? 1 : 0.2} />
           </button>
-          <span className="text-[10px] font-bold text-white shadow-black drop-shadow-md">Dislike</span>
+          <span className="text-xs font-bold text-white drop-shadow-md">Dislike</span>
         </div>
 
         {/* Comment */}
         <div className="flex flex-col items-center gap-1">
           <button 
              onClick={() => setShowComments(true)}
-             className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/20 text-white transition-all active:scale-90"
+             className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white transition-all active:scale-90"
           >
-             <MessageCircle size={28} />
+             <MessageCircle size={26} fill="white" fillOpacity={0.2} />
           </button>
-          <span className="text-xs font-bold text-white shadow-black drop-shadow-md">{comments.length}</span>
+          <span className="text-xs font-bold text-white drop-shadow-md">{comments.length}</span>
         </div>
 
-        {/* Fit / Adjust Video */}
-        <button 
-            onClick={toggleFit}
-            className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/20 text-white transition-all active:scale-90"
-        >
-           {objectFit === 'cover' ? <Minimize size={24} /> : <Maximize size={24} />}
-        </button>
+        {/* Share (NEW) */}
+        <div className="flex flex-col items-center gap-1">
+          <button 
+             onClick={handleShare}
+             className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white transition-all active:scale-90"
+          >
+             <Share2 size={26} fill="white" fillOpacity={0.2} />
+          </button>
+          <span className="text-xs font-bold text-white drop-shadow-md">Share</span>
+        </div>
       </div>
 
-      {/* Bottom Info */}
-      <div className="absolute bottom-[4.5rem] md:bottom-8 left-4 right-20 z-20 text-white">
-         <Link to={`/channel/${video.creatorId}`} className="flex items-center gap-2 mb-3 group">
-            {video.creatorAvatarUrl ? (
-                <img src={video.creatorAvatarUrl} className="w-10 h-10 rounded-full border-2 border-white object-cover" />
-            ) : (
-                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-bold border-2 border-white text-sm shadow-md">
-                    {video.creatorName[0]}
-                </div>
-            )}
-            <span className="font-bold text-sm md:text-base drop-shadow-md group-hover:underline">{video.creatorName}</span>
-            <button className="text-xs bg-white/20 backdrop-blur-md border border-white/30 px-3 py-1 rounded-full font-medium ml-2 hover:bg-white/30 transition-colors">Follow</button>
-         </Link>
-         <h2 className="text-sm md:text-lg leading-tight mb-2 drop-shadow-md font-semibold">{video.title}</h2>
-         <p className="text-xs md:text-sm text-slate-200 line-clamp-2 opacity-90 drop-shadow-sm">{video.description}</p>
+      {/* LEFT METADATA */}
+      <div className="absolute bottom-4 left-3 right-16 z-20 text-white flex flex-col items-start text-left pointer-events-none pb-safe">
+         
+         <div className="pointer-events-auto w-full">
+             {/* Creator & Subscribe Row */}
+             <div className="flex items-center gap-3 mb-2">
+                <Link to={`/channel/${video.creatorId}`} className="font-bold text-base md:text-lg drop-shadow-md hover:underline">@{video.creatorName}</Link>
+                <button 
+                    onClick={() => setIsSubscribed(!isSubscribed)}
+                    className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${isSubscribed ? 'bg-transparent text-white/80 border-white/40' : 'bg-red-600 text-white border-transparent'}`}
+                >
+                   {isSubscribed ? 'Subscribed' : 'Subscribe'}
+                </button>
+             </div>
+
+             {/* Title & Description */}
+             <h2 className="text-sm md:text-base font-semibold leading-tight mb-1 drop-shadow-md">{video.title}</h2>
+             <p className="text-xs md:text-sm text-slate-100 line-clamp-2 opacity-90 drop-shadow-sm font-medium pr-4">{video.description}</p>
+         </div>
       </div>
 
-      {/* Comments Drawer */}
+      {/* Comments Drawer (Fixed Overlay) */}
       {showComments && (
         <div className="fixed inset-0 z-[100] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
            <div 
-             className="w-full bg-slate-900 rounded-t-2xl h-[75%] md:h-[60%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom duration-300"
+             className="w-full bg-slate-900 rounded-t-2xl h-[65%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom duration-300"
              onClick={(e) => e.stopPropagation()}
            >
               <div className="flex justify-between items-center p-4 border-b border-slate-800">
                  <h3 className="font-bold text-white">Comments ({comments.length})</h3>
-                 <button onClick={() => setShowComments(false)} className="text-slate-400 hover:text-white p-2">
+                 <button onClick={() => setShowComments(false)} className="text-slate-400 hover:text-white bg-slate-800 p-1.5 rounded-full transition-colors">
                     <X size={20} />
                  </button>
               </div>
@@ -283,18 +303,18 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                  {comments.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-slate-500">
                        <MessageCircle size={32} className="mb-2 opacity-50"/>
-                       <p className="text-sm">No comments yet.</p>
+                       <p className="text-sm">Be the first to comment.</p>
                     </div>
                  ) : (
                     comments.map(c => (
-                      <div key={c.id} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2">
-                         <Link to={`/channel/${c.userId}`} className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 shrink-0 border border-slate-700 overflow-hidden">
-                           {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : c.username[0]}
+                      <div key={c.id} className="flex gap-3">
+                         <Link to={`/channel/${c.userId}`} className="w-8 h-8 rounded-full bg-slate-800 shrink-0 border border-slate-700 overflow-hidden">
+                           {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c.username[0]}</div>}
                          </Link>
                          <div>
                             <div className="flex items-baseline gap-2">
-                               <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-300 hover:underline">{c.username}</Link>
-                               <span className="text-[10px] text-slate-500">{new Date(c.timestamp).toLocaleDateString()}</span>
+                               <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-400 hover:text-white">{c.username}</Link>
+                               <span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-slate-200 mt-0.5">{c.text}</p>
                          </div>
@@ -308,20 +328,19 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                    type="text" 
                    value={newComment}
                    onChange={e => setNewComment(e.target.value)}
-                   className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50"
+                   className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
                    placeholder="Add a comment..."
                  />
                  <button 
                    type="submit" 
                    disabled={!newComment.trim()}
-                   className="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                   className="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-50 transition-colors"
                  >
-                    <Send size={16} />
+                    <Send size={18} />
                  </button>
               </form>
            </div>
            
-           {/* Click outside to close */}
            <div className="absolute inset-0 -z-10" onClick={() => setShowComments(false)}></div>
         </div>
       )}
@@ -336,13 +355,12 @@ export default function Shorts() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Randomize videos for the feed feel, filter shorts (<10 mins)
     db.getAllVideos().then(all => {
+        // Shuffle and filter
         setVideos(all.filter(v => v.duration < 600).sort(() => Math.random() - 0.5));
     });
   }, []);
 
-  // Track active video for autoplay
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;

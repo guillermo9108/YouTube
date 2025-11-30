@@ -19,7 +19,10 @@ export default function Channel() {
   const [purchases, setPurchases] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+        setLoading(false);
+        return;
+    }
     
     const loadChannel = async () => {
         setLoading(true);

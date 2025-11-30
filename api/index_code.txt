@@ -507,7 +507,8 @@ try {
             break;
         
         case 'get_creator_videos':
-            $stmt = $pdo->prepare("SELECT * FROM videos WHERE creatorId = ? ORDER BY createdAt DESC");
+            // CRITICAL FIX: Join users table to get creatorName and avatarUrl
+            $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? ORDER BY v.createdAt DESC");
             $stmt->execute([$_GET['creatorId']]);
             respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
             break;
