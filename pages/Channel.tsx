@@ -36,7 +36,7 @@ export default function Channel() {
             const vids = await db.getVideosByCreator(userId);
             setVideos(vids);
 
-            // 3. Calc Stats - Fix: Ensure numbers are added mathematically
+            // 3. Calc Stats
             const totalViews = vids.reduce((acc, curr) => acc + Number(curr.views), 0);
             setStats({ views: totalViews, uploads: vids.length });
 
@@ -63,10 +63,15 @@ export default function Channel() {
 
   const toggleSubscribe = async () => {
       if (!currentUser || !userId) return;
+      const oldState = isSubscribed;
+      setIsSubscribed(!oldState); // Optimistic UI
       try {
           const res = await db.toggleSubscribe(currentUser.id, userId);
           setIsSubscribed(res.isSubscribed);
-      } catch (e) { alert("Failed to subscribe"); }
+      } catch (e) { 
+          setIsSubscribed(oldState); // Revert on error
+          alert("Failed to subscribe"); 
+      }
   };
 
   const isUnlocked = (videoId: string, creatorId: string) => {

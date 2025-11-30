@@ -129,7 +129,7 @@ export default function Layout() {
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       
-      {/* Global Sidebar Drawer (Desktop/Tablet) */}
+      {/* Global Sidebar Drawer (Desktop/Tablet/Mobile) */}
       {showSidebar && (
         <div className="fixed inset-0 z-[60] flex">
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
@@ -140,26 +140,33 @@ export default function Layout() {
                 </div>
                 
                 <div className="space-y-1 flex-1">
-                    <Link to="/" className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
+                    {/* Admin Link - Added here for mobile visibility */}
+                    {user?.role === 'ADMIN' && (
+                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-900/10 hover:bg-amber-900/20 rounded-lg font-medium mb-4 border border-amber-500/20">
+                            <ShieldCheck size={20}/> Admin Panel
+                        </Link>
+                    )}
+
+                    <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
                         <Home size={20}/> Home
                     </Link>
-                    <Link to="/shorts" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                    <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <Smartphone size={20}/> Shorts
                     </Link>
                     <div className="h-px bg-slate-800 my-2"></div>
-                    <Link to="/requests" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                    <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <DownloadCloud size={20}/> Requests
                     </Link>
-                    <Link to="/upload" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                    <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <Upload size={20}/> Upload
                     </Link>
-                    <Link to="/profile" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                    <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <User size={20}/> Profile
                     </Link>
                 </div>
 
                 <div className="border-t border-slate-800 pt-4">
-                    <button onClick={logout} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-lg font-medium w-full text-left">
+                    <button onClick={() => { logout(); setShowSidebar(false); }} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-lg font-medium w-full text-left">
                         <LogOut size={20}/> Logout
                     </button>
                 </div>

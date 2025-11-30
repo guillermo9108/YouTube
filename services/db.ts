@@ -316,11 +316,17 @@ class DatabaseService {
 
   // --- Subscriptions & Notifications ---
   async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
-      return this.request('index.php?action=toggle_subscribe', 'POST', { userId, creatorId });
+      try {
+          return await this.request('index.php?action=toggle_subscribe', 'POST', { userId, creatorId });
+      } catch (e) {
+          throw new Error("Could not update subscription.");
+      }
   }
   async checkSubscription(userId: string, creatorId: string): Promise<boolean> {
-      const res = await this.request<{isSubscribed: boolean}>(`index.php?action=check_subscription&userId=${userId}&creatorId=${creatorId}`);
-      return res.isSubscribed;
+      try {
+          const res = await this.request<{isSubscribed: boolean}>(`index.php?action=check_subscription&userId=${userId}&creatorId=${creatorId}`);
+          return res.isSubscribed;
+      } catch { return false; }
   }
   async getNotifications(userId: string): Promise<Notification[]> {
       return this.request<Notification[]>(`index.php?action=get_notifications&userId=${userId}`);

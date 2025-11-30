@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, UserPlus, Check, Lock, DollarSign, Send, X, Plus } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -23,7 +23,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [likeCount, setLikeCount] = useState(video.likes);
-  const [isSubscribed, setIsSubscribed] = useState(false); // Visual Only State
+  const [isSubscribed, setIsSubscribed] = useState(false); // REAL DB State
 
   // Load Interaction Data
   useEffect(() => {
@@ -31,8 +31,10 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
       db.getInteraction(user.id, video.id).then(setInteraction);
       db.hasPurchased(user.id, video.id).then(setIsUnlocked);
       db.getComments(video.id).then(setComments);
+      // Check subscription status
+      db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed).catch(() => setIsSubscribed(false));
     }
-  }, [user, video.id]);
+  }, [user, video.id, video.creatorId]);
 
   // Handle Play/Pause, Autoplay Policies, and Auto-Purchase
   useEffect(() => {
@@ -112,6 +114,19 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     const res = await db.rateVideo(user.id, video.id, rating);
     setInteraction(res);
     if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
+  };
+
+  const handleSubscribe = async () => {
+      if (!user) return;
+      const oldState = isSubscribed;
+      setIsSubscribed(!oldState); // Optimistic Update
+      try {
+          const res = await db.toggleSubscribe(user.id, video.creatorId);
+          setIsSubscribed(res.isSubscribed);
+      } catch (e) {
+          setIsSubscribed(oldState); // Revert
+          alert("Failed to subscribe");
+      }
   };
 
   const handleShare = async () => {
@@ -213,7 +228,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                 )}
             </div>
             {!isSubscribed && (
-                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-600 text-white rounded-full p-0.5 border border-black shadow-sm transform scale-110" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsSubscribed(true); }}>
+                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-600 text-white rounded-full p-0.5 border border-black shadow-sm transform scale-110 cursor-pointer" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSubscribe(); }}>
                     <Plus size={12} strokeWidth={4} />
                 </div>
             )}
@@ -272,7 +287,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
              <div className="flex items-center gap-3 mb-2">
                 <Link to={`/channel/${video.creatorId}`} className="font-bold text-base md:text-lg drop-shadow-md hover:underline">@{video.creatorName}</Link>
                 <button 
-                    onClick={() => setIsSubscribed(!isSubscribed)}
+                    onClick={handleSubscribe}
                     className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${isSubscribed ? 'bg-transparent text-white/80 border-white/40' : 'bg-red-600 text-white border-transparent'}`}
                 >
                    {isSubscribed ? 'Subscribed' : 'Subscribe'}
