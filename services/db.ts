@@ -1,5 +1,5 @@
 
-import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
 // This ensures it works in subfolders (e.g., 192.168.x.x/streampay/) on Synology/XAMPP
@@ -291,8 +291,8 @@ class DatabaseService {
   async adminRepairDb(): Promise<void> { await this.request('index.php?action=admin_repair_db', 'POST', {}); }
   async adminCleanupVideos(): Promise<{deleted: number}> { return this.request<{deleted: number}>('index.php?action=admin_cleanup_videos', 'POST', {}); }
   
-  async getSmartCleanerPreview(category: string, percentage: number): Promise<SmartCleanerResult> {
-      return this.request<SmartCleanerResult>('index.php?action=admin_smart_cleaner_preview', 'POST', { category, percentage });
+  async getSmartCleanerPreview(category: string, percentage: number, safeHarborDays: number): Promise<SmartCleanerResult> {
+      return this.request<SmartCleanerResult>('index.php?action=admin_smart_cleaner_preview', 'POST', { category, percentage, safeHarborDays });
   }
   
   async executeSmartCleaner(videoIds: string[]): Promise<{deleted: number}> {
@@ -312,6 +312,21 @@ class DatabaseService {
   
   async serverImportVideo(url: string): Promise<void> {
     await this.request('index.php?action=server_import_video', 'POST', { url });
+  }
+
+  // --- Subscriptions & Notifications ---
+  async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
+      return this.request('index.php?action=toggle_subscribe', 'POST', { userId, creatorId });
+  }
+  async checkSubscription(userId: string, creatorId: string): Promise<boolean> {
+      const res = await this.request<{isSubscribed: boolean}>(`index.php?action=check_subscription&userId=${userId}&creatorId=${creatorId}`);
+      return res.isSubscribed;
+  }
+  async getNotifications(userId: string): Promise<Notification[]> {
+      return this.request<Notification[]>(`index.php?action=get_notifications&userId=${userId}`);
+  }
+  async markNotificationRead(notifId: string): Promise<void> {
+      await this.request('index.php?action=mark_notification_read', 'POST', { notifId });
   }
 }
 

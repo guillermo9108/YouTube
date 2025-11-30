@@ -145,6 +145,24 @@ if ($action === 'install') {
             enableYoutube TINYINT(1) DEFAULT 0
         )");
         
+        // NEW TABLES FOR SUBSCRIPTIONS & NOTIFICATIONS
+        $pdo->exec("CREATE TABLE IF NOT EXISTS subscriptions (
+            subscriberId VARCHAR(50),
+            creatorId VARCHAR(50),
+            createdAt BIGINT,
+            PRIMARY KEY (subscriberId, creatorId)
+        )");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (
+            id VARCHAR(50) PRIMARY KEY,
+            userId VARCHAR(50),
+            type VARCHAR(20),
+            text VARCHAR(255),
+            link VARCHAR(255),
+            isRead TINYINT(1) DEFAULT 0,
+            timestamp BIGINT
+        )");
+        
         $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
 
         $adminId = 'u_' . uniqid();

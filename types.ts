@@ -113,3 +113,14 @@ export interface SmartCleanerResult {
     spaceReclaimed: string; // Estimate
   }
 }
+
+export interface Notification {
+  id: string;
+  userId: string; // The recipient
+  type: 'UPLOAD' | 'SYSTEM';
+  text: string;
+  link: string; // URL to go to
+  isRead: boolean;
+  timestamp: number;
+  avatarUrl?: string; // Optional image for the notif
+}

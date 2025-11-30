@@ -23,6 +23,7 @@ export default function Admin() {
   // Cleaner State
   const [cleanerCategory, setCleanerCategory] = useState('ALL');
   const [cleanerPercent, setCleanerPercent] = useState(20);
+  const [cleanerSafeDays, setCleanerSafeDays] = useState(7); // Default 7 days safe harbor
   const [cleanerPreview, setCleanerPreview] = useState<Video[]>([]);
   const [cleanerStats, setCleanerStats] = useState({ totalVideos: 0, videosToDelete: 0, spaceReclaimed: '0 MB' });
   const [loadingCleaner, setLoadingCleaner] = useState(false);
@@ -111,7 +112,7 @@ export default function Admin() {
   const previewCleaner = async () => {
       setLoadingCleaner(true);
       try {
-          const res = await db.getSmartCleanerPreview(cleanerCategory, cleanerPercent);
+          const res = await db.getSmartCleanerPreview(cleanerCategory, cleanerPercent, cleanerSafeDays);
           setCleanerPreview(res.preview);
           setCleanerStats(res.stats);
       } finally { setLoadingCleaner(false); }
@@ -198,6 +199,19 @@ export default function Admin() {
                         className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                       />
                       <p className="text-[10px] text-slate-500 mt-1">Selects the bottom {cleanerPercent}% of videos by quality score.</p>
+                  </div>
+
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Minimum Age: {cleanerSafeDays} Days</label>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="30" 
+                        value={cleanerSafeDays} 
+                        onChange={e => setCleanerSafeDays(parseInt(e.target.value))} 
+                        className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">Videos newer than {cleanerSafeDays} days will NOT be deleted (Safe Harbor). Set to 0 to clean immediate junk.</p>
                   </div>
 
                   <button onClick={previewCleaner} disabled={loadingCleaner} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
