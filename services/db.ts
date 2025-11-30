@@ -1,5 +1,5 @@
 
-import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
 // This ensures it works in subfolders (e.g., 192.168.x.x/streampay/) on Synology/XAMPP
@@ -217,7 +217,11 @@ class DatabaseService {
   async getRelatedVideos(currentVideoId: string): Promise<Video[]> { return this.request<Video[]>(`index.php?action=get_related_videos&id=${currentVideoId}`); }
   async hasPurchased(userId: string, videoId: string): Promise<boolean> { const res = await this.request<{ hasPurchased: boolean }>(`index.php?action=has_purchased&userId=${userId}&videoId=${videoId}`); return res.hasPurchased; }
   async getInteraction(userId: string, videoId: string): Promise<UserInteraction> { return this.request<UserInteraction>(`index.php?action=get_interaction&userId=${userId}&videoId=${videoId}`); }
-  async toggleLike(userId: string, videoId: string, isLike: boolean): Promise<UserInteraction> { return this.request<UserInteraction>('index.php?action=toggle_like', 'POST', { userId, videoId, isLike }); }
+  
+  async rateVideo(userId: string, videoId: string, rating: 'like' | 'dislike'): Promise<UserInteraction> { 
+      return this.request<UserInteraction>('index.php?action=rate_video', 'POST', { userId, videoId, rating }); 
+  }
+  
   async markWatched(userId: string, videoId: string): Promise<void> { await this.request('index.php?action=mark_watched', 'POST', { userId, videoId }); }
   async toggleWatchLater(userId: string, videoId: string): Promise<string[]> { const res = await this.request<{ list: string[] }>('index.php?action=toggle_watch_later', 'POST', { userId, videoId }); return res.list; }
   async getUserActivity(userId: string): Promise<{ liked: string[], watched: string[] }> { return this.request<{ liked: string[], watched: string[] }>(`index.php?action=get_user_activity&userId=${userId}`); }
@@ -286,6 +290,14 @@ class DatabaseService {
   
   async adminRepairDb(): Promise<void> { await this.request('index.php?action=admin_repair_db', 'POST', {}); }
   async adminCleanupVideos(): Promise<{deleted: number}> { return this.request<{deleted: number}>('index.php?action=admin_cleanup_videos', 'POST', {}); }
+  
+  async getSmartCleanerPreview(category: string, percentage: number): Promise<SmartCleanerResult> {
+      return this.request<SmartCleanerResult>('index.php?action=admin_smart_cleaner_preview', 'POST', { category, percentage });
+  }
+  
+  async executeSmartCleaner(videoIds: string[]): Promise<{deleted: number}> {
+      return this.request<{deleted: number}>('index.php?action=admin_smart_cleaner_execute', 'POST', { videoIds });
+  }
 
   async getRequests(status?: string): Promise<ContentRequest[]> { const qs = status ? `&status=${status}` : ''; return this.request<ContentRequest[]>(`index.php?action=get_requests${qs}`); }
   async requestContent(userId: string, query: string, useLocalNetwork: boolean): Promise<ContentRequest> { return this.request<ContentRequest>('index.php?action=request_content', 'POST', { userId, query, useLocalNetwork }); }

@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Heart, MessageCircle, MoreVertical, DollarSign, Send, X, Lock, Volume2, VolumeX, Smartphone, RefreshCw, Maximize, Minimize } from 'lucide-react';
+import { Heart, MessageCircle, MoreVertical, DollarSign, Send, X, Lock, Volume2, VolumeX, Smartphone, RefreshCw, Maximize, Minimize, ThumbsDown } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -23,7 +23,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
   const [comments, setComments] = useState<Comment[]>([]);
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
-  const [likeCount, setLikeCount] = useState(video.likes); // Local state for immediate update
+  const [likeCount, setLikeCount] = useState(video.likes); 
 
   // Load Interaction Data
   useEffect(() => {
@@ -112,11 +112,11 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
     }
   };
 
-  const toggleLike = async () => {
+  const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
-    const res = await db.toggleLike(user.id, video.id, true);
+    const res = await db.rateVideo(user.id, video.id, rating);
     setInteraction(res);
-    if (res.newCount !== undefined) setLikeCount(res.newCount);
+    if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
   };
 
   const toggleMute = () => {
@@ -153,6 +153,13 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
             playsInline
             muted={isMuted} // Controlled by state
             onClick={toggleMute}
+            onTimeUpdate={(e) => { 
+                // ADDED: View Counting Logic for Shorts (30%)
+                if (e.currentTarget.currentTime / e.currentTarget.duration > 0.30 && interaction && !interaction.isWatched && user) { 
+                    db.markWatched(user.id, video.id); 
+                    setInteraction({...interaction, isWatched: true}); 
+                } 
+            }} 
           />
         ) : (
            <div className="w-full h-full relative">
@@ -200,7 +207,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
         {/* Like */}
         <div className="flex flex-col items-center gap-1">
           <button 
-            onClick={toggleLike}
+            onClick={() => handleRate('like')}
             className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/20 transition-all active:scale-90 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}
           >
              <Heart size={28} fill={interaction?.liked ? "currentColor" : "none"} />
@@ -208,6 +215,17 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
           <span className="text-xs font-bold text-white shadow-black drop-shadow-md">
              {likeCount}
           </span>
+        </div>
+
+        {/* Dislike */}
+        <div className="flex flex-col items-center gap-1">
+          <button 
+            onClick={() => handleRate('dislike')}
+            className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/20 transition-all active:scale-90 ${interaction?.disliked ? 'text-white bg-white/20' : 'text-white'}`}
+          >
+             <ThumbsDown size={24} fill={interaction?.disliked ? "currentColor" : "none"} />
+          </button>
+          <span className="text-[10px] font-bold text-white shadow-black drop-shadow-md">Dislike</span>
         </div>
 
         {/* Comment */}
@@ -232,7 +250,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
 
       {/* Bottom Info */}
       <div className="absolute bottom-[4.5rem] md:bottom-8 left-4 right-20 z-20 text-white">
-         <div className="flex items-center gap-2 mb-3">
+         <Link to={`/channel/${video.creatorId}`} className="flex items-center gap-2 mb-3 group">
             {video.creatorAvatarUrl ? (
                 <img src={video.creatorAvatarUrl} className="w-10 h-10 rounded-full border-2 border-white object-cover" />
             ) : (
@@ -240,9 +258,9 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                     {video.creatorName[0]}
                 </div>
             )}
-            <span className="font-bold text-sm md:text-base drop-shadow-md">{video.creatorName}</span>
+            <span className="font-bold text-sm md:text-base drop-shadow-md group-hover:underline">{video.creatorName}</span>
             <button className="text-xs bg-white/20 backdrop-blur-md border border-white/30 px-3 py-1 rounded-full font-medium ml-2 hover:bg-white/30 transition-colors">Follow</button>
-         </div>
+         </Link>
          <h2 className="text-sm md:text-lg leading-tight mb-2 drop-shadow-md font-semibold">{video.title}</h2>
          <p className="text-xs md:text-sm text-slate-200 line-clamp-2 opacity-90 drop-shadow-sm">{video.description}</p>
       </div>
@@ -270,12 +288,12 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
                  ) : (
                     comments.map(c => (
                       <div key={c.id} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2">
-                         <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 shrink-0 border border-slate-700 overflow-hidden">
+                         <Link to={`/channel/${c.userId}`} className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400 shrink-0 border border-slate-700 overflow-hidden">
                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : c.username[0]}
-                         </div>
+                         </Link>
                          <div>
                             <div className="flex items-baseline gap-2">
-                               <span className="text-xs font-bold text-slate-300">{c.username}</span>
+                               <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-300 hover:underline">{c.username}</Link>
                                <span className="text-[10px] text-slate-500">{new Date(c.timestamp).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-slate-200 mt-0.5">{c.text}</p>

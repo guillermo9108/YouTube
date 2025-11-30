@@ -1,55 +1,104 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useNavigate } from '../components/Router';
 import { VideoCategory } from '../types';
 
+// Helper to calculate image brightness
+const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    let r, g, b, avg;
+    let colorSum = 0;
+
+    for (let x = 0, len = data.length; x < len; x += 4) {
+        r = data[x];
+        g = data[x + 1];
+        b = data[x + 2];
+        avg = Math.floor((r + g + b) / 3);
+        colorSum += avg;
+    }
+
+    return Math.floor(colorSum / (width * height));
+};
+
 export const generateThumbnail = async (file: File): Promise<{ thumbnail: File | null, duration: number }> => {
   return new Promise((resolve) => {
-    try {
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.src = URL.createObjectURL(file);
-      video.muted = true;
-      video.playsInline = true;
-      video.currentTime = 1.0; 
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.src = URL.createObjectURL(file);
+    video.muted = true;
+    video.playsInline = true;
 
-      video.onloadedmetadata = () => {
-         // Duration available here
-      };
+    // Checkpoints to try if the frame is too dark (in percentage of duration)
+    const attemptPoints = [0, 0.15, 0.50]; 
+    let currentAttempt = 0;
 
-      video.onseeked = () => {
+    const captureFrame = () => {
         try {
-          const duration = video.duration || 0;
-          const canvas = document.createElement('canvas');
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          if (canvas.width > 1280) {
-              const scale = 1280 / canvas.width;
-              canvas.width = 1280;
-              canvas.height = video.videoHeight * scale;
-          }
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-          canvas.toBlob((blob) => {
-            if (blob) {
-              const thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
-              resolve({ thumbnail: thumbFile, duration });
+            const width = video.videoWidth;
+            const height = video.videoHeight;
+            const canvas = document.createElement('canvas');
+            
+            // OPTIMIZATION: Scale down to 640px max width.
+            // This saves ~75% RAM compared to 1280px, critical for mobile bulk uploads.
+            if (width > 640) { 
+                const scale = 640 / width;
+                canvas.width = 640;
+                canvas.height = height * scale;
             } else {
-              resolve({ thumbnail: null, duration: 0 });
+                canvas.width = width;
+                canvas.height = height;
             }
-            URL.revokeObjectURL(video.src);
-          }, 'image/jpeg', 0.75);
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error("No context");
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // SMART CHECK: Is the image too dark/black?
+            const brightness = getBrightness(ctx, canvas.width, canvas.height);
+            const duration = video.duration || 0;
+
+            // Threshold: 20 out of 255. If darker, try next seek point.
+            if (brightness < 20 && currentAttempt < attemptPoints.length - 1) {
+                currentAttempt++;
+                if (duration > 0) {
+                    const nextTime = Math.max(1.0, duration * attemptPoints[currentAttempt]);
+                    video.currentTime = nextTime;
+                    return; // Wait for seeked event again
+                }
+            }
+
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    const thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
+                    resolve({ thumbnail: thumbFile, duration });
+                } else {
+                    resolve({ thumbnail: null, duration: 0 });
+                }
+                // CRITICAL: Cleanup immediately to free RAM
+                URL.revokeObjectURL(video.src);
+                video.remove();
+            }, 'image/jpeg', 0.70); // Lower quality for speed
+
         } catch (e) {
-          resolve({ thumbnail: null, duration: 0 });
+            URL.revokeObjectURL(video.src);
+            resolve({ thumbnail: null, duration: 0 });
         }
-      };
-      video.onerror = () => resolve({ thumbnail: null, duration: 0 });
-    } catch (e) {
-       resolve({ thumbnail: null, duration: 0 });
-    }
+    };
+
+    video.onloadedmetadata = () => {
+        video.currentTime = 1.0;
+    };
+
+    video.onseeked = captureFrame;
+    video.onerror = () => {
+        URL.revokeObjectURL(video.src);
+        resolve({ thumbnail: null, duration: 0 });
+    };
   });
 };
 
@@ -64,9 +113,11 @@ export default function Upload() {
   const [durations, setDurations] = useState<number[]>([]);
   const [categories, setCategories] = useState<VideoCategory[]>([]);
   
-  // Processing State
-  const [processingFiles, setProcessingFiles] = useState(false);
-  const [processedCount, setProcessedCount] = useState(0);
+  // Queue Processing State
+  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+  const [queueProgress, setQueueProgress] = useState({ current: 0, total: 0 });
+  const processingRef = useRef(false); 
+  const queueRef = useRef<{file: File, index: number}[]>([]);
 
   // Global Settings
   const [desc, setDesc] = useState('');
@@ -77,52 +128,101 @@ export default function Upload() {
       if (duration <= 120) return VideoCategory.SHORTS;
       if (duration <= 300) return VideoCategory.MUSIC;
       if (duration <= 1500) return VideoCategory.SHORT_FILM;
-      if (duration <= 2700) return VideoCategory.SERIES; // Up to 45 mins
+      if (duration <= 2700) return VideoCategory.SERIES;
       if (duration > 2700) return VideoCategory.MOVIE;
       return VideoCategory.OTHER;
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setProcessingFiles(true);
       const newFiles = Array.from(e.target.files) as File[];
-      const newTitles = newFiles.map(f => f.name.replace(/\.[^/.]+$/, ""));
+      const startIndex = files.length;
 
+      // 1. Update UI placeholders immediately
+      const newTitles = newFiles.map(f => f.name.replace(/\.[^/.]+$/, ""));
+      
       setFiles(prev => [...prev, ...newFiles]);
       setTitles(prev => [...prev, ...newTitles]);
-      
-      const startIdx = files.length;
-      
-      // Init placeholders
-      setThumbnails(prev => [...prev, ...new Array(newFiles.length).fill(null)]);
+      setThumbnails(prev => [...prev, ...new Array(newFiles.length).fill(null)]); // Null means "pending"
       setDurations(prev => [...prev, ...new Array(newFiles.length).fill(0)]);
       setCategories(prev => [...prev, ...new Array(newFiles.length).fill(globalCategory !== VideoCategory.OTHER ? globalCategory : VideoCategory.OTHER)]);
 
-      // Process sequentially to update UI
-      for (let i = 0; i < newFiles.length; i++) {
-         const { thumbnail, duration } = await generateThumbnail(newFiles[i]);
-         
-         // Only use auto-detect if global category isn't set
-         const cat = globalCategory !== VideoCategory.OTHER ? globalCategory : detectCategory(duration);
-         
-         setThumbnails(prev => { const n = [...prev]; n[startIdx + i] = thumbnail; return n; });
-         setDurations(prev => { const n = [...prev]; n[startIdx + i] = duration; return n; });
-         setCategories(prev => { const n = [...prev]; n[startIdx + i] = cat; return n; });
-         
-         setProcessedCount(prev => prev + 1);
+      // 2. Add to processing queue
+      newFiles.forEach((file, i) => {
+          queueRef.current.push({ file, index: startIndex + i });
+      });
+
+      setQueueProgress(prev => ({ ...prev, total: prev.total + newFiles.length }));
+      
+      // 3. Trigger processor if idle
+      if (!processingRef.current) {
+          processQueue();
       }
-      setProcessingFiles(false);
-      setProcessedCount(0);
     }
+  };
+
+  // The Queue Processor - Recursive with Delays
+  const processQueue = async () => {
+      if (queueRef.current.length === 0) {
+          processingRef.current = false;
+          setIsProcessingQueue(false);
+          return;
+      }
+
+      processingRef.current = true;
+      setIsProcessingQueue(true);
+
+      // Get next task
+      const task = queueRef.current.shift(); 
+      if (task) {
+          setQueueProgress(prev => ({ ...prev, current: prev.current + 1 }));
+          
+          try {
+              // Generate Thumbnail
+              const { thumbnail, duration } = await generateThumbnail(task.file);
+              
+              // Smart Category
+              const cat = globalCategory !== VideoCategory.OTHER ? globalCategory : detectCategory(duration);
+
+              // Update State for this specific index
+              // Check if index still valid (user might have deleted items)
+              setThumbnails(prev => {
+                  if (prev.length <= task.index) return prev;
+                  const n = [...prev]; n[task.index] = thumbnail; return n;
+              });
+              setDurations(prev => {
+                  if (prev.length <= task.index) return prev;
+                  const n = [...prev]; n[task.index] = duration; return n;
+              });
+              setCategories(prev => {
+                  if (prev.length <= task.index) return prev;
+                  const n = [...prev]; n[task.index] = cat; return n;
+              });
+
+          } catch (e) {
+              console.error("Thumb gen failed", e);
+          }
+
+          // CRITICAL: Delay to allow Garbage Collector to free RAM from the large video blob
+          // This prevents crashes on low-end devices when processing multiple files.
+          await new Promise(r => setTimeout(r, 300));
+          
+          // Next iteration
+          processQueue();
+      }
   };
 
   const applyGlobalCategory = (cat: VideoCategory) => {
       setGlobalCategory(cat);
-      // Update all existing videos
       setCategories(prev => prev.map(() => cat));
   };
 
   const removeFile = (index: number) => {
+    if (isProcessingQueue) {
+        alert("Please wait for analysis to finish before removing items to avoid errors.");
+        return;
+    }
+
     setFiles(prev => prev.filter((_, i) => i !== index));
     setTitles(prev => prev.filter((_, i) => i !== index));
     setThumbnails(prev => prev.filter((_, i) => i !== index));
@@ -142,7 +242,6 @@ export default function Upload() {
     e.preventDefault();
     if (!user || files.length === 0) return;
 
-    // Build the queue items
     const queue = files.map((file, i) => ({
         title: titles[i],
         description: desc,
@@ -153,12 +252,15 @@ export default function Upload() {
         thumbnail: thumbnails[i]
     }));
 
-    // Send to background context
     addToQueue(queue, user);
     
-    // Reset and redirect
+    // Reset
     setFiles([]);
     setTitles([]);
+    setThumbnails([]);
+    setDurations([]);
+    setCategories([]);
+    setQueueProgress({ current: 0, total: 0 });
     navigate('/'); 
   };
 
@@ -182,15 +284,16 @@ export default function Upload() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-1 space-y-4">
            {/* Add Button */}
-           <div className={`relative border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:bg-slate-800/50 transition-colors group cursor-pointer aspect-square flex flex-col items-center justify-center bg-slate-900/50 ${processingFiles ? 'pointer-events-none opacity-50' : ''}`}>
-            <input type="file" accept="video/*" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" disabled={processingFiles} />
+           <div className={`relative border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:bg-slate-800/50 transition-colors group cursor-pointer aspect-square flex flex-col items-center justify-center bg-slate-900/50 ${isProcessingQueue ? 'pointer-events-none opacity-50' : ''}`}>
+            <input type="file" accept="video/*" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" disabled={isProcessingQueue} />
             <div className="flex flex-col items-center justify-center gap-2 pointer-events-none">
-                {processingFiles ? (
+                {isProcessingQueue ? (
                     <>
                         <Loader2 size={32} className="text-indigo-500 animate-spin" />
-                        <span className="text-slate-400 text-xs mt-2">Generating Thumbnails...</span>
+                        <span className="text-slate-400 text-xs mt-2 font-bold">Processing...</span>
+                        <span className="text-slate-500 text-[10px]">Queue: {queueProgress.current} / {queueProgress.total}</span>
                         <div className="w-20 h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
-                           <div className="h-full bg-indigo-500 transition-all" style={{ width: `${files.length > 0 ? (processedCount / files.length) * 100 : 0}%`}}></div>
+                           <div className="h-full bg-indigo-500 transition-all" style={{ width: `${queueProgress.total > 0 ? (queueProgress.current / queueProgress.total) * 100 : 0}%`}}></div>
                         </div>
                     </>
                 ) : (
@@ -199,7 +302,7 @@ export default function Upload() {
                         <Plus size={24} className="text-indigo-400" />
                         </div>
                         <span className="text-slate-400 text-sm font-medium">Add Videos</span>
-                        <span className="text-slate-600 text-xs">Auto-categorization active</span>
+                        <span className="text-slate-600 text-xs">Smart Queue Active</span>
                     </>
                 )}
             </div>
@@ -236,7 +339,7 @@ export default function Upload() {
            <form onSubmit={handleSubmit} className="bg-slate-900 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col h-full max-h-[600px]">
               <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
                  <h3 className="font-bold text-slate-200">Selected ({files.length})</h3>
-                 {files.length > 0 && <button type="button" onClick={() => { setFiles([]); setTitles([]); setThumbnails([]); setDurations([]); setCategories([]); }} className="text-xs text-red-400 hover:text-red-300">Clear All</button>}
+                 {files.length > 0 && !isProcessingQueue && <button type="button" onClick={() => { setFiles([]); setTitles([]); setThumbnails([]); setDurations([]); setCategories([]); }} className="text-xs text-red-400 hover:text-red-300">Clear All</button>}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {files.length === 0 ? (
@@ -251,7 +354,10 @@ export default function Upload() {
                          {thumbnails[idx] ? (
                            <img src={URL.createObjectURL(thumbnails[idx]!)} alt="Thumb" className="w-full h-full object-cover" />
                          ) : (
-                           <div className="w-full h-full flex items-center justify-center"><div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>
+                           <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900">
+                               <Loader2 className="w-4 h-4 text-indigo-500 animate-spin mb-1" />
+                               <span className="text-[8px] text-slate-500">GEN</span>
+                           </div>
                          )}
                          <div className="absolute bottom-0 right-0 bg-black/70 text-[9px] px-1 text-white font-mono">
                             {Math.floor(durations[idx]/60)}:{(durations[idx]%60).toFixed(0).padStart(2,'0')}
@@ -274,7 +380,7 @@ export default function Upload() {
                              <span className="text-[10px] text-slate-500">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
                           </div>
                        </div>
-                       <button type="button" onClick={() => removeFile(idx)} className="text-slate-500 hover:text-red-400 transition-colors p-1"><X size={16} /></button>
+                       <button type="button" onClick={() => removeFile(idx)} disabled={isProcessingQueue} className={`text-slate-500 hover:text-red-400 transition-colors p-1 ${isProcessingQueue ? 'opacity-30 cursor-not-allowed' : ''}`}><X size={16} /></button>
                     </div>
                   ))
                 )}
@@ -282,10 +388,10 @@ export default function Upload() {
               <div className="p-4 bg-slate-900/50 border-t border-slate-800">
                 <button 
                     type="submit" 
-                    disabled={processingFiles || files.length === 0} 
-                    className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all flex justify-center items-center gap-2 ${processingFiles || files.length === 0 ? 'bg-slate-700 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-500 active:scale-95'}`}
+                    disabled={isProcessingQueue || files.length === 0} 
+                    className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all flex justify-center items-center gap-2 ${isProcessingQueue || files.length === 0 ? 'bg-slate-700 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-500 active:scale-95'}`}
                 >
-                  {processingFiles ? <Loader2 className="animate-spin" size={20} /> : `Publish ${files.length} Video${files.length !== 1 ? 's' : ''} in Background`}
+                  {isProcessingQueue ? <><Loader2 className="animate-spin" size={20} /> Processing Thumbnails ({queueProgress.current}/{queueProgress.total})...</> : `Publish ${files.length} Video${files.length !== 1 ? 's' : ''} in Background`}
                 </button>
               </div>
            </form>

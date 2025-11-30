@@ -72,7 +72,8 @@ export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
   isWatched: boolean;
-  newCount?: number; // Server returned total count
+  newLikeCount?: number;
+  newDislikeCount?: number;
 }
 
 export interface AuthState {
@@ -102,4 +103,13 @@ export interface SystemSettings {
   pixabayKey: string;
   ytDlpPath: string;    // New: Path to yt-dlp binary
   enableYoutube: boolean; // New: Toggle for YouTube features
+}
+
+export interface SmartCleanerResult {
+  preview: Video[];
+  stats: {
+    totalVideos: number;
+    videosToDelete: number;
+    spaceReclaimed: string; // Estimate
+  }
 }

@@ -14,16 +14,26 @@ export function useNavigate() {
   };
 }
 
-export function useParams() {
+export function useParams(): Record<string, string | undefined> {
   const { pathname } = useLocation();
+  
   // Fixed Regex to be more robust for URLs like /watch/ID?param=1
-  const match = pathname.match(/\/watch\/([^/?&]+)/);
-  return match ? { id: match[1] } : {};
+  const watchMatch = pathname.match(/\/watch\/([^/?&]+)/);
+  if (watchMatch) {
+    return { id: watchMatch[1] };
+  }
+
+  const channelMatch = pathname.match(/\/channel\/([^/?&]+)/);
+  if (channelMatch) {
+    return { userId: channelMatch[1] };
+  }
+
+  return {};
 }
 
-export const Link: React.FC<{ to: string; children?: React.ReactNode; className?: string }> = ({ to, children, className }) => {
+export const Link: React.FC<{ to: string } & React.AnchorHTMLAttributes<HTMLAnchorElement>> = ({ to, children, className, ...props }) => {
   return (
-    <a href={`#${to}`} className={className}>
+    <a href={`#${to}`} className={className} {...props}>
       {children}
     </a>
   );

@@ -9,6 +9,7 @@ import Admin from './pages/Admin';
 import Shorts from './pages/Shorts';
 import Setup from './pages/Setup';
 import Requests from './pages/Requests';
+import Channel from './pages/Channel';
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UploadProvider } from './context/UploadContext';
@@ -78,6 +79,7 @@ export default function App() {
                 <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
                 <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
                 <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
+                <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
                 <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
                 <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
                 <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />

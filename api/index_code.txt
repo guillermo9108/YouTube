@@ -73,7 +73,8 @@ function repair_database_schema($pdo) {
         $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY DEFAULT 1, downloadStartTime VARCHAR(10) DEFAULT '01:00', downloadEndTime VARCHAR(10) DEFAULT '06:00', isQueuePaused TINYINT(1) DEFAULT 0, batchSize INT DEFAULT 5, maxDuration INT DEFAULT 600, maxResolution INT DEFAULT 1080, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255), ytDlpPath VARCHAR(255), enableYoutube TINYINT(1) DEFAULT 0)");
         $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
         $pdo->exec("CREATE TABLE IF NOT EXISTS requests (id VARCHAR(50) PRIMARY KEY, userId VARCHAR(50), query VARCHAR(255), status ENUM('PENDING','PROCESSING','COMPLETED','FAILED','MANUAL_UPLOAD') DEFAULT 'PENDING', createdAt BIGINT, useLocalNetwork TINYINT(1) DEFAULT 0)");
-        
+        $pdo->exec("CREATE TABLE IF NOT EXISTS interactions (userId VARCHAR(50), videoId VARCHAR(50), liked TINYINT(1) DEFAULT 0, disliked TINYINT(1) DEFAULT 0, isWatched TINYINT(1) DEFAULT 0, PRIMARY KEY (userId, videoId))");
+
         // List of all required columns to check/add
         $schemaUpdates = [
             "ALTER TABLE system_settings ADD COLUMN batchSize INT DEFAULT 5",
@@ -88,7 +89,8 @@ function repair_database_schema($pdo) {
             "ALTER TABLE videos ADD COLUMN fileHash VARCHAR(32)",
             "ALTER TABLE users ADD COLUMN currentSessionId VARCHAR(64) DEFAULT NULL",
             "ALTER TABLE users ADD COLUMN lastActive BIGINT DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN avatarUrl VARCHAR(255) DEFAULT NULL"
+            "ALTER TABLE users ADD COLUMN avatarUrl VARCHAR(255) DEFAULT NULL",
+            "ALTER TABLE interactions ADD COLUMN disliked TINYINT(1) DEFAULT 0"
         ];
         
         foreach($schemaUpdates as $sql) {
@@ -101,7 +103,7 @@ function repair_database_schema($pdo) {
 }
 
 function handle_video_entry($pdo, $title, $desc, $price, $category, $duration, $creatorId, $thumbPath, $videoPath, $hash, $isImport = false) {
-    $stmt = $pdo->prepare("SELECT id, videoUrl, creatorId FROM videos WHERE fileHash = ? LIMIT 1");
+    $stmt = $pdo->prepare("SELECT id, videoUrl, creatorId, thumbnailUrl FROM videos WHERE fileHash = ? LIMIT 1");
     $stmt->execute([$hash]);
     $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -133,6 +135,12 @@ function handle_video_entry($pdo, $title, $desc, $price, $category, $duration, $
         // 3. Different Creator: Create a new DB entry (COLLAB) but pointing to the same file
         $originalCreator = $pdo->query("SELECT username FROM users WHERE id = '{$existing['creatorId']}'")->fetchColumn();
         $title = $title . " (Collab with $originalCreator)";
+        
+        // COLLAB THUMBNAIL LOGIC:
+        // If the new uploader didn't provide a thumbnail (it's a placeholder), use the original video's thumbnail
+        if (strpos($thumbPath, 'placeholder') !== false) {
+            $thumbPath = $existing['thumbnailUrl'];
+        }
     }
 
     // CREATE NEW VIDEO ENTRY
@@ -389,16 +397,34 @@ try {
             respond(true, $res);
             break;
 
-        case 'toggle_like':
-            $uid=$input['userId']; $vid=$input['videoId']; $isLike=$input['isLike'];
+        case 'rate_video':
+            $uid=$input['userId']; $vid=$input['videoId']; $rating=$input['rating']; // 'like' or 'dislike'
+            
             $pdo->prepare("INSERT IGNORE INTO interactions (userId, videoId) VALUES (?, ?)")->execute([$uid, $vid]);
-            $pdo->prepare("UPDATE interactions SET liked = ? WHERE userId = ? AND videoId = ?")->execute([$isLike?1:0, $uid, $vid]);
-            $count = $pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId='$vid' AND liked=1")->fetchColumn();
-            $pdo->prepare("UPDATE videos SET likes = ? WHERE id = ?")->execute([$count, $vid]);
+            
+            // Get current state
+            $current = $pdo->query("SELECT liked, disliked FROM interactions WHERE userId='$uid' AND videoId='$vid'")->fetch(PDO::FETCH_ASSOC);
+            $newLiked = 0; $newDisliked = 0;
+
+            if ($rating === 'like') {
+                $newLiked = ($current['liked'] == 1) ? 0 : 1; // Toggle
+                $newDisliked = 0; // Removing dislike if liking
+            } else {
+                $newDisliked = ($current['disliked'] == 1) ? 0 : 1; // Toggle
+                $newLiked = 0; // Removing like if disliking
+            }
+
+            $pdo->prepare("UPDATE interactions SET liked = ?, disliked = ? WHERE userId = ? AND videoId = ?")->execute([$newLiked, $newDisliked, $uid, $vid]);
+            
+            // Update Video Totals
+            $lCount = $pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId='$vid' AND liked=1")->fetchColumn();
+            $dCount = $pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId='$vid' AND disliked=1")->fetchColumn();
+            $pdo->prepare("UPDATE videos SET likes = ?, dislikes = ? WHERE id = ?")->execute([$lCount, $dCount, $vid]);
             
             $res = $pdo->query("SELECT * FROM interactions WHERE userId='$uid' AND videoId='$vid'")->fetch(PDO::FETCH_ASSOC);
-            $res['liked']=(bool)$res['liked']; 
-            $res['newCount'] = $count; // Return new total count
+            $res['liked']=(bool)$res['liked']; $res['disliked']=(bool)$res['disliked'];
+            $res['newLikeCount'] = $lCount;
+            $res['newDislikeCount'] = $dCount;
             respond(true, $res);
             break;
 
@@ -511,6 +537,67 @@ try {
                 if (strpos($path, 'http') === 0) continue;
                 if (!file_exists($path)) {
                     $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]);
+                    $deleted++;
+                }
+            }
+            respond(true, ['deleted' => $deleted]);
+            break;
+            
+        case 'admin_smart_cleaner_preview':
+            $cat = $input['category'];
+            $pct = (int)$input['percentage'];
+            
+            $catFilter = ($cat !== 'ALL') ? "WHERE category = '$cat'" : "";
+            
+            // Calculate Score: Views(1) + Likes(2) - Dislikes(5) - AgeDays(0.5)
+            // Safe Harbor: Ignore videos < 7 days old
+            $sql = "SELECT id, title, views, likes, dislikes, createdAt,
+                    (views + (likes * 2) - (dislikes * 5) - (DATEDIFF(NOW(), FROM_UNIXTIME(createdAt/1000)) * 0.5)) as score
+                    FROM videos 
+                    $catFilter
+                    HAVING DATEDIFF(NOW(), FROM_UNIXTIME(createdAt/1000)) > 7
+                    ORDER BY score ASC";
+            
+            $stmt = $pdo->query($sql);
+            $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            $total = count($all);
+            $limit = floor($total * ($pct / 100));
+            $candidates = array_slice($all, 0, $limit);
+            
+            // Estimate space (very rough avg 20MB per video if file size unknown)
+            $estSpace = $limit * 20; 
+            
+            respond(true, [
+                'preview' => $candidates, 
+                'stats' => [
+                    'totalVideos' => $total, 
+                    'videosToDelete' => $limit, 
+                    'spaceReclaimed' => $estSpace . " MB"
+                ]
+            ]);
+            break;
+            
+        case 'admin_smart_cleaner_execute':
+            $ids = $input['videoIds'];
+            $deleted = 0;
+            foreach ($ids as $id) {
+                // Get paths
+                $v = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = '$id'")->fetch(PDO::FETCH_ASSOC);
+                if ($v) {
+                    $vPath = str_replace('/api/', '', $v['videoUrl']);
+                    $tPath = str_replace('/api/', '', $v['thumbnailUrl']);
+                    
+                    // Only delete file if no other video uses it (Deduplication check)
+                    $usage = $pdo->query("SELECT COUNT(*) FROM videos WHERE videoUrl = '{$v['videoUrl']}'")->fetchColumn();
+                    if ($usage <= 1) {
+                        @unlink($vPath);
+                        if (strpos($tPath, 'placeholder') === false) @unlink($tPath);
+                    }
+                    
+                    $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+                    $pdo->prepare("DELETE FROM interactions WHERE videoId = ?")->execute([$id]);
+                    $pdo->prepare("DELETE FROM comments WHERE videoId = ?")->execute([$id]);
                     $deleted++;
                 }
             }

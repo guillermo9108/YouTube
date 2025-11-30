@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info } from 'lucide-react';
+import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -216,13 +216,13 @@ export default function Watch() {
       setNewComment('');
   };
 
-  const handleLike = async () => {
+  const handleRate = async (rating: 'like' | 'dislike') => {
       if (!user || !video) return;
-      const res = await db.toggleLike(user.id, video.id, true);
+      const res = await db.rateVideo(user.id, video.id, rating);
       setInteraction(res);
-      // Correctly update video likes from server response
-      if (res.newCount !== undefined) {
-          setVideo(prev => prev ? { ...prev, likes: res.newCount! } : null);
+      // Correctly update video stats from server response
+      if (res.newLikeCount !== undefined) {
+          setVideo(prev => prev ? { ...prev, likes: res.newLikeCount!, dislikes: res.newDislikeCount! } : null);
       }
   };
 
@@ -247,7 +247,6 @@ export default function Watch() {
 
   const canAfford = (user?.balance || 0) >= (video?.price || 0);
 
-  // We render the layout even if loading is true (using an overlay) to preserve the video element in DOM for fullscreen
   return (
     <div className="max-w-5xl mx-auto pb-6" key={video?.id || 'loading'}>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-6">
@@ -265,7 +264,22 @@ export default function Watch() {
                 {video && (
                   isUnlocked ? (
                     <>
-                        <video ref={videoRef} src={video.videoUrl} poster={video.thumbnailUrl} className="w-full h-full" controls playsInline onEnded={handleVideoEnded} onTimeUpdate={(e) => { if (e.currentTarget.currentTime / e.currentTarget.duration > 0.95 && interaction && !interaction.isWatched && user) { db.markWatched(user.id, video.id); setInteraction({...interaction, isWatched: true}); } }} />
+                        <video 
+                            ref={videoRef} 
+                            src={video.videoUrl} 
+                            poster={video.thumbnailUrl} 
+                            className="w-full h-full" 
+                            controls 
+                            playsInline 
+                            onEnded={handleVideoEnded} 
+                            onTimeUpdate={(e) => { 
+                                // UPDATED: 30% Threshold
+                                if (e.currentTarget.currentTime / e.currentTarget.duration > 0.30 && interaction && !interaction.isWatched && user) { 
+                                    db.markWatched(user.id, video.id); 
+                                    setInteraction({...interaction, isWatched: true}); 
+                                } 
+                            }} 
+                        />
                         {countdown !== null && countdown > 0 && nextVideo && (
                             <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-20 animate-in fade-in">
                                 <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4">Up Next</p>
@@ -296,21 +310,28 @@ export default function Watch() {
                  <h1 className="text-lg md:text-xl font-bold text-white leading-tight break-words line-clamp-3 md:line-clamp-none">{video.title}</h1>
                  <div className="flex items-center justify-between mt-2">
                      <div className="flex items-center gap-3 text-xs text-slate-400">
-                         {/* CREATOR AVATAR HERE */}
-                         <div className="flex items-center gap-2">
+                         {/* CREATOR INFO LINKED TO CHANNEL */}
+                         <Link to={`/channel/${video.creatorId}`} className="flex items-center gap-2 hover:text-white transition-colors group">
                             {video.creatorAvatarUrl ? (
                                 <img src={video.creatorAvatarUrl} className="w-6 h-6 rounded-full object-cover border border-slate-700" alt={video.creatorName} />
                             ) : (
                                 <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] text-white font-bold">{video.creatorName[0]}</div>
                             )}
-                            <span className="text-slate-300 font-medium">{video.creatorName}</span>
-                         </div>
+                            <span className="text-slate-300 font-medium group-hover:underline">{video.creatorName}</span>
+                         </Link>
                          
                          <span>{video.views} views</span>
                          <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] font-bold uppercase text-slate-500">{video.category || 'OTHER'}</span>
                      </div>
                      <div className="flex gap-2">
-                         <button onClick={handleLike} className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${interaction?.liked ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}><ThumbsUp size={14}/> {video.likes}</button>
+                         <div className="flex items-center bg-slate-800 rounded-full overflow-hidden">
+                             <button onClick={() => handleRate('like')} className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold transition-colors border-r border-slate-700 ${interaction?.liked ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-400 hover:text-white'}`}>
+                                 <ThumbsUp size={14} fill={interaction?.liked ? "currentColor" : "none"}/> {video.likes}
+                             </button>
+                             <button onClick={() => handleRate('dislike')} className={`px-3 py-1.5 text-xs font-bold transition-colors ${interaction?.disliked ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-white'}`}>
+                                 <ThumbsDown size={14} fill={interaction?.disliked ? "currentColor" : "none"}/>
+                             </button>
+                         </div>
                          <button onClick={() => user && db.toggleWatchLater(user.id, video.id).then(l => setIsWatchLater(l.includes(video.id)))} className={`px-3 py-1.5 rounded-full transition-colors ${isWatchLater ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-800 text-slate-400'}`}><Clock size={14}/></button>
                      </div>
                  </div>
@@ -321,7 +342,24 @@ export default function Watch() {
              <div className="mt-4">
                  <h3 className="font-bold text-sm text-slate-300 mb-3 flex items-center gap-2"><MessageSquare size={14}/> Comments</h3>
                  <form onSubmit={postComment} className="flex gap-2 mb-4"><input type="text" value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Add a comment..." className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"/><button disabled={!newComment.trim()} type="submit" className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-500 disabled:opacity-50"><Send size={16}/></button></form>
-                 <div className="space-y-3">{comments.map(c => (<div key={c.id} className="flex gap-3"><div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 overflow-hidden border border-slate-700">{c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : c.username[0]}</div><div><div className="flex gap-2 items-baseline"><span className="text-xs font-bold text-slate-300">{c.username}</span><span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span></div><p className="text-xs text-slate-400">{c.text}</p></div></div>))}</div>
+                 <div className="space-y-3">
+                    {comments.map(c => (
+                        <div key={c.id} className="flex gap-3">
+                            <Link to={`/channel/${c.userId}`} className="shrink-0">
+                                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 overflow-hidden border border-slate-700">
+                                    {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : c.username[0]}
+                                </div>
+                            </Link>
+                            <div>
+                                <div className="flex gap-2 items-baseline">
+                                    <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-300 hover:underline">{c.username}</Link>
+                                    <span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span>
+                                </div>
+                                <p className="text-xs text-slate-400">{c.text}</p>
+                            </div>
+                        </div>
+                    ))}
+                 </div>
              </div>
         </div>
         <div>
