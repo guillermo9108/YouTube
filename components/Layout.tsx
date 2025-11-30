@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
@@ -112,7 +112,8 @@ const NotificationBell = () => {
 
 export default function Layout() {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const [showSidebar, setShowSidebar] = useState(false);
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
   const isShortsMode = location.pathname === '/shorts';
@@ -127,10 +128,54 @@ export default function Layout() {
 
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
+      
+      {/* Global Sidebar Drawer (Desktop/Tablet) */}
+      {showSidebar && (
+        <div className="fixed inset-0 z-[60] flex">
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
+            <div className="relative w-64 bg-slate-900 border-r border-slate-800 h-full p-4 flex flex-col animate-in slide-in-from-left duration-200">
+                <div className="flex items-center gap-3 mb-8 px-2">
+                    <button onClick={() => setShowSidebar(false)} className="p-1 hover:bg-slate-800 rounded-full"><Menu size={24} /></button>
+                    <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
+                </div>
+                
+                <div className="space-y-1 flex-1">
+                    <Link to="/" className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
+                        <Home size={20}/> Home
+                    </Link>
+                    <Link to="/shorts" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <Smartphone size={20}/> Shorts
+                    </Link>
+                    <div className="h-px bg-slate-800 my-2"></div>
+                    <Link to="/requests" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <DownloadCloud size={20}/> Requests
+                    </Link>
+                    <Link to="/upload" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <Upload size={20}/> Upload
+                    </Link>
+                    <Link to="/profile" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <User size={20}/> Profile
+                    </Link>
+                </div>
+
+                <div className="border-t border-slate-800 pt-4">
+                    <button onClick={logout} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-lg font-medium w-full text-left">
+                        <LogOut size={20}/> Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
-        <Link to="/" className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
-          StreamPay
-        </Link>
+        <div className="flex items-center gap-4">
+            <button onClick={() => setShowSidebar(true)} className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
+                <Menu size={24} />
+            </button>
+            <Link to="/" className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
+            StreamPay
+            </Link>
+        </div>
         <div className="flex items-center gap-6">
           {user && <NotificationBell />}
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">

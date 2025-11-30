@@ -708,6 +708,12 @@ try {
             $exists = $pdo->query("SELECT COUNT(*) FROM subscriptions WHERE subscriberId='$uid' AND creatorId='$cid'")->fetchColumn();
             respond(true, ['isSubscribed' => $exists > 0]);
             break;
+            
+        case 'get_subscriptions':
+            $uid = $_GET['userId'];
+            $subs = $pdo->query("SELECT creatorId FROM subscriptions WHERE subscriberId='$uid'")->fetchAll(PDO::FETCH_COLUMN);
+            respond(true, $subs ?: []);
+            break;
 
         case 'get_notifications':
             $uid = $_GET['userId'];

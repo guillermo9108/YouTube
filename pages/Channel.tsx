@@ -36,8 +36,8 @@ export default function Channel() {
             const vids = await db.getVideosByCreator(userId);
             setVideos(vids);
 
-            // 3. Calc Stats
-            const totalViews = vids.reduce((acc, curr) => acc + curr.views, 0);
+            // 3. Calc Stats - Fix: Ensure numbers are added mathematically
+            const totalViews = vids.reduce((acc, curr) => acc + Number(curr.views), 0);
             setStats({ views: totalViews, uploads: vids.length });
 
             // 4. Check purchases & Subscription

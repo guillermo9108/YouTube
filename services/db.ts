@@ -328,6 +328,9 @@ class DatabaseService {
   async markNotificationRead(notifId: string): Promise<void> {
       await this.request('index.php?action=mark_notification_read', 'POST', { notifId });
   }
+  async getSubscriptions(userId: string): Promise<string[]> {
+      return this.request<string[]>(`index.php?action=get_subscriptions&userId=${userId}`);
+  }
 }
 
 export const db = new DatabaseService();

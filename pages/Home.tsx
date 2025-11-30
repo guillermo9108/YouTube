@@ -1,13 +1,15 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
-import { Compass, RefreshCw, Search, X, Filter } from 'lucide-react';
+import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { Link } from '../components/Router';
 import VideoCard from '../components/VideoCard';
 
 const CATEGORIES = [
     { id: 'ALL', label: 'All' },
+    { id: 'SUBSCRIPTIONS', label: 'Subscriptions' },
     { id: VideoCategory.SHORTS, label: 'Shorts' },
     { id: VideoCategory.MUSIC, label: 'Music' },
     { id: VideoCategory.SHORT_FILM, label: 'Short Films' },
@@ -25,7 +27,9 @@ export default function Home() {
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
+  const [subscribedCreators, setSubscribedCreators] = useState<string[]>([]);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const { user, logout } = useAuth();
   
   // Display List State (Holds the shuffled order)
   const [displayList, setDisplayList] = useState<Video[]>([]);
@@ -58,14 +62,25 @@ export default function Home() {
     init();
   }, [user]);
 
+  // Fetch subscriptions if category is selected
+  useEffect(() => {
+      if (user && activeCategory === 'SUBSCRIPTIONS') {
+          db.getSubscriptions(user.id).then(setSubscribedCreators);
+      }
+  }, [user, activeCategory]);
+
   // 2. Logic to Shuffle "Fresh" content
   useEffect(() => {
       if (videos.length === 0) return;
 
       // A. Filter by Category
-      let filtered = activeCategory === 'ALL' 
-          ? videos 
-          : videos.filter(v => v.category === activeCategory);
+      let filtered = videos;
+      
+      if (activeCategory === 'SUBSCRIPTIONS') {
+          filtered = videos.filter(v => subscribedCreators.includes(v.creatorId));
+      } else if (activeCategory !== 'ALL') {
+          filtered = videos.filter(v => v.category === activeCategory);
+      }
 
       // B. Filter by Search Query
       if (searchQuery.trim()) {
@@ -97,7 +112,7 @@ export default function Home() {
 
       setDisplayList(finalOrder);
 
-  }, [videos, activeCategory, watchedIds, searchQuery]);
+  }, [videos, activeCategory, watchedIds, searchQuery, subscribedCreators]);
 
   const isUnlocked = (videoId: string, creatorId: string) => {
     return purchases.includes(videoId) || (user?.id === creatorId);
@@ -106,12 +121,56 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       
+      {/* Sidebar Overlay */}
+      {showSidebar && (
+        <div className="fixed inset-0 z-50 flex">
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
+            <div className="relative w-64 bg-slate-900 border-r border-slate-800 h-full p-4 flex flex-col animate-in slide-in-from-left duration-200">
+                <div className="flex items-center gap-3 mb-8 px-2">
+                    <button onClick={() => setShowSidebar(false)} className="p-1 hover:bg-slate-800 rounded-full"><Menu size={24} /></button>
+                    <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
+                </div>
+                
+                <div className="space-y-1 flex-1">
+                    <Link to="/" className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
+                        <HomeIcon size={20}/> Home
+                    </Link>
+                    <Link to="/shorts" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <Smartphone size={20}/> Shorts
+                    </Link>
+                    <button onClick={() => { setActiveCategory('SUBSCRIPTIONS'); setShowSidebar(false); }} className="w-full flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium text-left">
+                        <Compass size={20}/> Subscriptions
+                    </button>
+                    <div className="h-px bg-slate-800 my-2"></div>
+                    <Link to="/requests" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <DownloadCloud size={20}/> Requests
+                    </Link>
+                    <Link to="/upload" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <Upload size={20}/> Upload
+                    </Link>
+                    <Link to="/profile" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <User size={20}/> Profile
+                    </Link>
+                </div>
+
+                <div className="border-t border-slate-800 pt-4">
+                    <button onClick={logout} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-lg font-medium w-full text-left">
+                        <LogOut size={20}/> Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* Sticky Header: Search & Categories */}
       <div className="sticky top-0 z-40 bg-black/95 backdrop-blur-md border-b border-slate-800/50 pb-2 pt-2 transition-all">
          
          {/* Search Bar */}
-         <div className="px-4 md:px-6 mb-2">
-            <div className="relative group max-w-2xl mx-auto">
+         <div className="px-4 md:px-6 mb-2 flex items-center gap-4">
+            <button onClick={() => setShowSidebar(true)} className="md:hidden text-white p-2 hover:bg-slate-800 rounded-full">
+                <Menu size={24} />
+            </button>
+            <div className="relative group flex-1 max-w-2xl mx-auto">
                 <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
                 <input 
                     type="text" 
@@ -133,10 +192,10 @@ export default function Home() {
 
          {/* Categories Pills */}
          <div className="flex items-center gap-2 overflow-x-auto px-4 md:px-6 scrollbar-hide pb-2">
-            <div className="bg-slate-800/50 p-1.5 rounded-lg text-slate-400 shrink-0">
+            <div className="hidden md:flex bg-slate-800/50 p-1.5 rounded-lg text-slate-400 shrink-0">
                 <Compass size={18} />
             </div>
-            <div className="h-6 w-px bg-slate-800 mx-1 shrink-0"></div>
+            <div className="hidden md:block h-6 w-px bg-slate-800 mx-1 shrink-0"></div>
             {CATEGORIES.map(cat => (
                 <button
                     key={cat.id}
@@ -165,7 +224,10 @@ export default function Home() {
                         <p className="text-sm">Try different keywords for "{searchQuery}"</p>
                      </>
                  ) : (
-                     <p>No videos found in this category.</p>
+                     <>
+                        <p className="text-lg font-bold text-white mb-2">No videos here</p>
+                        <p className="text-sm">{activeCategory === 'SUBSCRIPTIONS' ? "You haven't subscribed to anyone yet." : "No videos found in this category."}</p>
+                     </>
                  )}
              </div>
          ) : (
