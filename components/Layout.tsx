@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
@@ -43,8 +43,12 @@ const NotificationBell = () => {
 
     const fetchNotifs = async () => {
         if(user) {
-            const list = await db.getNotifications(user.id);
-            setNotifs(list);
+            try {
+                const list = await db.getNotifications(user.id);
+                setNotifs(list);
+            } catch(e) {
+                // Ignore errors in polling to avoid console spam when offline
+            }
         }
     };
 
@@ -55,26 +59,26 @@ const NotificationBell = () => {
     }, [user]);
 
     const handleClick = (n: Notification) => {
-        if(!n.isRead) db.markNotificationRead(n.id);
+        if(!n.isRead) db.markNotificationRead(n.id).catch(() => {}); // Optimistic
         navigate(n.link);
         setIsOpen(false);
-        fetchNotifs();
+        setNotifs(prev => prev.map(p => p.id === n.id ? {...p, isRead: true} : p));
     };
 
     if (!user) return null;
 
     return (
-        <div className="relative">
-            <button onClick={() => setIsOpen(!isOpen)} className="text-slate-400 hover:text-white relative p-2">
+        <div className="relative group">
+            <button onClick={() => setIsOpen(!isOpen)} className="text-slate-400 hover:text-white relative p-2 rounded-full hover:bg-slate-800 transition-colors">
                 <Bell size={20} />
-                {hasUnread && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-slate-900"></span>}
+                {hasUnread && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-600 rounded-full border border-slate-900"></span>}
             </button>
 
             {isOpen && (
                 <>
                     <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
-                    <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                        <div className="p-3 border-b border-slate-800 flex justify-between items-center">
+                    <div className="absolute right-0 top-full mt-2 w-80 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 origin-top-right">
+                        <div className="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
                             <h3 className="font-bold text-sm text-white">Notifications</h3>
                             <button onClick={() => setIsOpen(false)}><X size={16} className="text-slate-500 hover:text-white"/></button>
                         </div>
@@ -90,14 +94,13 @@ const NotificationBell = () => {
                                             className={`p-3 flex gap-3 hover:bg-slate-800 cursor-pointer transition-colors ${!n.isRead ? 'bg-slate-800/50' : ''}`}
                                         >
                                             <div className="w-10 h-10 rounded-full bg-slate-700 shrink-0 overflow-hidden">
-                                                {/* Could implement avatar here if returned by API */}
-                                                <div className="w-full h-full flex items-center justify-center text-slate-400"><Bell size={16}/></div>
+                                                {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-400"><Bell size={16}/></div>}
                                             </div>
-                                            <div className="flex-1">
+                                            <div className="flex-1 min-w-0">
                                                 <p className={`text-xs ${!n.isRead ? 'text-white font-bold' : 'text-slate-400'}`}>{n.text}</p>
-                                                <span className="text-[10px] text-slate-600">{new Date(n.timestamp).toLocaleDateString()}</span>
+                                                <span className="text-[10px] text-slate-600 block mt-1">{new Date(n.timestamp).toLocaleDateString()}</span>
                                             </div>
-                                            {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2"></div>}
+                                            {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-1 shrink-0"></div>}
                                         </div>
                                     ))}
                                 </div>
@@ -129,7 +132,7 @@ export default function Layout() {
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       
-      {/* Global Sidebar Drawer (Desktop/Tablet/Mobile) */}
+      {/* Global Sidebar Drawer */}
       {showSidebar && (
         <div className="fixed inset-0 z-[60] flex">
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
@@ -140,8 +143,7 @@ export default function Layout() {
                 </div>
                 
                 <div className="space-y-1 flex-1">
-                    {/* Admin Link - Added here for mobile visibility */}
-                    {user?.role === 'ADMIN' && (
+                    {(user?.role === 'ADMIN') && (
                         <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-900/10 hover:bg-amber-900/20 rounded-lg font-medium mb-4 border border-amber-500/20">
                             <ShieldCheck size={20}/> Admin Panel
                         </Link>
@@ -174,6 +176,7 @@ export default function Layout() {
         </div>
       )}
 
+      {/* HEADER */}
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
             <button onClick={() => setShowSidebar(true)} className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
@@ -186,18 +189,13 @@ export default function Layout() {
         <div className="flex items-center gap-6">
           {user && <NotificationBell />}
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">
-             Balance: {user?.balance} Saldo
+             {user?.balance} Saldo
           </span>
-          {user?.role === 'ADMIN' && (
-             <Link to="/admin" className={isActive('/admin')}>Admin</Link>
-          )}
           <Link to="/" className={isActive('/')}>Browse</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
-          <Link to="/requests" className={isActive('/requests')}>Requests</Link>
           <Link to="/upload" className={isActive('/upload')}>Upload</Link>
           <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>
-            <Avatar size={20} />
-            Profile
+            <Avatar size={24} />
           </Link>
         </div>
       </header>

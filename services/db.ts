@@ -38,20 +38,58 @@ export interface VideoResult {
 }
 
 class DatabaseService {
-  private isInstalled: boolean = false;
+  private isInstalled: boolean = true; // Optimistic default
   private isDemoMode: boolean = false;
+  private isOffline: boolean = !navigator.onLine;
 
   constructor() {
     if (localStorage.getItem('sp_demo_mode') === 'true') {
         this.isDemoMode = true;
         this.isInstalled = true;
     }
+    
+    window.addEventListener('online', () => { this.isOffline = false; });
+    window.addEventListener('offline', () => { this.isOffline = true; });
+  }
+
+  // --- CACHE SYSTEM ---
+  private saveToCache(key: string, data: any) {
+      try {
+          // Only cache GET requests (identified by query params usually)
+          if (key.includes('action=')) {
+              localStorage.setItem(`sp_cache_${key}`, JSON.stringify({
+                  timestamp: Date.now(),
+                  data: data
+              }));
+          }
+      } catch (e) {
+          console.warn("Cache quota exceeded");
+      }
+  }
+
+  private getFromCache<T>(key: string): T | null {
+      const item = localStorage.getItem(`sp_cache_${key}`);
+      if (!item) return null;
+      try {
+          const parsed = JSON.parse(item);
+          // Optional: Add expiration logic here (e.g., 24 hours)
+          return parsed.data as T;
+      } catch {
+          return null;
+      }
   }
 
   private async request<T>(endpoint: string, method: string = 'GET', body?: any, silent: boolean = false): Promise<T> {
     if (this.isDemoMode) {
        return this.handleMockRequest<T>(endpoint, method, body);
     }
+
+    // Prepare URL
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
+    const cacheKey = cleanEndpoint; // Use endpoint as cache key
+    const url = method === 'GET' 
+       ? `${API_BASE}/${cleanEndpoint}${cleanEndpoint.includes('?') ? '&' : '?'}_t=${Date.now()}` 
+       : `${API_BASE}/${cleanEndpoint}`;
 
     const headers: HeadersInit = {
         'Cache-Control': 'no-cache, no-store, must-revalidate', 
@@ -63,17 +101,26 @@ class DatabaseService {
     
     if (body instanceof FormData) {
         requestBody = body;
-        // Do NOT set Content-Type header for FormData, browser sets it with boundary
     } else if (body) {
         headers['Content-Type'] = 'application/json';
         requestBody = JSON.stringify(body);
     }
 
-    // Ensure endpoint doesn't start with / if API_BASE doesn't end with /
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
-    const url = method === 'GET' 
-       ? `${API_BASE}/${cleanEndpoint}${cleanEndpoint.includes('?') ? '&' : '?'}_t=${Date.now()}` 
-       : `${API_BASE}/${cleanEndpoint}`;
+    // --- OFFLINE FIRST STRATEGY ---
+    // If explicitly offline and it's a GET request, try cache immediately
+    if (this.isOffline && method === 'GET') {
+        const cached = this.getFromCache<T>(cacheKey);
+        if (cached) {
+            console.log(`[Offline] Serving cached: ${cacheKey}`);
+            return cached;
+        }
+        throw new Error("No internet connection and no cached data available.");
+    }
+
+    // If trying to WRITE (POST) while offline
+    if (this.isOffline && method === 'POST') {
+        throw new Error("You are offline. Action cannot be completed.");
+    }
 
     try {
         const response = await fetch(url, {
@@ -84,8 +131,8 @@ class DatabaseService {
 
         const text = await response.text();
 
+        // NETWORK SUCCESS
         if (!response.ok) {
-            // Try to parse error from JSON if available
             try {
                 const errJson = JSON.parse(text);
                 throw new Error(errJson.error || `Server Error: ${response.status}`);
@@ -95,29 +142,41 @@ class DatabaseService {
         }
         
         if (!text || text.trim().length === 0) {
-            console.error("Empty response received from:", url);
-            throw new Error("Empty response from API. Check PHP logs or file permissions.");
+            throw new Error("Empty response from API. Check PHP logs.");
         }
 
         let json;
         try {
             json = JSON.parse(text);
         } catch (e) {
-            if (!silent) console.error("Invalid API Response:", text.substring(0, 200));
-            // Check if it's a raw PHP error printed
             if (text.includes('Fatal error') || text.includes('Parse error')) {
                  const match = text.match(/(Fatal|Parse) error: (.*?) in/);
                  throw new Error(`PHP Error: ${match ? match[2] : 'Unknown Syntax Error'}`);
             }
-            throw new Error(`Invalid JSON from API. Response was not JSON.`);
+            throw new Error(`Invalid JSON from API.`);
         }
         
         if (!json.success) {
             throw new Error(json.error || 'Operation failed');
         }
 
+        // CACHE SUCCESSFUL GET RESPONSES
+        if (method === 'GET') {
+            this.saveToCache(cacheKey, json.data);
+        }
+
         return json.data as T;
+
     } catch (error: any) {
+        // NETWORK FAIL - FALLBACK TO CACHE
+        if (method === 'GET') {
+            console.warn(`Network request failed for ${cacheKey}, trying cache...`);
+            const cached = this.getFromCache<T>(cacheKey);
+            if (cached) {
+                return cached;
+            }
+        }
+        
         if (!silent) console.error("API Request Failed:", endpoint, error);
         throw error;
     }
@@ -146,6 +205,7 @@ class DatabaseService {
     return {} as T;
   }
 
+  // --- INSTALLATION CHECK (SECURITY FIX) ---
   public async checkInstallation() {
     if (this.isDemoMode) {
         this.isInstalled = true;
@@ -155,14 +215,22 @@ class DatabaseService {
         const response = await fetch(`${API_BASE}/install.php?action=check`);
         if (!response.ok) throw new Error("Backend unreachable");
         const text = await response.text();
-        if (!text) { this.isInstalled = false; return; }
-        try {
-            const json = JSON.parse(text);
-            this.isInstalled = json.success && json.data.installed;
-        } catch { this.isInstalled = false; }
+        if (!text) throw new Error("Empty response");
+        
+        const json = JSON.parse(text);
+        
+        // Only set to FALSE if the server EXPLICITLY says { installed: false }
+        // If there's a network error, DB error, or weird response, we assume TRUE (installed)
+        // to prevent redirecting users to the setup page by accident.
+        if (json.success && json.data.installed === false) {
+            this.isInstalled = false;
+        } else {
+            this.isInstalled = true;
+        }
     } catch (e) {
-        this.isInstalled = false;
-        console.warn("Backend check failed", e);
+        // If network fails, we assume installed (Offline Mode)
+        console.warn("Backend check failed, assuming installed (Offline Mode)", e);
+        this.isInstalled = true;
     }
   }
 
@@ -243,6 +311,8 @@ class DatabaseService {
     onProgress?: (percent: number, loaded: number, total: number) => void
   ): Promise<void> {
     if (this.isDemoMode) { await new Promise(r => setTimeout(r, 1000)); return; }
+    if (this.isOffline) throw new Error("Cannot upload while offline.");
+    
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append('title', title);
@@ -255,7 +325,6 @@ class DatabaseService {
         if (thumbnail) formData.append('thumbnail', thumbnail);
         
         const xhr = new XMLHttpRequest();
-        // XHR also needs the relative path fix
         xhr.open('POST', `${API_BASE}/index.php?action=upload_video`, true);
         if (onProgress) { 
             xhr.upload.onprogress = (e) => { 
@@ -314,7 +383,6 @@ class DatabaseService {
     await this.request('index.php?action=server_import_video', 'POST', { url });
   }
 
-  // --- Subscriptions & Notifications ---
   async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
       try {
           return await this.request('index.php?action=toggle_subscribe', 'POST', { userId, creatorId });
@@ -325,7 +393,7 @@ class DatabaseService {
   async checkSubscription(userId: string, creatorId: string): Promise<boolean> {
       try {
           const res = await this.request<{isSubscribed: boolean}>(`index.php?action=check_subscription&userId=${userId}&creatorId=${creatorId}`);
-          return res.isSubscribed;
+          return res ? res.isSubscribed : false;
       } catch { return false; }
   }
   async getNotifications(userId: string): Promise<Notification[]> {

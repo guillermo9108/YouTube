@@ -384,16 +384,34 @@ try {
         
         case 'get_related_videos':
             $vidId = $_GET['id'];
-            $current = $pdo->query("SELECT creatorId, category, title FROM videos WHERE id='$vidId'")->fetch(PDO::FETCH_ASSOC);
-            if ($current && ($current['category'] === 'SERIES' || $current['category'] === 'NOVELAS')) {
-                $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? AND v.category = ? AND v.id != ? ORDER BY v.title ASC LIMIT 5");
-                $stmt->execute([$current['creatorId'], $current['category'], $vidId]);
-                $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                if (count($results) > 0) { respond(true, $results); }
+            $current = $pdo->query("SELECT creatorId, category, title, description FROM videos WHERE id='$vidId'")->fetch(PDO::FETCH_ASSOC);
+            if ($current) {
+                // Intelligent Relevance Scoring
+                // Score = (Category match * 10) + (Creator match * 5) + (Title keyword match * 5)
+                
+                // Extract simple keyword (first word > 3 chars)
+                $words = explode(' ', preg_replace('/[^a-zA-Z0-9 ]/', '', $current['title']));
+                $keyword = '';
+                foreach($words as $w) { if(strlen($w)>3) { $keyword = $w; break; } }
+                $likeQuery = $keyword ? "%$keyword%" : '%ImpossibleString%';
+
+                $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl,
+                        (
+                            (CASE WHEN v.category = ? THEN 10 ELSE 0 END) +
+                            (CASE WHEN v.creatorId = ? THEN 5 ELSE 0 END) +
+                            (CASE WHEN v.title LIKE ? THEN 5 ELSE 0 END)
+                        ) as relevance
+                        FROM videos v
+                        LEFT JOIN users u ON v.creatorId = u.id
+                        WHERE v.id != ?
+                        ORDER BY relevance DESC, v.views DESC LIMIT 10";
+
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([$current['category'], $current['creatorId'], $likeQuery, $vidId]);
+                respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+            } else {
+                respond(true, []);
             }
-            $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? ORDER BY RAND() LIMIT 5");
-            $stmt->execute([$vidId]);
-            respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
             break;
 
         case 'has_purchased':
@@ -729,7 +747,7 @@ try {
         default: respond(false, null, 'Invalid action');
     }
 } catch (PDOException $e) {
-    if ($e->getCode() == '42S22' || $e->getCode() == 1054) {
+    if ($e->getCode() == '42S22' || $e->getCode() == 1054 || $e->getCode() == '42S02') { // 42S02 Added
         if (repair_database_schema($pdo)) {
             respond(false, null, 'Database schema updated. Please retry action.');
         } else {

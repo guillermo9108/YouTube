@@ -14,10 +14,32 @@ import { HashRouter, Routes, Route, Navigate } from './components/Router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UploadProvider } from './context/UploadContext';
 import { db } from './services/db';
-import { Loader2 } from 'lucide-react';
+import { Loader2, WifiOff } from 'lucide-react';
 
 // Lazy load Layout
 const Layout = React.lazy(() => import('./components/Layout'));
+
+const OfflineBanner = () => {
+    const [online, setOnline] = useState(navigator.onLine);
+    useEffect(() => {
+        const handleOnline = () => setOnline(true);
+        const handleOffline = () => setOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
+    if (online) return null;
+
+    return (
+        <div className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-red-600/90 text-white text-center py-2 z-[100] text-xs font-bold flex items-center justify-center gap-2 backdrop-blur-sm">
+            <WifiOff size={14} /> You are offline. Showing cached content.
+        </div>
+    );
+};
 
 // --- Guards ---
 
@@ -50,7 +72,7 @@ const SetupGuard = ({ children }: PropsWithChildren) => {
     });
   }, []);
 
-  if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Checking system...</div>;
+  if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Connecting...</div>;
 
   if (needs) {
     return <Navigate to="/setup" replace />;
@@ -65,6 +87,7 @@ export default function App() {
     <AuthProvider>
       <UploadProvider>
         <HashRouter>
+          <OfflineBanner />
           <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>
             <Routes>
               <Route path="/setup" element={<Setup />} />

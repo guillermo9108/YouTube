@@ -31,7 +31,7 @@ export const useUpload = () => {
   return context;
 };
 
-export const UploadProvider = ({ children }: { children: React.ReactNode }) => {
+export const UploadProvider = ({ children }: { children?: React.ReactNode }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
