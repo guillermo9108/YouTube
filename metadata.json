@@ -1,5 +1,7 @@
 {
-  "name": "YouTube pwa",
+  "name": "YouTube OK",
   "description": "A mobile-first Pay-Per-View video platform using an internal currency (Saldo).",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "notifications"
+  ]
 }

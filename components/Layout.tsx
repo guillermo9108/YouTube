@@ -1,6 +1,5 @@
-
-import React, { useState, useEffect } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
@@ -17,7 +16,7 @@ const UploadIndicator = () => {
   const strokeDashoffset = circumference - (progress / 100) * circumference;
 
   return (
-    <div className="fixed bottom-20 md:bottom-8 right-4 z-50 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom-6">
+    <div className="fixed bottom-24 md:bottom-8 right-4 z-[40] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom-6">
        <div className="relative w-12 h-12 flex items-center justify-center">
           <svg className="transform -rotate-90 w-12 h-12">
             <circle className="text-slate-700" strokeWidth="4" stroke="currentColor" fill="transparent" r={radius} cx="24" cy="24" />
@@ -34,32 +33,64 @@ const UploadIndicator = () => {
   );
 };
 
-const NotificationBell = () => {
+const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const [notifs, setNotifs] = useState<Notification[]>([]);
     const [isOpen, setIsOpen] = useState(false);
+    const lastNotifIdRef = useRef<string | null>(null);
     const hasUnread = notifs.some(n => !n.isRead);
+
+    useEffect(() => {
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }, []);
 
     const fetchNotifs = async () => {
         if(user) {
             try {
                 const list = await db.getNotifications(user.id);
                 setNotifs(list);
-            } catch(e) {
-                // Ignore errors in polling to avoid console spam when offline
-            }
+                
+                // System Notification Trigger
+                if (list.length > 0) {
+                    const latest = list[0];
+                    if (latest.id !== lastNotifIdRef.current && !latest.isRead) {
+                        lastNotifIdRef.current = latest.id;
+                        triggerSystemNotification(latest);
+                    }
+                }
+            } catch(e) {}
+        }
+    };
+
+    const triggerSystemNotification = async (n: Notification) => {
+        if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
+            try {
+                const registration = await navigator.serviceWorker.ready;
+                const options: any = {
+                    body: n.text,
+                    icon: n.avatarUrl || '/pwa-192x192.png',
+                    badge: '/pwa-192x192.png',
+                    tag: n.id,
+                    data: { url: n.link },
+                    vibrate: [200, 100, 200]
+                };
+                if ((n as any).thumbnailUrl) options.image = (n as any).thumbnailUrl;
+                registration.showNotification("StreamPay", options);
+            } catch (e) { console.error(e); }
         }
     };
 
     useEffect(() => {
         if(user) fetchNotifs();
-        const interval = setInterval(() => { if(user) fetchNotifs(); }, 30000);
+        const interval = setInterval(() => { if(user) fetchNotifs(); }, 15000);
         return () => clearInterval(interval);
     }, [user]);
 
     const handleClick = (n: Notification) => {
-        if(!n.isRead) db.markNotificationRead(n.id).catch(() => {}); // Optimistic
+        if(!n.isRead) db.markNotificationRead(n.id).catch(() => {});
         navigate(n.link);
         setIsOpen(false);
         setNotifs(prev => prev.map(p => p.id === n.id ? {...p, isRead: true} : p));
@@ -68,48 +99,67 @@ const NotificationBell = () => {
     if (!user) return null;
 
     return (
-        <div className="relative group">
-            <button onClick={() => setIsOpen(!isOpen)} className="text-slate-400 hover:text-white relative p-2 rounded-full hover:bg-slate-800 transition-colors">
-                <Bell size={20} />
-                {hasUnread && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-600 rounded-full border border-slate-900"></span>}
+        <>
+            <button onClick={() => setIsOpen(!isOpen)} className={`relative p-2 rounded-full transition-colors ${isMobile ? 'text-slate-400 hover:text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+                <Bell size={isMobile ? 24 : 20} />
+                {hasUnread && <span className="absolute top-1 right-1.5 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-slate-900"></span>}
             </button>
 
             {isOpen && (
                 <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
-                    <div className="absolute right-0 top-full mt-2 w-80 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 origin-top-right">
-                        <div className="p-3 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
-                            <h3 className="font-bold text-sm text-white">Notifications</h3>
-                            <button onClick={() => setIsOpen(false)}><X size={16} className="text-slate-500 hover:text-white"/></button>
+                    {/* Backdrop - Z-Index 90 to cover almost everything */}
+                    <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
+                    
+                    {/* Responsive Container - Z-Index 100 to appear ABOVE the bottom nav bar (which is z-50) */}
+                    <div className={`
+                        fixed z-[100] bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col
+                        ${isMobile 
+                            ? 'bottom-0 left-0 right-0 rounded-t-2xl max-h-[75vh] animate-in slide-in-from-bottom duration-300 border-t-2 border-t-indigo-500/50' 
+                            : 'top-16 right-4 w-80 rounded-xl max-h-[80vh] animate-in fade-in zoom-in-95 origin-top-right'
+                        }
+                    `}>
+                        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/90 backdrop-blur-md sticky top-0 z-10">
+                            <h3 className="font-bold text-white flex items-center gap-2"><Bell size={18} className="text-indigo-400"/> Notifications</h3>
+                            <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-slate-800 rounded-full bg-slate-900 border border-slate-800"><X size={18} className="text-slate-400 hover:text-white"/></button>
                         </div>
-                        <div className="max-h-80 overflow-y-auto">
+                        
+                        <div className="overflow-y-auto overscroll-contain flex-1 bg-slate-900">
                             {notifs.length === 0 ? (
-                                <div className="p-6 text-center text-slate-500 text-xs">No new notifications.</div>
+                                <div className="p-12 text-center text-slate-500 text-sm flex flex-col items-center gap-3">
+                                    <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center opacity-50">
+                                        <Bell size={32}/>
+                                    </div>
+                                    <p>No new notifications</p>
+                                </div>
                             ) : (
-                                <div className="divide-y divide-slate-800">
+                                <div className="divide-y divide-slate-800/50 pb-8">
                                     {notifs.map(n => (
                                         <div 
                                             key={n.id} 
                                             onClick={() => handleClick(n)}
-                                            className={`p-3 flex gap-3 hover:bg-slate-800 cursor-pointer transition-colors ${!n.isRead ? 'bg-slate-800/50' : ''}`}
+                                            className={`p-4 flex gap-4 hover:bg-slate-800/80 cursor-pointer transition-colors active:bg-slate-800 ${!n.isRead ? 'bg-indigo-900/10 border-l-2 border-indigo-500' : 'border-l-2 border-transparent'}`}
                                         >
-                                            <div className="w-10 h-10 rounded-full bg-slate-700 shrink-0 overflow-hidden">
-                                                {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-400"><Bell size={16}/></div>}
+                                            <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-slate-700 mt-1">
+                                                {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><Bell size={16}/></div>}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <p className={`text-xs ${!n.isRead ? 'text-white font-bold' : 'text-slate-400'}`}>{n.text}</p>
-                                                <span className="text-[10px] text-slate-600 block mt-1">{new Date(n.timestamp).toLocaleDateString()}</span>
+                                                <p className={`text-sm leading-snug ${!n.isRead ? 'text-white font-semibold' : 'text-slate-400'}`}>{n.text}</p>
+                                                <span className="text-[10px] text-slate-600 block mt-1.5 flex items-center gap-1">
+                                                    <Clock size={10}/> {new Date(n.timestamp).toLocaleString()}
+                                                </span>
                                             </div>
-                                            {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-1 shrink-0"></div>}
+                                            {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 shrink-0 animate-pulse"></div>}
                                         </div>
                                     ))}
                                 </div>
                             )}
                         </div>
+                        {/* Safe area spacer for mobile navigation/gestures */}
+                        {isMobile && <div className="h-safe-area-bottom bg-slate-900 h-6"></div>}
                     </div>
                 </>
             )}
-        </div>
+        </>
     );
 };
 
@@ -134,7 +184,7 @@ export default function Layout() {
       
       {/* Global Sidebar Drawer */}
       {showSidebar && (
-        <div className="fixed inset-0 z-[60] flex">
+        <div className="fixed inset-0 z-[110] flex">
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
             <div className="relative w-64 bg-slate-900 border-r border-slate-800 h-full p-4 flex flex-col animate-in slide-in-from-left duration-200">
                 <div className="flex items-center gap-3 mb-8 px-2">
@@ -176,7 +226,7 @@ export default function Layout() {
         </div>
       )}
 
-      {/* HEADER */}
+      {/* HEADER (Desktop) */}
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
             <button onClick={() => setShowSidebar(true)} className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
@@ -207,7 +257,7 @@ export default function Layout() {
       
       <UploadIndicator />
 
-      {/* Bottom Nav */}
+      {/* Bottom Nav (Mobile) */}
       {!isShortsMode && (
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex justify-around items-center py-3 z-50 safe-area-bottom">
           <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/')}`}>
@@ -226,9 +276,9 @@ export default function Layout() {
              </Link>
           </div>
 
-          <div className="flex flex-col items-center gap-1 text-slate-400">
-             <NotificationBell />
-             <span className="text-[10px]">Alerts</span>
+          <div className="flex flex-col items-center gap-1">
+             <NotificationBell isMobile={true} />
+             <span className={`text-[10px] ${isActive('NOTIFS')}`}>Alerts</span>
           </div>
 
           <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>
