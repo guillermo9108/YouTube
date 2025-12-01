@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info } from 'lucide-react';
 import { db } from '../services/db';
@@ -125,12 +126,18 @@ export default function Watch() {
     return () => { isMounted = false; };
   }, [id, user]); 
 
-  // Auto-play effect
+  // Auto-play effect with Mute Fallback
   useEffect(() => {
     if (!loading && video && isUnlocked && videoRef.current) {
         const playPromise = videoRef.current.play();
         if (playPromise !== undefined) {
-            playPromise.catch(() => console.log("Auto-play blocked by browser"));
+            playPromise.catch((e) => {
+                console.log("Auto-play blocked by browser, trying muted...", e);
+                if (videoRef.current) {
+                    videoRef.current.muted = true;
+                    videoRef.current.play().catch(e => console.log("Muted autoplay also failed", e));
+                }
+            });
         }
     }
   }, [loading, video, isUnlocked]);

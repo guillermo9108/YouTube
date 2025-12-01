@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
 import { db } from '../services/db';
-import { Notification } from '../types';
+import { Notification as AppNotification } from '../types';
 
 const UploadIndicator = () => {
   const { isUploading, progress, currentFileIndex, totalFiles, uploadSpeed } = useUpload();
@@ -36,7 +37,7 @@ const UploadIndicator = () => {
 const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
     const { user } = useAuth();
     const navigate = useNavigate();
-    const [notifs, setNotifs] = useState<Notification[]>([]);
+    const [notifs, setNotifs] = useState<AppNotification[]>([]);
     const [isOpen, setIsOpen] = useState(false);
     const lastNotifIdRef = useRef<string | null>(null);
     const hasUnread = notifs.some(n => !n.isRead);
@@ -65,7 +66,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
         }
     };
 
-    const triggerSystemNotification = async (n: Notification) => {
+    const triggerSystemNotification = async (n: AppNotification) => {
         if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
             try {
                 const registration = await navigator.serviceWorker.ready;
@@ -89,7 +90,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
         return () => clearInterval(interval);
     }, [user]);
 
-    const handleClick = (n: Notification) => {
+    const handleClick = (n: AppNotification) => {
         if(!n.isRead) db.markNotificationRead(n.id).catch(() => {});
         navigate(n.link);
         setIsOpen(false);

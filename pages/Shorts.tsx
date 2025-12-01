@@ -39,7 +39,10 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
   // Handle Play/Pause, Autoplay Policies, and Auto-Purchase
   useEffect(() => {
     if (!isActive) {
-      if (videoRef.current) videoRef.current.pause();
+      if (videoRef.current) {
+          videoRef.current.pause();
+          videoRef.current.currentTime = 0; // Reset to start when scrolling away
+      }
       return;
     }
 
@@ -155,7 +158,7 @@ const ShortItem: React.FC<{ video: Video; isActive: boolean }> = ({ video, isAct
   };
 
   return (
-    <div className="relative w-full h-[100dvh] md:h-full snap-start snap-always shrink-0 flex items-center justify-center bg-black overflow-hidden">
+    <div className="relative w-full h-[100dvh] md:h-full snap-start snap-always shrink-0 flex items-center justify-center bg-black overflow-hidden video-container">
       
       {/* Video Layer */}
       <div className="absolute inset-0 z-0 bg-black">
@@ -368,6 +371,7 @@ export default function Shorts() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
     db.getAllVideos().then(all => {
@@ -378,18 +382,34 @@ export default function Shorts() {
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || videos.length === 0) return;
 
-    const handleScroll = () => {
-      const index = Math.round(container.scrollTop / container.clientHeight);
-      if (index !== activeIndex) {
-        setActiveIndex(index);
-      }
+    // Disconnect previous observer
+    if (observerRef.current) observerRef.current.disconnect();
+
+    const options = {
+        root: container,
+        rootMargin: '0px',
+        threshold: 0.6 // Trigger when 60% of video is visible
     };
 
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [activeIndex]);
+    observerRef.current = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                // Find index based on DOM order
+                const children = Array.from(container.children);
+                const index = children.indexOf(entry.target as Element);
+                if (index !== -1) setActiveIndex(index);
+            }
+        });
+    }, options);
+
+    // Observe all video children
+    const videoElements = container.querySelectorAll('.video-container');
+    videoElements.forEach(el => observerRef.current?.observe(el));
+
+    return () => observerRef.current?.disconnect();
+  }, [videos]);
 
   return (
     <div 

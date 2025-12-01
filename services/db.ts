@@ -1,4 +1,5 @@
 
+
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
@@ -52,19 +53,62 @@ class DatabaseService {
     window.addEventListener('offline', () => { this.isOffline = true; });
   }
 
-  // --- CACHE SYSTEM ---
+  // --- CACHE SYSTEM (SMART EVICTION) ---
   private saveToCache(key: string, data: any) {
+      const cacheItem = JSON.stringify({
+          timestamp: Date.now(),
+          data: data
+      });
+
       try {
-          // Only cache GET requests (identified by query params usually)
           if (key.includes('action=')) {
-              localStorage.setItem(`sp_cache_${key}`, JSON.stringify({
-                  timestamp: Date.now(),
-                  data: data
-              }));
+              localStorage.setItem(`sp_cache_${key}`, cacheItem);
           }
-      } catch (e) {
-          console.warn("Cache quota exceeded");
+      } catch (e: any) {
+          // Check for QuotaExceededError
+          if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+              console.warn("Cache quota exceeded. Running smart eviction...");
+              this.evictCache();
+              // Try again once
+              try {
+                  if (key.includes('action=')) {
+                      localStorage.setItem(`sp_cache_${key}`, cacheItem);
+                  }
+              } catch (retryErr) {
+                  console.error("Cache write failed even after eviction.", retryErr);
+              }
+          }
       }
+  }
+
+  private evictCache() {
+      // 1. Gather all sp_cache items
+      const items: { key: string, timestamp: number }[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('sp_cache_')) {
+              try {
+                  const val = localStorage.getItem(k);
+                  if (val) {
+                      const parsed = JSON.parse(val);
+                      items.push({ key: k, timestamp: parsed.timestamp || 0 });
+                  }
+              } catch(e) {
+                  // Corrupt item, mark for deletion
+                  items.push({ key: k, timestamp: 0 });
+              }
+          }
+      }
+
+      // 2. Sort by oldest first
+      items.sort((a, b) => a.timestamp - b.timestamp);
+
+      // 3. Delete the oldest 50%
+      const toDelete = Math.ceil(items.length * 0.5);
+      for (let i = 0; i < toDelete; i++) {
+          localStorage.removeItem(items[i].key);
+      }
+      console.log(`Evicted ${toDelete} old cache items.`);
   }
 
   private getFromCache<T>(key: string): T | null {
