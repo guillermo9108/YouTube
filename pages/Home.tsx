@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
+import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud, Clock, Trash2 } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -62,6 +62,11 @@ export default function Home() {
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchWrapperRef = useRef<HTMLDivElement>(null);
+
+  // Recent Search State
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [showRecent, setShowRecent] = useState(false);
 
   // State Ref to hold latest values for unmount saving (Prevents stale closures)
   const stateRef = useRef({
@@ -95,6 +100,12 @@ export default function Home() {
                 });
             }
         } catch (e) {}
+
+        // Load recent searches
+        try {
+            const saved = localStorage.getItem('sp_recent_searches');
+            if (saved) setRecentSearches(JSON.parse(saved));
+        } catch(e) {}
 
         // Check for "Dirty" flag (New upload happened?)
         const isDirty = localStorage.getItem('sp_home_dirty') === 'true';
@@ -176,6 +187,37 @@ export default function Home() {
           db.getSubscriptions(user.id).then(setSubscribedCreators);
       }
   }, [user, activeCategory]);
+
+  // Handle Search History
+  const addToHistory = (term: string) => {
+      if (!term.trim()) return;
+      const val = term.trim();
+      setRecentSearches(prev => {
+          const newArr = [val, ...prev.filter(t => t !== val)].slice(0, 8);
+          localStorage.setItem('sp_recent_searches', JSON.stringify(newArr));
+          return newArr;
+      });
+  };
+
+  const removeHistory = (e: React.MouseEvent, term: string) => {
+      e.stopPropagation();
+      setRecentSearches(prev => {
+          const newArr = prev.filter(t => t !== term);
+          localStorage.setItem('sp_recent_searches', JSON.stringify(newArr));
+          return newArr;
+      });
+  };
+
+  // Close recent searches on click outside
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (searchWrapperRef.current && !searchWrapperRef.current.contains(event.target as Node)) {
+              setShowRecent(false);
+          }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Logic to Process List (Filter Only - No Shuffle)
   useEffect(() => {
@@ -283,6 +325,8 @@ export default function Home() {
       window.location.reload();
   };
 
+  const filteredRecent = recentSearches.filter(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
+
   return (
     <div className="min-h-screen" ref={containerRef}>
       {/* Sidebar Overlay */}
@@ -334,30 +378,63 @@ export default function Home() {
             <button onClick={() => setShowSidebar(true)} className="md:hidden text-white p-2 hover:bg-slate-800 rounded-full">
                 <Menu size={24} />
             </button>
-            <div className="relative group flex-1 max-w-2xl mx-auto">
+            <div className="relative group flex-1 max-w-2xl mx-auto" ref={searchWrapperRef}>
                 <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
                 <input 
                     type="text" 
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => { setSearchQuery(e.target.value); setShowRecent(true); }}
+                    onFocus={() => setShowRecent(true)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            addToHistory(searchQuery);
+                            setShowRecent(false);
+                            (e.target as HTMLInputElement).blur();
+                        }
+                    }}
                     placeholder="Search videos, creators..." 
-                    className="w-full bg-slate-900 border border-slate-800 rounded-full py-2 pl-10 pr-10 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-slate-800 transition-all text-sm"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-full py-2 pl-10 pr-10 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-slate-800 transition-all text-sm relative z-20"
                 />
+                
                 {searchQuery ? (
                     <button 
                         onClick={() => setSearchQuery('')}
-                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white"
+                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white z-20"
                     >
                         <X size={18} />
                     </button>
                 ) : (
                     <button 
                         onClick={handleManualRefresh}
-                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white"
+                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white z-20"
                         title="Force Refresh"
                     >
                         <RefreshCw size={14} />
                     </button>
+                )}
+
+                {/* Recent Searches Dropdown */}
+                {showRecent && filteredRecent.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 mt-2 overflow-hidden animate-in fade-in zoom-in-95 origin-top">
+                        {filteredRecent.map(term => (
+                            <div 
+                                key={term} 
+                                onClick={() => { setSearchQuery(term); addToHistory(term); setShowRecent(false); }}
+                                className="flex items-center justify-between px-4 py-3 hover:bg-slate-800/80 cursor-pointer group/item transition-colors border-b border-slate-800/50 last:border-0"
+                            >
+                                <div className="flex items-center gap-3 text-slate-300">
+                                    <Clock size={16} className="text-slate-500" />
+                                    <span className="text-sm font-medium">{term}</span>
+                                </div>
+                                <button 
+                                    onClick={(e) => removeHistory(e, term)} 
+                                    className="text-slate-600 hover:text-red-400 p-1.5 hover:bg-slate-700/50 rounded-full transition-all opacity-0 group-hover/item:opacity-100"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
                 )}
             </div>
          </div>

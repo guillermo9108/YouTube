@@ -580,6 +580,167 @@ try {
             $val = $pdo->query("SELECT COUNT(*) FROM subscriptions WHERE subscriberId = '{$_GET['userId']}' AND creatorId = '{$_GET['creatorId']}'")->fetchColumn();
             respond(true, ['isSubscribed' => $val > 0]);
             break;
+
+        case 'admin_repair_db':
+            // 1. Create Tables
+            $pdo->exec("CREATE TABLE IF NOT EXISTS users (
+                id VARCHAR(50) PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                role ENUM('USER', 'ADMIN') DEFAULT 'USER',
+                balance DECIMAL(10, 2) DEFAULT 0.00,
+                autoPurchaseLimit DECIMAL(10, 2) DEFAULT 1.00,
+                watchLater JSON,
+                currentSessionId VARCHAR(64) DEFAULT NULL,
+                lastActive BIGINT DEFAULT 0,
+                avatarUrl VARCHAR(255) DEFAULT NULL,
+                defaultPrices JSON DEFAULT NULL
+            )");
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS videos (
+                id VARCHAR(50) PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                price DECIMAL(10, 2) DEFAULT 0.00,
+                thumbnailUrl VARCHAR(255),
+                videoUrl VARCHAR(255),
+                creatorId VARCHAR(50),
+                views INT DEFAULT 0,
+                createdAt BIGINT,
+                likes INT DEFAULT 0,
+                dislikes INT DEFAULT 0,
+                category VARCHAR(50) DEFAULT 'OTHER',
+                duration INT DEFAULT 0,
+                fileHash VARCHAR(32),
+                isLocal TINYINT(1) DEFAULT 0
+            )");
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS transactions (
+                id VARCHAR(50) PRIMARY KEY,
+                buyerId VARCHAR(50),
+                creatorId VARCHAR(50),
+                videoId VARCHAR(50),
+                amount DECIMAL(10, 2),
+                timestamp BIGINT,
+                type VARCHAR(20)
+            )");
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS comments (
+                id VARCHAR(50) PRIMARY KEY,
+                videoId VARCHAR(50),
+                userId VARCHAR(50),
+                text TEXT,
+                timestamp BIGINT
+            )");
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS interactions (
+                userId VARCHAR(50),
+                videoId VARCHAR(50),
+                liked TINYINT(1) DEFAULT 0,
+                disliked TINYINT(1) DEFAULT 0,
+                isWatched TINYINT(1) DEFAULT 0,
+                PRIMARY KEY (userId, videoId)
+            )");
+            
+            $pdo->exec("CREATE TABLE IF NOT EXISTS requests (
+                id VARCHAR(50) PRIMARY KEY,
+                userId VARCHAR(50),
+                query VARCHAR(255),
+                status ENUM('PENDING','PROCESSING','COMPLETED','FAILED','MANUAL_UPLOAD') DEFAULT 'PENDING',
+                createdAt BIGINT,
+                useLocalNetwork TINYINT(1) DEFAULT 0
+            )");
+            
+            $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (
+                id INT PRIMARY KEY DEFAULT 1,
+                downloadStartTime VARCHAR(10) DEFAULT '01:00',
+                downloadEndTime VARCHAR(10) DEFAULT '06:00',
+                isQueuePaused TINYINT(1) DEFAULT 0,
+                batchSize INT DEFAULT 5,
+                maxDuration INT DEFAULT 600,
+                maxResolution INT DEFAULT 1080,
+                pexelsKey VARCHAR(255),
+                pixabayKey VARCHAR(255),
+                ytDlpPath VARCHAR(255),
+                enableYoutube TINYINT(1) DEFAULT 0,
+                categoryPrices JSON DEFAULT NULL,
+                customCategories JSON DEFAULT NULL,
+                localLibraryPath VARCHAR(255) DEFAULT ''
+            )");
+            
+            $pdo->exec("CREATE TABLE IF NOT EXISTS subscriptions (
+                subscriberId VARCHAR(50),
+                creatorId VARCHAR(50),
+                createdAt BIGINT,
+                PRIMARY KEY (subscriberId, creatorId)
+            )");
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (
+                id VARCHAR(50) PRIMARY KEY,
+                userId VARCHAR(50),
+                type VARCHAR(20),
+                text VARCHAR(255),
+                link VARCHAR(255),
+                isRead TINYINT(1) DEFAULT 0,
+                timestamp BIGINT
+            )");
+            
+            // 2. Ensure Settings Row
+            $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
+
+            // 3. Add Missing Columns (Migrations)
+            $updates = [
+                "videos" => [
+                    "fileHash" => "VARCHAR(32)", 
+                    "isLocal" => "TINYINT(1) DEFAULT 0",
+                    "category" => "VARCHAR(50) DEFAULT 'OTHER'",
+                    "duration" => "INT DEFAULT 0"
+                ],
+                "users" => [
+                    "avatarUrl" => "VARCHAR(255) DEFAULT NULL",
+                    "defaultPrices" => "JSON DEFAULT NULL",
+                    "currentSessionId" => "VARCHAR(64) DEFAULT NULL",
+                    "lastActive" => "BIGINT DEFAULT 0"
+                ],
+                "system_settings" => [
+                    "customCategories" => "JSON DEFAULT NULL",
+                    "localLibraryPath" => "VARCHAR(255) DEFAULT ''",
+                    "categoryPrices" => "JSON DEFAULT NULL",
+                    "enableYoutube" => "TINYINT(1) DEFAULT 0",
+                    "ytDlpPath" => "VARCHAR(255)"
+                ]
+            ];
+
+            foreach ($updates as $table => $cols) {
+                foreach ($cols as $col => $def) {
+                    try {
+                        // Check if column exists
+                        $check = $pdo->query("SHOW COLUMNS FROM $table LIKE '$col'");
+                        if ($check->rowCount() == 0) {
+                            $pdo->exec("ALTER TABLE $table ADD COLUMN $col $def");
+                        }
+                    } catch (Exception $e) {}
+                }
+            }
+
+            respond(true);
+            break;
+
+        case 'admin_cleanup_videos':
+            // Removes videos from DB that don't have files on disk
+            $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE isLocal = 0");
+            $deleted = 0;
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                // videoUrl is like /api/uploads/videos/xyz.mp4
+                // We need relative path from api/ folder.
+                $path = str_replace('/api/', '', $row['videoUrl']);
+                if (!file_exists($path)) {
+                    $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$row['id']]);
+                    $deleted++;
+                }
+            }
+            respond(true, ['deleted' => $deleted]);
+            break;
             
         default:
             respond(false, null, 'Invalid action');
