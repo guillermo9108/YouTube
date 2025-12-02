@@ -67,8 +67,9 @@ export default function Watch() {
   const [nextVideo, setNextVideo] = useState<Video | null>(null);
   const [autoStatus, setAutoStatus] = useState<'IDLE' | 'SKIPPING_WATCHED' | 'AUTO_BUYING' | 'PLAYING_NEXT' | 'WAITING_CONFIRMATION'>('IDLE');
   const [showDebug, setShowDebug] = useState(false);
+  const repairAttempted = useRef(false);
 
-  // ID Change Handler - Optimized to prevent unmounting of video player
+  // ID Change Handler
   useEffect(() => {
     if (!id) {
         setErrorMsg("No Video ID provided in URL");
@@ -77,18 +78,16 @@ export default function Watch() {
     }
 
     let isMounted = true;
-    
-    // We do NOT clear video state immediately to keep the player mounted during transition
     setLoading(true);
     setErrorMsg('');
     setComments([]);
     setRelatedVideos([]);
     setCountdown(null);
     setNextVideo(null);
+    repairAttempted.current = false;
 
     const fetchVideo = async () => {
         try {
-            console.log("Fetching video:", id);
             const v = await db.getVideo(id);
             if (!isMounted) return;
             
@@ -98,10 +97,8 @@ export default function Watch() {
                 return;
             }
             
-            // Update Video Data
             setVideo(v);
 
-            // Fetch secondary data
             if (user) {
                 db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Purchase check failed", e));
                 db.getInteraction(user.id, v.id).then(res => isMounted && setInteraction(res)).catch(e => console.warn("Interaction fetch failed", e));
@@ -114,7 +111,6 @@ export default function Watch() {
             setLoading(false);
         } catch (e: any) {
             if (isMounted) {
-                console.error("Watch Error:", e);
                 setErrorMsg(e.message || "Connection Error");
                 setLoading(false);
             }
@@ -122,30 +118,51 @@ export default function Watch() {
     };
 
     fetchVideo();
-
     return () => { isMounted = false; };
   }, [id, user]); 
 
-  // Auto-play effect with Mute Fallback
+  // Auto-play effect
   useEffect(() => {
     if (!loading && video && isUnlocked && videoRef.current) {
         const playPromise = videoRef.current.play();
         if (playPromise !== undefined) {
             playPromise.catch((e) => {
-                console.log("Auto-play blocked by browser, trying muted...", e);
                 if (videoRef.current) {
                     videoRef.current.muted = true;
-                    videoRef.current.play().catch(e => console.log("Muted autoplay also failed", e));
+                    videoRef.current.play().catch(() => {});
                 }
             });
         }
     }
   }, [loading, video, isUnlocked]);
 
+  const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+      const el = e.currentTarget;
+      // Mark Watched Logic
+      if (el.currentTime / el.duration > 0.30 && interaction && !interaction.isWatched && user && video) { 
+          db.markWatched(user.id, video.id); 
+          setInteraction({...interaction, isWatched: true}); 
+      }
+      
+      // Thumbnail Repair Logic: Capture frame at > 1 sec if missing
+      if (!repairAttempted.current && el.currentTime > 1.0 && video && isUnlocked) {
+          repairAttempted.current = true;
+          if (video.thumbnailUrl.includes('placeholder')) {
+              try {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = el.videoWidth;
+                  canvas.height = el.videoHeight;
+                  canvas.getContext('2d')?.drawImage(el, 0, 0);
+                  canvas.toBlob(blob => {
+                      if(blob) db.repairThumbnail(video.id, new File([blob], "repaired.jpg", {type: 'image/jpeg'}));
+                  }, 'image/jpeg', 0.6);
+              } catch(e) {}
+          }
+      }
+  };
+
   const handleVideoEnded = async () => {
     if (!video || !user) return;
-    
-    // SERIES/NOVELA LOGIC
     if (video.category === VideoCategory.SERIES || video.category === VideoCategory.NOVELAS) {
          try {
              const creatorVideos = await db.getVideosByCreator(video.creatorId);
@@ -160,8 +177,6 @@ export default function Watch() {
              }
          } catch (e) { }
     }
-
-    // DEFAULT LOGIC
     if (relatedVideos.length > 0) {
         for (const v of relatedVideos) {
              const vInt = await db.getInteraction(user.id, v.id);
@@ -179,7 +194,7 @@ export default function Watch() {
       if (owned) {
           setAutoStatus('PLAYING_NEXT');
           setCountdown(3);
-      } else if (target.price <= user.autoPurchaseLimit && user.balance >= target.price) {
+      } else if (Number(target.price) <= Number(user.autoPurchaseLimit) && Number(user.balance) >= Number(target.price)) {
           setAutoStatus('AUTO_BUYING');
           setCountdown(3);
       } else {
@@ -206,7 +221,7 @@ export default function Watch() {
 
   const handlePurchase = async () => {
       if (!user || !video || purchasing) return;
-      if (user.balance < video.price) { alert("Insufficient Balance"); return; }
+      if (Number(user.balance) < Number(video.price)) { alert("Insufficient Balance"); return; }
       setPurchasing(true);
       try {
           await db.purchaseVideo(user.id, video.id);
@@ -227,13 +242,11 @@ export default function Watch() {
       if (!user || !video) return;
       const res = await db.rateVideo(user.id, video.id, rating);
       setInteraction(res);
-      // Correctly update video stats from server response
       if (res.newLikeCount !== undefined) {
           setVideo(prev => prev ? { ...prev, likes: res.newLikeCount!, dislikes: res.newDislikeCount! } : null);
       }
   };
 
-  // Initial Loading State (Only if no video data exists yet)
   if (loading && !video) return <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 text-slate-500"><RefreshCw className="animate-spin text-indigo-500" size={32} /><p>Loading video...</p></div>;
   
   if ((!video && !loading) || errorMsg) return (
@@ -252,15 +265,13 @@ export default function Watch() {
       </div>
   );
 
-  const canAfford = (user?.balance || 0) >= (video?.price || 0);
+  const canAfford = Number(user?.balance || 0) >= Number(video?.price || 0);
 
   return (
     <div className="max-w-5xl mx-auto pb-6" key={video?.id || 'loading'}>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 lg:gap-6">
         <div className="lg:col-span-2 space-y-2">
              <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800">
-                
-                {/* Loader Overlay for Transitions */}
                 {loading && (
                     <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center">
                         <RefreshCw className="animate-spin text-indigo-500 mb-2" size={32} />
@@ -279,13 +290,7 @@ export default function Watch() {
                             controls 
                             playsInline 
                             onEnded={handleVideoEnded} 
-                            onTimeUpdate={(e) => { 
-                                // UPDATED: 30% Threshold
-                                if (e.currentTarget.currentTime / e.currentTarget.duration > 0.30 && interaction && !interaction.isWatched && user) { 
-                                    db.markWatched(user.id, video.id); 
-                                    setInteraction({...interaction, isWatched: true}); 
-                                } 
-                            }} 
+                            onTimeUpdate={handleTimeUpdate} 
                         />
                         {countdown !== null && countdown > 0 && nextVideo && (
                             <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-20 animate-in fade-in">
@@ -317,7 +322,6 @@ export default function Watch() {
                  <h1 className="text-lg md:text-xl font-bold text-white leading-tight break-words line-clamp-3 md:line-clamp-none">{video.title}</h1>
                  <div className="flex items-center justify-between mt-2">
                      <div className="flex items-center gap-3 text-xs text-slate-400">
-                         {/* CREATOR INFO LINKED TO CHANNEL */}
                          <Link to={`/channel/${video.creatorId}`} className="flex items-center gap-2 hover:text-white transition-colors group">
                             {video.creatorAvatarUrl ? (
                                 <img src={video.creatorAvatarUrl} className="w-6 h-6 rounded-full object-cover border border-slate-700" alt={video.creatorName} />
@@ -377,3 +381,4 @@ export default function Watch() {
     </div>
   );
 }
+

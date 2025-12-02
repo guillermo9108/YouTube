@@ -36,6 +36,13 @@ export interface VideoResult {
   originalUrl?: string;
 }
 
+export interface ScanResult {
+    scanned: number;
+    imported: number;
+    errors: string[];
+    log: string[];
+}
+
 class DatabaseService {
   private isInstalled: boolean = true; // Optimistic default
   private isDemoMode: boolean = false;
@@ -444,6 +451,25 @@ class DatabaseService {
         xhr.onerror = () => reject(new Error("Network connection error"));
         xhr.send(formData);
     });
+  }
+
+  // CROWDSOURCED THUMBNAIL REPAIR
+  async repairThumbnail(videoId: string, file: File): Promise<void> {
+      const formData = new FormData();
+      formData.append('videoId', videoId);
+      formData.append('thumbnail', file);
+      // Silent request (true) so we don't spam the console if it fails
+      await this.request('index.php?action=repair_thumbnail', 'POST', formData, true);
+  }
+
+  // NAS LOCAL LIBRARY SCAN
+  async scanLocalLibrary(path: string): Promise<ScanResult> {
+      const res = await this.request<ScanResult>('index.php?action=scan_local_library', 'POST', { path });
+      if (res.imported > 0) {
+          this.invalidateCache('index.php?action=get_videos');
+          this.setHomeDirty();
+      }
+      return res;
   }
 
   async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> { await this.request('index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice }); }

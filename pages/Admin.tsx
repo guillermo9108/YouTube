@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -17,7 +17,7 @@ export default function Admin() {
   const [processingQueue, setProcessingQueue] = useState(false);
   const [processResult, setProcessResult] = useState('');
   const [requests, setRequests] = useState<ContentRequest[]>([]);
-  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES' | 'LIBRARY'>('USERS');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
 
   // Cleaner State
@@ -28,12 +28,20 @@ export default function Admin() {
   const [cleanerStats, setCleanerStats] = useState({ totalVideos: 0, videosToDelete: 0, spaceReclaimed: '0 MB' });
   const [loadingCleaner, setLoadingCleaner] = useState(false);
 
+  // Library State
+  const [localPath, setLocalPath] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanLog, setScanLog] = useState<string[]>([]);
+
   // Category State
   const [newCatName, setNewCatName] = useState('');
 
   useEffect(() => {
     loadData();
-    db.getSystemSettings().then(setSettings);
+    db.getSystemSettings().then(s => {
+        setSettings(s);
+        if (s.localLibraryPath) setLocalPath(s.localLibraryPath);
+    });
   }, []);
 
   const loadData = async () => {
@@ -107,9 +115,39 @@ export default function Admin() {
   const saveSettings = async () => {
       if (!settings) return;
       try {
-          await db.updateSystemSettings(settings);
+          // If in Library tab, save path too
+          if (activeTab === 'LIBRARY') {
+              const updated = { ...settings, localLibraryPath: localPath };
+              await db.updateSystemSettings(updated);
+              setSettings(updated);
+          } else {
+              await db.updateSystemSettings(settings);
+          }
           alert("Settings saved!");
       } catch (e) { alert("Failed to save"); }
+  };
+
+  const handleScanLibrary = async () => {
+      if (!localPath.trim()) return;
+      setScanning(true);
+      setScanLog(['Starting scan...']);
+      
+      // Save path first
+      if (settings) {
+          const updated = { ...settings, localLibraryPath: localPath };
+          await db.updateSystemSettings(updated);
+      }
+
+      try {
+          const res = await db.scanLocalLibrary(localPath);
+          setScanLog(res.log);
+          alert(`Scan complete. Imported ${res.imported} new videos.`);
+      } catch (e: any) {
+          setScanLog(prev => [...prev, `ERROR: ${e.message}`]);
+          alert("Scan error: " + e.message);
+      } finally {
+          setScanning(false);
+      }
   };
 
   const addCustomCategory = () => {
@@ -203,9 +241,65 @@ export default function Admin() {
            <button onClick={() => setActiveTab('USERS')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'USERS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Users</button>
            <button onClick={() => setActiveTab('CONFIG')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CONFIG' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Config</button>
            <button onClick={() => setActiveTab('CATEGORIES')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CATEGORIES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cat & Prices</button>
+           <button onClick={() => setActiveTab('LIBRARY')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'LIBRARY' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Library Import</button>
            <button onClick={() => setActiveTab('CLEANER')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CLEANER' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cleaner</button>
         </div>
       </div>
+
+      {activeTab === 'LIBRARY' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
+                  <h3 className="font-bold text-white flex items-center gap-2"><FolderSearch size={18}/> Local Library Scan</h3>
+                  <div className="p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-lg text-sm text-indigo-200/80 leading-relaxed">
+                      This tool recursively scans a folder on your NAS/Server for video files. It will:
+                      <ul className="list-disc pl-5 mt-2 space-y-1 text-xs">
+                          <li>Index videos without moving them (saves space/time).</li>
+                          <li>Intelligently detect <strong>Series</strong> (S01E01), <strong>Novelas</strong> (Capitulo 5), and <strong>Movies</strong>.</li>
+                          <li>Auto-import local cover images (jpg/png) if they match the video name.</li>
+                          <li>Enable streaming for files outside the web root.</li>
+                      </ul>
+                  </div>
+
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Server Directory Path</label>
+                      <input 
+                        type="text" 
+                        value={localPath}
+                        onChange={e => setLocalPath(e.target.value)}
+                        placeholder="/volume1/video/movies"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 text-white font-mono text-sm"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">Example: <code>/var/www/html/videos</code> or <code>/volume1/video</code></p>
+                  </div>
+
+                  <button 
+                    onClick={handleScanLibrary}
+                    disabled={scanning || !localPath}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
+                  >
+                      {scanning ? <Loader2 className="animate-spin" size={20}/> : <FolderSearch size={20}/>}
+                      {scanning ? 'Scanning & Importing...' : 'Start Scan'}
+                  </button>
+              </div>
+
+              <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 h-[500px] overflow-y-auto shadow-inner">
+                  <div className="flex items-center gap-2 text-slate-500 mb-2 border-b border-slate-800 pb-2">
+                      <Terminal size={14}/> Scan Logs
+                  </div>
+                  {scanLog.length === 0 ? (
+                      <div className="text-slate-600 italic">Waiting to scan...</div>
+                  ) : (
+                      scanLog.map((line, i) => (
+                          <div key={i} className={`mb-1 ${line.startsWith('ERROR') ? 'text-red-400' : (line.startsWith('Success') ? 'text-emerald-400' : 'text-slate-300')}`}>
+                              <span className="text-slate-600 mr-2">[{new Date().toLocaleTimeString()}]</span>
+                              {line}
+                          </div>
+                      ))
+                  )}
+                  {scanning && <div className="animate-pulse">_</div>}
+              </div>
+          </div>
+      )}
 
       {activeTab === 'CATEGORIES' && settings && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useMemo, useRef, useLayoutEffect } from 'react';
+import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { Link } from '../components/Router';
 import VideoCard from '../components/VideoCard';
 
-const CATEGORIES = [
+const INITIAL_CATEGORIES = [
     { id: 'ALL', label: 'All' },
     { id: 'SUBSCRIPTIONS', label: 'Subscriptions' },
     { id: VideoCategory.SHORTS, label: 'Shorts' },
@@ -33,6 +33,7 @@ interface HomeSnapshot {
     visibleCount: number;
     scrollPosition: number;
     purchases: Set<string>;
+    categories: { id: string, label: string }[];
 }
 
 let homeSnapshot: HomeSnapshot | null = null;
@@ -52,6 +53,9 @@ export default function Home() {
   const [showSidebar, setShowSidebar] = useState(false);
   const { user, logout } = useAuth();
   
+  // Dynamic Category List
+  const [categoryList, setCategoryList] = useState(INITIAL_CATEGORIES);
+
   // Full Processed List (Filtered)
   const [processedList, setProcessedList] = useState<Video[]>([]);
   // Visible Chunk
@@ -61,19 +65,37 @@ export default function Home() {
 
   // State Ref to hold latest values for unmount saving (Prevents stale closures)
   const stateRef = useRef({
-      videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases
+      videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList
   });
 
   // Always keep ref updated
   useEffect(() => {
       stateRef.current = {
-          videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases
+          videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList
       };
-  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases]);
+  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList]);
 
   // --- INIT & SNAPSHOT RESTORATION ---
   useEffect(() => {
     const init = async () => {
+        // Fetch System Settings to get Custom Categories
+        try {
+            const settings = await db.getSystemSettings();
+            if (settings.customCategories) {
+                const custom = settings.customCategories.map(c => ({ id: c, label: c.replace('_', ' ') }));
+                // Merge with initial, avoiding duplicates if any
+                setCategoryList(prev => {
+                    // Start with initial
+                    const base = [...INITIAL_CATEGORIES];
+                    // Append custom
+                    custom.forEach(c => {
+                        if (!base.find(b => b.id === c.id)) base.push(c);
+                    });
+                    return base;
+                });
+            }
+        } catch (e) {}
+
         // Check for "Dirty" flag (New upload happened?)
         const isDirty = localStorage.getItem('sp_home_dirty') === 'true';
 
@@ -87,6 +109,7 @@ export default function Home() {
             setProcessedList(homeSnapshot.processedList);
             setVisibleCount(homeSnapshot.visibleCount);
             setPurchases(homeSnapshot.purchases);
+            if(homeSnapshot.categories.length > INITIAL_CATEGORIES.length) setCategoryList(homeSnapshot.categories);
             setLoading(false);
             
             // Background update for watched status (cheap)
@@ -133,7 +156,8 @@ export default function Home() {
                 searchQuery: s.searchQuery,
                 visibleCount: s.visibleCount,
                 scrollPosition: window.scrollY,
-                purchases: s.purchases
+                purchases: s.purchases,
+                categories: s.categoryList
             };
         }
     };
@@ -179,12 +203,7 @@ export default function Home() {
       setProcessedList(filtered);
       
       // Reset count when filters change (unless it's the initial load/restore)
-      // We check if the previous processed length is different to avoid resetting on simple re-renders
       if (!loading) {
-         // Optionally reset visible count here, but for smoother UX we might keep it or reset it.
-         // Let's reset it if the category changed to ensure user sees top of new list
-         // Note: We can't easily detect "change" inside this effect without refs, 
-         // but setting it to 12 is safe for most filter changes.
          if (homeSnapshot && activeCategory === homeSnapshot.activeCategory && searchQuery === homeSnapshot.searchQuery) {
              // If matches snapshot (restore), keep snapshot count (handled by init)
          } else {
@@ -203,9 +222,7 @@ export default function Home() {
               setVisibleCount(prev => prev + ITEMS_PER_PAGE);
           }
       }, { 
-          // CRITICAL OPTIMIZATION:
-          // Instead of 200px, we look 1500px (approx 2-3 screen heights) ahead.
-          // This triggers the load way before the user hits the bottom, masking the NAS latency.
+          // CRITICAL OPTIMIZATION: Look 1500px ahead
           rootMargin: '1500px' 
       });
 
@@ -222,7 +239,7 @@ export default function Home() {
       const fetchVisiblePurchases = async () => {
           // Only check videos we haven't checked yet
           const toCheck = displayList.filter(v => 
-              v.price > 0 && 
+              Number(v.price) > 0 && 
               v.creatorId !== user.id && 
               !purchases.has(v.id)
           );
@@ -351,11 +368,11 @@ export default function Home() {
                 <Compass size={18} />
             </div>
             <div className="hidden md:block h-6 w-px bg-slate-800 mx-1 shrink-0"></div>
-            {CATEGORIES.map(cat => (
+            {categoryList.map(cat => (
                 <button
                     key={cat.id}
                     onClick={() => setActiveCategory(cat.id)}
-                    className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${activeCategory === cat.id ? 'bg-white text-black border-white' : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:border-slate-700'}`}
+                    className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${activeTabClass(activeCategory, cat.id)}`}
                 >
                     {cat.label}
                 </button>
@@ -401,7 +418,6 @@ export default function Home() {
              {/* Invisible Trigger for Infinite Scroll */}
              {visibleCount < processedList.length && (
                 <div ref={loadMoreRef} className="py-24 flex justify-center">
-                    {/* Add height so observer catches it earlier */}
                     <RefreshCw className="animate-spin text-slate-600" />
                 </div>
              )}
@@ -410,4 +426,9 @@ export default function Home() {
       </div>
     </div>
   );
+}
+
+function activeTabClass(current: string, target: string) {
+    if (current === target) return 'bg-white text-black border-white';
+    return 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:border-slate-700';
 }

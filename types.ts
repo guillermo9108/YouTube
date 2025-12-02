@@ -45,6 +45,7 @@ export interface Video {
   duration: number; // Seconds
   fileHash?: string; // New: MD5 Hash for deduplication
   creatorAvatarUrl?: string;
+  isLocal?: boolean; // New: Flag for local NAS files
 }
 
 export interface Transaction {
@@ -106,6 +107,7 @@ export interface SystemSettings {
   enableYoutube: boolean; // New: Toggle for YouTube features
   categoryPrices: Record<string, number>; // New: Global default prices
   customCategories: string[]; // New: List of admin added categories
+  localLibraryPath: string; // New: Path to local NAS video folder
 }
 
 export interface SmartCleanerResult {

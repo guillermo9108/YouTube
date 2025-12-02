@@ -1,4 +1,5 @@
 
+
 <?php
 ob_start();
 
@@ -39,7 +40,8 @@ if ($action === 'check') {
     if (file_exists($configFile)) {
         $config = json_decode(file_get_contents($configFile), true);
         try {
-            $pdo = new PDO("mysql:host={$config['host']};port={$config['port']};dbname={$config['name']}", $config['user'], $config['password']);
+            $pdo = new PDO("mysql:host={$config['host']};port={$config['port']}", $config['user'], $config['password']);
+            $pdo->exec("USE `{$config['name']}`");
             if ($pdo->query("SHOW TABLES LIKE 'users'")->rowCount() > 0) respond(true, ['installed' => true]);
         } catch (Exception $e) {}
     }
@@ -93,7 +95,8 @@ if ($action === 'install') {
             dislikes INT DEFAULT 0,
             category VARCHAR(50) DEFAULT 'OTHER',
             duration INT DEFAULT 0,
-            fileHash VARCHAR(32)
+            fileHash VARCHAR(32),
+            isLocal TINYINT(1) DEFAULT 0
         )");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS transactions (
@@ -145,7 +148,8 @@ if ($action === 'install') {
             ytDlpPath VARCHAR(255),
             enableYoutube TINYINT(1) DEFAULT 0,
             categoryPrices JSON DEFAULT NULL,
-            customCategories JSON DEFAULT NULL
+            customCategories JSON DEFAULT NULL,
+            localLibraryPath VARCHAR(255) DEFAULT ''
         )");
         
         $pdo->exec("CREATE TABLE IF NOT EXISTS subscriptions (
