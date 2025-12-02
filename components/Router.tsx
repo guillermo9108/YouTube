@@ -1,4 +1,5 @@
 
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const RouterContext = createContext<{ pathname: string }>({ pathname: '/' });
@@ -26,6 +27,12 @@ export function useParams(): Record<string, string | undefined> {
   const channelMatch = pathname.match(/\/channel\/([^/?&]+)/);
   if (channelMatch) {
     return { userId: channelMatch[1] };
+  }
+
+  // Add regex for Marketplace items (excluding 'create' route)
+  const marketMatch = pathname.match(/\/marketplace\/([^/?&]+)/);
+  if (marketMatch && marketMatch[1] !== 'create') {
+    return { id: marketMatch[1] };
   }
 
   return {};
