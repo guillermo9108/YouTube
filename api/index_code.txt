@@ -191,6 +191,19 @@ try {
             }
             respond(false, null, 'Invalid login');
             break;
+            
+        case 'get_user':
+            $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+            $stmt->execute([$_GET['id']]);
+            $u = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($u) {
+                unset($u['password_hash']);
+                $u['watchLater'] = json_decode($u['watchLater'] ?? '[]');
+                $u['defaultPrices'] = json_decode($u['defaultPrices'] ?? '{}');
+                respond(true, $u);
+            }
+            respond(false, null, 'User not found');
+            break;
 
         case 'logout':
             $pdo->prepare("UPDATE users SET currentSessionId = NULL, lastActive = 0 WHERE id = ?")->execute([$input['userId']]);

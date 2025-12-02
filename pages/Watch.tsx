@@ -14,9 +14,13 @@ const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) 
    useEffect(() => {
      if(userId) {
         db.getInteraction(userId, rv.id).then(i => setWatched(i.isWatched)).catch(() => {});
-        db.hasPurchased(userId, rv.id).then(setPurchased).catch(() => {});
+        if (userId === rv.creatorId) {
+            setPurchased(true);
+        } else {
+            db.hasPurchased(userId, rv.id).then(setPurchased).catch(() => {});
+        }
      }
-   }, [userId, rv.id]);
+   }, [userId, rv.id, rv.creatorId]);
 
    return (
     <Link to={`/watch/${rv.id}`} className="flex gap-3 group">
@@ -85,6 +89,7 @@ export default function Watch() {
     setCountdown(null);
     setNextVideo(null);
     repairAttempted.current = false;
+    setIsUnlocked(false);
 
     const fetchVideo = async () => {
         try {
@@ -100,7 +105,13 @@ export default function Watch() {
             setVideo(v);
 
             if (user) {
-                db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Purchase check failed", e));
+                // Determine Unlocked Status: Owned or Creator
+                if (user.id === v.creatorId) {
+                    setIsUnlocked(true);
+                } else {
+                    db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Purchase check failed", e));
+                }
+                
                 db.getInteraction(user.id, v.id).then(res => isMounted && setInteraction(res)).catch(e => console.warn("Interaction fetch failed", e));
                 if (user.watchLater) setIsWatchLater(user.watchLater.includes(v.id));
             }
@@ -189,7 +200,8 @@ export default function Watch() {
 
   const prepareNextVideo = async (target: Video) => {
       if (!user) return;
-      const owned = await db.hasPurchased(user.id, target.id);
+      const owned = (user.id === target.creatorId) || (await db.hasPurchased(user.id, target.id));
+      
       setNextVideo(target);
       if (owned) {
           setAutoStatus('PLAYING_NEXT');
@@ -381,4 +393,3 @@ export default function Watch() {
     </div>
   );
 }
-
