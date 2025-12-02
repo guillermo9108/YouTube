@@ -3,8 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from '../components/Router';
 import { db } from '../services/db';
-import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon } from 'lucide-react';
-import { Video, Transaction } from '../types';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save } from 'lucide-react';
+import { Video, Transaction, VideoCategory } from '../types';
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
@@ -16,15 +16,20 @@ export default function Profile() {
   const [myVideos, setMyVideos] = useState<Video[]>([]);
   
   // Security Tab
-  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY'>('OVERVIEW');
+  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING'>('OVERVIEW');
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
   const [passMsg, setPassMsg] = useState('');
 
+  // Pricing Tab
+  const [defaultPrices, setDefaultPrices] = useState<Record<string, number>>({});
+  const [availableCategories, setAvailableCategories] = useState<string[]>(Object.values(VideoCategory));
+
   useEffect(() => {
     if (user) {
       setAutoLimit(user.autoPurchaseLimit);
+      setDefaultPrices(user.defaultPrices || {});
       
       // Async fetches
       Promise.all(user.watchLater.map(id => db.getVideo(id))).then(res => {
@@ -33,6 +38,13 @@ export default function Profile() {
 
       db.getUserTransactions(user.id).then(setTransactions);
       db.getVideosByCreator(user.id).then(setMyVideos);
+      
+      // Fetch custom categories
+      db.getSystemSettings().then(s => {
+          if (s.customCategories) {
+              setAvailableCategories([...Object.values(VideoCategory), ...s.customCategories]);
+          }
+      });
     }
   }, [user]);
 
@@ -51,6 +63,12 @@ export default function Profile() {
     await db.updateUserProfile(user.id, { autoPurchaseLimit: autoLimit });
     refreshUser();
     alert("Auto-purchase limit updated.");
+  };
+
+  const savePricingConfig = async () => {
+      await db.updateUserProfile(user.id, { defaultPrices });
+      refreshUser();
+      alert("Default pricing preferences saved!");
   };
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,6 +108,9 @@ export default function Profile() {
       <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
           <button onClick={() => setTab('OVERVIEW')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='OVERVIEW'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <UserIcon size={16}/> Overview
+          </button>
+          <button onClick={() => setTab('PRICING')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='PRICING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+              <Tag size={16}/> Pricing
           </button>
           <button onClick={() => setTab('SECURITY')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='SECURITY'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <Shield size={16}/> Security
@@ -261,6 +282,39 @@ export default function Profile() {
             </div>
         </div>
       </>
+      )}
+
+      {tab === 'PRICING' && (
+          <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+              <div className="flex items-center justify-between mb-4">
+                  <div>
+                      <h3 className="font-bold text-white">Default Upload Prices</h3>
+                      <p className="text-xs text-slate-400">Set your preferred price for each category. These will be auto-filled when you upload.</p>
+                  </div>
+                  <button onClick={savePricingConfig} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                      <Save size={16}/> Save
+                  </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {availableCategories.map(cat => (
+                      <div key={cat} className="bg-slate-950 p-3 rounded-lg border border-slate-800 flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-300 uppercase">{cat.replace('_', ' ')}</span>
+                          <div className="flex items-center gap-2">
+                              <span className="text-xs text-slate-500">Price:</span>
+                              <input 
+                                type="number" 
+                                min="0" 
+                                className="w-16 bg-slate-900 border border-slate-700 rounded text-center text-amber-400 font-bold py-1 focus:border-indigo-500 outline-none"
+                                value={defaultPrices[cat] ?? ''}
+                                placeholder="Auto"
+                                onChange={(e) => setDefaultPrices({...defaultPrices, [cat]: parseInt(e.target.value) || 0})}
+                              />
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
       )}
 
       {tab === 'SECURITY' && (

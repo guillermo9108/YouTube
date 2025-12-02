@@ -75,7 +75,8 @@ if ($action === 'install') {
             watchLater JSON,
             currentSessionId VARCHAR(64) DEFAULT NULL,
             lastActive BIGINT DEFAULT 0,
-            avatarUrl VARCHAR(255) DEFAULT NULL
+            avatarUrl VARCHAR(255) DEFAULT NULL,
+            defaultPrices JSON DEFAULT NULL
         )");
 
         $pdo->exec("CREATE TABLE IF NOT EXISTS videos (
@@ -142,10 +143,11 @@ if ($action === 'install') {
             pexelsKey VARCHAR(255),
             pixabayKey VARCHAR(255),
             ytDlpPath VARCHAR(255),
-            enableYoutube TINYINT(1) DEFAULT 0
+            enableYoutube TINYINT(1) DEFAULT 0,
+            categoryPrices JSON DEFAULT NULL,
+            customCategories JSON DEFAULT NULL
         )");
         
-        // NEW TABLES FOR SUBSCRIPTIONS & NOTIFICATIONS
         $pdo->exec("CREATE TABLE IF NOT EXISTS subscriptions (
             subscriberId VARCHAR(50),
             creatorId VARCHAR(50),

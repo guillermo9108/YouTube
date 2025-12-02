@@ -70,7 +70,7 @@ function download_url($url, $dest) {
 function repair_database_schema($pdo) {
     try {
         // Ensure Tables Exist
-        $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY DEFAULT 1, downloadStartTime VARCHAR(10) DEFAULT '01:00', downloadEndTime VARCHAR(10) DEFAULT '06:00', isQueuePaused TINYINT(1) DEFAULT 0, batchSize INT DEFAULT 5, maxDuration INT DEFAULT 600, maxResolution INT DEFAULT 1080, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255), ytDlpPath VARCHAR(255), enableYoutube TINYINT(1) DEFAULT 0)");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (id INT PRIMARY KEY DEFAULT 1, downloadStartTime VARCHAR(10) DEFAULT '01:00', downloadEndTime VARCHAR(10) DEFAULT '06:00', isQueuePaused TINYINT(1) DEFAULT 0, batchSize INT DEFAULT 5, maxDuration INT DEFAULT 600, maxResolution INT DEFAULT 1080, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255), ytDlpPath VARCHAR(255), enableYoutube TINYINT(1) DEFAULT 0, categoryPrices JSON DEFAULT NULL, customCategories JSON DEFAULT NULL)");
         $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
         $pdo->exec("CREATE TABLE IF NOT EXISTS requests (id VARCHAR(50) PRIMARY KEY, userId VARCHAR(50), query VARCHAR(255), status ENUM('PENDING','PROCESSING','COMPLETED','FAILED','MANUAL_UPLOAD') DEFAULT 'PENDING', createdAt BIGINT, useLocalNetwork TINYINT(1) DEFAULT 0)");
         $pdo->exec("CREATE TABLE IF NOT EXISTS interactions (userId VARCHAR(50), videoId VARCHAR(50), liked TINYINT(1) DEFAULT 0, disliked TINYINT(1) DEFAULT 0, isWatched TINYINT(1) DEFAULT 0, PRIMARY KEY (userId, videoId))");
@@ -86,12 +86,15 @@ function repair_database_schema($pdo) {
             "ALTER TABLE system_settings ADD COLUMN maxResolution INT DEFAULT 1080",
             "ALTER TABLE system_settings ADD COLUMN ytDlpPath VARCHAR(255)",
             "ALTER TABLE system_settings ADD COLUMN enableYoutube TINYINT(1) DEFAULT 0",
+            "ALTER TABLE system_settings ADD COLUMN categoryPrices JSON DEFAULT NULL",
+            "ALTER TABLE system_settings ADD COLUMN customCategories JSON DEFAULT NULL",
             "ALTER TABLE videos ADD COLUMN category VARCHAR(50) DEFAULT 'OTHER'",
             "ALTER TABLE videos ADD COLUMN duration INT DEFAULT 0",
             "ALTER TABLE videos ADD COLUMN fileHash VARCHAR(32)",
             "ALTER TABLE users ADD COLUMN currentSessionId VARCHAR(64) DEFAULT NULL",
             "ALTER TABLE users ADD COLUMN lastActive BIGINT DEFAULT 0",
             "ALTER TABLE users ADD COLUMN avatarUrl VARCHAR(255) DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN defaultPrices JSON DEFAULT NULL",
             "ALTER TABLE interactions ADD COLUMN disliked TINYINT(1) DEFAULT 0"
         ];
         
@@ -173,72 +176,6 @@ function handle_video_entry($pdo, $title, $desc, $price, $category, $duration, $
     return ['status' => 'created', 'id' => $newId];
 }
 
-function search_provider($pdo, $query, $limit = 5, $source = 'STOCK') {
-    $settings = $pdo->query("SELECT * FROM system_settings WHERE id=1")->fetch(PDO::FETCH_ASSOC);
-    $results = [];
-
-    if ($source === 'YOUTUBE' && !empty($settings['enableYoutube'])) {
-        $ytPath = !empty($settings['ytDlpPath']) ? $settings['ytDlpPath'] : './yt-dlp';
-        $safeQuery = escapeshellarg("ytsearch{$limit}:$query");
-        if (file_exists($ytPath) || strpos($ytPath, '/') === false) {
-             $cmd = "$ytPath $safeQuery --dump-json --flat-playlist --no-warnings 2>&1";
-             $output = shell_exec($cmd);
-             $lines = explode("\n", $output);
-             foreach($lines as $line) {
-                 $json = json_decode($line, true);
-                 if ($json && isset($json['title'])) {
-                      $results[] = [
-                         'source' => 'YouTube',
-                         'id' => $json['id'],
-                         'title' => $json['title'],
-                         'thumbnail' => "https://i.ytimg.com/vi/{$json['id']}/mqdefault.jpg",
-                         'downloadUrl' => "https://www.youtube.com/watch?v={$json['id']}",
-                         'duration' => $json['duration'] ?? 0,
-                         'author' => $json['uploader'] ?? 'Unknown'
-                     ];
-                 }
-             }
-        }
-        return $results;
-    }
-
-    if (!empty($settings['pexelsKey'])) {
-        $ch = curl_init("https://api.pexels.com/videos/search?query=".urlencode($query)."&per_page=".$limit);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: ".$settings['pexelsKey']]);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        $res = json_decode(curl_exec($ch), true);
-        curl_close($ch);
-        if (!empty($res['videos'])) {
-            foreach ($res['videos'] as $v) {
-                $files = $v['video_files'] ?? [];
-                usort($files, function($a, $b) { return $b['width'] - $a['width']; });
-                $target = null;
-                foreach($files as $f) { if($f['width'] >= 960 && $f['width'] <= 1920) { $target = $f; break; } }
-                if(!$target && count($files) > 0) $target = $files[0];
-                if($target) {
-                    $results[] = ['source'=>'Pexels','id'=>'pex-'.$v['id'],'title'=>'Pexels Video '.$v['id'],'thumbnail'=>$v['image'],'downloadUrl'=>$target['link'],'duration'=>$v['duration'],'author'=>$v['user']['name']];
-                }
-            }
-        }
-    }
-
-    if (!empty($settings['pixabayKey'])) {
-        $ch = curl_init("https://pixabay.com/api/videos/?key=".$settings['pixabayKey']."&q=".urlencode($query)."&per_page=".$limit);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        $res = json_decode(curl_exec($ch), true);
-        curl_close($ch);
-        if (!empty($res['hits'])) {
-            foreach ($res['hits'] as $v) {
-                $var = $v['videos']['medium'] ?? $v['videos']['large'] ?? $v['videos']['small'];
-                $results[] = ['source'=>'Pixabay','id'=>'pix-'.$v['id'],'title'=>$v['tags'],'thumbnail'=>"https://i.vimeocdn.com/video/{$v['picture_id']}_640x360.jpg",'downloadUrl'=>$var['url'],'duration'=>$v['duration'],'author'=>$v['user']];
-            }
-        }
-    }
-    return $results;
-}
-
 // MAIN EXECUTION BLOCK
 try {
     $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']}", $db_config['user'], $db_config['password'], [PDO::ATTR_PERSISTENT => true]);
@@ -258,6 +195,7 @@ try {
                 $pdo->prepare("UPDATE users SET currentSessionId = ?, lastActive = ? WHERE id = ?")->execute([$newToken, $now, $user['id']]);
                 unset($user['password_hash']);
                 $user['watchLater'] = json_decode($user['watchLater'] ?? '[]');
+                $user['defaultPrices'] = json_decode($user['defaultPrices'] ?? '{}');
                 $user['sessionToken'] = $newToken;
                 respond(true, $user);
             }
@@ -300,7 +238,7 @@ try {
             $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater, currentSessionId, lastActive, avatarUrl) VALUES (?, ?, ?, 'USER', 0, 1, '[]', ?, ?, ?)")
                 ->execute([$id, $username, $hash, $newToken, $now, $avatarUrl]);
                 
-            respond(true, ['id' => $id, 'username' => $username, 'role' => 'USER', 'balance' => 0, 'autoPurchaseLimit'=>1, 'watchLater'=>[], 'sessionToken'=>$newToken, 'avatarUrl'=>$avatarUrl]);
+            respond(true, ['id' => $id, 'username' => $username, 'role' => 'USER', 'balance' => 0, 'autoPurchaseLimit'=>1, 'watchLater'=>[], 'sessionToken'=>$newToken, 'avatarUrl'=>$avatarUrl, 'defaultPrices'=>[]]);
             break;
             
         case 'update_avatar':
@@ -335,10 +273,14 @@ try {
             break;
 
         case 'get_user':
-            $stmt = $pdo->prepare("SELECT id, username, role, balance, autoPurchaseLimit, watchLater, avatarUrl FROM users WHERE id = ?");
+            $stmt = $pdo->prepare("SELECT id, username, role, balance, autoPurchaseLimit, watchLater, avatarUrl, defaultPrices FROM users WHERE id = ?");
             $stmt->execute([$_GET['id']]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($user) { $user['watchLater'] = json_decode($user['watchLater'] ?? '[]'); respond(true, $user); }
+            if ($user) { 
+                $user['watchLater'] = json_decode($user['watchLater'] ?? '[]'); 
+                $user['defaultPrices'] = json_decode($user['defaultPrices'] ?? '{}');
+                respond(true, $user); 
+            }
             respond(false, null, 'User not found');
             break;
             
@@ -355,8 +297,12 @@ try {
             break;
 
         case 'update_user':
-            if (isset($input['updates']['autoPurchaseLimit'])) {
-                $pdo->prepare("UPDATE users SET autoPurchaseLimit = ? WHERE id = ?")->execute([$input['updates']['autoPurchaseLimit'], $input['userId']]);
+            $u = $input['updates'];
+            if (isset($u['autoPurchaseLimit'])) {
+                $pdo->prepare("UPDATE users SET autoPurchaseLimit = ? WHERE id = ?")->execute([$u['autoPurchaseLimit'], $input['userId']]);
+            }
+            if (isset($u['defaultPrices'])) {
+                $pdo->prepare("UPDATE users SET defaultPrices = ? WHERE id = ?")->execute([json_encode($u['defaultPrices']), $input['userId']]);
             }
             respond(true);
             break;
@@ -387,9 +333,6 @@ try {
             $current = $pdo->query("SELECT creatorId, category, title, description FROM videos WHERE id='$vidId'")->fetch(PDO::FETCH_ASSOC);
             if ($current) {
                 // Intelligent Relevance Scoring
-                // Score = (Category match * 10) + (Creator match * 5) + (Title keyword match * 5)
-                
-                // Extract simple keyword (first word > 3 chars)
                 $words = explode(' ', preg_replace('/[^a-zA-Z0-9 ]/', '', $current['title']));
                 $keyword = '';
                 foreach($words as $w) { if(strlen($w)>3) { $keyword = $w; break; } }
@@ -569,7 +512,6 @@ try {
             $catFilter = ($cat !== 'ALL') ? "WHERE category = '$cat'" : "";
             
             // Score: Views(1) + Likes(2) - Dislikes(5) - AgeDays(0.5)
-            // Fix: Check age condition properly. If safeDays is 0, we delete immediate junk.
             $sql = "SELECT id, title, views, likes, dislikes, createdAt,
                     (views + (likes * 2) - (dislikes * 5) - (DATEDIFF(NOW(), FROM_UNIXTIME(createdAt/1000)) * 0.5)) as score
                     FROM videos 
@@ -612,14 +554,20 @@ try {
 
         case 'get_system_settings':
             $res = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
-            if($res) { $res['isQueuePaused']=(bool)$res['isQueuePaused']; $res['enableYoutube']=(bool)$res['enableYoutube']; $res['batchSize']=(int)$res['batchSize']; }
+            if($res) { 
+                $res['isQueuePaused']=(bool)$res['isQueuePaused']; 
+                $res['enableYoutube']=(bool)$res['enableYoutube']; 
+                $res['batchSize']=(int)$res['batchSize'];
+                $res['categoryPrices'] = json_decode($res['categoryPrices'] ?? '{}');
+                $res['customCategories'] = json_decode($res['customCategories'] ?? '[]');
+            }
             respond(true, $res);
             break;
 
         case 'update_system_settings':
             $s = $input['settings'];
-            $pdo->prepare("UPDATE system_settings SET downloadStartTime=?, downloadEndTime=?, isQueuePaused=?, batchSize=?, maxDuration=?, maxResolution=?, pexelsKey=?, pixabayKey=?, ytDlpPath=?, enableYoutube=? WHERE id=1")
-                ->execute([$s['downloadStartTime'], $s['downloadEndTime'], $s['isQueuePaused']?1:0, $s['batchSize'], $s['maxDuration'], $s['maxResolution'], $s['pexelsKey'], $s['pixabayKey'], $s['ytDlpPath'], $s['enableYoutube']?1:0]);
+            $pdo->prepare("UPDATE system_settings SET downloadStartTime=?, downloadEndTime=?, isQueuePaused=?, batchSize=?, maxDuration=?, maxResolution=?, pexelsKey=?, pixabayKey=?, ytDlpPath=?, enableYoutube=?, categoryPrices=?, customCategories=? WHERE id=1")
+                ->execute([$s['downloadStartTime'], $s['downloadEndTime'], $s['isQueuePaused']?1:0, $s['batchSize'], $s['maxDuration'], $s['maxResolution'], $s['pexelsKey'], $s['pixabayKey'], $s['ytDlpPath'], $s['enableYoutube']?1:0, json_encode($s['categoryPrices']), json_encode($s['customCategories'])]);
             respond(true);
             break;
 

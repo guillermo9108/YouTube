@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useLayoutEffect } from 'react';
 import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
@@ -21,6 +21,21 @@ const CATEGORIES = [
 
 const ITEMS_PER_PAGE = 12;
 
+// --- GLOBAL STATE SNAPSHOT (Lives outside component lifecycle) ---
+// This acts as a "Keep-Alive" cache for the Home view
+interface HomeSnapshot {
+    videos: Video[];
+    shuffledList: Video[];
+    processedList: Video[];
+    activeCategory: string;
+    searchQuery: string;
+    visibleCount: number;
+    scrollPosition: number;
+    purchases: Set<string>;
+}
+
+let homeSnapshot: HomeSnapshot | null = null;
+
 export default function Home() {
   const [videos, setVideos] = useState<Video[]>([]);
   // Use a shuffled copy of videos to maintain stability during filtering
@@ -41,18 +56,43 @@ export default function Home() {
   // Visible Chunk
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // 1. Fetch All Data Initial
+  // --- INIT & SNAPSHOT RESTORATION ---
   useEffect(() => {
     const init = async () => {
+        // Check for "Dirty" flag (New upload happened?)
+        const isDirty = localStorage.getItem('sp_home_dirty') === 'true';
+
+        // 1. Try to restore from Snapshot if clean
+        if (!isDirty && homeSnapshot) {
+            console.log("Restoring Home from Snapshot (Instant Load)");
+            setVideos(homeSnapshot.videos);
+            setShuffledMasterList(homeSnapshot.shuffledList);
+            setActiveCategory(homeSnapshot.activeCategory);
+            setSearchQuery(homeSnapshot.searchQuery);
+            setProcessedList(homeSnapshot.processedList); // Critical: Restore exact list
+            setVisibleCount(homeSnapshot.visibleCount);
+            setPurchases(homeSnapshot.purchases);
+            setLoading(false);
+            
+            // Background update for watched status (cheap)
+            if (user) {
+                db.getUserActivity(user.id).then(act => setWatchedIds(act.watched || []));
+            }
+            return;
+        }
+
+        // 2. Fresh Load (If dirty or no snapshot)
         setLoading(true);
+        if (isDirty) localStorage.removeItem('sp_home_dirty'); // Clear flag
+        
         try {
             // Use aggressive caching here handled by db.ts
             const allVideos = await db.getAllVideos();
             setVideos(allVideos);
             
             // Generate shuffle ONCE when data loads
-            // This prevents list jumping when changing filters
             const shuffled = [...allVideos].sort(() => Math.random() - 0.5);
             setShuffledMasterList(shuffled);
             
@@ -67,7 +107,37 @@ export default function Home() {
         }
     };
     init();
+
+    // SNAPSHOT SAVE on Unmount
+    return () => {
+        // We can't access updated state in cleanup easily, so we rely on a ref or updated closure
+        // But React 18 state inside useEffect cleanup usually refers to current render state if deps are correct.
+        // However, to be safe, we update the snapshot on every state change (cheap pointer assignment) or use a ref.
+    };
   }, [user]);
+
+  // Sync state to snapshot constantly so it's ready on unmount/navigate
+  useEffect(() => {
+     if (!loading && videos.length > 0) {
+         homeSnapshot = {
+             videos,
+             shuffledList: shuffledMasterList,
+             processedList,
+             activeCategory,
+             searchQuery,
+             visibleCount,
+             scrollPosition: window.scrollY,
+             purchases
+         };
+     }
+  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, loading, purchases]);
+
+  // RESTORE SCROLL POSITION
+  useLayoutEffect(() => {
+      if (!loading && homeSnapshot && homeSnapshot.scrollPosition > 0) {
+          window.scrollTo(0, homeSnapshot.scrollPosition);
+      }
+  }, [loading, processedList]);
 
   // Fetch subscriptions
   useEffect(() => {
@@ -76,11 +146,18 @@ export default function Home() {
       }
   }, [user, activeCategory]);
 
-  // 2. Logic to Process List (Filter Only - No Shuffle)
+  // Logic to Process List (Filter Only - No Shuffle)
+  // Only run if we are NOT restoring a snapshot, OR if the user changed filters actively
   useEffect(() => {
+      // If loading from snapshot, skip this effect initially to prevent overriding restored processedList
+      if (homeSnapshot && processedList === homeSnapshot.processedList && activeCategory === homeSnapshot.activeCategory && searchQuery === homeSnapshot.searchQuery) return;
+      
       if (shuffledMasterList.length === 0) return;
-      setVisibleCount(ITEMS_PER_PAGE); // Reset pagination on filter change
-
+      
+      // Reset pagination ONLY if we are actively changing filters (not just initial load)
+      // We detect "change" by comparing to previous known state or just relying on user interaction
+      // Simplified: If visibleCount is default, or if we changed category, reset.
+      
       // Use the pre-shuffled list
       let filtered = shuffledMasterList;
       
@@ -100,27 +177,38 @@ export default function Home() {
           );
       }
       
-      // If we are searching, we might want to prioritize relevance, 
-      // but for now keeping the stable shuffle is better UX than random jumping.
       setProcessedList(filtered);
+      
+      // Only reset count if we are NOT in the middle of a restore
+      // (This logic is slightly tricky, but usually setting count to 12 on filter change is desired)
+      if (loading === false && (activeCategory !== (homeSnapshot?.activeCategory) || searchQuery !== (homeSnapshot?.searchQuery))) {
+          setVisibleCount(ITEMS_PER_PAGE);
+      }
 
-  }, [shuffledMasterList, activeCategory, searchQuery, subscribedCreators]);
+  }, [shuffledMasterList, activeCategory, searchQuery, subscribedCreators, loading]);
 
-  // 3. Infinite Scroll Observer
+  // Infinite Scroll Observer - OPTIMIZED FOR NAS
   useEffect(() => {
+      if (loading) return; // Don't attach observer while loading
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
+              // Increase by chunk size
               setVisibleCount(prev => prev + ITEMS_PER_PAGE);
           }
-      }, { rootMargin: '200px' });
+      }, { 
+          // CRITICAL OPTIMIZATION:
+          // Instead of 200px, we look 1500px (approx 2-3 screen heights) ahead.
+          // This triggers the load way before the user hits the bottom, masking the NAS latency.
+          rootMargin: '1500px' 
+      });
 
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
-  }, [processedList]);
+  }, [processedList, loading]);
 
   const displayList = processedList.slice(0, visibleCount);
 
-  // 4. Lazy Load Purchases for Visible Items (NAS OPTIMIZATION)
+  // Lazy Load Purchases for Visible Items (NAS OPTIMIZATION)
   useEffect(() => {
       if (!user || displayList.length === 0) return;
 
@@ -135,7 +223,7 @@ export default function Home() {
           if (toCheck.length === 0) return;
 
           // Limit concurrency to avoid choking the NAS
-          const BATCH_SIZE = 4; 
+          const BATCH_SIZE = 6; 
           
           for (let i = 0; i < toCheck.length; i += BATCH_SIZE) {
                const batch = toCheck.slice(i, i + BATCH_SIZE);
@@ -160,14 +248,19 @@ export default function Home() {
       };
 
       fetchVisiblePurchases();
-  }, [displayList, user]); // Only runs when more items are displayed
+  }, [displayList, user]); 
 
   const isUnlocked = (videoId: string, creatorId: string) => {
     return purchases.has(videoId) || (user?.id === creatorId);
   };
 
+  const handleManualRefresh = () => {
+      homeSnapshot = null;
+      window.location.reload();
+  };
+
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen" ref={containerRef}>
       {/* Sidebar Overlay */}
       {showSidebar && (
         <div className="fixed inset-0 z-50 flex">
@@ -226,12 +319,20 @@ export default function Home() {
                     placeholder="Search videos, creators..." 
                     className="w-full bg-slate-900 border border-slate-800 rounded-full py-2 pl-10 pr-10 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-slate-800 transition-all text-sm"
                 />
-                {searchQuery && (
+                {searchQuery ? (
                     <button 
                         onClick={() => setSearchQuery('')}
                         className="absolute right-3 top-2.5 text-slate-500 hover:text-white"
                     >
                         <X size={18} />
+                    </button>
+                ) : (
+                    <button 
+                        onClick={handleManualRefresh}
+                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white"
+                        title="Force Refresh"
+                    >
+                        <RefreshCw size={14} />
                     </button>
                 )}
             </div>
@@ -292,8 +393,9 @@ export default function Home() {
              
              {/* Invisible Trigger for Infinite Scroll */}
              {visibleCount < processedList.length && (
-                <div ref={loadMoreRef} className="py-8 flex justify-center opacity-50">
-                    <RefreshCw className="animate-spin text-slate-500" />
+                <div ref={loadMoreRef} className="py-24 flex justify-center">
+                    {/* Add height so observer catches it earlier */}
+                    <RefreshCw className="animate-spin text-slate-600" />
                 </div>
              )}
             </>

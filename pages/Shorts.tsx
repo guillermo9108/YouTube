@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2 } from 'lucide-react';
 import { db } from '../services/db';
@@ -75,15 +76,16 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
         el.currentTime = 0; // Reset to start
     }
     
-    // Strict Cleanup
+    // Strict Cleanup for MEMORY, but loosely for DOM
+    // Only remove src if we are REALLY far away
     return () => {
-        if (el) {
+        if (!shouldLoad && el) {
             el.pause();
             el.removeAttribute('src'); // Force drop buffer
             el.load();
         }
     };
-  }, [isActive, isUnlocked]);
+  }, [isActive, isUnlocked, shouldLoad]);
 
   // Actions
   const handlePurchase = async () => {
@@ -385,9 +387,9 @@ export default function Shorts() {
     return () => observer.disconnect();
   }, [videos]);
 
-  // Virtualization Window: 
-  // We only fully render: Current, Previous (1), Next (1).
-  // Everything else is a lightweight placeholder.
+  // Virtualization Window Optimizations for NAS: 
+  // 1. Widen the window (Active +/- 2) to keep DOM elements around longer.
+  // 2. Control PRELOAD carefully. Only Active gets 'auto'. Next gets 'metadata' (to not kill bandwidth).
   return (
     <div 
       ref={containerRef}
@@ -395,11 +397,18 @@ export default function Shorts() {
       style={{ scrollBehavior: 'smooth' }}
     >
       {videos.map((video, idx) => {
-          // Window Logic
+          // Window Logic - Widened to 2 for smoother DOM handling
           const distance = Math.abs(idx - activeIndex);
-          const shouldLoad = distance <= 1; // Load active, prev, next
-          const isNext = idx === activeIndex + 1;
+          const shouldLoad = distance <= 2; 
+          
           const isActive = idx === activeIndex;
+          const isNext = idx === activeIndex + 1;
+
+          // NAS Bandwidth protection: 
+          // Only fully buffer the ACTIVE video.
+          // Fetch metadata for NEXT video (so cover displays).
+          // Do NOT fetch PREVIOUS or far videos.
+          const preloadStrategy = isActive ? "auto" : (isNext ? "metadata" : "none");
 
           return (
             <div key={video.id} data-index={idx} className="w-full h-full snap-start snap-always">
@@ -407,7 +416,7 @@ export default function Shorts() {
                     video={video} 
                     isActive={isActive} 
                     shouldLoad={shouldLoad}
-                    preload={isActive ? "auto" : (isNext ? "auto" : "none")}
+                    preload={preloadStrategy}
                  />
             </div>
           );

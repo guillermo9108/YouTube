@@ -25,6 +25,7 @@ export interface User {
   watchLater: string[]; // Video IDs
   sessionToken?: string; // New: For single session enforcement
   avatarUrl?: string; // New: Profile Picture
+  defaultPrices?: Record<string, number>; // New: User specific price overrides
 }
 
 export interface Video {
@@ -40,7 +41,7 @@ export interface Video {
   createdAt: number;
   likes: number;
   dislikes: number;
-  category: VideoCategory; // New
+  category: string; // Changed from VideoCategory to string to support custom ones
   duration: number; // Seconds
   fileHash?: string; // New: MD5 Hash for deduplication
   creatorAvatarUrl?: string;
@@ -103,6 +104,8 @@ export interface SystemSettings {
   pixabayKey: string;
   ytDlpPath: string;    // New: Path to yt-dlp binary
   enableYoutube: boolean; // New: Toggle for YouTube features
+  categoryPrices: Record<string, number>; // New: Global default prices
+  customCategories: string[]; // New: List of admin added categories
 }
 
 export interface SmartCleanerResult {

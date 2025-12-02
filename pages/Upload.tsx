@@ -1,10 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2 } from 'lucide-react';
+import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useNavigate } from '../components/Router';
 import { VideoCategory } from '../types';
+import { db } from '../services/db';
 
 // Helper to calculate image brightness
 const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -126,7 +127,14 @@ export default function Upload() {
   const [titles, setTitles] = useState<string[]>([]);
   const [thumbnails, setThumbnails] = useState<(File | null)[]>([]);
   const [durations, setDurations] = useState<number[]>([]);
-  const [categories, setCategories] = useState<VideoCategory[]>([]);
+  
+  // Important: categories is now string[] to support custom ones
+  const [categories, setCategories] = useState<string[]>([]);
+  const [prices, setPrices] = useState<number[]>([]); // New: Individual prices
+  
+  // Configuration Data
+  const [availableCategories, setAvailableCategories] = useState<string[]>(Object.values(VideoCategory));
+  const [systemCategoryPrices, setSystemCategoryPrices] = useState<Record<string, number>>({});
   
   // Queue Processing State
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
@@ -136,10 +144,38 @@ export default function Upload() {
 
   // Global Settings
   const [desc, setDesc] = useState('');
-  const [price, setPrice] = useState(1);
-  const [globalCategory, setGlobalCategory] = useState<VideoCategory>(VideoCategory.OTHER);
 
-  const detectCategory = (duration: number): VideoCategory => {
+  useEffect(() => {
+      // Load Custom Categories and Default Prices
+      const loadConfig = async () => {
+          try {
+              const settings = await db.getSystemSettings();
+              
+              // Merge standard categories with custom ones
+              const standard = Object.values(VideoCategory) as string[];
+              const custom = settings.customCategories || [];
+              setAvailableCategories([...standard, ...custom]);
+
+              setSystemCategoryPrices(settings.categoryPrices || {});
+          } catch(e) { console.error(e); }
+      };
+      loadConfig();
+  }, []);
+
+  const getPriceForCategory = (cat: string) => {
+      // 1. Check User Preference Override
+      if (user?.defaultPrices && user.defaultPrices[cat] !== undefined) {
+          return user.defaultPrices[cat];
+      }
+      // 2. Check System Default
+      if (systemCategoryPrices[cat] !== undefined) {
+          return systemCategoryPrices[cat];
+      }
+      // 3. Fallback
+      return 1;
+  };
+
+  const detectCategory = (duration: number): string => {
       if (duration <= 120) return VideoCategory.SHORTS;
       if (duration <= 300) return VideoCategory.MUSIC;
       if (duration <= 1500) return VideoCategory.SHORT_FILM;
@@ -160,7 +196,13 @@ export default function Upload() {
       setTitles(prev => [...prev, ...newTitles]);
       setThumbnails(prev => [...prev, ...new Array(newFiles.length).fill(null)]); // Null means "pending"
       setDurations(prev => [...prev, ...new Array(newFiles.length).fill(0)]);
-      setCategories(prev => [...prev, ...new Array(newFiles.length).fill(globalCategory !== VideoCategory.OTHER ? globalCategory : VideoCategory.OTHER)]);
+      
+      // Default to 'OTHER' initially, will be refined by duration later
+      const defaultCat = VideoCategory.OTHER;
+      const defaultPrice = getPriceForCategory(defaultCat);
+
+      setCategories(prev => [...prev, ...new Array(newFiles.length).fill(defaultCat)]);
+      setPrices(prev => [...prev, ...new Array(newFiles.length).fill(defaultPrice)]);
 
       // 2. Add to processing queue
       newFiles.forEach((file, i) => {
@@ -196,8 +238,9 @@ export default function Upload() {
               // Generate Thumbnail
               const { thumbnail, duration } = await generateThumbnail(task.file);
               
-              // Smart Category
-              const cat = globalCategory !== VideoCategory.OTHER ? globalCategory : detectCategory(duration);
+              // Smart Category Detection
+              const cat = detectCategory(duration);
+              const price = getPriceForCategory(cat);
 
               // Update State for this specific index
               // Check if index still valid (user might have deleted items)
@@ -209,9 +252,18 @@ export default function Upload() {
                   if (prev.length <= task.index) return prev;
                   const n = [...prev]; n[task.index] = duration; return n;
               });
+              
+              // Only auto-set category if it is currently 'OTHER' (user hasn't manually changed it yet)
               setCategories(prev => {
                   if (prev.length <= task.index) return prev;
+                  // If user changed it while processing, don't overwrite
+                  if (prev[task.index] !== VideoCategory.OTHER) return prev;
                   const n = [...prev]; n[task.index] = cat; return n;
+              });
+
+              setPrices(prev => {
+                  if (prev.length <= task.index) return prev;
+                  const n = [...prev]; n[task.index] = price; return n;
               });
 
           } catch (e) {
@@ -219,17 +271,11 @@ export default function Upload() {
           }
 
           // CRITICAL: Delay to allow Garbage Collector to free RAM from the large video blob
-          // This prevents crashes on low-end devices when processing multiple files.
           await new Promise(r => setTimeout(r, 300));
           
           // Next iteration
           processQueue();
       }
-  };
-
-  const applyGlobalCategory = (cat: VideoCategory) => {
-      setGlobalCategory(cat);
-      setCategories(prev => prev.map(() => cat));
   };
 
   const removeFile = (index: number) => {
@@ -243,14 +289,22 @@ export default function Upload() {
     setThumbnails(prev => prev.filter((_, i) => i !== index));
     setDurations(prev => prev.filter((_, i) => i !== index));
     setCategories(prev => prev.filter((_, i) => i !== index));
+    setPrices(prev => prev.filter((_, i) => i !== index));
   };
 
   const updateTitle = (index: number, val: string) => {
     setTitles(prev => { const next = [...prev]; next[index] = val; return next; });
   };
 
-  const updateCategory = (index: number, val: VideoCategory) => {
+  const updateCategory = (index: number, val: string) => {
     setCategories(prev => { const next = [...prev]; next[index] = val; return next; });
+    // Auto-update price when category changes manually
+    const newPrice = getPriceForCategory(val);
+    updatePrice(index, newPrice);
+  };
+  
+  const updatePrice = (index: number, val: number) => {
+    setPrices(prev => { const next = [...prev]; next[index] = val; return next; });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -260,8 +314,8 @@ export default function Upload() {
     const queue = files.map((file, i) => ({
         title: titles[i],
         description: desc,
-        price: price,
-        category: categories[i],
+        price: prices[i],
+        category: categories[i] as VideoCategory, // Cast string to VideoCategory (DB supports string actually)
         duration: durations[i],
         file: file,
         thumbnail: thumbnails[i]
@@ -275,6 +329,7 @@ export default function Upload() {
     setThumbnails([]);
     setDurations([]);
     setCategories([]);
+    setPrices([]);
     setQueueProgress({ current: 0, total: 0 });
     navigate('/'); 
   };
@@ -325,28 +380,12 @@ export default function Upload() {
           
           {/* Global Settings */}
           <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-            <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><Layers size={14}/> Bulk Settings</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
-                <textarea rows={3} value={desc} onChange={e => setDesc(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500 outline-none text-white resize-none" placeholder="Applies to all..." />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Price (Saldo)</label>
-                <input type="number" min="1" value={price} onChange={e => setPrice(parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm focus:ring-1 focus:ring-indigo-500 outline-none text-white font-mono" />
-              </div>
-              <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Global Category</label>
-                  <select 
-                      value={globalCategory} 
-                      onChange={(e) => applyGlobalCategory(e.target.value as VideoCategory)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white uppercase font-bold focus:ring-1 focus:ring-indigo-500 outline-none"
-                  >
-                      <option value={VideoCategory.OTHER}>Auto / Mixed</option>
-                      {Object.values(VideoCategory).filter(c => c !== VideoCategory.OTHER).map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
-                  </select>
-              </div>
+            <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><Layers size={14}/> Bulk Description</h3>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
+              <textarea rows={3} value={desc} onChange={e => setDesc(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500 outline-none text-white resize-none" placeholder="Applies to all..." />
             </div>
+            <p className="text-[10px] text-slate-500 mt-2 italic">Note: Prices are auto-set based on category. You can adjust them individually.</p>
           </div>
         </div>
 
@@ -354,7 +393,7 @@ export default function Upload() {
            <form onSubmit={handleSubmit} className="bg-slate-900 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col h-full max-h-[600px]">
               <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
                  <h3 className="font-bold text-slate-200">Selected ({files.length})</h3>
-                 {files.length > 0 && !isProcessingQueue && <button type="button" onClick={() => { setFiles([]); setTitles([]); setThumbnails([]); setDurations([]); setCategories([]); }} className="text-xs text-red-400 hover:text-red-300">Clear All</button>}
+                 {files.length > 0 && !isProcessingQueue && <button type="button" onClick={() => { setFiles([]); setTitles([]); setThumbnails([]); setDurations([]); setCategories([]); setPrices([]); }} className="text-xs text-red-400 hover:text-red-300">Clear All</button>}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {files.length === 0 ? (
@@ -386,12 +425,25 @@ export default function Upload() {
                                 <Tag size={12} className="absolute left-2 top-1.5 text-slate-500" />
                                 <select 
                                     value={categories[idx]} 
-                                    onChange={(e) => updateCategory(idx, e.target.value as VideoCategory)}
+                                    onChange={(e) => updateCategory(idx, e.target.value)}
                                     className="bg-slate-900 border border-slate-700 rounded text-xs text-slate-300 py-1 pl-6 pr-2 outline-none focus:border-indigo-500 uppercase font-bold"
                                 >
-                                    {Object.values(VideoCategory).map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+                                    {availableCategories.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
                                 </select>
                              </div>
+                             
+                             {/* Individual Price Input */}
+                             <div className="relative w-20">
+                                <DollarSign size={10} className="absolute left-2 top-2 text-slate-500" />
+                                <input 
+                                    type="number" 
+                                    min="0"
+                                    value={prices[idx]}
+                                    onChange={(e) => updatePrice(idx, parseInt(e.target.value))}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-amber-400 font-bold py-1 pl-5 pr-1 outline-none focus:border-indigo-500"
+                                />
+                             </div>
+
                              <span className="text-[10px] text-slate-500">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
                           </div>
                        </div>

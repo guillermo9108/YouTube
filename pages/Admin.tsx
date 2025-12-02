@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -17,7 +17,7 @@ export default function Admin() {
   const [processingQueue, setProcessingQueue] = useState(false);
   const [processResult, setProcessResult] = useState('');
   const [requests, setRequests] = useState<ContentRequest[]>([]);
-  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES'>('USERS');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
 
   // Cleaner State
@@ -27,6 +27,9 @@ export default function Admin() {
   const [cleanerPreview, setCleanerPreview] = useState<Video[]>([]);
   const [cleanerStats, setCleanerStats] = useState({ totalVideos: 0, videosToDelete: 0, spaceReclaimed: '0 MB' });
   const [loadingCleaner, setLoadingCleaner] = useState(false);
+
+  // Category State
+  const [newCatName, setNewCatName] = useState('');
 
   useEffect(() => {
     loadData();
@@ -109,6 +112,35 @@ export default function Admin() {
       } catch (e) { alert("Failed to save"); }
   };
 
+  const addCustomCategory = () => {
+      if (!settings || !newCatName.trim()) return;
+      const cleanName = newCatName.trim().toUpperCase().replace(/ /g, '_');
+      
+      const current = settings.customCategories || [];
+      if (current.includes(cleanName) || Object.values(VideoCategory).includes(cleanName as any)) {
+          alert("Category already exists");
+          return;
+      }
+
+      const updated = {
+          ...settings,
+          customCategories: [...current, cleanName]
+      };
+      setSettings(updated);
+      setNewCatName('');
+  };
+
+  const removeCustomCategory = (cat: string) => {
+      if (!settings || !settings.customCategories) return;
+      if (!confirm(`Delete category ${cat}? This won't delete videos, but they will show as standard text.`)) return;
+      
+      const updated = {
+          ...settings,
+          customCategories: settings.customCategories.filter(c => c !== cat)
+      };
+      setSettings(updated);
+  };
+
   const previewCleaner = async () => {
       setLoadingCleaner(true);
       try {
@@ -133,6 +165,9 @@ export default function Admin() {
   };
 
   const filteredUsers = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
+
+  // Categories list union
+  const allCategories = settings ? [...Object.values(VideoCategory), ...(settings.customCategories || [])] : Object.values(VideoCategory);
 
   return (
     <div className="space-y-6 pb-24 relative">
@@ -166,10 +201,79 @@ export default function Admin() {
         </div>
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
            <button onClick={() => setActiveTab('USERS')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'USERS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Users</button>
-           <button onClick={() => setActiveTab('CONFIG')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CONFIG' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Configuration</button>
-           <button onClick={() => setActiveTab('CLEANER')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CLEANER' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'}`}>Smart Cleaner</button>
+           <button onClick={() => setActiveTab('CONFIG')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CONFIG' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Config</button>
+           <button onClick={() => setActiveTab('CATEGORIES')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CATEGORIES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cat & Prices</button>
+           <button onClick={() => setActiveTab('CLEANER')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CLEANER' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cleaner</button>
         </div>
       </div>
+
+      {activeTab === 'CATEGORIES' && settings && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Price Config */}
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-bold text-white flex items-center gap-2"><Tag size={18}/> Global Base Prices</h3>
+                      <button onClick={saveSettings} className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                          <Save size={14}/> Save
+                      </button>
+                  </div>
+                  <p className="text-xs text-slate-500 mb-4">These prices will be suggested to users when they upload a video in these categories. Users can still override them.</p>
+                  
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                      {allCategories.map(cat => {
+                          const isCustom = settings.customCategories?.includes(cat);
+                          return (
+                            <div key={cat} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-300 uppercase">{cat.replace('_', ' ')}</span>
+                                    {isCustom && <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 rounded">CUSTOM</span>}
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs text-slate-500">Default:</span>
+                                        <input 
+                                            type="number" 
+                                            min="0"
+                                            className="w-16 bg-slate-900 border border-slate-700 rounded text-center text-amber-400 font-bold py-1 focus:border-indigo-500 outline-none text-sm"
+                                            value={settings.categoryPrices?.[cat] ?? 1}
+                                            onChange={(e) => {
+                                                const prices = { ...settings.categoryPrices, [cat]: parseInt(e.target.value) || 0 };
+                                                setSettings({ ...settings, categoryPrices: prices });
+                                            }}
+                                        />
+                                    </div>
+                                    {isCustom && (
+                                        <button onClick={() => removeCustomCategory(cat)} className="text-slate-600 hover:text-red-500"><Trash2 size={16}/></button>
+                                    )}
+                                </div>
+                            </div>
+                          );
+                      })}
+                  </div>
+              </div>
+
+              {/* Add New Category */}
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 h-fit">
+                  <h3 className="font-bold text-white flex items-center gap-2 mb-4"><PlusCircle size={18}/> Add Custom Category</h3>
+                  <div className="flex gap-2 mb-4">
+                      <input 
+                        type="text" 
+                        value={newCatName}
+                        onChange={e => setNewCatName(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white placeholder-slate-500 uppercase font-bold text-sm"
+                        placeholder="NEW_CATEGORY_NAME"
+                      />
+                      <button onClick={addCustomCategory} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold text-sm">Add</button>
+                  </div>
+                  <div className="bg-indigo-900/10 border border-indigo-500/20 p-4 rounded-lg">
+                      <h4 className="text-xs font-bold text-indigo-300 mb-1">How it works</h4>
+                      <p className="text-xs text-indigo-200/70 leading-relaxed">
+                          Adding a category here makes it available in the upload dropdown for all users. You can also set a base price for it on the left panel.
+                      </p>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {activeTab === 'CLEANER' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -184,7 +288,7 @@ export default function Admin() {
                       <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Target Category</label>
                       <select value={cleanerCategory} onChange={e => setCleanerCategory(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
                           <option value="ALL">All Categories</option>
-                          {Object.values(VideoCategory).map(c => <option key={c} value={c}>{c}</option>)}
+                          {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                   </div>
 

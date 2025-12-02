@@ -132,6 +132,11 @@ class DatabaseService {
       localStorage.removeItem(`sp_cache_${endpointKey}`);
   }
 
+  // Helper to mark Home feed as outdated so it refreshes on next visit
+  public setHomeDirty() {
+      localStorage.setItem('sp_home_dirty', 'true');
+  }
+
   private async request<T>(endpoint: string, method: string = 'GET', body?: any, silent: boolean = false): Promise<T> {
     if (this.isDemoMode) {
        return this.handleMockRequest<T>(endpoint, method, body);
@@ -424,6 +429,8 @@ class DatabaseService {
                     if (json.success) {
                         // Invalidate video list cache so new content appears
                         this.invalidateCache('index.php?action=get_videos');
+                        // MARK HOME AS DIRTY to force refresh when user goes back
+                        this.setHomeDirty();
                         resolve(); 
                     } else reject(new Error(json.error || 'Upload failed')); 
                 } catch (e) { 
@@ -469,6 +476,9 @@ class DatabaseService {
   
   async serverImportVideo(url: string): Promise<void> {
     await this.request('index.php?action=server_import_video', 'POST', { url });
+    // Import also adds content, so mark home dirty
+    this.invalidateCache('index.php?action=get_videos');
+    this.setHomeDirty();
   }
 
   async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
