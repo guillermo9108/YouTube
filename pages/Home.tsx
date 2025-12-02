@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo, useRef, useLayoutEffect } from 'react';
 import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
 import { db } from '../services/db';
@@ -58,6 +59,18 @@ export default function Home() {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // State Ref to hold latest values for unmount saving (Prevents stale closures)
+  const stateRef = useRef({
+      videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases
+  });
+
+  // Always keep ref updated
+  useEffect(() => {
+      stateRef.current = {
+          videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases
+      };
+  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases]);
+
   // --- INIT & SNAPSHOT RESTORATION ---
   useEffect(() => {
     const init = async () => {
@@ -66,12 +79,12 @@ export default function Home() {
 
         // 1. Try to restore from Snapshot if clean
         if (!isDirty && homeSnapshot) {
-            console.log("Restoring Home from Snapshot (Instant Load)");
+            // console.log("Restoring Home from Snapshot");
             setVideos(homeSnapshot.videos);
             setShuffledMasterList(homeSnapshot.shuffledList);
             setActiveCategory(homeSnapshot.activeCategory);
             setSearchQuery(homeSnapshot.searchQuery);
-            setProcessedList(homeSnapshot.processedList); // Critical: Restore exact list
+            setProcessedList(homeSnapshot.processedList);
             setVisibleCount(homeSnapshot.visibleCount);
             setPurchases(homeSnapshot.purchases);
             setLoading(false);
@@ -108,36 +121,30 @@ export default function Home() {
     };
     init();
 
-    // SNAPSHOT SAVE on Unmount
+    // SNAPSHOT SAVE on Unmount ONLY
     return () => {
-        // We can't access updated state in cleanup easily, so we rely on a ref or updated closure
-        // But React 18 state inside useEffect cleanup usually refers to current render state if deps are correct.
-        // However, to be safe, we update the snapshot on every state change (cheap pointer assignment) or use a ref.
+        const s = stateRef.current;
+        if (s.videos.length > 0) {
+            homeSnapshot = {
+                videos: s.videos,
+                shuffledList: s.shuffledMasterList,
+                processedList: s.processedList,
+                activeCategory: s.activeCategory,
+                searchQuery: s.searchQuery,
+                visibleCount: s.visibleCount,
+                scrollPosition: window.scrollY,
+                purchases: s.purchases
+            };
+        }
     };
   }, [user]);
-
-  // Sync state to snapshot constantly so it's ready on unmount/navigate
-  useEffect(() => {
-     if (!loading && videos.length > 0) {
-         homeSnapshot = {
-             videos,
-             shuffledList: shuffledMasterList,
-             processedList,
-             activeCategory,
-             searchQuery,
-             visibleCount,
-             scrollPosition: window.scrollY,
-             purchases
-         };
-     }
-  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, loading, purchases]);
 
   // RESTORE SCROLL POSITION
   useLayoutEffect(() => {
       if (!loading && homeSnapshot && homeSnapshot.scrollPosition > 0) {
           window.scrollTo(0, homeSnapshot.scrollPosition);
       }
-  }, [loading, processedList]);
+  }, [loading]);
 
   // Fetch subscriptions
   useEffect(() => {
@@ -147,16 +154,8 @@ export default function Home() {
   }, [user, activeCategory]);
 
   // Logic to Process List (Filter Only - No Shuffle)
-  // Only run if we are NOT restoring a snapshot, OR if the user changed filters actively
   useEffect(() => {
-      // If loading from snapshot, skip this effect initially to prevent overriding restored processedList
-      if (homeSnapshot && processedList === homeSnapshot.processedList && activeCategory === homeSnapshot.activeCategory && searchQuery === homeSnapshot.searchQuery) return;
-      
       if (shuffledMasterList.length === 0) return;
-      
-      // Reset pagination ONLY if we are actively changing filters (not just initial load)
-      // We detect "change" by comparing to previous known state or just relying on user interaction
-      // Simplified: If visibleCount is default, or if we changed category, reset.
       
       // Use the pre-shuffled list
       let filtered = shuffledMasterList;
@@ -179,10 +178,18 @@ export default function Home() {
       
       setProcessedList(filtered);
       
-      // Only reset count if we are NOT in the middle of a restore
-      // (This logic is slightly tricky, but usually setting count to 12 on filter change is desired)
-      if (loading === false && (activeCategory !== (homeSnapshot?.activeCategory) || searchQuery !== (homeSnapshot?.searchQuery))) {
-          setVisibleCount(ITEMS_PER_PAGE);
+      // Reset count when filters change (unless it's the initial load/restore)
+      // We check if the previous processed length is different to avoid resetting on simple re-renders
+      if (!loading) {
+         // Optionally reset visible count here, but for smoother UX we might keep it or reset it.
+         // Let's reset it if the category changed to ensure user sees top of new list
+         // Note: We can't easily detect "change" inside this effect without refs, 
+         // but setting it to 12 is safe for most filter changes.
+         if (homeSnapshot && activeCategory === homeSnapshot.activeCategory && searchQuery === homeSnapshot.searchQuery) {
+             // If matches snapshot (restore), keep snapshot count (handled by init)
+         } else {
+             setVisibleCount(ITEMS_PER_PAGE);
+         }
       }
 
   }, [shuffledMasterList, activeCategory, searchQuery, subscribedCreators, loading]);
