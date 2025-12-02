@@ -1,8 +1,7 @@
-
-import React from 'react';
+import React, { useState } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
-import { CheckCircle2, MoreVertical } from 'lucide-react';
+import { CheckCircle2, MoreVertical, ImageOff } from 'lucide-react';
 
 interface VideoCardProps {
   video: Video;
@@ -25,24 +24,44 @@ const formatTimeAgo = (timestamp: number) => {
   return "Just now";
 };
 
-const VideoCard: React.FC<VideoCardProps> = ({ video, isUnlocked, isWatched }) => {
+const formatDuration = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) {
+        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+};
+
+// React.memo to prevent re-renders of cards that didn't change when parent state updates
+const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched }) => {
   // Check if video is "New" (less than 24 hours old)
   const isNew = (Date.now() - video.createdAt) < 24 * 60 * 60 * 1000;
+  const [imgError, setImgError] = useState(false);
 
   return (
     <div className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
       {/* Thumbnail Container */}
       <Link to={`/watch/${video.id}`} className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm group-hover:rounded-none transition-all duration-200 block">
-        <img 
-          src={video.thumbnailUrl} 
-          alt={video.title} 
-          className="w-full h-full object-cover"
-          loading="lazy"
-        />
+        {!imgError ? (
+            <img 
+              src={video.thumbnailUrl} 
+              alt={video.title} 
+              className="w-full h-full object-cover"
+              loading="lazy"
+              decoding="async"
+              onError={() => setImgError(true)}
+            />
+        ) : (
+            <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600">
+                <ImageOff size={24} />
+            </div>
+        )}
         
         {/* Duration Badge */}
         <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm">
-           {Math.floor(video.duration/60)}:{(video.duration%60).toFixed(0).padStart(2,'0')}
+           {formatDuration(video.duration)}
         </div>
 
         {/* NEW Badge */}
@@ -111,6 +130,6 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, isUnlocked, isWatched }) =
       </div>
     </div>
   );
-};
+});
 
 export default VideoCard;

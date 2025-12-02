@@ -1,4 +1,6 @@
 
+
+
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User } from '../types';
 import { db } from '../services/db';
@@ -65,7 +67,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
             if (user && user.sessionToken) {
                 const isValid = await db.heartbeat(user.id, user.sessionToken);
                 if (!isValid) {
-                    alert("Session Expired. You were logged out because this account was accessed from another device.");
+                    console.warn("Session expired or invalidated by another login.");
                     logout();
                 }
             }

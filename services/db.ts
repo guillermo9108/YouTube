@@ -1,5 +1,3 @@
-
-
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
@@ -42,6 +40,9 @@ class DatabaseService {
   private isInstalled: boolean = true; // Optimistic default
   private isDemoMode: boolean = false;
   private isOffline: boolean = !navigator.onLine;
+  
+  // DEDUPLICATION: Map to store in-flight requests
+  private pendingRequests = new Map<string, Promise<any>>();
 
   constructor() {
     if (localStorage.getItem('sp_demo_mode') === 'true') {
@@ -61,6 +62,7 @@ class DatabaseService {
       });
 
       try {
+          // Cache GET requests
           if (key.includes('action=')) {
               localStorage.setItem(`sp_cache_${key}`, cacheItem);
           }
@@ -111,16 +113,23 @@ class DatabaseService {
       console.log(`Evicted ${toDelete} old cache items.`);
   }
 
-  private getFromCache<T>(key: string): T | null {
+  private getFromCache<T>(key: string, maxAgeMs: number = 0): T | null {
       const item = localStorage.getItem(`sp_cache_${key}`);
       if (!item) return null;
       try {
           const parsed = JSON.parse(item);
-          // Optional: Add expiration logic here (e.g., 24 hours)
+          // Check expiration if maxAgeMs is provided
+          if (maxAgeMs > 0 && (Date.now() - parsed.timestamp > maxAgeMs)) {
+              return null;
+          }
           return parsed.data as T;
       } catch {
           return null;
       }
+  }
+
+  public invalidateCache(endpointKey: string) {
+      localStorage.removeItem(`sp_cache_${endpointKey}`);
   }
 
   private async request<T>(endpoint: string, method: string = 'GET', body?: any, silent: boolean = false): Promise<T> {
@@ -131,6 +140,40 @@ class DatabaseService {
     // Prepare URL
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
     const cacheKey = cleanEndpoint; // Use endpoint as cache key
+    
+    // --- STRATEGY: STALE-WHILE-REVALIDATE FOR HOME FEED ---
+    // If getting all videos, assume cache is good for 5 minutes to avoid spinning up NAS HDDs constantly
+    if (method === 'GET' && cleanEndpoint.includes('get_videos') && !cleanEndpoint.includes('id=')) {
+        const cached = this.getFromCache<T>(cacheKey, 5 * 60 * 1000); // 5 Minutes
+        if (cached) {
+            console.log(`[Cache] Serving ${cacheKey} from persistent cache`);
+            return cached;
+        }
+    }
+
+    // --- OFFLINE FIRST STRATEGY ---
+    // If explicitly offline and it's a GET request, try cache immediately (ignore age)
+    if (this.isOffline && method === 'GET') {
+        const cached = this.getFromCache<T>(cacheKey);
+        if (cached) {
+            console.log(`[Offline] Serving cached: ${cacheKey}`);
+            return cached;
+        }
+        throw new Error("No internet connection and no cached data available.");
+    }
+
+    // If trying to WRITE (POST) while offline
+    if (this.isOffline && method === 'POST') {
+        throw new Error("You are offline. Action cannot be completed.");
+    }
+
+    // --- DEDUPLICATION START ---
+    // If a request for this key is already in flight, return that promise
+    if (method === 'GET' && this.pendingRequests.has(cacheKey)) {
+        // console.log(`[Dedupe] Reusing in-flight request for: ${cacheKey}`);
+        return this.pendingRequests.get(cacheKey) as Promise<T>;
+    }
+
     const url = method === 'GET' 
        ? `${API_BASE}/${cleanEndpoint}${cleanEndpoint.includes('?') ? '&' : '?'}_t=${Date.now()}` 
        : `${API_BASE}/${cleanEndpoint}`;
@@ -150,80 +193,77 @@ class DatabaseService {
         requestBody = JSON.stringify(body);
     }
 
-    // --- OFFLINE FIRST STRATEGY ---
-    // If explicitly offline and it's a GET request, try cache immediately
-    if (this.isOffline && method === 'GET') {
-        const cached = this.getFromCache<T>(cacheKey);
-        if (cached) {
-            console.log(`[Offline] Serving cached: ${cacheKey}`);
-            return cached;
-        }
-        throw new Error("No internet connection and no cached data available.");
-    }
-
-    // If trying to WRITE (POST) while offline
-    if (this.isOffline && method === 'POST') {
-        throw new Error("You are offline. Action cannot be completed.");
-    }
-
-    try {
-        const response = await fetch(url, {
-            method,
-            headers,
-            body: requestBody
-        });
-
-        const text = await response.text();
-
-        // NETWORK SUCCESS
-        if (!response.ok) {
-            try {
-                const errJson = JSON.parse(text);
-                throw new Error(errJson.error || `Server Error: ${response.status}`);
-            } catch {
-                throw new Error(`Server Error: ${response.status} ${response.statusText}`);
-            }
-        }
-        
-        if (!text || text.trim().length === 0) {
-            throw new Error("Empty response from API. Check PHP logs.");
-        }
-
-        let json;
+    const requestPromise = (async () => {
         try {
-            json = JSON.parse(text);
-        } catch (e) {
-            if (text.includes('Fatal error') || text.includes('Parse error')) {
-                 const match = text.match(/(Fatal|Parse) error: (.*?) in/);
-                 throw new Error(`PHP Error: ${match ? match[2] : 'Unknown Syntax Error'}`);
+            const response = await fetch(url, {
+                method,
+                headers,
+                body: requestBody
+            });
+    
+            const text = await response.text();
+    
+            // NETWORK SUCCESS
+            if (!response.ok) {
+                try {
+                    const errJson = JSON.parse(text);
+                    throw new Error(errJson.error || `Server Error: ${response.status}`);
+                } catch {
+                    throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+                }
             }
-            throw new Error(`Invalid JSON from API.`);
-        }
-        
-        if (!json.success) {
-            throw new Error(json.error || 'Operation failed');
-        }
-
-        // CACHE SUCCESSFUL GET RESPONSES
-        if (method === 'GET') {
-            this.saveToCache(cacheKey, json.data);
-        }
-
-        return json.data as T;
-
-    } catch (error: any) {
-        // NETWORK FAIL - FALLBACK TO CACHE
-        if (method === 'GET') {
-            console.warn(`Network request failed for ${cacheKey}, trying cache...`);
-            const cached = this.getFromCache<T>(cacheKey);
-            if (cached) {
-                return cached;
+            
+            if (!text || text.trim().length === 0) {
+                throw new Error("Empty response from API. Check PHP logs.");
+            }
+    
+            let json;
+            try {
+                json = JSON.parse(text);
+            } catch (e) {
+                if (text.includes('Fatal error') || text.includes('Parse error')) {
+                     const match = text.match(/(Fatal|Parse) error: (.*?) in/);
+                     throw new Error(`PHP Error: ${match ? match[2] : 'Unknown Syntax Error'}`);
+                }
+                throw new Error(`Invalid JSON from API.`);
+            }
+            
+            if (!json.success) {
+                throw new Error(json.error || 'Operation failed');
+            }
+    
+            // CACHE SUCCESSFUL GET RESPONSES
+            if (method === 'GET') {
+                this.saveToCache(cacheKey, json.data);
+            }
+    
+            return json.data as T;
+    
+        } catch (error: any) {
+            // NETWORK FAIL - FALLBACK TO CACHE
+            if (method === 'GET') {
+                console.warn(`Network request failed for ${cacheKey}, trying cache...`);
+                const cached = this.getFromCache<T>(cacheKey);
+                if (cached) {
+                    return cached;
+                }
+            }
+            
+            if (!silent) console.error("API Request Failed:", endpoint, error);
+            throw error;
+        } finally {
+            // Remove from pending map when done (success or fail)
+            if (method === 'GET') {
+                this.pendingRequests.delete(cacheKey);
             }
         }
-        
-        if (!silent) console.error("API Request Failed:", endpoint, error);
-        throw error;
+    })();
+
+    if (method === 'GET') {
+        this.pendingRequests.set(cacheKey, requestPromise);
     }
+
+    return requestPromise;
   }
 
   private async handleMockRequest<T>(endpoint: string, method: string, body: any): Promise<T> {
@@ -381,7 +421,11 @@ class DatabaseService {
             if (xhr.status >= 200 && xhr.status < 300) { 
                 try { 
                     const json = JSON.parse(xhr.responseText); 
-                    if (json.success) resolve(); else reject(new Error(json.error || 'Upload failed')); 
+                    if (json.success) {
+                        // Invalidate video list cache so new content appears
+                        this.invalidateCache('index.php?action=get_videos');
+                        resolve(); 
+                    } else reject(new Error(json.error || 'Upload failed')); 
                 } catch (e) { 
                     console.error("Upload response error", xhr.responseText);
                     reject(new Error("Invalid server response")); 

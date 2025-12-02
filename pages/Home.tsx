@@ -1,5 +1,4 @@
-
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
@@ -20,9 +19,15 @@ const CATEGORIES = [
     { id: VideoCategory.OTHER, label: 'Other' },
 ];
 
+const ITEMS_PER_PAGE = 12;
+
 export default function Home() {
   const [videos, setVideos] = useState<Video[]>([]);
-  const [purchases, setPurchases] = useState<string[]>([]);
+  // Use a shuffled copy of videos to maintain stability during filtering
+  const [shuffledMasterList, setShuffledMasterList] = useState<Video[]>([]);
+  
+  // Store purchases as a Set for O(1) lookup performance
+  const [purchases, setPurchases] = useState<Set<string>>(new Set());
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,27 +36,29 @@ export default function Home() {
   const [showSidebar, setShowSidebar] = useState(false);
   const { user, logout } = useAuth();
   
-  // Display List State (Holds the shuffled order)
-  const [displayList, setDisplayList] = useState<Video[]>([]);
+  // Full Processed List (Filtered)
+  const [processedList, setProcessedList] = useState<Video[]>([]);
+  // Visible Chunk
+  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // 1. Fetch All Data Initial
   useEffect(() => {
     const init = async () => {
         setLoading(true);
         try {
+            // Use aggressive caching here handled by db.ts
             const allVideos = await db.getAllVideos();
             setVideos(allVideos);
             
+            // Generate shuffle ONCE when data loads
+            // This prevents list jumping when changing filters
+            const shuffled = [...allVideos].sort(() => Math.random() - 0.5);
+            setShuffledMasterList(shuffled);
+            
             if (user) {
-                // Fetch Activity (Watched IDs)
                 const activity = await db.getUserActivity(user.id);
                 setWatchedIds(activity.watched || []);
-
-                // Fetch Purchases
-                const checks = allVideos.map(v => db.hasPurchased(user.id, v.id));
-                const results = await Promise.all(checks);
-                const p = allVideos.filter((_, i) => results[i]).map(v => v.id);
-                setPurchases(p);
             }
         } catch (e) {
             console.error(e);
@@ -62,27 +69,28 @@ export default function Home() {
     init();
   }, [user]);
 
-  // Fetch subscriptions if category is selected
+  // Fetch subscriptions
   useEffect(() => {
       if (user && activeCategory === 'SUBSCRIPTIONS') {
           db.getSubscriptions(user.id).then(setSubscribedCreators);
       }
   }, [user, activeCategory]);
 
-  // 2. Logic to Shuffle "Fresh" content
+  // 2. Logic to Process List (Filter Only - No Shuffle)
   useEffect(() => {
-      if (videos.length === 0) return;
+      if (shuffledMasterList.length === 0) return;
+      setVisibleCount(ITEMS_PER_PAGE); // Reset pagination on filter change
 
-      // A. Filter by Category
-      let filtered = videos;
+      // Use the pre-shuffled list
+      let filtered = shuffledMasterList;
       
       if (activeCategory === 'SUBSCRIPTIONS') {
-          filtered = videos.filter(v => subscribedCreators.includes(v.creatorId));
+          filtered = shuffledMasterList.filter(v => subscribedCreators.includes(v.creatorId));
       } else if (activeCategory !== 'ALL') {
-          filtered = videos.filter(v => v.category === activeCategory);
+          filtered = shuffledMasterList.filter(v => v.category === activeCategory);
       }
 
-      // B. Filter by Search Query
+      // B. Search
       if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
           filtered = filtered.filter(v => 
@@ -91,36 +99,75 @@ export default function Home() {
               v.creatorName.toLowerCase().includes(q)
           );
       }
+      
+      // If we are searching, we might want to prioritize relevance, 
+      // but for now keeping the stable shuffle is better UX than random jumping.
+      setProcessedList(filtered);
 
-      // C. Separate Unwatched vs Watched
-      const unwatched = filtered.filter(v => !watchedIds.includes(v.id));
-      const watched = filtered.filter(v => watchedIds.includes(v.id));
+  }, [shuffledMasterList, activeCategory, searchQuery, subscribedCreators]);
 
-      // D. Sort/Shuffle Logic
-      let finalOrder: Video[] = [];
+  // 3. Infinite Scroll Observer
+  useEffect(() => {
+      const observer = new IntersectionObserver((entries) => {
+          if (entries[0].isIntersecting) {
+              setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+          }
+      }, { rootMargin: '200px' });
 
-      if (searchQuery.trim()) {
-          // If searching, just show results (unwatched first, but no random shuffle to keep relevance)
-          finalOrder = [...unwatched, ...watched];
-      } else {
-          // If browsing feed, Shuffle Unwatched to show "Fresh" content on every reload/category change
-          const shuffledUnwatched = [...unwatched].sort(() => Math.random() - 0.5);
-          // Watched videos go to the bottom, sorted by newest
-          const sortedWatched = [...watched].sort((a, b) => b.createdAt - a.createdAt);
-          finalOrder = [...shuffledUnwatched, ...sortedWatched];
-      }
+      if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+      return () => observer.disconnect();
+  }, [processedList]);
 
-      setDisplayList(finalOrder);
+  const displayList = processedList.slice(0, visibleCount);
 
-  }, [videos, activeCategory, watchedIds, searchQuery, subscribedCreators]);
+  // 4. Lazy Load Purchases for Visible Items (NAS OPTIMIZATION)
+  useEffect(() => {
+      if (!user || displayList.length === 0) return;
+
+      const fetchVisiblePurchases = async () => {
+          // Only check videos we haven't checked yet
+          const toCheck = displayList.filter(v => 
+              v.price > 0 && 
+              v.creatorId !== user.id && 
+              !purchases.has(v.id)
+          );
+
+          if (toCheck.length === 0) return;
+
+          // Limit concurrency to avoid choking the NAS
+          const BATCH_SIZE = 4; 
+          
+          for (let i = 0; i < toCheck.length; i += BATCH_SIZE) {
+               const batch = toCheck.slice(i, i + BATCH_SIZE);
+               const newIds: string[] = [];
+
+               await Promise.all(batch.map(async (v) => {
+                   try {
+                       const has = await db.hasPurchased(user.id, v.id);
+                       if (has) newIds.push(v.id);
+                   } catch (e) { console.warn("Purchase check failed", e); }
+               }));
+
+               // Update state once per batch to reduce renders
+               if (newIds.length > 0) {
+                   setPurchases(prev => {
+                       const next = new Set(prev);
+                       newIds.forEach(id => next.add(id));
+                       return next;
+                   });
+               }
+          }
+      };
+
+      fetchVisiblePurchases();
+  }, [displayList, user]); // Only runs when more items are displayed
 
   const isUnlocked = (videoId: string, creatorId: string) => {
-    return purchases.includes(videoId) || (user?.id === creatorId);
+    return purchases.has(videoId) || (user?.id === creatorId);
   };
 
   return (
     <div className="min-h-screen">
-      
       {/* Sidebar Overlay */}
       {showSidebar && (
         <div className="fixed inset-0 z-50 flex">
@@ -243,11 +290,11 @@ export default function Home() {
                 ))}
              </div>
              
-             {watchedIds.length > 0 && activeCategory === 'ALL' && !searchQuery && (
-                 <div className="mt-12 pt-8 border-t border-slate-800 text-center text-slate-500 text-sm pb-10">
-                     <p>You've seen all the new stuff!</p>
-                     <p className="text-xs mt-1 opacity-50">Videos below are from your history.</p>
-                 </div>
+             {/* Invisible Trigger for Infinite Scroll */}
+             {visibleCount < processedList.length && (
+                <div ref={loadMoreRef} className="py-8 flex justify-center opacity-50">
+                    <RefreshCw className="animate-spin text-slate-500" />
+                </div>
              )}
             </>
          )}

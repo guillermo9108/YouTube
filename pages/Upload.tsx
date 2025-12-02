@@ -27,8 +27,18 @@ const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: num
 export const generateThumbnail = async (file: File): Promise<{ thumbnail: File | null, duration: number }> => {
   return new Promise((resolve) => {
     const video = document.createElement('video');
+    const objectUrl = URL.createObjectURL(file);
+    
+    // Safety Timeout (5 seconds max per file)
+    const timeout = setTimeout(() => {
+        // CRITICAL: Clean up memory even on timeout
+        URL.revokeObjectURL(objectUrl);
+        video.remove();
+        resolve({ thumbnail: null, duration: 0 });
+    }, 5000);
+
     video.preload = 'metadata';
-    video.src = URL.createObjectURL(file);
+    video.src = objectUrl;
     video.muted = true;
     video.playsInline = true;
 
@@ -73,6 +83,7 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
             }
 
             canvas.toBlob((blob) => {
+                clearTimeout(timeout);
                 if (blob) {
                     const thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
                     resolve({ thumbnail: thumbFile, duration });
@@ -80,12 +91,14 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
                     resolve({ thumbnail: null, duration: 0 });
                 }
                 // CRITICAL: Cleanup immediately to free RAM
-                URL.revokeObjectURL(video.src);
+                URL.revokeObjectURL(objectUrl);
                 video.remove();
             }, 'image/jpeg', 0.70); // Lower quality for speed
 
         } catch (e) {
-            URL.revokeObjectURL(video.src);
+            clearTimeout(timeout);
+            URL.revokeObjectURL(objectUrl);
+            video.remove();
             resolve({ thumbnail: null, duration: 0 });
         }
     };
@@ -96,7 +109,9 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
 
     video.onseeked = captureFrame;
     video.onerror = () => {
-        URL.revokeObjectURL(video.src);
+        clearTimeout(timeout);
+        URL.revokeObjectURL(objectUrl);
+        video.remove();
         resolve({ thumbnail: null, duration: 0 });
     };
   });
