@@ -48,6 +48,19 @@ export interface Video {
   isLocal?: boolean; // New: Flag for local NAS files
 }
 
+export interface MarketplaceItem {
+  id: string;
+  title: string;
+  description: string;
+  price: number;
+  sellerId: string;
+  sellerName: string;
+  sellerAvatarUrl?: string;
+  media: { type: 'image' | 'video', url: string }[];
+  status: 'ACTIVE' | 'SOLD';
+  createdAt: number;
+}
+
 export interface Transaction {
   id: string;
   buyerId: string;
@@ -55,7 +68,7 @@ export interface Transaction {
   videoId: string | null;
   amount: number;
   timestamp: number;
-  type: 'PURCHASE' | 'DEPOSIT';
+  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE';
 }
 
 export interface Comment {

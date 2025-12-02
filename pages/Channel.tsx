@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState } from 'react';
 import { useParams } from '../components/Router';
 import { db } from '../services/db';
@@ -32,16 +33,16 @@ export default function Channel() {
             const u = await db.getUser(userId);
             setChannelUser(u);
 
-            // 2. Get User Videos
+            // 2. Get User Videos (Now works with backend get_creator_videos)
             const vids = await db.getVideosByCreator(userId);
-            setVideos(vids);
+            setVideos(vids || []);
 
             // 3. Calc Stats
-            const totalViews = vids.reduce((acc, curr) => acc + Number(curr.views), 0);
-            setStats({ views: totalViews, uploads: vids.length });
+            const totalViews = vids ? vids.reduce((acc, curr) => acc + Number(curr.views), 0) : 0;
+            setStats({ views: totalViews, uploads: vids ? vids.length : 0 });
 
             // 4. Check purchases & Subscription
-            if (currentUser) {
+            if (currentUser && vids) {
                 const checks = vids.map(v => db.hasPurchased(currentUser.id, v.id));
                 const results = await Promise.all(checks);
                 const p = vids.filter((_, i) => results[i]).map(v => v.id);

@@ -1,6 +1,7 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
@@ -207,6 +208,9 @@ export default function Layout() {
                         <Smartphone size={20}/> Shorts
                     </Link>
                     <div className="h-px bg-slate-800 my-2"></div>
+                    <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-emerald-400 hover:text-emerald-200 hover:bg-emerald-900/20 rounded-lg font-medium">
+                        <ShoppingBag size={20}/> Marketplace
+                    </Link>
                     <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <DownloadCloud size={20}/> Requests
                     </Link>
@@ -243,6 +247,7 @@ export default function Layout() {
              {user?.balance} Saldo
           </span>
           <Link to="/" className={isActive('/')}>Browse</Link>
+          <Link to="/marketplace" className={isActive('/marketplace')}>Market</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
           <Link to="/upload" className={isActive('/upload')}>Upload</Link>
           <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>

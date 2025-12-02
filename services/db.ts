@@ -1,4 +1,4 @@
-import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
 // This ensures it works in subfolders (e.g., 192.168.x.x/streampay/) on Synology/XAMPP
@@ -563,6 +563,30 @@ class DatabaseService {
   }
   async getSubscriptions(userId: string): Promise<string[]> {
       return this.request<string[]>(`index.php?action=get_subscriptions&userId=${userId}`);
+  }
+  
+  // MARKETPLACE
+  async getMarketplaceItems(): Promise<MarketplaceItem[]> {
+      return this.request<MarketplaceItem[]>('index.php?action=get_marketplace_items');
+  }
+
+  async getMarketplaceItem(id: string): Promise<MarketplaceItem> {
+      return this.request<MarketplaceItem>(`index.php?action=get_marketplace_item&id=${id}`);
+  }
+
+  async createListing(sellerId: string, title: string, desc: string, price: number, files: File[]): Promise<void> {
+      const formData = new FormData();
+      formData.append('sellerId', sellerId);
+      formData.append('title', title);
+      formData.append('description', desc);
+      formData.append('price', price.toString());
+      files.forEach(f => formData.append('media[]', f));
+      
+      await this.request('index.php?action=create_marketplace_item', 'POST', formData);
+  }
+
+  async buyMarketplaceItem(buyerId: string, itemId: string): Promise<void> {
+      await this.request('index.php?action=buy_marketplace_item', 'POST', { buyerId, itemId });
   }
 }
 

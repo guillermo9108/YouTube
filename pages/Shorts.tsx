@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2 } from 'lucide-react';
 import { db } from '../services/db';
@@ -37,15 +38,54 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
   // Load Interaction Data only when item is close to viewport
   useEffect(() => {
     if (user && shouldLoad) {
-      db.getInteraction(user.id, video.id).then(setInteraction);
-      db.hasPurchased(user.id, video.id).then(setIsUnlocked);
-      // Lazy load comments and sub status
+      // 1. Get Interaction (Likes/Watched)
+      db.getInteraction(user.id, video.id).then(res => {
+          setInteraction(res);
+      });
+
+      // 2. Check Purchase Status
+      if (user.id === video.creatorId) {
+          setIsUnlocked(true);
+      } else {
+          db.hasPurchased(user.id, video.id).then(setIsUnlocked);
+      }
+
+      // 3. Lazy load comments and sub status if active
       if (isActive) {
           db.getComments(video.id).then(setComments);
           db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed).catch(() => setIsSubscribed(false));
       }
     }
   }, [user, video.id, video.creatorId, shouldLoad, isActive]);
+
+  // Actions
+  const handlePurchase = async () => {
+    if (!user) return;
+    setPurchasing(true);
+    try {
+      await db.purchaseVideo(user.id, video.id);
+      refreshUser();
+      setIsUnlocked(true);
+    } catch (e) {
+      // alert("Insufficient funds or error.");
+    } finally {
+      setPurchasing(false);
+    }
+  };
+
+  // --- AUTO PURCHASE LOGIC ---
+  useEffect(() => {
+      if (isActive && user && !isUnlocked && !purchasing) {
+          const price = Number(video.price);
+          const limit = Number(user.autoPurchaseLimit);
+          const balance = Number(user.balance);
+
+          // If price is within auto-limit AND user has enough balance
+          if (price > 0 && price <= limit && balance >= price) {
+               handlePurchase();
+          }
+      }
+  }, [isActive, isUnlocked, user, video.price, purchasing]);
 
   // Handle Play/Pause & Cleanup
   useEffect(() => {
@@ -77,7 +117,6 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
     }
     
     // Strict Cleanup for MEMORY, but loosely for DOM
-    // Only remove src if we are REALLY far away
     return () => {
         if (!shouldLoad && el) {
             el.pause();
@@ -87,23 +126,9 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
     };
   }, [isActive, isUnlocked, shouldLoad]);
 
-  // Actions
-  const handlePurchase = async () => {
-    if (!user) return;
-    setPurchasing(true);
-    try {
-      await db.purchaseVideo(user.id, video.id);
-      refreshUser();
-      setIsUnlocked(true);
-    } catch (e) {
-      alert("Insufficient funds or error.");
-    } finally {
-      setPurchasing(false);
-    }
-  };
-
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
+    // Optimistic Update
     const res = await db.rateVideo(user.id, video.id, rating);
     setInteraction(res);
     if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
@@ -176,9 +201,10 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
                 onWaiting={() => setIsBuffering(true)}
                 onPlaying={() => setIsBuffering(false)}
                 onTimeUpdate={(e) => { 
+                    // Auto Mark Watched
                     if (e.currentTarget.currentTime / e.currentTarget.duration > 0.30 && interaction && !interaction.isWatched && user) { 
                         db.markWatched(user.id, video.id); 
-                        setInteraction({...interaction, isWatched: true}); 
+                        setInteraction(prev => prev ? {...prev, isWatched: true} : null); 
                     } 
                 }} 
             />
