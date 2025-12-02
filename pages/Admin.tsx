@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video } from '../types';
@@ -130,21 +131,26 @@ export default function Admin() {
   const handleScanLibrary = async () => {
       if (!localPath.trim()) return;
       setScanning(true);
-      setScanLog(['Starting scan...']);
+      setScanLog(['Starting real-time scan...']);
       
       // Save path first
       if (settings) {
           const updated = { ...settings, localLibraryPath: localPath };
-          await db.updateSystemSettings(updated);
+          db.updateSystemSettings(updated);
       }
 
       try {
-          const res = await db.scanLocalLibrary(localPath);
-          setScanLog(res.log);
-          alert(`Scan complete. Imported ${res.imported} new videos.`);
+          // Use new streaming method
+          await db.scanLocalLibraryStream(localPath, (msg, type) => {
+               setScanLog(prev => {
+                   // Keep log size manageable (last 100 lines)
+                   const newLog = [...prev, type === 'log' ? msg : `[${type.toUpperCase()}] ${msg}`];
+                   if (newLog.length > 100) return newLog.slice(newLog.length - 100);
+                   return newLog;
+               });
+          });
       } catch (e: any) {
           setScanLog(prev => [...prev, `ERROR: ${e.message}`]);
-          alert("Scan error: " + e.message);
       } finally {
           setScanning(false);
       }
@@ -290,7 +296,7 @@ export default function Admin() {
                       <div className="text-slate-600 italic">Waiting to scan...</div>
                   ) : (
                       scanLog.map((line, i) => (
-                          <div key={i} className={`mb-1 ${line.startsWith('ERROR') ? 'text-red-400' : (line.startsWith('Success') ? 'text-emerald-400' : 'text-slate-300')}`}>
+                          <div key={i} className={`mb-1 ${line.includes('ERROR') ? 'text-red-400' : (line.includes('Imported') ? 'text-emerald-400' : 'text-slate-300')}`}>
                               <span className="text-slate-600 mr-2">[{new Date().toLocaleTimeString()}]</span>
                               {line}
                           </div>

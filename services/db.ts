@@ -462,14 +462,49 @@ class DatabaseService {
       await this.request('index.php?action=repair_thumbnail', 'POST', formData, true);
   }
 
-  // NAS LOCAL LIBRARY SCAN
-  async scanLocalLibrary(path: string): Promise<ScanResult> {
-      const res = await this.request<ScanResult>('index.php?action=scan_local_library', 'POST', { path });
-      if (res.imported > 0) {
-          this.invalidateCache('index.php?action=get_videos');
-          this.setHomeDirty();
+  // NAS LOCAL LIBRARY SCAN (STREAMING)
+  async scanLocalLibraryStream(path: string, onMessage: (msg: string, type: 'log'|'error'|'success') => void): Promise<void> {
+      const response = await fetch(`${API_BASE}/index.php?action=scan_local_library`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path })
+      });
+
+      if (!response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                  const dataStr = line.replace('data: ', '').trim();
+                  if (dataStr === '[DONE]') {
+                      this.invalidateCache('index.php?action=get_videos');
+                      this.setHomeDirty();
+                      return;
+                  }
+                  try {
+                      const data = JSON.parse(dataStr);
+                      onMessage(data.msg, data.type);
+                  } catch (e) {
+                      // ignore json parse error
+                  }
+              }
+          }
       }
-      return res;
+  }
+
+  // Deprecated synchronous version kept for type compatibility
+  async scanLocalLibrary(path: string): Promise<ScanResult> {
+      return this.request<ScanResult>('index.php?action=scan_local_library', 'POST', { path });
   }
 
   async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> { await this.request('index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice }); }
