@@ -360,6 +360,8 @@ try {
             break;
 
         case 'scan_local_library':
+            set_time_limit(0); // Prevent timeouts for large folders
+            
             // Turn off output buffering for streaming
             while (ob_get_level()) ob_end_clean();
             
@@ -368,7 +370,7 @@ try {
             header('Cache-Control: no-cache');
             header('X-Accel-Buffering: no'); // Disable Nginx buffering
             
-            $path = $input['path'] ?? '';
+            $path = trim($input['path'] ?? '');
             
             // Helper to send SSE
             function sendMsg($msg, $type='log') {
@@ -376,8 +378,30 @@ try {
                 flush();
             }
 
+            // PERMISSIONS & PATH CHECK
             if (!$path || !is_dir($path)) {
-                sendMsg("Directory not found or not accessible: " . htmlspecialchars($path), 'error');
+                $errMsg = "Directory not found or not accessible: " . htmlspecialchars($path);
+                
+                // Diagnostic for open_basedir (Common on Synology)
+                $open_basedir = ini_get('open_basedir');
+                if ($open_basedir) {
+                    $allowed = false;
+                    foreach (explode(PATH_SEPARATOR, $open_basedir) as $allowedPath) {
+                        if (strpos($path, $allowedPath) === 0) {
+                            $allowed = true;
+                            break;
+                        }
+                    }
+                    if (!$allowed) {
+                        $errMsg .= " | [ERROR] PHP open_basedir restriction enabled. Allowed paths: " . $open_basedir;
+                    }
+                } else {
+                    if (file_exists($path) && !is_readable($path)) {
+                        $errMsg .= " | [ERROR] Directory exists but is NOT readable. Check file permissions.";
+                    }
+                }
+
+                sendMsg($errMsg, 'error');
                 echo "data: [DONE]\n\n";
                 flush();
                 exit;
@@ -441,7 +465,7 @@ try {
                             }
                         }
                     } catch (Exception $e) {
-                        sendMsg("Error processing file: " . $file->getFilename(), 'error');
+                        sendMsg("Skipping file (Access Denied): " . $file->getFilename(), 'error');
                     }
                 }
             } catch (Exception $e) {
@@ -747,7 +771,10 @@ try {
                         if ($check->rowCount() == 0) {
                             $pdo->exec("ALTER TABLE $table ADD COLUMN $col $def");
                         }
-                    } catch (Exception $e) {}
+                    } catch (Exception $e) {
+                         // Table might not exist yet if CREATE failed, or other issue. 
+                         // Continue safely.
+                    }
                 }
             }
 

@@ -118,7 +118,7 @@ export default function Admin() {
       try {
           // If in Library tab, save path too
           if (activeTab === 'LIBRARY') {
-              const updated = { ...settings, localLibraryPath: localPath };
+              const updated = { ...settings, localLibraryPath: localPath.trim() };
               await db.updateSystemSettings(updated);
               setSettings(updated);
           } else {
@@ -133,15 +133,18 @@ export default function Admin() {
       setScanning(true);
       setScanLog(['Starting real-time scan...']);
       
+      const cleanPath = localPath.trim();
+      setLocalPath(cleanPath);
+
       // Save path first
       if (settings) {
-          const updated = { ...settings, localLibraryPath: localPath };
+          const updated = { ...settings, localLibraryPath: cleanPath };
           db.updateSystemSettings(updated);
       }
 
       try {
           // Use new streaming method
-          await db.scanLocalLibraryStream(localPath, (msg, type) => {
+          await db.scanLocalLibraryStream(cleanPath, (msg, type) => {
                setScanLog(prev => {
                    // Keep log size manageable (last 100 lines)
                    const newLog = [...prev, type === 'log' ? msg : `[${type.toUpperCase()}] ${msg}`];
@@ -589,8 +592,9 @@ export default function Admin() {
       {activeTab === 'USERS' && (
         <>
             <div className="flex justify-end">
-                <button onClick={handleRepairDb} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold border border-slate-700 flex items-center gap-2">
-                    <Database size={14} /> Repair DB
+                <button onClick={handleRepairDb} disabled={repairing} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold border border-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait">
+                    {repairing ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />} 
+                    {repairing ? 'Repairing...' : 'Repair DB'}
                 </button>
             </div>
             
