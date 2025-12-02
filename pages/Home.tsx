@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud, Clock, Trash2 } from 'lucide-react';
+import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud, Clock, Trash2, ShieldCheck, ShoppingBag } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -340,12 +340,25 @@ export default function Home() {
                 </div>
                 
                 <div className="space-y-1 flex-1">
+                    {/* Admin Link */}
+                    {user?.role === 'ADMIN' && (
+                        <Link to="/admin" className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-900/10 hover:bg-amber-900/20 rounded-lg font-medium mb-4 border border-amber-500/20">
+                            <ShieldCheck size={20}/> Admin Panel
+                        </Link>
+                    )}
+
                     <Link to="/" className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
                         <HomeIcon size={20}/> Home
                     </Link>
                     <Link to="/shorts" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <Smartphone size={20}/> Shorts
                     </Link>
+                    
+                    {/* Marketplace Link */}
+                    <Link to="/marketplace" className="flex items-center gap-4 px-4 py-3 text-emerald-400 hover:text-emerald-200 hover:bg-emerald-900/20 rounded-lg font-medium">
+                        <ShoppingBag size={20}/> Marketplace
+                    </Link>
+
                     <button onClick={() => { setActiveCategory('SUBSCRIPTIONS'); setShowSidebar(false); }} className="w-full flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium text-left">
                         <Compass size={20}/> Subscriptions
                     </button>
