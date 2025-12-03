@@ -54,7 +54,6 @@ function streamVideo($filePath) {
     $start = 0;
     $end = $size - 1;
 
-    // Clean buffer
     ob_end_clean();
 
     header('Content-Type: video/mp4');
@@ -298,7 +297,7 @@ if ($action === 'stream_video') {
         streamVideo($path);
     }
     http_response_code(404);
-    die("Video source not found");
+    die("Fuente de video no encontrada");
 }
 
 if ($action === 'get_video') {
@@ -322,7 +321,6 @@ if ($action === 'get_video') {
 
 if ($action === 'get_related_videos') {
     $id = $_GET['id'];
-    // Simple heuristic: same category or same creator
     $stmt = $pdo->prepare("SELECT category, creatorId FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $current = $stmt->fetch();
@@ -384,7 +382,6 @@ if ($action === 'upload_video') {
         move_uploaded_file($_FILES['video']['tmp_name'], UPLOAD_DIR . $vName);
         $videoUrl = "api/" . UPLOAD_DIR . $vName;
     } else {
-        // External URL import (from Server Import Queue)
         $videoUrl = $_POST['videoUrl'];
     }
 
@@ -398,7 +395,7 @@ if ($action === 'upload_video') {
     $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, category, duration, creatorId, videoUrl, thumbnailUrl, createdAt, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->execute([$id, $title, $desc, $price, $cat, $dur, $creatorId, $videoUrl, $thumbUrl, time(), $isLocal]);
     
-    // Notify followers
+    // Notify
     $stmt = $pdo->prepare("SELECT subscriberId FROM subscriptions WHERE creatorId = ?");
     $stmt->execute([$creatorId]);
     $subs = $stmt->fetchAll(PDO::FETCH_COLUMN);
@@ -588,7 +585,6 @@ if ($action === 'admin_cleanup_videos') {
     $videos = $stmt->fetchAll();
     $deleted = 0;
     foreach ($videos as $v) {
-        // Skip local videos from cleanup for safety unless strictly missing
         if ($v['isLocal']) continue; 
         
         $vPath = str_replace('api/', '', $v['videoUrl']);
@@ -808,7 +804,7 @@ if ($action === 'get_user_orders') {
     respond(true, ['bought' => $bought, 'sold' => $sold]);
 }
 
-// --- SYSTEM SETTINGS & REQUESTS ---
+// --- SYSTEM & REQUESTS ---
 
 if ($action === 'get_system_settings') {
     $stmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
@@ -827,7 +823,6 @@ if ($action === 'get_system_settings') {
         'customCategories' => '[]',
         'localLibraryPath' => ''
     ];
-    // Cast types
     $settings['isQueuePaused'] = (bool)$settings['isQueuePaused'];
     $settings['batchSize'] = (int)$settings['batchSize'];
     $settings['enableYoutube'] = (bool)$settings['enableYoutube'];
@@ -877,7 +872,7 @@ if ($action === 'delete_request') {
     respond(true);
 }
 
-// --- ADMIN & TOOLS ---
+// --- ADMIN ---
 
 if ($action === 'scan_local_library') {
     header('Content-Type: text/event-stream');
@@ -956,7 +951,6 @@ if ($action === 'scan_local_library') {
 
 if ($action === 'admin_repair_db') {
     try {
-        // Core tables
         $pdo->exec("CREATE TABLE IF NOT EXISTS marketplace_items (id VARCHAR(50) PRIMARY KEY, sellerId VARCHAR(50), title VARCHAR(255), description TEXT, price DECIMAL(10, 2), media JSON, status VARCHAR(20), createdAt BIGINT, stock INT DEFAULT 1, discountPercent INT DEFAULT 0, salesCount INT DEFAULT 0)");
         $pdo->exec("CREATE TABLE IF NOT EXISTS marketplace_orders (id VARCHAR(50) PRIMARY KEY, buyerId VARCHAR(50), sellerId VARCHAR(50), items JSON, totalAmount DECIMAL(10, 2), shippingData JSON, timestamp BIGINT, status VARCHAR(20))");
         $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (downloadStartTime VARCHAR(10), downloadEndTime VARCHAR(10), isQueuePaused TINYINT, batchSize INT, maxDuration INT, maxResolution INT, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255), ytDlpPath VARCHAR(255), enableYoutube TINYINT, categoryPrices JSON, customCategories JSON, localLibraryPath VARCHAR(255))");
@@ -964,7 +958,6 @@ if ($action === 'admin_repair_db') {
         $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (id VARCHAR(50) PRIMARY KEY, userId VARCHAR(50), type VARCHAR(20), text VARCHAR(255), link VARCHAR(255), isRead TINYINT DEFAULT 0, timestamp BIGINT)");
         $pdo->exec("CREATE TABLE IF NOT EXISTS subscriptions (subscriberId VARCHAR(50), creatorId VARCHAR(50), createdAt BIGINT, PRIMARY KEY(subscriberId, creatorId))");
 
-        // Columns check
         try { $pdo->exec("ALTER TABLE transactions ADD COLUMN orderId VARCHAR(50) DEFAULT NULL"); } catch(Exception $e){}
         try { $pdo->exec("ALTER TABLE users ADD COLUMN defaultPrices JSON DEFAULT NULL"); } catch(Exception $e){}
         
@@ -973,8 +966,6 @@ if ($action === 'admin_repair_db') {
         respond(false, null, $e->getMessage());
     }
 }
-
-// --- EXTERNAL SEARCH & CLEANER ---
 
 if ($action === 'search_external') {
     $query = urlencode($input['query']);
@@ -1022,8 +1013,7 @@ if ($action === 'admin_smart_cleaner_preview') {
     $safeTime = $days * 86400;
 
     foreach ($videos as $v) {
-        if ($now - $v['createdAt'] < $safeTime) continue; // Safe harbor
-        // Score: Likes * 5 + Views - Dislikes * 10
+        if ($now - $v['createdAt'] < $safeTime) continue; 
         $score = ($v['likes'] * 5) + $v['views'] - ($v['dislikes'] * 10);
         $v['score'] = $score;
         $candidates[] = $v;
@@ -1118,6 +1108,15 @@ if ($action === 'get_subscriptions') {
     respond(true, $stmt->fetchAll(PDO::FETCH_COLUMN));
 }
 
-// Fallback
+if ($action === 'process_queue') {
+    // Placeholder for background processing trigger
+    respond(true, ['processed' => 0, 'message' => 'Cola procesada (Mock)']);
+}
+
+if ($action === 'server_import_video') {
+    // Placeholder for server-side download
+    respond(true);
+}
+
 respond(false, null, 'Acción inválida');
 ?>
