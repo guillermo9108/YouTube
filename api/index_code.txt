@@ -1,4 +1,3 @@
-
 <?php
 ob_start();
 ini_set('display_errors', 0);
@@ -411,7 +410,7 @@ if ($action === 'admin_repair_db') {
         // Safe migrations for updates
         try { $pdo->exec("ALTER TABLE transactions ADD COLUMN orderId VARCHAR(50) DEFAULT NULL"); } catch(Exception $e){}
         try { $pdo->exec("ALTER TABLE users ADD COLUMN defaultPrices JSON DEFAULT NULL"); } catch(Exception $e){}
-        try { $pdo->exec("ALTER TABLE users ADD COLUMN watchLater JSON DEFAULT NULL"); } catch(Exception $e){} // CRITICAL FIX
+        try { $pdo->exec("ALTER TABLE users ADD COLUMN watchLater JSON DEFAULT NULL"); } catch(Exception $e){} 
         try { $pdo->exec("ALTER TABLE marketplace_items ADD COLUMN stock INT DEFAULT 1"); } catch(Exception $e){}
         try { $pdo->exec("ALTER TABLE marketplace_items ADD COLUMN discountPercent INT DEFAULT 0"); } catch(Exception $e){}
         try { $pdo->exec("ALTER TABLE marketplace_items ADD COLUMN salesCount INT DEFAULT 0"); } catch(Exception $e){}
@@ -419,6 +418,10 @@ if ($action === 'admin_repair_db') {
         // Fix for the reported error: Ensure marketplace_orders has 'items' and 'shippingData'
         try { $pdo->exec("ALTER TABLE marketplace_orders ADD COLUMN items JSON"); } catch(Exception $e){}
         try { $pdo->exec("ALTER TABLE marketplace_orders ADD COLUMN shippingData JSON"); } catch(Exception $e){}
+        
+        // NEW: Fix for missing 'status' column in marketplace tables
+        try { $pdo->exec("ALTER TABLE marketplace_orders ADD COLUMN status VARCHAR(20) DEFAULT 'COMPLETED'"); } catch(Exception $e){}
+        try { $pdo->exec("ALTER TABLE marketplace_items ADD COLUMN status VARCHAR(20) DEFAULT 'ACTIVE'"); } catch(Exception $e){}
         
         // Columns for Smart Cleaner
         try { $pdo->exec("ALTER TABLE videos ADD COLUMN views INT DEFAULT 0"); } catch(Exception $e){}

@@ -4,7 +4,7 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/db';
 import { useNavigate } from '../components/Router';
-import { Trash2, Plus, Minus, ArrowRight, Loader2, CreditCard, History, ShoppingBag } from 'lucide-react';
+import { Trash2, Plus, Minus, ArrowRight, Loader2, CreditCard, History, ShoppingBag, AlertCircle } from 'lucide-react';
 
 export default function Cart() {
   const { items, updateQuantity, removeFromCart, cartTotal, clearCart } = useCart();
@@ -53,7 +53,11 @@ export default function Cart() {
           refreshUser();
           navigate('/profile?tab=ORDERS');
       } catch (e: any) {
-          alert("Falló el pago: " + e.message);
+          let msg = e.message;
+          if (msg.includes('Column not found')) {
+              msg = "Error de Sistema: La base de datos necesita mantenimiento. Contacta al administrador.";
+          }
+          alert("Falló el pago: " + msg);
       } finally {
           setProcessing(false);
       }
