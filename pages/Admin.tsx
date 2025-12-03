@@ -1,7 +1,3 @@
-
-
-
-
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video } from '../types';
@@ -91,7 +87,7 @@ export default function Admin() {
   const handleCleanup = async () => {
       if(confirm("Esto eliminará videos de la base de datos que no tengan archivos. ¿Continuar?")) {
           try {
-              const res = await db.adminCleanupVideos();
+              const res = await db.adminCleanupVideos() as { deleted: number };
               alert(`Limpieza completa. Eliminados ${res.deleted} videos rotos.`);
           } catch(e: any) {
               alert("Error de limpieza: " + e.message);
@@ -104,7 +100,7 @@ export default function Admin() {
        setProcessingQueue(true);
        setProcessResult('');
        try {
-         const res = await db.triggerQueueProcessing();
+         const res = await db.triggerQueueProcessing() as { message: string };
          setProcessResult(res.message);
          loadData();
          setTimeout(() => setProcessingQueue(false), 3000);
@@ -204,7 +200,7 @@ export default function Admin() {
       
       try {
           const ids = cleanerPreview.map(v => v.id);
-          const res = await db.executeSmartCleaner(ids);
+          const res = await db.executeSmartCleaner(ids) as { deleted: number };
           alert(`Eliminados ${res.deleted} videos exitosamente.`);
           setCleanerPreview([]);
           setCleanerStats({ totalVideos: 0, videosToDelete: 0, spaceReclaimed: '0 MB' });
