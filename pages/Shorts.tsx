@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2 } from 'lucide-react';
 import { db } from '../services/db';
@@ -91,46 +85,34 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
       }
   }, [isActive, isUnlocked, user, video.price, purchasing]);
 
-  // Handle Play/Pause & Cleanup
+  // Handle Play/Pause
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    if (isActive) {
-        // Active Slide
-        if (isUnlocked) {
-            const playPromise = el.play();
-            if (playPromise !== undefined) {
-                playPromise
-                .then(() => {
-                    setIsMuted(el.muted);
-                    setIsBuffering(false);
-                })
-                .catch(() => {
-                    // Autoplay blocked, mute and retry
-                    el.muted = true;
-                    setIsMuted(true);
-                    el.play().catch(() => {});
-                });
-            }
+    if (isActive && isUnlocked) {
+        // Active Slide -> Play
+        const playPromise = el.play();
+        if (playPromise !== undefined) {
+            playPromise
+            .then(() => {
+                setIsMuted(el.muted);
+                setIsBuffering(false);
+            })
+            .catch(() => {
+                // Autoplay blocked, mute and retry
+                el.muted = true;
+                setIsMuted(true);
+                el.play().catch(() => {});
+            });
         }
     } else {
-        // Inactive Slide - PAUSE AND MUTE IMMEDIATELY
+        // Inactive Slide -> Pause only
+        // Do NOT remove src here, or it will flash black when scrolling back
         el.pause();
-        el.muted = true; // Ensure no ghost audio
-        el.currentTime = 0; // Reset to start
+        el.currentTime = 0; 
     }
-    
-    // Strict Cleanup for MEMORY
-    return () => {
-        if (el) {
-            el.pause();
-            el.muted = true;
-            el.removeAttribute('src'); // Force drop buffer
-            el.load(); // Reset media element
-        }
-    };
-  }, [isActive, isUnlocked, shouldLoad]);
+  }, [isActive, isUnlocked]);
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
@@ -177,7 +159,7 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
     setNewComment('');
   };
 
-  // If not in window, render placeholder to keep scroll height correct but save memory
+  // If not in window (virtualization), render placeholder to keep scroll height correct but save memory/gpu
   if (!shouldLoad) {
       return (
           <div className="w-full h-full snap-start snap-always shrink-0 bg-black flex items-center justify-center relative">

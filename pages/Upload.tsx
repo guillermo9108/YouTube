@@ -8,20 +8,24 @@ import { db } from '../services/db';
 
 // Helper to calculate image brightness
 const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    let r, g, b, avg;
-    let colorSum = 0;
+    try {
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+        let r, g, b, avg;
+        let colorSum = 0;
 
-    for (let x = 0, len = data.length; x < len; x += 4) {
-        r = data[x];
-        g = data[x + 1];
-        b = data[x + 2];
-        avg = Math.floor((r + g + b) / 3);
-        colorSum += avg;
+        for (let x = 0, len = data.length; x < len; x += 4) {
+            r = data[x];
+            g = data[x + 1];
+            b = data[x + 2];
+            avg = Math.floor((r + g + b) / 3);
+            colorSum += avg;
+        }
+
+        return Math.floor(colorSum / (width * height));
+    } catch(e) {
+        return 255; // If fails, assume bright enough to avoid infinite seek loop
     }
-
-    return Math.floor(colorSum / (width * height));
 };
 
 export const generateThumbnail = async (file: File): Promise<{ thumbnail: File | null, duration: number }> => {
@@ -29,13 +33,13 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
     const video = document.createElement('video');
     const objectUrl = URL.createObjectURL(file);
     
-    // Safety Timeout (5 seconds max per file)
+    // Safety Timeout (8 seconds max per file)
     const timeout = setTimeout(() => {
         // CRITICAL: Clean up memory even on timeout
         URL.revokeObjectURL(objectUrl);
         video.remove();
         resolve({ thumbnail: null, duration: 0 });
-    }, 5000);
+    }, 8000);
 
     video.preload = 'metadata';
     video.src = objectUrl;
@@ -43,17 +47,24 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
     video.playsInline = true;
 
     // Checkpoints to try if the frame is too dark (in percentage of duration)
-    const attemptPoints = [0, 0.15, 0.50]; 
+    const attemptPoints = [0.05, 0.20, 0.50]; 
     let currentAttempt = 0;
+    let isSeeking = false;
 
     const captureFrame = () => {
+        if (isSeeking) return; // Prevent double capture
         try {
             const width = video.videoWidth;
             const height = video.videoHeight;
+            
+            if (!width || !height) {
+                 // Metadata loaded but dimensions missing? Retrigger
+                 return; 
+            }
+
             const canvas = document.createElement('canvas');
             
             // OPTIMIZATION: Scale down to 640px max width.
-            // This saves ~75% RAM compared to 1280px, critical for mobile bulk uploads.
             if (width > 640) { 
                 const scale = 640 / width;
                 canvas.width = 640;
@@ -76,8 +87,8 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
             if (brightness < 20 && currentAttempt < attemptPoints.length - 1) {
                 currentAttempt++;
                 if (duration > 0) {
-                    const nextTime = Math.max(0.1, duration * attemptPoints[currentAttempt]);
-                    video.currentTime = nextTime;
+                    isSeeking = true;
+                    video.currentTime = Math.max(0.1, duration * attemptPoints[currentAttempt]);
                     return; // Wait for seeked event again
                 }
             }
@@ -88,7 +99,7 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
                     const thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
                     resolve({ thumbnail: thumbFile, duration });
                 } else {
-                    resolve({ thumbnail: null, duration: 0 });
+                    resolve({ thumbnail: null, duration: duration || 0 });
                 }
                 // CRITICAL: Cleanup immediately to free RAM
                 URL.revokeObjectURL(objectUrl);
@@ -96,21 +107,28 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
             }, 'image/jpeg', 0.70); // Lower quality for speed
 
         } catch (e) {
+            console.error("Frame capture error", e);
             clearTimeout(timeout);
             URL.revokeObjectURL(objectUrl);
             video.remove();
-            resolve({ thumbnail: null, duration: 0 });
+            resolve({ thumbnail: null, duration: video.duration || 0 });
         }
     };
 
     video.onloadedmetadata = () => {
         // Safe seek for very short videos
-        const seekPoint = Math.min(Math.max(0.1, video.duration * 0.1), 1.0);
+        const seekPoint = Math.min(Math.max(0.1, video.duration * 0.05), 1.0);
+        isSeeking = true;
         video.currentTime = seekPoint;
     };
 
-    video.onseeked = captureFrame;
-    video.onerror = () => {
+    video.onseeked = () => {
+        isSeeking = false;
+        captureFrame();
+    };
+
+    video.onerror = (e) => {
+        console.error("Video load error", e);
         clearTimeout(timeout);
         URL.revokeObjectURL(objectUrl);
         video.remove();
