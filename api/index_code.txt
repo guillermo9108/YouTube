@@ -397,7 +397,7 @@ if ($action === 'admin_smart_cleaner_preview') {
     $cat = $input['category']; $pct = $input['percentage']; $days = $input['safeHarborDays'];
     $sql = "SELECT * FROM videos" . ($cat !== 'ALL' ? " WHERE category = '$cat'" : ""); $vids = $pdo->query($sql)->fetchAll(); $cands = []; $safe = time() - ($days*86400);
     foreach($vids as $v) { if($v['createdAt'] > $safe) continue; $v['score'] = ($v['likes']*5) + $v['views'] - ($v['dislikes']*10); $cands[] = $v; }
-    usort($cands, fn($a,$b) => $a['score'] - $b['score']); respond(true, ['preview'=>array_slice($cands, 0, ceil(count($cands)*($pct/100))), 'stats'=>['videosToDelete'=>count($cands)]]);
+    usort($cands, function($a,$b) { return $a['score'] - $b['score']; }); respond(true, ['preview'=>array_slice($cands, 0, ceil(count($cands)*($pct/100))), 'stats'=>['videosToDelete'=>count($cands)]]);
 }
 if ($action === 'admin_smart_cleaner_execute') {
     $cnt = 0; foreach($input['videoIds'] as $id) {
