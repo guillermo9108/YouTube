@@ -175,7 +175,7 @@ export default function Home() {
             setShuffledMasterList(shuffled);
             
             // Generate Shorts Shelf (only shorts, max 15)
-            const shelf = shuffled.filter(v => v.category === VideoCategory.SHORTS || v.duration < 120).slice(0, 15);
+            const shelf = shuffled.filter(v => v.category === VideoCategory.SHORTS || Number(v.duration) < 120).slice(0, 15);
             setShortsShelf(shelf);
             
             if (user) {

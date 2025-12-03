@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/db';
-import { useNavigate } from '../components/Router';
+import { useNavigate, Link } from '../components/Router';
 import { Trash2, Plus, Minus, ArrowRight, Loader2, CreditCard, History, ShoppingBag, AlertCircle, Percent } from 'lucide-react';
 
 export default function Cart() {
@@ -74,9 +74,9 @@ export default function Cart() {
               <button onClick={() => navigate('/marketplace')} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-emerald-500 transition-all">
                   Ir a la Tienda
               </button>
-              <button onClick={() => navigate('/profile?tab=ORDERS')} className="bg-slate-800 text-slate-300 px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-700 transition-all">
+              <Link to="/profile?tab=ORDERS" className="bg-slate-800 text-slate-300 px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-700 transition-all">
                   <History size={18} /> Ver Mis Pedidos Pasados
-              </button>
+              </Link>
           </div>
       </div>
   );
@@ -87,12 +87,12 @@ export default function Cart() {
     <div className="max-w-2xl mx-auto pb-24">
        <div className="flex justify-between items-center mb-6">
            <h1 className="text-2xl font-bold text-white">Carrito de Compras</h1>
-           <button 
-              onClick={() => navigate('/profile?tab=ORDERS')} 
+           <Link 
+              to="/profile?tab=ORDERS" 
               className="text-xs font-bold text-slate-400 flex items-center gap-1 hover:text-white bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800"
            >
                <History size={14} /> Historial
-           </button>
+           </Link>
        </div>
 
        {step === 'REVIEW' && (
@@ -102,24 +102,29 @@ export default function Cart() {
                        const finalPrice = item.price * (1 - (item.discountPercent / 100));
                        return (
                        <div key={item.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex gap-4 items-center animate-in slide-in-from-bottom-2 duration-300">
-                           <div className="w-20 h-20 bg-slate-800 rounded-lg overflow-hidden shrink-0 relative group">
-                               {item.media[0].type === 'image' ? (
-                                   <img src={item.media[0].url} className="w-full h-full object-cover"/>
-                               ) : (
-                                   <div className="w-full h-full bg-slate-900 flex items-center justify-center"><ShoppingBag size={20} className="text-slate-600"/></div>
-                               )}
-                               {item.discountPercent > 0 && (
-                                   <div className="absolute top-0 left-0 bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br">-{item.discountPercent}%</div>
-                               )}
-                           </div>
-                           <div className="flex-1 min-w-0">
-                               <h3 className="font-bold text-white truncate text-sm md:text-base">{item.title}</h3>
-                               <p className="text-xs text-slate-400 mb-1">@{item.sellerName}</p>
-                               <div className="flex items-center gap-2">
-                                    <div className="text-emerald-400 font-bold font-mono">{finalPrice.toFixed(2)} $</div>
-                                    {item.discountPercent > 0 && <div className="text-slate-500 text-xs line-through">{item.price.toFixed(2)} $</div>}
+                           {/* Item Info wrapped in Link */}
+                           <Link to={`/marketplace/${item.id}`} className="flex gap-4 items-center flex-1 min-w-0 group">
+                               <div className="w-20 h-20 bg-slate-800 rounded-lg overflow-hidden shrink-0 relative">
+                                    {item.media[0].type === 'image' ? (
+                                        <img src={item.media[0].url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"/>
+                                    ) : (
+                                        <div className="w-full h-full bg-slate-900 flex items-center justify-center"><ShoppingBag size={20} className="text-slate-600"/></div>
+                                    )}
+                                    {item.discountPercent > 0 && (
+                                        <div className="absolute top-0 left-0 bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br">-{item.discountPercent}%</div>
+                                    )}
                                </div>
-                           </div>
+                               <div className="flex-1 min-w-0">
+                                    <h3 className="font-bold text-white truncate text-sm md:text-base group-hover:text-emerald-400 transition-colors">{item.title}</h3>
+                                    <p className="text-xs text-slate-400 mb-1">@{item.sellerName}</p>
+                                    <div className="flex items-center gap-2">
+                                            <div className="text-emerald-400 font-bold font-mono">{finalPrice.toFixed(2)} $</div>
+                                            {item.discountPercent > 0 && <div className="text-slate-500 text-xs line-through">{item.price.toFixed(2)} $</div>}
+                                    </div>
+                               </div>
+                           </Link>
+                           
+                           {/* Actions separated from Link */}
                            <div className="flex flex-col items-end gap-2">
                                <button onClick={() => removeFromCart(item.id)} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
                                <div className="flex items-center bg-slate-950 rounded-lg border border-slate-800">

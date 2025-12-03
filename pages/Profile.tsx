@@ -8,7 +8,7 @@ import { Video, Transaction, VideoCategory, Order } from '../types';
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
-  const { pathname } = useLocation(); // Use custom router hook
+  const { pathname } = useLocation(); // In HashRouter shim, this is the hash part (e.g. /profile?tab=ORDERS)
   
   const [bulkPrice, setBulkPrice] = useState<number>(1);
   const [showBulk, setShowBulk] = useState(false);
@@ -45,11 +45,14 @@ export default function Profile() {
       notes: ''
   });
 
-  // Check URL for Tab
+  // Check URL for Tab - Robust Check
   useEffect(() => {
+      // Handle ?tab=X in hash path
       if (pathname.includes('tab=ORDERS')) setTab('ORDERS');
       else if (pathname.includes('tab=SHIPPING')) setTab('SHIPPING');
       else if (pathname.includes('tab=PRICING')) setTab('PRICING');
+      else if (pathname.includes('tab=SECURITY')) setTab('SECURITY');
+      else if (pathname.includes('tab=OVERVIEW')) setTab('OVERVIEW');
   }, [pathname]);
 
   useEffect(() => {

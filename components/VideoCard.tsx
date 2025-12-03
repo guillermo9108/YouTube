@@ -42,8 +42,9 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   const isNew = (Date.now() - createdAtMs) < 24 * 60 * 60 * 1000;
   const [imgError, setImgError] = useState(false);
 
-  // Determine if it's a short for linking
-  const isShort = video.category === VideoCategory.SHORTS || video.duration <= 60;
+  // Robust Short detection: Force number casting and case-insensitive check if needed
+  const duration = Number(video.duration);
+  const isShort = video.category === VideoCategory.SHORTS || duration <= 60;
   const targetLink = isShort ? `/shorts?id=${video.id}` : `/watch/${video.id}`;
 
   return (
@@ -68,7 +69,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         {/* Duration Badge */}
         <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm flex items-center gap-1">
            {isShort && <Smartphone size={8} />}
-           {formatDuration(video.duration)}
+           {formatDuration(duration)}
         </div>
 
         {/* NEW Badge */}
