@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud, Clock, Trash2, ShieldCheck, ShoppingBag } from 'lucide-react';
+import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud, Clock, Trash2, ShieldCheck, ShoppingBag, Play } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -26,6 +26,7 @@ interface HomeSnapshot {
     videos: Video[];
     shuffledList: Video[];
     processedList: Video[];
+    shortsShelf: Video[];
     activeCategory: string;
     searchQuery: string;
     visibleCount: number;
@@ -37,9 +38,44 @@ interface HomeSnapshot {
 
 let homeSnapshot: HomeSnapshot | null = null;
 
+const ShortsShelf = ({ videos }: { videos: Video[] }) => {
+    if (videos.length === 0) return null;
+    return (
+        <div className="col-span-full py-2 mb-4">
+            <div className="flex items-center gap-2 mb-4 px-1">
+                <div className="p-1 bg-red-600 rounded text-white">
+                    <Smartphone size={16} strokeWidth={3} />
+                </div>
+                <h2 className="text-xl font-bold text-white tracking-tight">Shorts</h2>
+            </div>
+            <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide snap-x -mx-4 px-4 md:mx-0 md:px-0">
+                {videos.map(v => (
+                    <Link to={`/shorts?id=${v.id}`} key={v.id} className="relative w-36 md:w-40 aspect-[9/16] bg-slate-900 rounded-xl overflow-hidden shrink-0 snap-start group border border-slate-800 hover:border-slate-600 transition-all hover:scale-[1.02] shadow-lg">
+                        <img src={v.thumbnailUrl} alt={v.title} className="w-full h-full object-cover" loading="lazy" />
+                        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/90"></div>
+                        
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                             <div className="bg-black/40 backdrop-blur-md p-1 rounded-full text-white">
+                                 <Play size={12} fill="white" />
+                             </div>
+                        </div>
+
+                        <div className="absolute bottom-3 left-3 right-3">
+                             <h3 className="text-white text-sm font-bold line-clamp-2 leading-tight mb-1 drop-shadow-sm">{v.title}</h3>
+                             <p className="text-[10px] text-slate-300 font-medium">{v.views} vistas</p>
+                        </div>
+                    </Link>
+                ))}
+            </div>
+            <div className="h-px bg-slate-800/50 w-full mt-4"></div>
+        </div>
+    );
+};
+
 export default function Home() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [shuffledMasterList, setShuffledMasterList] = useState<Video[]>([]);
+  const [shortsShelf, setShortsShelf] = useState<Video[]>([]);
   
   // Store purchases and CHECKED statuses
   const [purchases, setPurchases] = useState<Set<string>>(new Set());
@@ -67,14 +103,14 @@ export default function Home() {
   const [showRecent, setShowRecent] = useState(false);
 
   const stateRef = useRef({
-      videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList
+      videos, shuffledMasterList, processedList, shortsShelf, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList
   });
 
   useEffect(() => {
       stateRef.current = {
-          videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList
+          videos, shuffledMasterList, processedList, shortsShelf, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList
       };
-  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList]);
+  }, [videos, shuffledMasterList, processedList, shortsShelf, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList]);
 
   // Debounce logic
   useEffect(() => {
@@ -111,6 +147,7 @@ export default function Home() {
         if (!isDirty && homeSnapshot) {
             setVideos(homeSnapshot.videos);
             setShuffledMasterList(homeSnapshot.shuffledList);
+            setShortsShelf(homeSnapshot.shortsShelf || []);
             setActiveCategory(homeSnapshot.activeCategory);
             setSearchQuery(homeSnapshot.searchQuery);
             setDebouncedSearch(homeSnapshot.searchQuery); 
@@ -137,6 +174,10 @@ export default function Home() {
             const shuffled = [...allVideos].sort(() => Math.random() - 0.5);
             setShuffledMasterList(shuffled);
             
+            // Generate Shorts Shelf (only shorts, max 15)
+            const shelf = shuffled.filter(v => v.category === VideoCategory.SHORTS || v.duration < 120).slice(0, 15);
+            setShortsShelf(shelf);
+            
             if (user) {
                 const activity = await db.getUserActivity(user.id);
                 setWatchedIds(activity.watched || []);
@@ -156,6 +197,7 @@ export default function Home() {
                 videos: s.videos,
                 shuffledList: s.shuffledMasterList,
                 processedList: s.processedList,
+                shortsShelf: s.shortsShelf,
                 activeCategory: s.activeCategory,
                 searchQuery: s.searchQuery,
                 visibleCount: s.visibleCount,
@@ -324,6 +366,14 @@ export default function Home() {
 
   const filteredRecent = recentSearches.filter(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
 
+  // Logic to show shorts shelf
+  // Only show on 'ALL' category, if no search query, and if we have shorts
+  const shouldShowShelf = activeCategory === 'ALL' && !searchQuery && shortsShelf.length > 0;
+  
+  // Split list to insert shelf
+  // Insert after the first 8 videos (2 rows on desktop)
+  const insertionIndex = 8;
+
   return (
     <div className="min-h-screen" ref={containerRef}>
       {/* Sidebar Overlay */}
@@ -456,13 +506,44 @@ export default function Home() {
          ) : (
             <>
              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-8 gap-x-4">
-                {displayList.map(video => (
+                {/* First Batch of Videos */}
+                {displayList.slice(0, shouldShowShelf ? insertionIndex : undefined).map(video => (
                   <VideoCard 
                     key={video.id} 
                     video={video} 
                     isUnlocked={isUnlocked(video.id, video.creatorId)}
                     isWatched={watchedIds.includes(video.id)}
                   />
+                ))}
+
+                {/* Shorts Shelf injected in the grid */}
+                {shouldShowShelf && <ShortsShelf videos={shortsShelf} />}
+
+                {/* Remaining Videos */}
+                {displayList.slice(shouldShowShelf ? insertionIndex : 0).map(video => {
+                    // Avoid duplicating items if shelf was not shown (the logic above handles slice)
+                    // If shelf shown, slice starts from insertionIndex.
+                    // If shelf NOT shown, we handled all items in the first map? No.
+                    // Correction:
+                    if (!shouldShowShelf) return null; // Logic is split above.
+                    return (
+                        <VideoCard 
+                            key={video.id} 
+                            video={video} 
+                            isUnlocked={isUnlocked(video.id, video.creatorId)}
+                            isWatched={watchedIds.includes(video.id)}
+                        />
+                    )
+                })}
+
+                {/* Fallback for when shelf is NOT shown, renders everything here */}
+                {!shouldShowShelf && displayList.map(video => (
+                     <VideoCard 
+                        key={video.id} 
+                        video={video} 
+                        isUnlocked={isUnlocked(video.id, video.creatorId)}
+                        isWatched={watchedIds.includes(video.id)}
+                    />
                 ))}
              </div>
              {visibleCount < processedList.length && (

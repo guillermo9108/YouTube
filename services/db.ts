@@ -1,3 +1,4 @@
+
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, Order } from '../types';
 
 const API_BASE = 'api';
@@ -174,9 +175,20 @@ class DatabaseService {
     }
   }
 
+  private enrichUser(user: User): User {
+      try {
+          const shipping = localStorage.getItem(`sp_shipping_${user.id}`);
+          if (shipping) {
+              user.shippingDetails = JSON.parse(shipping);
+          }
+      } catch (e) {}
+      return user;
+  }
+
   // --- Auth ---
   async login(username: string, password: string): Promise<User> {
-      return this.request('login', 'POST', { username, password });
+      const user = await this.request<User>('login', 'POST', { username, password });
+      return this.enrichUser(user);
   }
 
   async register(username: string, password: string, avatar?: File | null): Promise<User> {
@@ -188,11 +200,12 @@ class DatabaseService {
       const res = await fetch(`${API_BASE}/index.php?action=register`, { method: 'POST', body: fd });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
-      return json.data;
+      return this.enrichUser(json.data);
   }
 
   async getUser(id: string): Promise<User> {
-      return this.request(`get_user&id=${id}`);
+      const user = await this.request<User>(`get_user&id=${id}`);
+      return this.enrichUser(user);
   }
 
   async logout(userId: string) {
@@ -208,7 +221,16 @@ class DatabaseService {
 
   // --- Profile ---
   async updateUserProfile(userId: string, updates: Partial<User>) {
-      await this.request('update_user', 'POST', { userId, updates });
+      // Handle client-side fields separately to avoid backend errors
+      if (updates.shippingDetails) {
+          localStorage.setItem(`sp_shipping_${userId}`, JSON.stringify(updates.shippingDetails));
+          delete updates.shippingDetails; // Do not send to server
+      }
+
+      // If there are other updates left, send them to server
+      if (Object.keys(updates).length > 0) {
+          await this.request('update_user', 'POST', { userId, updates });
+      }
       this.invalidateCache(`get_user&id=${userId}`);
   }
 
@@ -448,6 +470,14 @@ class DatabaseService {
 
   async requestContent(userId: string, query: string, useLocalNetwork: boolean) {
       return this.request('request_content', 'POST', { userId, query, useLocalNetwork });
+  }
+
+  // NEW: Submit claim via request_content transport to alert admin
+  async submitOrderClaim(orderId: string, reason: string) {
+      // We retrieve user ID from localStorage since it's cleaner than passing it down everywhere if auth context isn't available
+      const userId = localStorage.getItem('sp_current_user_id') || 'unknown';
+      const query = `[RECLAMO] Orden ${orderId}: ${reason}`;
+      return this.request('request_content', 'POST', { userId, query, useLocalNetwork: false });
   }
 
   async deleteRequest(requestId: string) {

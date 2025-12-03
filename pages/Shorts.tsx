@@ -319,7 +319,7 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
                          <div>
                             <div className="flex items-baseline gap-2">
                                <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-400 hover:text-white">{c.username}</Link>
-                               <span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span>
+                               <span className="text-[10px] text-slate-600">{new Date(c.timestamp < 10000000000 ? c.timestamp * 1000 : c.timestamp).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-slate-200 mt-0.5">{c.text}</p>
                          </div>
@@ -356,22 +356,26 @@ export default function Shorts() {
   
   // Initialize
   useEffect(() => {
-    // Attempt to get cached videos first for instant load
-    const cached = localStorage.getItem('sp_cache_get_videos');
-    if (cached) {
-        try {
-            const parsed = JSON.parse(cached);
-            if (parsed.data) {
-                 const shorts = (parsed.data as Video[]).filter(v => v.duration < 180).sort(() => Math.random() - 0.5);
-                 setVideos(shorts);
-            }
-        } catch(e) {}
-    }
+    // Check for ID query param to start with specific video
+    const hash = window.location.hash;
+    const idMatch = hash.match(/\?id=([^&]+)/);
+    const startId = idMatch ? idMatch[1] : null;
 
     db.getAllVideos().then(all => {
-        const shorts = all.filter(v => v.duration < 180).sort(() => Math.random() - 0.5);
-        // Only update if significantly different to prevent reset
-        setVideos(prev => (prev.length === 0 ? shorts : prev));
+        let shorts = all.filter(v => v.duration < 180 || v.category === 'SHORTS');
+        
+        if (startId) {
+            const target = shorts.find(v => v.id === startId);
+            const others = shorts.filter(v => v.id !== startId).sort(() => Math.random() - 0.5);
+            if (target) {
+                // Put target first, then random rest
+                setVideos([target, ...others]);
+                return;
+            }
+        }
+        
+        // Fallback or default random sort
+        setVideos(shorts.sort(() => Math.random() - 0.5));
     });
   }, []);
 

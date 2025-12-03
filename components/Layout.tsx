@@ -1,8 +1,3 @@
-
-
-
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -151,7 +146,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                                             <div className="flex-1 min-w-0">
                                                 <p className={`text-sm leading-snug ${!n.isRead ? 'text-white font-semibold' : 'text-slate-400'}`}>{n.text}</p>
                                                 <span className="text-[10px] text-slate-600 block mt-1.5 flex items-center gap-1">
-                                                    <Clock size={10}/> {new Date(n.timestamp).toLocaleString()}
+                                                    <Clock size={10}/> {new Date(n.timestamp < 10000000000 ? n.timestamp * 1000 : n.timestamp).toLocaleString()}
                                                 </span>
                                             </div>
                                             {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 shrink-0 animate-pulse"></div>}

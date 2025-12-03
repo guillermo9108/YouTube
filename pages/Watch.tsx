@@ -1,7 +1,3 @@
-
-
-
-
 import React, { useEffect, useState, useRef } from 'react';
 import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info } from 'lucide-react';
 import { db } from '../services/db';
@@ -378,7 +374,7 @@ export default function Watch() {
                             <div>
                                 <div className="flex gap-2 items-baseline">
                                     <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-300 hover:underline">{c.username}</Link>
-                                    <span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span>
+                                    <span className="text-[10px] text-slate-600">{new Date(c.timestamp < 10000000000 ? c.timestamp * 1000 : c.timestamp).toLocaleDateString()}</span>
                                 </div>
                                 <p className="text-xs text-slate-400">{c.text}</p>
                             </div>

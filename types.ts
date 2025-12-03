@@ -15,6 +15,14 @@ export enum VideoCategory {
   OTHER = 'OTHER'
 }
 
+export interface ShippingDetails {
+  fullName: string;
+  phoneNumber: string;
+  address: string;
+  bankAccount?: string;
+  notes?: string;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -26,6 +34,7 @@ export interface User {
   sessionToken?: string; 
   avatarUrl?: string; 
   defaultPrices?: Record<string, number>; 
+  shippingDetails?: ShippingDetails;
 }
 
 export interface Video {
@@ -78,6 +87,7 @@ export interface Order {
     name: string;
     bankAccount?: string;
     phoneNumber?: string;
+    address?: string;
     notes?: string;
   };
   timestamp: number;

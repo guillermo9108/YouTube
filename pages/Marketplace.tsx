@@ -1,6 +1,3 @@
-
-
-
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/db';
 import { MarketplaceItem } from '../types';
@@ -86,7 +83,11 @@ export default function Marketplace() {
            </div>
        ) : (
            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-               {displayedItems.map(item => (
+               {displayedItems.map(item => {
+                   // Calculate Final Price for Display
+                   const finalPrice = item.price * (1 - (item.discountPercent / 100));
+
+                   return (
                    <Link to={`/marketplace/${item.id}`} key={item.id} className="group bg-slate-900 rounded-xl border border-slate-800 overflow-hidden hover:border-emerald-500/50 transition-colors relative">
                        <div className="aspect-square bg-slate-950 relative overflow-hidden">
                            {item.media.length > 0 ? (
@@ -108,12 +109,12 @@ export default function Marketplace() {
                                </div>
                            )}
 
-                           {/* Price Badge */}
+                           {/* Price Badge (Final Price) */}
                            <div className="absolute top-2 right-2 bg-emerald-500 text-emerald-950 font-black text-xs px-2 py-1 rounded shadow-sm">
-                               {item.price} $
+                               {finalPrice.toFixed(2)} $
                            </div>
                            
-                           {/* Sold Out Overlay (if status logic changes in backend to keep displayed) */}
+                           {/* Sold Out Overlay */}
                            {item.stock === 0 && (
                                <div className="absolute inset-0 bg-black/70 flex items-center justify-center font-bold text-white uppercase tracking-widest z-20">
                                    Agotado
@@ -137,7 +138,7 @@ export default function Marketplace() {
                            </div>
                        </div>
                    </Link>
-               ))}
+               )})}
            </div>
        )}
     </div>

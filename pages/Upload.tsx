@@ -459,15 +459,15 @@ export default function Upload() {
                                 </select>
                              </div>
                              
-                             {/* Individual Price Input */}
-                             <div className="relative w-20">
-                                <DollarSign size={10} className="absolute left-2 top-2 text-slate-500" />
+                             {/* Individual Price Input - Fixed visibility */}
+                             <div className="relative w-24">
+                                <DollarSign size={10} className="absolute left-2 top-2 text-slate-400" />
                                 <input 
                                     type="number" 
                                     min="0"
                                     value={item.price}
                                     onChange={(e) => updateField(item.id, 'price', parseInt(e.target.value) || 0)}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-amber-400 font-bold py-1 pl-5 pr-1 outline-none focus:border-indigo-500"
+                                    className="w-full bg-slate-800 border border-slate-700 rounded text-xs text-white font-bold py-1 pl-5 pr-1 outline-none focus:border-indigo-500 focus:bg-slate-700 transition-colors"
                                 />
                              </div>
 

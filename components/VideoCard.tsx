@@ -1,5 +1,3 @@
-
-
 import React, { useState } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
@@ -12,7 +10,11 @@ interface VideoCardProps {
 }
 
 const formatTimeAgo = (timestamp: number) => {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  // Fix: Normalizar timestamp de PHP (segundos) a JS (milisegundos)
+  // Si es menor a 10 billones (año 2286), asumimos que son segundos.
+  const timeMs = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
+
+  const seconds = Math.floor((Date.now() - timeMs) / 1000);
   let interval = seconds / 31536000;
   if (interval > 1) return "hace " + Math.floor(interval) + " años";
   interval = seconds / 2592000;
@@ -38,8 +40,11 @@ const formatDuration = (seconds: number) => {
 
 // React.memo to prevent re-renders of cards that didn't change when parent state updates
 const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched }) => {
+  // Normalizar createdAt para cálculo de "Nuevo"
+  const createdAtMs = video.createdAt < 10000000000 ? video.createdAt * 1000 : video.createdAt;
   // Check if video is "New" (less than 24 hours old)
-  const isNew = (Date.now() - video.createdAt) < 24 * 60 * 60 * 1000;
+  const isNew = (Date.now() - createdAtMs) < 24 * 60 * 60 * 1000;
+  
   const [imgError, setImgError] = useState(false);
 
   return (

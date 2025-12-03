@@ -1,12 +1,15 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Link } from '../components/Router';
+import { Link, useLocation } from '../components/Router';
 import { db } from '../services/db';
-import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, ShoppingBag } from 'lucide-react';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, ShoppingBag, Truck, AlertTriangle, MessageSquare, Send, X, Package } from 'lucide-react';
 import { Video, Transaction, VideoCategory, Order } from '../types';
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
+  const { pathname } = useLocation(); // Use custom router hook
+  
   const [bulkPrice, setBulkPrice] = useState<number>(1);
   const [showBulk, setShowBulk] = useState(false);
   const [autoLimit, setAutoLimit] = useState<number>(1);
@@ -16,9 +19,14 @@ export default function Profile() {
   
   // Orders
   const [orders, setOrders] = useState<{bought: Order[], sold: Order[]}>({bought: [], sold: []});
+  const [claimModal, setClaimModal] = useState<{isOpen: boolean, orderId: string, type: 'BOUGHT'|'SOLD'} | null>(null);
+  const [claimReason, setClaimReason] = useState('');
+  const [claimSubmitting, setClaimSubmitting] = useState(false);
 
+  // Tabs
+  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING' | 'ORDERS' | 'SHIPPING'>('OVERVIEW');
+  
   // Security Tab
-  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING' | 'ORDERS'>('OVERVIEW');
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
@@ -28,12 +36,37 @@ export default function Profile() {
   const [defaultPrices, setDefaultPrices] = useState<Record<string, number>>({});
   const [availableCategories, setAvailableCategories] = useState<string[]>(Object.values(VideoCategory));
 
+  // Shipping Tab
+  const [shipping, setShipping] = useState({
+      fullName: '',
+      phoneNumber: '',
+      address: '',
+      bankAccount: '',
+      notes: ''
+  });
+
+  // Check URL for Tab
+  useEffect(() => {
+      if (pathname.includes('tab=ORDERS')) setTab('ORDERS');
+      else if (pathname.includes('tab=SHIPPING')) setTab('SHIPPING');
+      else if (pathname.includes('tab=PRICING')) setTab('PRICING');
+  }, [pathname]);
+
   useEffect(() => {
     if (user) {
       setAutoLimit(user.autoPurchaseLimit);
       setDefaultPrices(user.defaultPrices || {});
       
-      // Async fetches
+      if (user.shippingDetails) {
+          setShipping({
+              fullName: user.shippingDetails.fullName || '',
+              phoneNumber: user.shippingDetails.phoneNumber || '',
+              address: user.shippingDetails.address || '',
+              bankAccount: user.shippingDetails.bankAccount || '',
+              notes: user.shippingDetails.notes || ''
+          });
+      }
+      
       Promise.all(user.watchLater.map(id => db.getVideo(id))).then(res => {
           setWatchLaterVideos(res.filter(v => !!v) as Video[]);
       });
@@ -42,7 +75,6 @@ export default function Profile() {
       db.getVideosByCreator(user.id).then(setMyVideos);
       db.getUserOrders(user.id).then(setOrders);
       
-      // Fetch custom categories
       db.getSystemSettings().then(s => {
           if (s.customCategories) {
               setAvailableCategories([...Object.values(VideoCategory), ...s.customCategories]);
@@ -74,6 +106,12 @@ export default function Profile() {
       alert("Preferencias de precios guardadas!");
   };
 
+  const saveShipping = async () => {
+      await db.updateUserProfile(user.id, { shippingDetails: shipping });
+      refreshUser();
+      alert("Datos de envío guardados. Se usarán automáticamente en el carrito.");
+  };
+
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
           const file = e.target.files[0];
@@ -100,20 +138,42 @@ export default function Profile() {
       }
   };
 
+  const openClaim = (orderId: string, type: 'BOUGHT'|'SOLD') => {
+      setClaimModal({ isOpen: true, orderId, type });
+      setClaimReason('');
+  };
+
+  const submitClaim = async () => {
+      if (!claimModal || !claimReason.trim()) return;
+      setClaimSubmitting(true);
+      try {
+          await db.submitOrderClaim(claimModal.orderId, claimReason);
+          alert("Reclamo enviado a administración. Revisarán el caso pronto.");
+          setClaimModal(null);
+      } catch(e: any) {
+          alert("Error al enviar reclamo: " + e.message);
+      } finally {
+          setClaimSubmitting(false);
+      }
+  };
+
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-6 pb-20 relative">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Mi Perfil</h2>
         <button onClick={logout} className="text-sm text-red-400 hover:text-red-300 underline">Cerrar Sesión</button>
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800 overflow-x-auto">
+      <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800 overflow-x-auto scrollbar-hide">
           <button onClick={() => setTab('OVERVIEW')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='OVERVIEW'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <UserIcon size={16}/> Resumen
           </button>
           <button onClick={() => setTab('ORDERS')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='ORDERS'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <ShoppingBag size={16}/> Pedidos
+          </button>
+          <button onClick={() => setTab('SHIPPING')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='SHIPPING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+              <Truck size={16}/> Envío
           </button>
           <button onClick={() => setTab('PRICING')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='PRICING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <Tag size={16}/> Precios
@@ -274,7 +334,7 @@ export default function Profile() {
                             {isSystem ? 'Depósito Admin' : (isIncoming ? 'Video Vendido' : 'Compra Video')}
                         </div>
                         <div className="text-xs text-slate-500">
-                            {new Date(tx.timestamp).toLocaleString()}
+                            {new Date(tx.timestamp < 10000000000 ? tx.timestamp * 1000 : tx.timestamp).toLocaleString()}
                         </div>
                         </div>
                         <div className={`font-mono font-bold text-sm ${isIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -290,27 +350,76 @@ export default function Profile() {
       </>
       )}
 
+      {tab === 'SHIPPING' && (
+          <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+              <div className="flex justify-between items-center mb-4">
+                  <div>
+                      <h3 className="font-bold text-white">Datos de Envío</h3>
+                      <p className="text-xs text-slate-400">Estos datos se rellenarán automáticamente en el carrito.</p>
+                  </div>
+                  <button onClick={saveShipping} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                      <Save size={16}/> Guardar
+                  </button>
+              </div>
+
+              <div className="space-y-4">
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nombre Completo</label>
+                      <input type="text" value={shipping.fullName} onChange={e => setShipping({...shipping, fullName: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="Juan Pérez" />
+                  </div>
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Dirección de Envío</label>
+                      <input type="text" value={shipping.address} onChange={e => setShipping({...shipping, address: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="Calle 123, Ciudad" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Teléfono Móvil</label>
+                          <input type="tel" value={shipping.phoneNumber} onChange={e => setShipping({...shipping, phoneNumber: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="+505..." />
+                      </div>
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Cuenta Bancaria (Opcional)</label>
+                          <input type="text" value={shipping.bankAccount} onChange={e => setShipping({...shipping, bankAccount: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="Para reembolsos" />
+                      </div>
+                  </div>
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas Predeterminadas</label>
+                      <textarea value={shipping.notes} onChange={e => setShipping({...shipping, notes: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="Ej: Llamar antes de entregar..." rows={2} />
+                  </div>
+              </div>
+          </div>
+      )}
+
       {tab === 'ORDERS' && (
           <div className="space-y-6">
               <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-                  <h3 className="font-bold text-white mb-4">Mis Compras</h3>
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Package size={20}/> Compras Realizadas</h3>
                   <div className="space-y-4">
-                      {orders.bought.length === 0 ? <p className="text-slate-500 text-sm">Aún no has comprado nada.</p> : orders.bought.map(order => (
-                          <div key={order.id} className="bg-slate-950 p-4 rounded-lg border border-slate-800">
-                              <div className="flex justify-between items-start mb-2">
+                      {orders.bought.length === 0 ? <p className="text-slate-500 text-sm italic">Aún no has comprado nada.</p> : orders.bought.map(order => (
+                          <div key={order.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative group">
+                              <div className="flex justify-between items-start mb-3">
                                   <div>
-                                      <div className="text-xs text-slate-500">Pedido #{order.id.slice(0,8)}</div>
-                                      <div className="text-xs text-slate-400">{new Date(order.timestamp).toLocaleString()}</div>
+                                      <div className="flex items-center gap-2">
+                                          <div className="text-xs font-bold bg-slate-800 px-2 py-0.5 rounded text-slate-400">#{order.id.slice(0,8)}</div>
+                                          <div className="text-[10px] bg-emerald-900/30 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase tracking-wide">Completado</div>
+                                      </div>
+                                      <div className="text-xs text-slate-500 mt-1">
+                                          {new Date(order.timestamp < 10000000000 ? order.timestamp * 1000 : order.timestamp).toLocaleString()}
+                                      </div>
                                   </div>
-                                  <div className="font-bold text-emerald-400">{order.totalAmount} Saldo</div>
+                                  <div className="font-black text-emerald-400 text-lg">{order.totalAmount} $</div>
                               </div>
-                              <div className="space-y-1">
+                              <div className="space-y-2 mb-3">
                                   {order.items.map(i => (
-                                      <div key={i.itemId} className="text-sm text-slate-300 flex justify-between">
-                                          <span>{i.quantity}x {i.title}</span>
-                                          <span>{i.price}</span>
+                                      <div key={i.itemId} className="text-sm text-slate-300 flex justify-between items-center bg-slate-900/50 p-2 rounded">
+                                          <span className="font-medium">{i.quantity}x {i.title}</span>
+                                          <span className="text-slate-500">{i.price}</span>
                                       </div>
                                   ))}
+                              </div>
+                              <div className="border-t border-slate-800 pt-3 flex justify-end">
+                                  <button onClick={() => openClaim(order.id, 'BOUGHT')} className="text-xs font-bold text-slate-500 hover:text-amber-400 flex items-center gap-1 transition-colors">
+                                      <AlertTriangle size={12}/> Reportar Problema
+                                  </button>
                               </div>
                           </div>
                       ))}
@@ -318,24 +427,33 @@ export default function Profile() {
               </div>
 
               <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-                  <h3 className="font-bold text-white mb-4">Mis Ventas</h3>
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Tag size={20}/> Ventas Realizadas</h3>
                    <div className="space-y-4">
-                      {orders.sold.length === 0 ? <p className="text-slate-500 text-sm">Aún no has vendido nada.</p> : orders.sold.map(order => (
-                          <div key={order.id} className="bg-slate-950 p-4 rounded-lg border border-slate-800">
-                              <div className="flex justify-between items-start mb-2">
+                      {orders.sold.length === 0 ? <p className="text-slate-500 text-sm italic">Aún no has vendido nada.</p> : orders.sold.map(order => (
+                          <div key={order.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                              <div className="flex justify-between items-start mb-3">
                                   <div>
-                                      <div className="text-xs text-slate-500">Pedido #{order.id.slice(0,8)}</div>
-                                      <div className="font-bold text-white text-sm">Comprador: {order.shippingData.name}</div>
+                                      <div className="flex items-center gap-2">
+                                          <div className="text-xs font-bold bg-slate-800 px-2 py-0.5 rounded text-slate-400">#{order.id.slice(0,8)}</div>
+                                          <div className="text-[10px] font-bold text-indigo-400">Comprador: {order.shippingData.name}</div>
+                                      </div>
+                                      <div className="text-xs text-slate-500 mt-1">
+                                          {new Date(order.timestamp < 10000000000 ? order.timestamp * 1000 : order.timestamp).toLocaleString()}
+                                      </div>
                                   </div>
-                                  <div className="font-bold text-emerald-400">+{order.totalAmount}</div>
+                                  <div className="font-black text-emerald-400 text-lg">+{order.totalAmount} $</div>
                               </div>
-                              <div className="bg-slate-900 p-2 rounded text-xs text-slate-400 mb-2">
-                                  <div>Móvil: {order.shippingData.phoneNumber || 'N/A'}</div>
-                                  <div>Notas: {order.shippingData.notes || 'Ninguna'}</div>
+                              
+                              <div className="bg-slate-900 p-3 rounded-lg text-xs text-slate-300 mb-3 border border-slate-800">
+                                  <div className="font-bold text-slate-500 uppercase mb-1 text-[10px]">Datos de Envío</div>
+                                  <div><span className="text-slate-500">Dirección:</span> {order.shippingData.address || 'N/A'}</div>
+                                  <div><span className="text-slate-500">Móvil:</span> {order.shippingData.phoneNumber || 'N/A'}</div>
+                                  {order.shippingData.notes && <div className="mt-1 text-amber-200/80 italic">Nota: "{order.shippingData.notes}"</div>}
                               </div>
-                              <div className="space-y-1 border-t border-slate-800 pt-2">
+
+                              <div className="space-y-1">
                                   {order.items.map(i => (
-                                      <div key={i.itemId} className="text-sm text-slate-300 flex justify-between">
+                                      <div key={i.itemId} className="text-sm text-slate-300 flex justify-between items-center">
                                           <span>{i.quantity}x {i.title}</span>
                                       </div>
                                   ))}
@@ -399,6 +517,41 @@ export default function Profile() {
                   {passMsg && <div className="text-xs font-bold text-indigo-400">{passMsg}</div>}
                   <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg">Actualizar Contraseña</button>
               </form>
+          </div>
+      )}
+
+      {/* Claim Modal */}
+      {claimModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setClaimModal(null)}></div>
+              <div className="bg-slate-900 w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl relative z-10 p-6 animate-in zoom-in-95 duration-200">
+                  <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2"><AlertTriangle className="text-amber-500"/> Reportar Pedido</h3>
+                      <button onClick={() => setClaimModal(null)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+                  </div>
+                  <p className="text-sm text-slate-400 mb-4">
+                      Describe el problema con el pedido <span className="text-white font-mono">#{claimModal.orderId.slice(0,8)}</span>. 
+                      La administración revisará el caso y contactará contigo.
+                  </p>
+                  
+                  <textarea 
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-amber-500 min-h-[100px] mb-4" 
+                    placeholder="Ej: No recibí el producto, llegó dañado, es una estafa..."
+                    value={claimReason}
+                    onChange={e => setClaimReason(e.target.value)}
+                  ></textarea>
+
+                  <div className="flex justify-end gap-3">
+                      <button onClick={() => setClaimModal(null)} className="px-4 py-2 rounded-lg text-slate-400 hover:text-white font-bold">Cancelar</button>
+                      <button 
+                        onClick={submitClaim} 
+                        disabled={claimSubmitting || !claimReason.trim()}
+                        className="px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold flex items-center gap-2 disabled:opacity-50"
+                      >
+                         <Send size={16}/> Enviar Reporte
+                      </button>
+                  </div>
+              </div>
           </div>
       )}
     </div>

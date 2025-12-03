@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, FileWarning, CheckSquare, Square } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, FileWarning, CheckSquare, Square, AlertTriangle, MessageSquare } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -16,7 +17,7 @@ export default function Admin() {
   const [processingQueue, setProcessingQueue] = useState(false);
   const [processResult, setProcessResult] = useState('');
   const [requests, setRequests] = useState<ContentRequest[]>([]);
-  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES' | 'LIBRARY'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES' | 'LIBRARY' | 'REQUESTS'>('USERS');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
 
   // Cleaner State
@@ -263,7 +264,15 @@ export default function Admin() {
       } catch(e) { alert("Error eliminando"); }
   };
 
+  const handleDeleteRequest = async (id: string) => {
+      if (!confirm("¿Eliminar/Archivar esta petición?")) return;
+      await db.deleteRequest(id);
+      loadData();
+  };
+
   const filteredUsers = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
+  const claimRequests = requests.filter(r => r.query.startsWith('[RECLAMO]'));
+  const contentRequests = requests.filter(r => !r.query.startsWith('[RECLAMO]'));
 
   // Categories list union
   const allCategories = settings ? [...Object.values(VideoCategory), ...(settings.customCategories || [])] : Object.values(VideoCategory);
@@ -300,6 +309,10 @@ export default function Admin() {
         </div>
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
            <button onClick={() => setActiveTab('USERS')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'USERS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Usuarios</button>
+           <button onClick={() => setActiveTab('REQUESTS')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 ${activeTab === 'REQUESTS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+               Peticiones
+               {claimRequests.length > 0 && <span className="bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">{claimRequests.length}</span>}
+           </button>
            <button onClick={() => setActiveTab('CONFIG')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CONFIG' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Config</button>
            <button onClick={() => setActiveTab('CATEGORIES')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CATEGORIES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cat. y Precios</button>
            <button onClick={() => setActiveTab('LIBRARY')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'LIBRARY' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Importar Librería</button>
@@ -307,6 +320,71 @@ export default function Admin() {
         </div>
       </div>
 
+      {activeTab === 'REQUESTS' && (
+          <div className="space-y-6">
+              {/* Claims Section */}
+              {claimRequests.length > 0 && (
+                  <div className="bg-slate-900 rounded-xl border border-red-900/50 overflow-hidden">
+                      <div className="bg-red-900/20 p-4 border-b border-red-900/30 flex items-center gap-2">
+                          <AlertTriangle className="text-red-500" size={20}/>
+                          <h3 className="font-bold text-red-200">Reclamos y Reportes ({claimRequests.length})</h3>
+                      </div>
+                      <div className="divide-y divide-slate-800">
+                          {claimRequests.map(req => (
+                              <div key={req.id} className="p-4 hover:bg-slate-800/50 transition-colors">
+                                  <div className="flex justify-between items-start mb-2">
+                                      <div className="flex items-center gap-2">
+                                          <UserIcon size={14} className="text-slate-500"/>
+                                          <span className="font-bold text-slate-300">{req.userId === 'admin' ? 'Sistema' : `Usuario: ${req.userId}`}</span>
+                                      </div>
+                                      <div className="text-xs text-slate-500">
+                                          {new Date(req.createdAt < 10000000000 ? req.createdAt * 1000 : req.createdAt).toLocaleString()}
+                                      </div>
+                                  </div>
+                                  <div className="bg-red-500/10 p-3 rounded-lg text-red-200 border border-red-500/10 mb-2 font-medium">
+                                      {req.query.replace('[RECLAMO]', '')}
+                                  </div>
+                                  <div className="flex justify-end">
+                                      <button onClick={() => handleDeleteRequest(req.id)} className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded flex items-center gap-1">
+                                          <CheckSquare size={12}/> Marcar Resuelto / Archivar
+                                      </button>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+              )}
+
+              <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+                  <div className="bg-slate-950 p-4 border-b border-slate-800">
+                      <h3 className="font-bold text-white flex items-center gap-2"><DownloadCloud size={18}/> Peticiones de Contenido ({contentRequests.length})</h3>
+                  </div>
+                  {contentRequests.length === 0 ? (
+                      <div className="p-8 text-center text-slate-500">No hay peticiones pendientes.</div>
+                  ) : (
+                      <div className="divide-y divide-slate-800">
+                          {contentRequests.map(req => (
+                              <div key={req.id} className="p-4 flex justify-between items-center hover:bg-slate-800/50">
+                                  <div>
+                                      <div className="font-bold text-white mb-1">{req.query}</div>
+                                      <div className="text-xs text-slate-500 flex items-center gap-2">
+                                          <span>Por: {req.userId}</span>
+                                          <span>•</span>
+                                          <span className={`px-1.5 py-0.5 rounded font-bold uppercase ${req.status === 'PENDING' ? 'bg-amber-500/20 text-amber-500' : 'bg-emerald-500/20 text-emerald-500'}`}>{req.status}</span>
+                                      </div>
+                                  </div>
+                                  <button onClick={() => handleDeleteRequest(req.id)} className="p-2 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded">
+                                      <Trash2 size={16}/>
+                                  </button>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
+      {/* The rest of the tabs remain the same, just keeping them in the render logic */}
       {activeTab === 'LIBRARY' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
