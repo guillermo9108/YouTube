@@ -1,4 +1,6 @@
 
+
+
 import React, { useState } from 'react';
 import { DownloadCloud, Search, Check, Loader2, Server, Globe, Clock, Trash2, Youtube, Image as ImageIcon, Layers } from 'lucide-react';
 import { db, VideoResult } from '../services/db';
@@ -39,9 +41,9 @@ export default function Requests() {
     try {
         const hits = await db.searchExternal(query, source);
         if (hits && hits.length > 0) setResults(hits);
-        else setError("No results found. Please check Admin API Keys configuration.");
+        else setError("No se encontraron resultados. Verifica la configuración de API Keys.");
     } catch (e: any) {
-        setError("Search failed: " + e.message);
+        setError("Búsqueda fallida: " + e.message);
     } finally {
         setLoadingSearch(false);
     }
@@ -66,7 +68,7 @@ export default function Requests() {
 
             // YOUTUBE SERVER SIDE IMPORT (Direct Trigger)
             if (source === 'YOUTUBE') {
-                setProgressMsg(`(${count}/${total}) Requesting server download...`);
+                setProgressMsg(`(${count}/${total}) Solicitando descarga al servidor...`);
                 await db.serverImportVideo(videoData.downloadUrl);
                 count++;
                 continue;
@@ -75,22 +77,22 @@ export default function Requests() {
             // STOCK CLIENT SIDE IMPORT (Prepare for Background Queue)
             const safeTitle = (videoData.title || query + ' ' + count).replace(/[^a-z0-9 \-_]/gi, '').substring(0, 50);
             setUploadPercent(0);
-            setProgressMsg(`(${count}/${total}) Downloading source...`);
+            setProgressMsg(`(${count}/${total}) Descargando fuente...`);
             
             // 1. Download Blob
             const response = await fetch(videoData.downloadUrl);
-            if (!response.ok) throw new Error(`Failed to download video file`);
+            if (!response.ok) throw new Error(`Fallo al descargar video`);
             const blob = await response.blob();
             const file = new File([blob], `${safeTitle}.mp4`, { type: 'video/mp4' });
             
             // 2. Generate Thumbnail & Duration
-            setProgressMsg(`(${count}/${total}) Generating Metadata...`);
+            setProgressMsg(`(${count}/${total}) Generando Metadatos...`);
             const { thumbnail, duration } = await generateThumbnail(file);
 
             // 3. Add to Queue Array
             uploadQueue.push({
                 title: safeTitle,
-                description: `Imported from ${videoData.source}. By ${videoData.author}.`,
+                description: `Importado de ${videoData.source}. Por ${videoData.author}.`,
                 price: 1,
                 category: VideoCategory.OTHER,
                 duration: duration || videoData.duration || 0,
@@ -103,14 +105,14 @@ export default function Requests() {
 
         // If we have items for the background queue
         if (uploadQueue.length > 0) {
-            setProgressMsg("Adding to background queue...");
+            setProgressMsg("Añadiendo a la cola en segundo plano...");
             await addToQueue(uploadQueue, user);
         }
 
-        alert(source === 'YOUTUBE' ? "Server import started!" : "Videos added to upload queue! You can browse while they upload.");
+        alert(source === 'YOUTUBE' ? "¡Importación de servidor iniciada!" : "¡Videos añadidos a la cola! Puedes navegar mientras se suben.");
         navigate('/');
      } catch (e: any) {
-         alert("Error during import: " + e.message);
+         alert("Error durante la importación: " + e.message);
      } finally {
          setProcessing(false);
          setProgressMsg('');
@@ -134,12 +136,12 @@ export default function Requests() {
           await db.requestContent(user.id, queueQuery, false);
           setQueueQuery('');
           loadMyRequests();
-          alert("Request added to server queue!");
-      } catch (e: any) { alert("Failed to request: " + e.message); }
+          alert("¡Petición añadida a la cola del servidor!");
+      } catch (e: any) { alert("Error al solicitar: " + e.message); }
   };
 
   const handleDeleteRequest = async (id: string) => {
-      if (!confirm("Remove this request?")) return;
+      if (!confirm("¿Eliminar esta petición?")) return;
       await db.deleteRequest(id);
       loadMyRequests();
   };
@@ -149,18 +151,18 @@ export default function Requests() {
       <div className="flex items-center justify-between">
          <div>
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-               <DownloadCloud className="text-indigo-400" /> Content Center
+               <DownloadCloud className="text-indigo-400" /> Centro de Contenido
             </h2>
-            <p className="text-slate-400 text-sm">Import content via Client or Server</p>
+            <p className="text-slate-400 text-sm">Importar contenido vía Cliente o Servidor</p>
          </div>
       </div>
 
       <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
           <button onClick={() => setActiveTab('INSTANT')} className={`flex-1 py-3 text-sm font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${activeTab === 'INSTANT' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
-             <Globe size={16}/> Instant Import
+             <Globe size={16}/> Importación Instantánea
           </button>
           <button onClick={() => setActiveTab('QUEUE')} className={`flex-1 py-3 text-sm font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${activeTab === 'QUEUE' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
-             <Server size={16}/> Server Queue
+             <Server size={16}/> Cola del Servidor
           </button>
       </div>
 
@@ -178,9 +180,9 @@ export default function Requests() {
              
              <form onSubmit={handleSearch} className="relative">
                 <Search className="absolute left-4 top-3.5 text-slate-500" size={20} />
-                <input type="text" value={query} onChange={e => setQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder={source === 'YOUTUBE' ? "Search YouTube..." : "Search Stock Videos..."} />
+                <input type="text" value={query} onChange={e => setQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder={source === 'YOUTUBE' ? "Buscar en YouTube..." : "Buscar Videos de Stock..."} />
                 <button type="submit" disabled={loadingSearch} className="absolute right-2 top-2 bottom-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-lg font-bold disabled:opacity-50">
-                    {loadingSearch ? <Loader2 className="animate-spin" /> : 'Search'}
+                    {loadingSearch ? <Loader2 className="animate-spin" /> : 'Buscar'}
                 </button>
             </form>
           </div>
@@ -190,8 +192,8 @@ export default function Requests() {
           {results.length > 0 && (
              <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                   <span className="text-slate-400 text-sm">Found {results.length} results</span>
-                   {selectedVideos.length > 0 && <span className="text-indigo-400 font-bold text-sm">{selectedVideos.length} selected</span>}
+                   <span className="text-slate-400 text-sm">Encontrados {results.length} resultados</span>
+                   {selectedVideos.length > 0 && <span className="text-indigo-400 font-bold text-sm">{selectedVideos.length} seleccionados</span>}
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                    {results.map(vid => {
@@ -211,10 +213,10 @@ export default function Requests() {
                 </div>
                 <div className="sticky bottom-4 z-30">
                    <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4">
-                      <div className="text-sm text-slate-300">Ready to import <strong className="text-white">{selectedVideos.length}</strong> videos.</div>
+                      <div className="text-sm text-slate-300">Listo para importar <strong className="text-white">{selectedVideos.length}</strong> videos.</div>
                       <button onClick={processDownloads} disabled={selectedVideos.length === 0 || processing} className={`px-6 py-3 rounded-lg font-bold disabled:opacity-50 flex items-center gap-2 text-white ${source === 'YOUTUBE' ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
                          {processing ? <Loader2 className="animate-spin" size={20} /> : (source === 'YOUTUBE' ? <Server size={20}/> : <Layers size={20} />)}
-                         {processing ? 'Processing...' : (source === 'YOUTUBE' ? 'Server Import' : 'Queue Import')}
+                         {processing ? 'Procesando...' : (source === 'YOUTUBE' ? 'Importar Servidor' : 'Importar Cola')}
                       </button>
                    </div>
                 </div>
@@ -227,14 +229,14 @@ export default function Requests() {
       <div className="animate-in fade-in slide-in-from-right-4 duration-300">
            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 mb-6">
              <form onSubmit={handleQueueSubmit} className="flex gap-2">
-                <input type="text" value={queueQuery} onChange={e => setQueueQuery(e.target.value)} className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Request Topic..." />
-                <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-xl font-bold">Add to Queue</button>
+                <input type="text" value={queueQuery} onChange={e => setQueueQuery(e.target.value)} className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Tema de la petición..." />
+                <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-xl font-bold">Añadir a Cola</button>
             </form>
           </div>
           <div className="space-y-4">
-              <h3 className="font-bold text-white flex items-center gap-2"><Clock size={18}/> My Pending Requests</h3>
+              <h3 className="font-bold text-white flex items-center gap-2"><Clock size={18}/> Mis Peticiones Pendientes</h3>
               {loadingQueue ? <Loader2 className="animate-spin text-indigo-500" /> : (
-                  myRequests.length === 0 ? <div className="text-center p-8 bg-slate-900/30 rounded-xl border border-dashed border-slate-800 text-slate-500">No pending requests.</div> : (
+                  myRequests.length === 0 ? <div className="text-center p-8 bg-slate-900/30 rounded-xl border border-dashed border-slate-800 text-slate-500">No hay peticiones pendientes.</div> : (
                       <div className="space-y-3">
                           {myRequests.map(req => (
                               <div key={req.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
@@ -256,7 +258,7 @@ export default function Requests() {
          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-slate-900 p-8 rounded-2xl border border-slate-700 text-center max-w-sm w-full">
                <Loader2 size={48} className="text-emerald-500 animate-spin mx-auto mb-6" />
-               <h3 className="text-xl font-bold text-white mb-2">{source === 'YOUTUBE' ? 'Server Download' : 'Preparing Upload'}</h3>
+               <h3 className="text-xl font-bold text-white mb-2">{source === 'YOUTUBE' ? 'Descarga en Servidor' : 'Preparando Subida'}</h3>
                <p className="text-emerald-400 font-mono text-sm mb-4">{progressMsg}</p>
             </div>
          </div>

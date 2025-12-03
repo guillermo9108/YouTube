@@ -1,4 +1,6 @@
 
+
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/db';
 import { MarketplaceItem } from '../types';
@@ -46,21 +48,21 @@ export default function Marketplace() {
        <div className="flex justify-between items-center mb-6">
            <div>
                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                   <ShoppingBag className="text-emerald-400" /> Marketplace
+                   <ShoppingBag className="text-emerald-400" /> Tienda
                </h2>
-               <p className="text-slate-400 text-sm">Buy and sell items with Saldo</p>
+               <p className="text-slate-400 text-sm">Compra y vende artículos con Saldo</p>
            </div>
            <Link to="/marketplace/create" className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-emerald-900/20 transition-all active:scale-95">
-               <Plus size={18} /> Sell Item
+               <Plus size={18} /> Vender Artículo
            </Link>
        </div>
 
        {/* Smart Filters */}
        <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
-           <button onClick={() => setFilter('ALL')} className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-bold transition-colors border ${filter === 'ALL' ? 'bg-white text-black border-white' : 'bg-slate-900 text-slate-400 border-slate-700'}`}>All Items</button>
-           <button onClick={() => setFilter('FLASH_SALE')} className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-bold transition-colors border flex items-center gap-1 ${filter === 'FLASH_SALE' ? 'bg-amber-500 text-black border-amber-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}><Zap size={12}/> Flash Sale</button>
-           <button onClick={() => setFilter('BEST_SELLER')} className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-bold transition-colors border flex items-center gap-1 ${filter === 'BEST_SELLER' ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}><TrendingUp size={12}/> Best Sellers</button>
-           <button onClick={() => setFilter('SUPER_OFFER')} className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-bold transition-colors border flex items-center gap-1 ${filter === 'SUPER_OFFER' ? 'bg-red-500 text-white border-red-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}><Percent size={12}/> Super Offers</button>
+           <button onClick={() => setFilter('ALL')} className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-bold transition-colors border ${filter === 'ALL' ? 'bg-white text-black border-white' : 'bg-slate-900 text-slate-400 border-slate-700'}`}>Todos</button>
+           <button onClick={() => setFilter('FLASH_SALE')} className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-bold transition-colors border flex items-center gap-1 ${filter === 'FLASH_SALE' ? 'bg-amber-500 text-black border-amber-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}><Zap size={12}/> Ventas Flash</button>
+           <button onClick={() => setFilter('BEST_SELLER')} className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-bold transition-colors border flex items-center gap-1 ${filter === 'BEST_SELLER' ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}><TrendingUp size={12}/> Más Vendidos</button>
+           <button onClick={() => setFilter('SUPER_OFFER')} className={`whitespace-nowrap px-4 py-2 rounded-full text-xs font-bold transition-colors border flex items-center gap-1 ${filter === 'SUPER_OFFER' ? 'bg-red-500 text-white border-red-500' : 'bg-slate-900 text-slate-400 border-slate-700'}`}><Percent size={12}/> Super Ofertas</button>
        </div>
 
        {/* Search Bar */}
@@ -68,7 +70,7 @@ export default function Marketplace() {
            <Search className="absolute left-4 top-3.5 text-slate-500" size={20} />
            <input 
              type="text" 
-             placeholder="Search items..." 
+             placeholder="Buscar artículos..." 
              value={search}
              onChange={e => setSearch(e.target.value)}
              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500" 
@@ -80,7 +82,7 @@ export default function Marketplace() {
        ) : displayedItems.length === 0 ? (
            <div className="text-center py-20 text-slate-500 flex flex-col items-center gap-4">
                <Tag size={48} className="opacity-50" />
-               <p>No active listings found for this filter.</p>
+               <p>No se encontraron artículos activos para este filtro.</p>
            </div>
        ) : (
            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -114,7 +116,7 @@ export default function Marketplace() {
                            {/* Sold Out Overlay (if status logic changes in backend to keep displayed) */}
                            {item.stock === 0 && (
                                <div className="absolute inset-0 bg-black/70 flex items-center justify-center font-bold text-white uppercase tracking-widest z-20">
-                                   Sold Out
+                                   Agotado
                                </div>
                            )}
                        </div>
@@ -130,7 +132,7 @@ export default function Marketplace() {
                                    <span className="text-xs text-slate-400 truncate max-w-[80px]">@{item.sellerName}</span>
                                </div>
                                {item.stock < 3 && item.stock > 0 && (
-                                   <span className="text-[9px] text-red-400 font-bold bg-red-900/20 px-1.5 rounded">Almost Gone</span>
+                                   <span className="text-[9px] text-red-400 font-bold bg-red-900/20 px-1.5 rounded">Quedan pocos</span>
                                )}
                            </div>
                        </div>

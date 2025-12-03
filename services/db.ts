@@ -1,15 +1,12 @@
-
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, Order } from '../types';
 
-// CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
 const API_BASE = 'api';
 
-// --- MOCK DATA FOR DEMO MODE ---
 const MOCK_VIDEOS: Video[] = [
   {
     id: 'demo_1',
-    title: 'Cyberpunk City Run',
-    description: 'A futuristic run through the neon streets.',
+    title: 'Demo Video',
+    description: 'Video de demostración.',
     price: 5,
     thumbnailUrl: 'https://images.unsplash.com/photo-1533907650686-705761a08656',
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
@@ -60,7 +57,6 @@ class DatabaseService {
     window.addEventListener('offline', () => { this.isOffline = true; });
   }
 
-  // --- CACHE SYSTEM ---
   private saveToCache(key: string, data: any) {
       const cacheItem = JSON.stringify({
           timestamp: Date.now(),
@@ -143,11 +139,11 @@ class DatabaseService {
     if (this.isOffline && method === 'GET') {
         const cached = this.getFromCache<T>(cacheKey);
         if (cached) return cached;
-        throw new Error("No internet connection and no cached data available.");
+        throw new Error("Sin conexión a internet y sin datos en caché.");
     }
 
     if (this.isOffline && method === 'POST') {
-        throw new Error("You are offline. Action cannot be completed.");
+        throw new Error("Estás desconectado. No se puede completar la acción.");
     }
 
     if (method === 'GET' && this.pendingRequests.has(cacheKey)) {
@@ -186,25 +182,25 @@ class DatabaseService {
             if (!response.ok) {
                 try {
                     const errJson = JSON.parse(text);
-                    throw new Error(errJson.error || `Server Error: ${response.status}`);
+                    throw new Error(errJson.error || `Error Servidor: ${response.status}`);
                 } catch {
-                    throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+                    throw new Error(`Error Servidor: ${response.status} ${response.statusText}`);
                 }
             }
             
             if (!text || text.trim().length === 0) {
-                throw new Error("Empty response from API. Check PHP logs.");
+                throw new Error("Respuesta vacía de la API.");
             }
     
             let json;
             try {
                 json = JSON.parse(text);
             } catch (e) {
-                throw new Error(`Invalid JSON from API.`);
+                throw new Error(`JSON inválido de la API.`);
             }
             
             if (!json.success) {
-                throw new Error(json.error || 'Operation failed');
+                throw new Error(json.error || 'Operación fallida');
             }
     
             if (method === 'GET') {
@@ -218,7 +214,7 @@ class DatabaseService {
                 const cached = this.getFromCache<T>(cacheKey);
                 if (cached) return cached;
             }
-            if (!silent) console.error("API Request Failed:", endpoint, error);
+            if (!silent) console.error("Error API:", endpoint, error);
             throw error;
         } finally {
             if (method === 'GET') {
@@ -258,7 +254,7 @@ class DatabaseService {
     }
     try {
         const response = await fetch(`${API_BASE}/install.php?action=check`);
-        if (!response.ok) throw new Error("Backend unreachable");
+        if (!response.ok) throw new Error("Backend inaccesible");
         const json = await response.json();
         this.isInstalled = !(json.success && json.data.installed === false);
     } catch (e) {
@@ -336,9 +332,9 @@ class DatabaseService {
                 this.invalidateCache('index.php?action=get_videos');
                 this.setHomeDirty();
                 resolve(); 
-            } else reject(new Error(`Server error: ${xhr.status}`)); 
+            } else reject(new Error(`Error servidor: ${xhr.status}`)); 
         };
-        xhr.onerror = () => reject(new Error("Network connection error"));
+        xhr.onerror = () => reject(new Error("Error de red"));
         xhr.send(formData);
     });
   }
@@ -397,7 +393,7 @@ class DatabaseService {
   async triggerQueueProcessing(): Promise<{ processed: number, message: string }> { return this.request<{ processed: number, message: string }>('index.php?action=process_queue', 'POST', {}); }
   async searchExternal(query: string, source: 'STOCK' | 'YOUTUBE' = 'STOCK'): Promise<VideoResult[]> { return this.request<VideoResult[]>('index.php?action=search_external', 'POST', { query, source }); }
   async serverImportVideo(url: string): Promise<void> { await this.request('index.php?action=server_import_video', 'POST', { url }); this.invalidateCache('index.php?action=get_videos'); this.setHomeDirty(); }
-  async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> { try { return await this.request('index.php?action=toggle_subscribe', 'POST', { userId, creatorId }); } catch (e) { throw new Error("Could not update subscription."); } }
+  async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> { try { return await this.request('index.php?action=toggle_subscribe', 'POST', { userId, creatorId }); } catch (e) { throw new Error("No se pudo actualizar la suscripción."); } }
   async checkSubscription(userId: string, creatorId: string): Promise<boolean> { try { const res = await this.request<{isSubscribed: boolean}>(`index.php?action=check_subscription&userId=${userId}&creatorId=${creatorId}`); return res ? res.isSubscribed : false; } catch { return false; } }
   async getNotifications(userId: string): Promise<Notification[]> { return this.request<Notification[]>(`index.php?action=get_notifications&userId=${userId}`); }
   async markNotificationRead(notifId: string): Promise<void> { await this.request('index.php?action=mark_notification_read', 'POST', { notifId }); }
@@ -427,11 +423,6 @@ class DatabaseService {
 
   async editListing(itemId: string, sellerId: string, updates: Partial<MarketplaceItem>): Promise<void> {
       await this.request('index.php?action=edit_marketplace_item', 'POST', { itemId, sellerId, updates });
-  }
-
-  // Deprecated single buy - kept for backward compat if needed, but cart is preferred
-  async buyMarketplaceItem(buyerId: string, itemId: string): Promise<void> {
-      await this.request('index.php?action=buy_marketplace_item', 'POST', { buyerId, itemId });
   }
 
   async checkoutCart(buyerId: string, items: {id: string, quantity: number}[], shippingData: any): Promise<void> {

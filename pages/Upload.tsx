@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -280,7 +282,7 @@ export default function Upload() {
 
   const removeFile = (index: number) => {
     if (isProcessingQueue) {
-        alert("Please wait for analysis to finish before removing items to avoid errors.");
+        alert("Por favor espera a que termine el análisis antes de eliminar items para evitar errores.");
         return;
     }
 
@@ -338,15 +340,15 @@ export default function Upload() {
     <div className="max-w-4xl mx-auto">
       <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
         <UploadIcon className="text-indigo-500" />
-        Upload Content
+        Subir Contenido
       </h2>
 
       {isUploading && (
           <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 p-4 rounded-xl mb-6 flex items-center gap-3">
               <Loader2 className="animate-spin" />
               <div>
-                  <div className="font-bold">Upload in progress</div>
-                  <div className="text-xs opacity-80">You can add more files to the queue.</div>
+                  <div className="font-bold">Subida en progreso</div>
+                  <div className="text-xs opacity-80">Puedes añadir más archivos a la cola.</div>
               </div>
           </div>
       )}
@@ -360,8 +362,8 @@ export default function Upload() {
                 {isProcessingQueue ? (
                     <>
                         <Loader2 size={32} className="text-indigo-500 animate-spin" />
-                        <span className="text-slate-400 text-xs mt-2 font-bold">Processing...</span>
-                        <span className="text-slate-500 text-[10px]">Queue: {queueProgress.current} / {queueProgress.total}</span>
+                        <span className="text-slate-400 text-xs mt-2 font-bold">Procesando...</span>
+                        <span className="text-slate-500 text-[10px]">Cola: {queueProgress.current} / {queueProgress.total}</span>
                         <div className="w-20 h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
                            <div className="h-full bg-indigo-500 transition-all" style={{ width: `${queueProgress.total > 0 ? (queueProgress.current / queueProgress.total) * 100 : 0}%`}}></div>
                         </div>
@@ -371,8 +373,8 @@ export default function Upload() {
                         <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-black/50">
                         <Plus size={24} className="text-indigo-400" />
                         </div>
-                        <span className="text-slate-400 text-sm font-medium">Add Videos</span>
-                        <span className="text-slate-600 text-xs">Smart Queue Active</span>
+                        <span className="text-slate-400 text-sm font-medium">Añadir Videos</span>
+                        <span className="text-slate-600 text-xs">Cola Inteligente Activa</span>
                     </>
                 )}
             </div>
@@ -380,26 +382,26 @@ export default function Upload() {
           
           {/* Global Settings */}
           <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-            <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><Layers size={14}/> Bulk Description</h3>
+            <h3 className="text-sm font-bold text-slate-300 mb-3 flex items-center gap-2"><Layers size={14}/> Descripción Masiva</h3>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
-              <textarea rows={3} value={desc} onChange={e => setDesc(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500 outline-none text-white resize-none" placeholder="Applies to all..." />
+              <label className="block text-xs font-medium text-slate-500 mb-1">Descripción</label>
+              <textarea rows={3} value={desc} onChange={e => setDesc(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500 outline-none text-white resize-none" placeholder="Aplica para todos..." />
             </div>
-            <p className="text-[10px] text-slate-500 mt-2 italic">Note: Prices are auto-set based on category. You can adjust them individually.</p>
+            <p className="text-[10px] text-slate-500 mt-2 italic">Nota: Los precios se ajustan automáticamente según la categoría. Puedes editarlos individualmente.</p>
           </div>
         </div>
 
         <div className="md:col-span-2">
            <form onSubmit={handleSubmit} className="bg-slate-900 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col h-full max-h-[600px]">
               <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
-                 <h3 className="font-bold text-slate-200">Selected ({files.length})</h3>
-                 {files.length > 0 && !isProcessingQueue && <button type="button" onClick={() => { setFiles([]); setTitles([]); setThumbnails([]); setDurations([]); setCategories([]); setPrices([]); }} className="text-xs text-red-400 hover:text-red-300">Clear All</button>}
+                 <h3 className="font-bold text-slate-200">Seleccionados ({files.length})</h3>
+                 {files.length > 0 && !isProcessingQueue && <button type="button" onClick={() => { setFiles([]); setTitles([]); setThumbnails([]); setDurations([]); setCategories([]); setPrices([]); }} className="text-xs text-red-400 hover:text-red-300">Borrar Todo</button>}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {files.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 py-10">
                      <FileVideo size={48} className="mb-2" />
-                     <p>No videos selected</p>
+                     <p>No hay videos seleccionados</p>
                   </div>
                 ) : (
                   files.map((file, idx) => (
@@ -418,7 +420,7 @@ export default function Upload() {
                          </div>
                        </div>
                        <div className="flex-1 min-w-0 space-y-2">
-                          <input type="text" value={titles[idx]} onChange={(e) => updateTitle(idx, e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-slate-700 focus:border-indigo-500 outline-none text-sm font-bold text-slate-200 p-0 pb-1 transition-colors" placeholder="Title" required />
+                          <input type="text" value={titles[idx]} onChange={(e) => updateTitle(idx, e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-slate-700 focus:border-indigo-500 outline-none text-sm font-bold text-slate-200 p-0 pb-1 transition-colors" placeholder="Título" required />
                           
                           <div className="flex items-center gap-2">
                              <div className="relative">
@@ -458,7 +460,7 @@ export default function Upload() {
                     disabled={isProcessingQueue || files.length === 0} 
                     className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all flex justify-center items-center gap-2 ${isProcessingQueue || files.length === 0 ? 'bg-slate-700 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-500 active:scale-95'}`}
                 >
-                  {isProcessingQueue ? <><Loader2 className="animate-spin" size={20} /> Processing Thumbnails ({queueProgress.current}/{queueProgress.total})...</> : `Publish ${files.length} Video${files.length !== 1 ? 's' : ''} in Background`}
+                  {isProcessingQueue ? <><Loader2 className="animate-spin" size={20} /> Procesando Miniaturas ({queueProgress.current}/{queueProgress.total})...</> : `Publicar ${files.length} Video${files.length !== 1 ? 's' : ''} en Segundo Plano`}
                 </button>
               </div>
            </form>

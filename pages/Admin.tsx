@@ -1,5 +1,7 @@
 
 
+
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video } from '../types';
@@ -61,11 +63,11 @@ export default function Admin() {
 
   const handleAddCredit = async (targetId: string, username: string) => {
     if (!currentUser) return;
-    if (confirm(`Add ${amount} Saldo to ${username}?`)) {
+    if (confirm(`¿Añadir ${amount} Saldo a ${username}?`)) {
       try {
         await db.adminAddBalance(currentUser.id, targetId, amount);
         loadData();
-        alert(`Successfully added ${amount} Saldo.`);
+        alert(`Se añadieron ${amount} Saldo.`);
       } catch (e: any) {
         alert(e.message);
       }
@@ -73,13 +75,13 @@ export default function Admin() {
   };
 
   const handleRepairDb = async () => {
-    if (confirm("This will attempt to create any missing tables. Continue?")) {
+    if (confirm("Esto intentará crear las tablas faltantes. ¿Continuar?")) {
       setRepairing(true);
       try {
          await db.adminRepairDb();
-         alert("Database schema updated successfully.");
+         alert("Esquema de base de datos actualizado.");
       } catch (e: any) {
-         alert("Repair failed: " + e.message);
+         alert("Error en reparación: " + e.message);
       } finally {
          setRepairing(false);
       }
@@ -87,18 +89,18 @@ export default function Admin() {
   };
 
   const handleCleanup = async () => {
-      if(confirm("This will delete videos from database that have missing files. Continue?")) {
+      if(confirm("Esto eliminará videos de la base de datos que no tengan archivos. ¿Continuar?")) {
           try {
               const res = await db.adminCleanupVideos();
-              alert(`Cleanup complete. Removed ${res.deleted} broken video entries.`);
+              alert(`Limpieza completa. Eliminados ${res.deleted} videos rotos.`);
           } catch(e: any) {
-              alert("Cleanup error: " + e.message);
+              alert("Error de limpieza: " + e.message);
           }
       }
   };
 
   const triggerDownload = async () => {
-     if(confirm("Force queue processing now? Server will attempt to download pending videos.")) {
+     if(confirm("¿Forzar procesamiento de cola? El servidor intentará descargar los videos pendientes.")) {
        setProcessingQueue(true);
        setProcessResult('');
        try {
@@ -107,7 +109,7 @@ export default function Admin() {
          loadData();
          setTimeout(() => setProcessingQueue(false), 3000);
        } catch (e: any) {
-         alert("Trigger failed: " + e.message);
+         alert("Error al activar: " + e.message);
          setProcessingQueue(false);
        }
      }
@@ -124,14 +126,14 @@ export default function Admin() {
           } else {
               await db.updateSystemSettings(settings);
           }
-          alert("Settings saved!");
-      } catch (e) { alert("Failed to save"); }
+          alert("Configuración guardada!");
+      } catch (e) { alert("Error al guardar"); }
   };
 
   const handleScanLibrary = async () => {
       if (!localPath.trim()) return;
       setScanning(true);
-      setScanLog(['Starting real-time scan...']);
+      setScanLog(['Iniciando escaneo en tiempo real...']);
       
       const cleanPath = localPath.trim();
       setLocalPath(cleanPath);
@@ -165,7 +167,7 @@ export default function Admin() {
       
       const current = settings.customCategories || [];
       if (current.includes(cleanName) || Object.values(VideoCategory).includes(cleanName as any)) {
-          alert("Category already exists");
+          alert("La categoría ya existe");
           return;
       }
 
@@ -179,7 +181,7 @@ export default function Admin() {
 
   const removeCustomCategory = (cat: string) => {
       if (!settings || !settings.customCategories) return;
-      if (!confirm(`Delete category ${cat}? This won't delete videos, but they will show as standard text.`)) return;
+      if (!confirm(`¿Eliminar categoría ${cat}? Esto no borrará los videos, pero se mostrarán como texto estándar.`)) return;
       
       const updated = {
           ...settings,
@@ -198,16 +200,16 @@ export default function Admin() {
   };
 
   const executeCleaner = async () => {
-      if (!confirm(`WARNING: This will permanently delete ${cleanerStats.videosToDelete} videos. This cannot be undone.\n\nType 'DELETE' to confirm.`)) return;
+      if (!confirm(`ADVERTENCIA: Esto eliminará permanentemente ${cleanerStats.videosToDelete} videos. No se puede deshacer.\n\nEscribe 'DELETE' para confirmar (en tu mente, solo pulsa OK).`)) return;
       
       try {
           const ids = cleanerPreview.map(v => v.id);
           const res = await db.executeSmartCleaner(ids);
-          alert(`Deleted ${res.deleted} videos successfully.`);
+          alert(`Eliminados ${res.deleted} videos exitosamente.`);
           setCleanerPreview([]);
           setCleanerStats({ totalVideos: 0, videosToDelete: 0, spaceReclaimed: '0 MB' });
       } catch (e: any) {
-          alert("Error executing cleaner: " + e.message);
+          alert("Error ejecutando limpiador: " + e.message);
       }
   };
 
@@ -225,15 +227,15 @@ export default function Admin() {
              <div className="bg-slate-900 p-8 rounded-2xl border border-slate-700 text-center max-w-sm w-full">
                  {processResult ? (
                      <>
-                        <div className="text-emerald-400 font-bold mb-4 text-xl">Completed!</div>
+                        <div className="text-emerald-400 font-bold mb-4 text-xl">¡Completado!</div>
                         <p className="text-slate-300 mb-6">{processResult}</p>
                      </>
                  ) : (
                      <>
                         <Loader2 size={48} className="text-indigo-500 animate-spin mx-auto mb-6" />
-                        <h3 className="text-xl font-bold text-white mb-2">Server Processing</h3>
-                        <p className="text-slate-400 mb-4 text-sm">Downloading videos from Pexels/Pixabay...</p>
-                        <p className="text-xs text-slate-500">This may take a minute. Do not close.</p>
+                        <h3 className="text-xl font-bold text-white mb-2">Procesando en Servidor</h3>
+                        <p className="text-slate-400 mb-4 text-sm">Descargando videos...</p>
+                        <p className="text-xs text-slate-500">Esto puede tomar un minuto. No cierres.</p>
                      </>
                  )}
              </div>
@@ -243,34 +245,34 @@ export default function Admin() {
       {/* Header */}
       <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white mb-1">Admin Dashboard</h2>
-          <p className="text-slate-400 text-sm">System Management</p>
+          <h2 className="text-xl font-bold text-white mb-1">Panel de Administración</h2>
+          <p className="text-slate-400 text-sm">Gestión del Sistema</p>
         </div>
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
-           <button onClick={() => setActiveTab('USERS')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'USERS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Users</button>
+           <button onClick={() => setActiveTab('USERS')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'USERS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Usuarios</button>
            <button onClick={() => setActiveTab('CONFIG')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CONFIG' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Config</button>
-           <button onClick={() => setActiveTab('CATEGORIES')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CATEGORIES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cat & Prices</button>
-           <button onClick={() => setActiveTab('LIBRARY')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'LIBRARY' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Library Import</button>
-           <button onClick={() => setActiveTab('CLEANER')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CLEANER' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cleaner</button>
+           <button onClick={() => setActiveTab('CATEGORIES')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CATEGORIES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cat. y Precios</button>
+           <button onClick={() => setActiveTab('LIBRARY')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'LIBRARY' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Importar Librería</button>
+           <button onClick={() => setActiveTab('CLEANER')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CLEANER' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'}`}>Limpiador</button>
         </div>
       </div>
 
       {activeTab === 'LIBRARY' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
-                  <h3 className="font-bold text-white flex items-center gap-2"><FolderSearch size={18}/> Local Library Scan</h3>
+                  <h3 className="font-bold text-white flex items-center gap-2"><FolderSearch size={18}/> Escaneo de Librería Local</h3>
                   <div className="p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-lg text-sm text-indigo-200/80 leading-relaxed">
-                      This tool recursively scans a folder on your NAS/Server for video files. It will:
+                      Esta herramienta escanea recursivamente una carpeta en tu NAS/Servidor en busca de archivos de video. Hará lo siguiente:
                       <ul className="list-disc pl-5 mt-2 space-y-1 text-xs">
-                          <li>Index videos without moving them (saves space/time).</li>
-                          <li>Intelligently detect <strong>Series</strong> (S01E01), <strong>Novelas</strong> (Capitulo 5), and <strong>Movies</strong>.</li>
-                          <li>Auto-import local cover images (jpg/png) if they match the video name.</li>
-                          <li>Enable streaming for files outside the web root.</li>
+                          <li>Indexar videos sin moverlos (ahorra espacio/tiempo).</li>
+                          <li>Detectar inteligentemente <strong>Series</strong> (S01E01), <strong>Novelas</strong> (Capitulo 5), y <strong>Películas</strong>.</li>
+                          <li>Auto-importar portadas locales (jpg/png) si coinciden con el nombre del video.</li>
+                          <li>Habilitar streaming para archivos fuera de la raíz web.</li>
                       </ul>
                   </div>
 
                   <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Server Directory Path</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta del Directorio del Servidor</label>
                       <input 
                         type="text" 
                         value={localPath}
@@ -278,7 +280,7 @@ export default function Admin() {
                         placeholder="/volume1/video/movies"
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 text-white font-mono text-sm"
                       />
-                      <p className="text-[10px] text-slate-500 mt-1">Example: <code>/var/www/html/videos</code> or <code>/volume1/video</code></p>
+                      <p className="text-[10px] text-slate-500 mt-1">Ejemplo: <code>/var/www/html/videos</code> o <code>/volume1/video</code></p>
                   </div>
 
                   <button 
@@ -287,16 +289,16 @@ export default function Admin() {
                     className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
                   >
                       {scanning ? <Loader2 className="animate-spin" size={20}/> : <FolderSearch size={20}/>}
-                      {scanning ? 'Scanning & Importing...' : 'Start Scan'}
+                      {scanning ? 'Escaneando e Importando...' : 'Iniciar Escaneo'}
                   </button>
               </div>
 
               <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 h-[500px] overflow-y-auto shadow-inner">
                   <div className="flex items-center gap-2 text-slate-500 mb-2 border-b border-slate-800 pb-2">
-                      <Terminal size={14}/> Scan Logs
+                      <Terminal size={14}/> Logs de Escaneo
                   </div>
                   {scanLog.length === 0 ? (
-                      <div className="text-slate-600 italic">Waiting to scan...</div>
+                      <div className="text-slate-600 italic">Esperando para escanear...</div>
                   ) : (
                       scanLog.map((line, i) => (
                           <div key={i} className={`mb-1 ${line.includes('ERROR') ? 'text-red-400' : (line.includes('Imported') ? 'text-emerald-400' : 'text-slate-300')}`}>
@@ -315,12 +317,12 @@ export default function Admin() {
               {/* Price Config */}
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
                   <div className="flex justify-between items-center mb-4">
-                      <h3 className="font-bold text-white flex items-center gap-2"><Tag size={18}/> Global Base Prices</h3>
+                      <h3 className="font-bold text-white flex items-center gap-2"><Tag size={18}/> Precios Base Globales</h3>
                       <button onClick={saveSettings} className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
-                          <Save size={14}/> Save
+                          <Save size={14}/> Guardar
                       </button>
                   </div>
-                  <p className="text-xs text-slate-500 mb-4">These prices will be suggested to users when they upload a video in these categories. Users can still override them.</p>
+                  <p className="text-xs text-slate-500 mb-4">Estos precios se sugerirán a los usuarios cuando suban un video en estas categorías. Los usuarios pueden cambiarlos.</p>
                   
                   <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
                       {allCategories.map(cat => {
@@ -329,11 +331,11 @@ export default function Admin() {
                             <div key={cat} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800">
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs font-bold text-slate-300 uppercase">{cat.replace('_', ' ')}</span>
-                                    {isCustom && <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 rounded">CUSTOM</span>}
+                                    {isCustom && <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 rounded">PERSONALIZADO</span>}
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <div className="flex items-center gap-2">
-                                        <span className="text-xs text-slate-500">Default:</span>
+                                        <span className="text-xs text-slate-500">Defecto:</span>
                                         <input 
                                             type="number" 
                                             min="0"
@@ -357,21 +359,21 @@ export default function Admin() {
 
               {/* Add New Category */}
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 h-fit">
-                  <h3 className="font-bold text-white flex items-center gap-2 mb-4"><PlusCircle size={18}/> Add Custom Category</h3>
+                  <h3 className="font-bold text-white flex items-center gap-2 mb-4"><PlusCircle size={18}/> Añadir Categoría Personalizada</h3>
                   <div className="flex gap-2 mb-4">
                       <input 
                         type="text" 
                         value={newCatName}
                         onChange={e => setNewCatName(e.target.value)}
                         className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white placeholder-slate-500 uppercase font-bold text-sm"
-                        placeholder="NEW_CATEGORY_NAME"
+                        placeholder="NUEVA_CATEGORIA"
                       />
-                      <button onClick={addCustomCategory} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold text-sm">Add</button>
+                      <button onClick={addCustomCategory} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold text-sm">Añadir</button>
                   </div>
                   <div className="bg-indigo-900/10 border border-indigo-500/20 p-4 rounded-lg">
-                      <h4 className="text-xs font-bold text-indigo-300 mb-1">How it works</h4>
+                      <h4 className="text-xs font-bold text-indigo-300 mb-1">Cómo funciona</h4>
                       <p className="text-xs text-indigo-200/70 leading-relaxed">
-                          Adding a category here makes it available in the upload dropdown for all users. You can also set a base price for it on the left panel.
+                          Añadir una categoría aquí la hace disponible en el menú desplegable de subida para todos los usuarios.
                       </p>
                   </div>
               </div>
@@ -381,22 +383,22 @@ export default function Admin() {
       {activeTab === 'CLEANER' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6">
-                  <h3 className="font-bold text-white flex items-center gap-2"><Brush size={18} /> Cleaner Configuration</h3>
+                  <h3 className="font-bold text-white flex items-center gap-2"><Brush size={18} /> Configuración del Limpiador</h3>
                   <p className="text-xs text-slate-400">
-                      The Smart Cleaner algorithm calculates a score for each video based on Views, Likes, Dislikes, and Age.
-                      Videos with the lowest scores (least popular/oldest) will be selected for deletion.
+                      El algoritmo calcula una puntuación para cada video basada en Vistas, Likes, Dislikes y Antigüedad.
+                      Los videos con menor puntuación serán seleccionados para eliminación.
                   </p>
                   
                   <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Target Category</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Categoría Objetivo</label>
                       <select value={cleanerCategory} onChange={e => setCleanerCategory(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
-                          <option value="ALL">All Categories</option>
+                          <option value="ALL">Todas las Categorías</option>
                           {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                   </div>
 
                   <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Delete Percentage: {cleanerPercent}%</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Porcentaje a Eliminar: {cleanerPercent}%</label>
                       <input 
                         type="range" 
                         min="5" 
@@ -405,11 +407,11 @@ export default function Admin() {
                         onChange={e => setCleanerPercent(parseInt(e.target.value))} 
                         className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                       />
-                      <p className="text-[10px] text-slate-500 mt-1">Selects the bottom {cleanerPercent}% of videos by quality score.</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Selecciona el {cleanerPercent}% inferior de videos.</p>
                   </div>
 
                   <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Minimum Age: {cleanerSafeDays} Days</label>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Antigüedad Mínima: {cleanerSafeDays} Días</label>
                       <input 
                         type="range" 
                         min="0" 
@@ -418,17 +420,17 @@ export default function Admin() {
                         onChange={e => setCleanerSafeDays(parseInt(e.target.value))} 
                         className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                       />
-                      <p className="text-[10px] text-slate-500 mt-1">Videos newer than {cleanerSafeDays} days will NOT be deleted (Safe Harbor). Set to 0 to clean immediate junk.</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Videos más nuevos de {cleanerSafeDays} días NO serán eliminados.</p>
                   </div>
 
                   <button onClick={previewCleaner} disabled={loadingCleaner} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                      {loadingCleaner ? <Loader2 className="animate-spin"/> : <Search size={18}/>} Preview Candidates
+                      {loadingCleaner ? <Loader2 className="animate-spin"/> : <Search size={18}/>} Previsualizar Candidatos
                   </button>
               </div>
 
               <div className="lg:col-span-2 bg-slate-900 p-6 rounded-xl border border-slate-800 flex flex-col h-[600px]">
                   <div className="flex justify-between items-center mb-4">
-                      <h3 className="font-bold text-white">Candidates for Deletion</h3>
+                      <h3 className="font-bold text-white">Candidatos para Eliminación</h3>
                       {cleanerStats.videosToDelete > 0 && (
                           <span className="text-xs bg-red-900/30 text-red-400 px-2 py-1 rounded font-mono">
                               {cleanerStats.videosToDelete} Videos (~{cleanerStats.spaceReclaimed})
@@ -439,17 +441,17 @@ export default function Admin() {
                   <div className="flex-1 overflow-y-auto border border-slate-800 rounded-lg bg-slate-950/50">
                       {cleanerPreview.length === 0 ? (
                           <div className="h-full flex items-center justify-center text-slate-500 text-sm">
-                              Run preview to see videos here.
+                              Ejecuta la previsualización para ver videos aquí.
                           </div>
                       ) : (
                           <table className="w-full text-left text-xs">
                               <thead className="bg-slate-900 text-slate-400 sticky top-0">
                                   <tr>
                                       <th className="p-3">Video</th>
-                                      <th className="p-3">Views</th>
+                                      <th className="p-3">Vistas</th>
                                       <th className="p-3">Likes</th>
                                       <th className="p-3">Dislikes</th>
-                                      <th className="p-3">Age (Days)</th>
+                                      <th className="p-3">Edad (Días)</th>
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-800">
@@ -473,7 +475,7 @@ export default function Admin() {
                         disabled={cleanerPreview.length === 0}
                         className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
                       >
-                          <Trash2 size={18}/> Confirm & Delete Permanently
+                          <Trash2 size={18}/> Confirmar y Eliminar Permanentemente
                       </button>
                   </div>
               </div>
@@ -483,106 +485,106 @@ export default function Admin() {
       {activeTab === 'CONFIG' && settings && (
          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6">
-                <h3 className="font-bold text-white flex items-center gap-2"><Settings size={18} /> Auto-Download Configuration</h3>
+                <h3 className="font-bold text-white flex items-center gap-2"><Settings size={18} /> Configuración de Auto-Descarga</h3>
                 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Start Time</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Inicio</label>
                         <input type="time" value={settings.downloadStartTime} onChange={e => setSettings({...settings, downloadStartTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"/>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">End Time</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Fin</label>
                         <input type="time" value={settings.downloadEndTime} onChange={e => setSettings({...settings, downloadEndTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"/>
                     </div>
                 </div>
 
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Batch Size (Videos per Run)</label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tamaño del Lote (Videos por ejecución)</label>
                     <input type="number" min="1" max="50" value={settings.batchSize} onChange={e => setSettings({...settings, batchSize: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"/>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Max Duration (Sec)</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Duración Máx (Seg)</label>
                         <input type="number" value={settings.maxDuration} onChange={e => setSettings({...settings, maxDuration: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"/>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Max Height (px)</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Altura Máx (px)</label>
                         <input type="number" placeholder="1080" value={settings.maxResolution} onChange={e => setSettings({...settings, maxResolution: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"/>
                     </div>
                 </div>
 
                 <button onClick={saveSettings} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                    <Save size={18} /> Save Settings
+                    <Save size={18} /> Guardar Configuración
                 </button>
              </div>
 
              <div className="space-y-6">
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
                     <div className="flex items-center justify-between">
-                         <h3 className="font-bold text-white flex items-center gap-2"><Key size={18} /> Server API Keys</h3>
-                         <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded">Stored Safely in DB</span>
+                         <h3 className="font-bold text-white flex items-center gap-2"><Key size={18} /> API Keys del Servidor</h3>
+                         <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded">Almacenado Seguro</span>
                     </div>
-                    <p className="text-xs text-slate-500">Provide keys to allow the server and users to search/download stock content.</p>
+                    <p className="text-xs text-slate-500">Proporciona claves para permitir la búsqueda/descarga de contenido.</p>
                     
                     <div>
                         <div className="flex justify-between mb-1">
                             <label className="block text-xs font-bold text-slate-500 uppercase">Pexels Key</label>
-                            <a href="https://www.pexels.com/api/new/" target="_blank" rel="noreferrer" className="text-xs text-indigo-400 flex items-center gap-1 hover:underline"><ExternalLink size={10}/> Get Key</a>
+                            <a href="https://www.pexels.com/api/new/" target="_blank" rel="noreferrer" className="text-xs text-indigo-400 flex items-center gap-1 hover:underline"><ExternalLink size={10}/> Obtener Key</a>
                         </div>
-                        <input type="text" value={settings.pexelsKey} onChange={e => setSettings({...settings, pexelsKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="Your Pexels API Key"/>
+                        <input type="text" value={settings.pexelsKey} onChange={e => setSettings({...settings, pexelsKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="Tu API Key"/>
                     </div>
                     <div>
                         <div className="flex justify-between mb-1">
                             <label className="block text-xs font-bold text-slate-500 uppercase">Pixabay Key</label>
-                            <a href="https://pixabay.com/api/docs/" target="_blank" rel="noreferrer" className="text-xs text-indigo-400 flex items-center gap-1 hover:underline"><ExternalLink size={10}/> Get Key</a>
+                            <a href="https://pixabay.com/api/docs/" target="_blank" rel="noreferrer" className="text-xs text-indigo-400 flex items-center gap-1 hover:underline"><ExternalLink size={10}/> Obtener Key</a>
                         </div>
-                        <input type="text" value={settings.pixabayKey} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="Your Pixabay API Key"/>
+                        <input type="text" value={settings.pixabayKey} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="Tu API Key"/>
                     </div>
                 </div>
                 
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
-                    <h3 className="font-bold text-white flex items-center gap-2"><Shield size={18} /> Maintenance</h3>
+                    <h3 className="font-bold text-white flex items-center gap-2"><Shield size={18} /> Mantenimiento</h3>
                      <button onClick={handleCleanup} className="w-full bg-red-600/10 hover:bg-red-600/20 text-red-400 font-bold py-3 rounded-lg flex items-center justify-center gap-2 border border-red-600/20">
-                        <Trash2 size={18}/> Scan & Repair Broken Videos
+                        <Trash2 size={18}/> Escanear y Reparar Videos Rotos
                     </button>
                 </div>
 
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
-                    <h3 className="font-bold text-white flex items-center gap-2"><Youtube size={18} /> YouTube Integration (Advanced)</h3>
-                    <p className="text-xs text-slate-500">Requires <code>yt-dlp</code> binary on the server.</p>
+                    <h3 className="font-bold text-white flex items-center gap-2"><Youtube size={18} /> Integración YouTube (Avanzado)</h3>
+                    <p className="text-xs text-slate-500">Requiere <code>yt-dlp</code> binario en el servidor.</p>
 
                     <div className="flex items-center gap-3">
                         <label className="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" checked={settings.enableYoutube} onChange={e => setSettings({...settings, enableYoutube: e.target.checked})} className="sr-only peer"/>
                             <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
-                            <span className="ml-3 text-sm font-medium text-slate-300">Enable YouTube</span>
+                            <span className="ml-3 text-sm font-medium text-slate-300">Habilitar YouTube</span>
                         </label>
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">yt-dlp Binary Path</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta binario yt-dlp</label>
                         <input type="text" value={settings.ytDlpPath} onChange={e => setSettings({...settings, ytDlpPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono" placeholder="./yt-dlp"/>
-                        <p className="text-[10px] text-slate-500 mt-1">Default: <code>./yt-dlp</code> (Relative to api/ folder)</p>
+                        <p className="text-[10px] text-slate-500 mt-1">Defecto: <code>./yt-dlp</code> (Relativo a carpeta api/)</p>
                     </div>
                 </div>
 
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
-                    <h3 className="font-bold text-white flex items-center gap-2"><Clock size={18} /> Queue Controls</h3>
+                    <h3 className="font-bold text-white flex items-center gap-2"><Clock size={18} /> Controles de Cola</h3>
                     <div className="flex gap-2">
                         <button 
                            onClick={() => { setSettings({...settings, isQueuePaused: !settings.isQueuePaused}); saveSettings(); }}
                            className={`flex-1 py-3 rounded-lg font-bold flex items-center justify-center gap-2 ${settings.isQueuePaused ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'}`}
                         >
-                            {settings.isQueuePaused ? <><Play size={18}/> Resume Queue</> : <><Pause size={18}/> Pause Queue</>}
+                            {settings.isQueuePaused ? <><Play size={18}/> Reanudar Cola</> : <><Pause size={18}/> Pausar Cola</>}
                         </button>
                         <button onClick={triggerDownload} className="flex-1 bg-slate-800 border border-slate-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-slate-700">
-                            <DownloadCloud size={18}/> Force Run
+                            <DownloadCloud size={18}/> Forzar Ejecución
                         </button>
                     </div>
                     <div className="flex justify-between items-center text-xs text-slate-400 bg-slate-950 p-2 rounded">
-                        <span>Status: <strong>{settings.isQueuePaused ? 'PAUSED' : 'ACTIVE'}</strong></span>
-                        <span>{requests.filter(r => r.status === 'PENDING').length} Pending</span>
+                        <span>Estado: <strong>{settings.isQueuePaused ? 'PAUSADO' : 'ACTIVO'}</strong></span>
+                        <span>{requests.filter(r => r.status === 'PENDING').length} Pendientes</span>
                     </div>
                 </div>
              </div>
@@ -594,7 +596,7 @@ export default function Admin() {
             <div className="flex justify-end">
                 <button onClick={handleRepairDb} disabled={repairing} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs font-bold border border-slate-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait">
                     {repairing ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />} 
-                    {repairing ? 'Repairing...' : 'Repair DB'}
+                    {repairing ? 'Reparando...' : 'Reparar DB'}
                 </button>
             </div>
             
@@ -603,14 +605,14 @@ export default function Admin() {
                 <Search className="absolute left-3 top-3.5 text-slate-500" size={18} />
                 <input 
                     type="text" 
-                    placeholder="Search users..." 
+                    placeholder="Buscar usuarios..." 
                     value={search}
                     onChange={e => setSearch(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-indigo-500"
                 />
                 </div>
                 <div className="w-full md:w-48 flex items-center gap-2">
-                    <span className="text-xs text-slate-400 font-bold whitespace-nowrap">Credit Amount:</span>
+                    <span className="text-xs text-slate-400 font-bold whitespace-nowrap">Cantidad Saldo:</span>
                     <input 
                     type="number"
                     value={amount}
@@ -624,17 +626,17 @@ export default function Admin() {
                 <table className="w-full text-left">
                 <thead className="bg-slate-950 text-slate-400 text-xs uppercase">
                     <tr>
-                    <th className="p-4">User</th>
-                    <th className="p-4 text-right">Balance</th>
-                    <th className="p-4 text-center">Action</th>
+                    <th className="p-4">Usuario</th>
+                    <th className="p-4 text-right">Saldo</th>
+                    <th className="p-4 text-center">Acción</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                     {loadingUsers ? (
-                         <tr><td colSpan={3} className="p-10 text-center text-slate-500"><Loader2 className="animate-spin mx-auto"/> Loading users...</td></tr>
+                         <tr><td colSpan={3} className="p-10 text-center text-slate-500"><Loader2 className="animate-spin mx-auto"/> Cargando usuarios...</td></tr>
                     ) : (
                         filteredUsers.length === 0 ? (
-                            <tr><td colSpan={3} className="p-10 text-center text-slate-500">No users found.</td></tr>
+                            <tr><td colSpan={3} className="p-10 text-center text-slate-500">No se encontraron usuarios.</td></tr>
                         ) : (
                             filteredUsers.map(u => (
                             <tr key={u.id}>
@@ -642,7 +644,7 @@ export default function Admin() {
                                 <td className="p-4 text-right font-mono text-indigo-300">{u.balance}</td>
                                 <td className="p-4 flex justify-center">
                                     <button onClick={() => handleAddCredit(u.id, u.username)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-2">
-                                        <PlusCircle size={16} /> Add {amount}
+                                        <PlusCircle size={16} /> Añadir {amount}
                                     </button>
                                 </td>
                             </tr>
@@ -663,7 +665,7 @@ export default function Admin() {
                              <span className="font-mono text-indigo-400">{u.balance} Saldo</span>
                          </div>
                          <button onClick={() => handleAddCredit(u.id, u.username)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
-                             <PlusCircle size={16} /> Add {amount} Credits
+                             <PlusCircle size={16} /> Añadir {amount} Saldo
                          </button>
                      </div>
                 ))}

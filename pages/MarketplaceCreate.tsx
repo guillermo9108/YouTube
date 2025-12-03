@@ -1,4 +1,6 @@
 
+
+
 import React, { useState } from 'react';
 import { useNavigate } from '../components/Router';
 import { useAuth } from '../context/AuthContext';
@@ -36,12 +38,12 @@ export default function MarketplaceCreate() {
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!user) return;
-      if (files.length === 0) { alert("Add at least one photo or video."); return; }
+      if (files.length === 0) { alert("Añade al menos una foto o video."); return; }
       
       setLoading(true);
       try {
           await db.createListing(user.id, title, desc, price, stock, discount, files);
-          alert("Listing created!");
+          alert("Venta creada!");
           navigate('/marketplace');
       } catch (e: any) {
           alert("Error: " + e.message);
@@ -52,38 +54,38 @@ export default function MarketplaceCreate() {
 
   return (
     <div className="max-w-2xl mx-auto pb-24">
-        <h2 className="text-2xl font-bold text-white mb-6">Sell an Item</h2>
+        <h2 className="text-2xl font-bold text-white mb-6">Vender un Artículo</h2>
         
         <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-400 uppercase">Title</label>
-                <input type="text" required value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="What are you selling?" />
+                <label className="text-sm font-bold text-slate-400 uppercase">Título</label>
+                <input type="text" required value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="¿Qué estás vendiendo?" />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                    <label className="text-sm font-bold text-slate-400 uppercase">Price (Saldo)</label>
+                    <label className="text-sm font-bold text-slate-400 uppercase">Precio (Saldo)</label>
                     <input type="number" required min="1" value={price} onChange={e => setPrice(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="0.00" />
                 </div>
                 <div className="space-y-2">
-                    <label className="text-sm font-bold text-slate-400 uppercase">Stock (Qty)</label>
+                    <label className="text-sm font-bold text-slate-400 uppercase">Stock (Cant.)</label>
                     <input type="number" required min="1" value={stock} onChange={e => setStock(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" />
                 </div>
             </div>
 
             <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-400 uppercase">Discount (%)</label>
+                <label className="text-sm font-bold text-slate-400 uppercase">Descuento (%)</label>
                 <input type="number" min="0" max="99" value={discount} onChange={e => setDiscount(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="0" />
-                <p className="text-[10px] text-slate-500">Optional. Final price will be {price} - {discount}%</p>
+                <p className="text-[10px] text-slate-500">Opcional. El precio final será {price} - {discount}%</p>
             </div>
 
             <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-400 uppercase">Description</label>
-                <textarea required rows={5} value={desc} onChange={e => setDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="Describe condition, details, pickup info..."></textarea>
+                <label className="text-sm font-bold text-slate-400 uppercase">Descripción</label>
+                <textarea required rows={5} value={desc} onChange={e => setDesc(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="Describe la condición, detalles, información de entrega..."></textarea>
             </div>
 
             <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-400 uppercase">Photos & Videos</label>
+                <label className="text-sm font-bold text-slate-400 uppercase">Fotos y Videos</label>
                 <div className="grid grid-cols-3 gap-4">
                     {previews.map((src, i) => (
                         <div key={i} className="relative aspect-square bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group">
@@ -97,7 +99,7 @@ export default function MarketplaceCreate() {
                     ))}
                     <label className="aspect-square bg-slate-900 rounded-lg border-2 border-dashed border-slate-800 hover:border-emerald-500 flex flex-col items-center justify-center cursor-pointer transition-colors text-slate-500 hover:text-emerald-500">
                         <Upload size={24} className="mb-2"/>
-                        <span className="text-xs font-bold">Add Media</span>
+                        <span className="text-xs font-bold">Añadir</span>
                         <input type="file" multiple accept="image/*,video/*" onChange={handleFileChange} className="hidden" />
                     </label>
                 </div>
@@ -105,7 +107,7 @@ export default function MarketplaceCreate() {
 
             <div className="pt-4">
                 <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50">
-                    {loading ? <Loader2 className="animate-spin" /> : 'Create Listing'}
+                    {loading ? <Loader2 className="animate-spin" /> : 'Crear Venta'}
                 </button>
             </div>
         </form>

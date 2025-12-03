@@ -1,3 +1,5 @@
+
+
 import React, { useState } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
@@ -12,16 +14,16 @@ interface VideoCardProps {
 const formatTimeAgo = (timestamp: number) => {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
   let interval = seconds / 31536000;
-  if (interval > 1) return Math.floor(interval) + " years ago";
+  if (interval > 1) return "hace " + Math.floor(interval) + " años";
   interval = seconds / 2592000;
-  if (interval > 1) return Math.floor(interval) + " months ago";
+  if (interval > 1) return "hace " + Math.floor(interval) + " meses";
   interval = seconds / 86400;
-  if (interval > 1) return Math.floor(interval) + " days ago";
+  if (interval > 1) return "hace " + Math.floor(interval) + " días";
   interval = seconds / 3600;
-  if (interval > 1) return Math.floor(interval) + " hours ago";
+  if (interval > 1) return "hace " + Math.floor(interval) + " horas";
   interval = seconds / 60;
-  if (interval > 1) return Math.floor(interval) + " min ago";
-  return "Just now";
+  if (interval > 1) return "hace " + Math.floor(interval) + " min";
+  return "Justo ahora";
 };
 
 const formatDuration = (seconds: number) => {
@@ -67,7 +69,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         {/* NEW Badge */}
         {isNew && !isWatched && (
             <div className="absolute top-1.5 left-1.5 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm animate-pulse">
-                NEW
+                NUEVO
             </div>
         )}
 
@@ -75,7 +77,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         {isWatched && (
              <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                  <div className="flex items-center gap-1 text-slate-200 bg-black/40 px-2 py-1 rounded backdrop-blur-md border border-white/10">
-                    <CheckCircle2 size={14} /> <span className="text-[10px] font-bold tracking-wider">WATCHED</span>
+                    <CheckCircle2 size={14} /> <span className="text-[10px] font-bold tracking-wider">VISTO</span>
                  </div>
              </div>
         )}
@@ -116,7 +118,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
                     <CheckCircle2 size={10} className="text-slate-500 fill-slate-800" />
                 </Link>
                 <div className="flex items-center gap-1">
-                    <span>{video.views} views</span>
+                    <span>{video.views} vistas</span>
                     <span className="text-slate-600">•</span>
                     <span>{formatTimeAgo(video.createdAt)}</span>
                 </div>

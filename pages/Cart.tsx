@@ -1,4 +1,6 @@
 
+
+
 import React, { useState } from 'react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -35,12 +37,12 @@ export default function Cart() {
           
           await db.checkoutCart(user.id, items.map(i => ({ id: i.id, quantity: i.cartQuantity })), shippingData);
           
-          alert("Order Placed Successfully!");
+          alert("Pedido realizado con éxito!");
           clearCart();
           refreshUser();
           navigate('/profile');
       } catch (e: any) {
-          alert("Checkout failed: " + e.message);
+          alert("Falló el pago: " + e.message);
       } finally {
           setProcessing(false);
       }
@@ -49,16 +51,16 @@ export default function Cart() {
   if (items.length === 0) {
       return (
           <div className="flex flex-col items-center justify-center h-[60vh] text-slate-500">
-              <h2 className="text-xl font-bold text-white mb-2">Your Cart is Empty</h2>
-              <p className="mb-6">Browse the marketplace to find items.</p>
-              <button onClick={() => navigate('/marketplace')} className="bg-emerald-600 text-white px-6 py-2 rounded-full font-bold">Go Shopping</button>
+              <h2 className="text-xl font-bold text-white mb-2">Tu carrito está vacío</h2>
+              <p className="mb-6">Busca artículos en la tienda.</p>
+              <button onClick={() => navigate('/marketplace')} className="bg-emerald-600 text-white px-6 py-2 rounded-full font-bold">Ir a Comprar</button>
           </div>
       );
   }
 
   return (
     <div className="max-w-2xl mx-auto pb-24">
-       <h1 className="text-2xl font-bold text-white mb-6">Shopping Cart</h1>
+       <h1 className="text-2xl font-bold text-white mb-6">Carrito de Compras</h1>
 
        {step === 'REVIEW' && (
            <>
@@ -95,7 +97,7 @@ export default function Cart() {
                        <span className="text-2xl font-bold text-emerald-400">{cartTotal.toFixed(2)} Saldo</span>
                    </div>
                    <button onClick={() => setStep('SHIPPING')} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
-                       Proceed to Checkout <ArrowRight size={18}/>
+                       Proceder al Pago <ArrowRight size={18}/>
                    </button>
                </div>
            </>
@@ -104,38 +106,38 @@ export default function Cart() {
        {step === 'SHIPPING' && (
            <form onSubmit={handleCheckout} className="space-y-6">
                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
-                   <h3 className="font-bold text-white flex items-center gap-2"><CreditCard size={18}/> Shipping & Payment</h3>
+                   <h3 className="font-bold text-white flex items-center gap-2"><CreditCard size={18}/> Envío y Pago</h3>
                    
                    <div>
-                       <label className="text-xs font-bold text-slate-500 uppercase">Full Name</label>
+                       <label className="text-xs font-bold text-slate-500 uppercase">Nombre Completo</label>
                        <input type="text" required value={name} onChange={e => setName(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-white" />
                    </div>
 
                    <div>
-                       <label className="text-xs font-bold text-slate-500 uppercase">Bank Account (Optional)</label>
-                       <input type="text" value={bank} onChange={e => setBank(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-white" placeholder="For refunds if needed" />
+                       <label className="text-xs font-bold text-slate-500 uppercase">Cuenta Bancaria (Opcional)</label>
+                       <input type="text" value={bank} onChange={e => setBank(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-white" placeholder="Para reembolsos si es necesario" />
                    </div>
 
                    <div>
-                       <label className="text-xs font-bold text-slate-500 uppercase">Mobile Number (Optional)</label>
+                       <label className="text-xs font-bold text-slate-500 uppercase">Número Móvil (Opcional)</label>
                        <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-white" placeholder="+1 234..." />
                    </div>
 
                    <div>
-                       <label className="text-xs font-bold text-slate-500 uppercase">Order Notes</label>
-                       <textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-white" placeholder="Special instructions for seller..."></textarea>
+                       <label className="text-xs font-bold text-slate-500 uppercase">Notas del Pedido</label>
+                       <textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-white" placeholder="Instrucciones especiales..."></textarea>
                    </div>
                </div>
 
                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
-                    <span className="text-slate-400">Total to Pay</span>
+                    <span className="text-slate-400">Total a Pagar</span>
                     <span className="text-xl font-bold text-emerald-400">{cartTotal.toFixed(2)} Saldo</span>
                </div>
 
                <div className="flex gap-4">
-                   <button type="button" onClick={() => setStep('REVIEW')} className="flex-1 bg-slate-800 text-white font-bold py-3 rounded-xl">Back</button>
+                   <button type="button" onClick={() => setStep('REVIEW')} className="flex-1 bg-slate-800 text-white font-bold py-3 rounded-xl">Atrás</button>
                    <button type="submit" disabled={processing} className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50">
-                       {processing ? <Loader2 className="animate-spin"/> : 'Confirm Payment'}
+                       {processing ? <Loader2 className="animate-spin"/> : 'Confirmar Pago'}
                    </button>
                </div>
            </form>
