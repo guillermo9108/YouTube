@@ -33,13 +33,12 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
     const video = document.createElement('video');
     const objectUrl = URL.createObjectURL(file);
     
-    // Safety Timeout (8 seconds max per file)
+    // Safety Timeout (10 seconds max per file)
     const timeout = setTimeout(() => {
-        // CRITICAL: Clean up memory even on timeout
         URL.revokeObjectURL(objectUrl);
         video.remove();
         resolve({ thumbnail: null, duration: 0 });
-    }, 8000);
+    }, 10000);
 
     video.preload = 'metadata';
     video.src = objectUrl;
@@ -58,7 +57,6 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
             const height = video.videoHeight;
             
             if (!width || !height) {
-                 // Metadata loaded but dimensions missing? Retrigger
                  return; 
             }
 
@@ -101,10 +99,9 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
                 } else {
                     resolve({ thumbnail: null, duration: duration || 0 });
                 }
-                // CRITICAL: Cleanup immediately to free RAM
                 URL.revokeObjectURL(objectUrl);
                 video.remove();
-            }, 'image/jpeg', 0.70); // Lower quality for speed
+            }, 'image/jpeg', 0.70);
 
         } catch (e) {
             console.error("Frame capture error", e);
@@ -116,10 +113,14 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
     };
 
     video.onloadedmetadata = () => {
-        // Safe seek for very short videos
-        const seekPoint = Math.min(Math.max(0.1, video.duration * 0.05), 1.0);
-        isSeeking = true;
-        video.currentTime = seekPoint;
+        if (!Number.isFinite(video.duration)) {
+             // Fallback
+             video.currentTime = 0;
+        } else {
+             const seekPoint = Math.min(Math.max(0.1, video.duration * 0.05), 1.0);
+             isSeeking = true;
+             video.currentTime = seekPoint;
+        }
     };
 
     video.onseeked = () => {
@@ -134,6 +135,9 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
         video.remove();
         resolve({ thumbnail: null, duration: 0 });
     };
+    
+    // Explicit load
+    video.load();
   });
 };
 
@@ -179,10 +183,8 @@ export default function Upload() {
 
   // Queue Processing State
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false); // New lock state
   const [queueProgress, setQueueProgress] = useState({ current: 0, total: 0 });
-  const processingRef = useRef(false);
-  // We store IDs to process, not objects, to avoid stale state
-  const processingQueueIds = useRef<string[]>([]);
 
   // Global Settings
   const [desc, setDesc] = useState('');
@@ -270,17 +272,22 @@ export default function Upload() {
   };
 
   // RE-IMPLEMENTED QUEUE PROCESSOR
-  // We use a useEffect that watches for "unprocessed" items in the list
   useEffect(() => {
+      // Find the next item that hasn't been processed
       const unprocessed = uploads.find(u => !u.processed);
-      if (unprocessed && !processingRef.current) {
+      
+      // Only trigger if we have an item AND we aren't currently busy
+      if (unprocessed && !isGenerating) {
           processItem(unprocessed);
+      } else if (!unprocessed && isProcessingQueue && !isGenerating) {
+          // If no items left, and we were in processing mode, turn it off
+          setIsProcessingQueue(false);
       }
-  }, [uploads]);
+  }, [uploads, isGenerating, isProcessingQueue]);
 
   const processItem = async (item: PendingUploadItem) => {
-      processingRef.current = true;
-      setIsProcessingQueue(true);
+      setIsGenerating(true);
+      if (!isProcessingQueue) setIsProcessingQueue(true);
       
       try {
           const { thumbnail, duration } = await generateThumbnail(item.file);
@@ -306,23 +313,18 @@ export default function Upload() {
           console.error("Processing failed for", item.title);
           // Mark as processed anyway to avoid infinite loop
           setUploads(prev => prev.map(u => u.id === item.id ? { ...u, processed: true } : u));
+      } finally {
+          // Small delay to allow state to settle and UI to render
+          setTimeout(() => setIsGenerating(false), 50);
       }
-
-      await new Promise(r => setTimeout(r, 200)); // GC Pause
-      processingRef.current = false;
-      
-      // The useEffect will trigger next item automatically
-      if (uploads.every(u => u.processed)) setIsProcessingQueue(false);
   };
 
   const removeUpload = (id: string) => {
       setUploads(prev => prev.filter(u => u.id !== id));
-      // If we remove an item, total in queue progress should decrease conceptually, 
-      // but simpler to just leave it as is visually or reset if empty.
+      // Reset queue UI if empty
       if (uploads.length <= 1) {
           setQueueProgress({ current: 0, total: 0 });
           setIsProcessingQueue(false);
-          processingRef.current = false;
       }
   };
 
@@ -387,6 +389,7 @@ export default function Upload() {
                     <>
                         <Loader2 size={32} className="text-indigo-500 animate-spin" />
                         <span className="text-slate-400 text-xs mt-2 font-bold">Procesando...</span>
+                        <span className="text-[10px] text-slate-500">{queueProgress.current}/{queueProgress.total}</span>
                     </>
                 ) : (
                     <>
@@ -425,7 +428,7 @@ export default function Upload() {
                   </div>
                 ) : (
                   uploads.map((item) => (
-                    <div key={item.id} className="flex gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800 items-start">
+                    <div key={item.id} className={`flex gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800 items-start ${!item.processed ? 'opacity-70' : ''}`}>
                        <div className="w-20 h-14 rounded bg-slate-800 shrink-0 overflow-hidden relative border border-slate-700 group">
                          {item.thumbnail ? (
                            <ThumbPreview file={item.thumbnail} />
@@ -435,9 +438,11 @@ export default function Upload() {
                                <span className="text-[8px] text-slate-500">GEN</span>
                            </div>
                          )}
-                         <div className="absolute bottom-0 right-0 bg-black/70 text-[9px] px-1 text-white font-mono">
-                            {Math.floor(item.duration/60)}:{(item.duration%60).toFixed(0).padStart(2,'0')}
-                         </div>
+                         {item.duration > 0 && (
+                            <div className="absolute bottom-0 right-0 bg-black/70 text-[9px] px-1 text-white font-mono">
+                                {Math.floor(item.duration/60)}:{(item.duration%60).toFixed(0).padStart(2,'0')}
+                            </div>
+                         )}
                        </div>
                        <div className="flex-1 min-w-0 space-y-2">
                           <input type="text" value={item.title} onChange={(e) => updateField(item.id, 'title', e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-slate-700 focus:border-indigo-500 outline-none text-sm font-bold text-slate-200 p-0 pb-1 transition-colors" placeholder="Título" required />
