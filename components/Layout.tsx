@@ -171,7 +171,8 @@ export default function Layout() {
   const [showSidebar, setShowSidebar] = useState(false);
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
-  const isShortsMode = location.pathname === '/shorts';
+  // Use startsWith to correctly handle URLs like /shorts?id=...
+  const isShortsMode = location.pathname.startsWith('/shorts');
 
   const Avatar = ({ size=24, className='' }: {size?: number, className?: string}) => (
       user?.avatarUrl ? (
@@ -236,6 +237,7 @@ export default function Layout() {
       )}
 
       {/* HEADER (Desktop) */}
+      {!isShortsMode && (
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
             <button onClick={() => setShowSidebar(true)} className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
@@ -263,6 +265,7 @@ export default function Layout() {
           </Link>
         </div>
       </header>
+      )}
 
       {/* Main Content */}
       <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : 'flex-1 container mx-auto px-4 pt-2 md:pt-8 max-w-5xl'}>
