@@ -21,11 +21,11 @@ export interface User {
   password?: string;
   role: UserRole;
   balance: number;
-  autoPurchaseLimit: number; // Default 1
-  watchLater: string[]; // Video IDs
-  sessionToken?: string; // New: For single session enforcement
-  avatarUrl?: string; // New: Profile Picture
-  defaultPrices?: Record<string, number>; // New: User specific price overrides
+  autoPurchaseLimit: number; 
+  watchLater: string[]; 
+  sessionToken?: string; 
+  avatarUrl?: string; 
+  defaultPrices?: Record<string, number>; 
 }
 
 export interface Video {
@@ -41,11 +41,11 @@ export interface Video {
   createdAt: number;
   likes: number;
   dislikes: number;
-  category: string; // Changed from VideoCategory to string to support custom ones
-  duration: number; // Seconds
-  fileHash?: string; // New: MD5 Hash for deduplication
+  category: string; 
+  duration: number; 
+  fileHash?: string; 
   creatorAvatarUrl?: string;
-  isLocal?: boolean; // New: Flag for local NAS files
+  isLocal?: boolean; 
 }
 
 export interface MarketplaceItem {
@@ -57,8 +57,31 @@ export interface MarketplaceItem {
   sellerName: string;
   sellerAvatarUrl?: string;
   media: { type: 'image' | 'video', url: string }[];
-  status: 'ACTIVE' | 'SOLD';
+  status: 'ACTIVE' | 'SOLD' | 'OUT_OF_STOCK';
   createdAt: number;
+  stock: number;         // New: Quantity available
+  discountPercent: number; // New: 0-100
+  salesCount: number;    // New: For "Best Seller" logic
+}
+
+export interface CartItem extends MarketplaceItem {
+  cartQuantity: number;
+}
+
+export interface Order {
+  id: string;
+  buyerId: string;
+  sellerId: string; // Grouped by seller usually, but for simplicity flattened
+  items: { itemId: string, title: string, price: number, quantity: number }[];
+  totalAmount: number;
+  shippingData: {
+    name: string;
+    bankAccount?: string;
+    phoneNumber?: string;
+    notes?: string;
+  };
+  timestamp: number;
+  status: 'COMPLETED' | 'REFUNDED';
 }
 
 export interface Transaction {
@@ -69,6 +92,7 @@ export interface Transaction {
   amount: number;
   timestamp: number;
   type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE';
+  orderId?: string; // Link to the order
 }
 
 export interface Comment {
@@ -116,11 +140,11 @@ export interface SystemSettings {
   maxResolution: number;     
   pexelsKey: string;
   pixabayKey: string;
-  ytDlpPath: string;    // New: Path to yt-dlp binary
-  enableYoutube: boolean; // New: Toggle for YouTube features
-  categoryPrices: Record<string, number>; // New: Global default prices
-  customCategories: string[]; // New: List of admin added categories
-  localLibraryPath: string; // New: Path to local NAS video folder
+  ytDlpPath: string;    
+  enableYoutube: boolean; 
+  categoryPrices: Record<string, number>; 
+  customCategories: string[]; 
+  localLibraryPath: string; 
 }
 
 export interface SmartCleanerResult {
@@ -128,17 +152,17 @@ export interface SmartCleanerResult {
   stats: {
     totalVideos: number;
     videosToDelete: number;
-    spaceReclaimed: string; // Estimate
+    spaceReclaimed: string; 
   }
 }
 
 export interface Notification {
   id: string;
-  userId: string; // The recipient
+  userId: string; 
   type: 'UPLOAD' | 'SYSTEM';
   text: string;
-  link: string; // URL to go to
+  link: string; 
   isRead: boolean;
   timestamp: number;
-  avatarUrl?: string; // Optional image for the notif
+  avatarUrl?: string; 
 }

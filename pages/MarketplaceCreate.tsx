@@ -1,8 +1,9 @@
+
 import React, { useState } from 'react';
 import { useNavigate } from '../components/Router';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/db';
-import { Loader2, Upload, X, Image as ImageIcon } from 'lucide-react';
+import { Loader2, Upload, X } from 'lucide-react';
 
 export default function MarketplaceCreate() {
   const { user } = useAuth();
@@ -11,6 +12,8 @@ export default function MarketplaceCreate() {
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [price, setPrice] = useState<number>(0);
+  const [stock, setStock] = useState<number>(1);
+  const [discount, setDiscount] = useState<number>(0);
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
 
@@ -37,7 +40,7 @@ export default function MarketplaceCreate() {
       
       setLoading(true);
       try {
-          await db.createListing(user.id, title, desc, price, files);
+          await db.createListing(user.id, title, desc, price, stock, discount, files);
           alert("Listing created!");
           navigate('/marketplace');
       } catch (e: any) {
@@ -57,9 +60,21 @@ export default function MarketplaceCreate() {
                 <input type="text" required value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="What are you selling?" />
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <label className="text-sm font-bold text-slate-400 uppercase">Price (Saldo)</label>
+                    <input type="number" required min="1" value={price} onChange={e => setPrice(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="0.00" />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-sm font-bold text-slate-400 uppercase">Stock (Qty)</label>
+                    <input type="number" required min="1" value={stock} onChange={e => setStock(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" />
+                </div>
+            </div>
+
             <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-400 uppercase">Price (Saldo)</label>
-                <input type="number" required min="1" value={price} onChange={e => setPrice(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="0.00" />
+                <label className="text-sm font-bold text-slate-400 uppercase">Discount (%)</label>
+                <input type="number" min="0" max="99" value={discount} onChange={e => setDiscount(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" placeholder="0" />
+                <p className="text-[10px] text-slate-500">Optional. Final price will be {price} - {discount}%</p>
             </div>
 
             <div className="space-y-2">

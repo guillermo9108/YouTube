@@ -1,47 +1,72 @@
+
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from '../components/Router';
 import { db } from '../services/db';
 import { MarketplaceItem } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Loader2, ArrowLeft, User, ShieldCheck, Check } from 'lucide-react';
+import { useCart } from '../context/CartContext';
+import { Loader2, ArrowLeft, User, ShieldCheck, ShoppingCart, Edit2, Save } from 'lucide-react';
 
 export default function MarketplaceItemView() {
   const { id } = useParams();
-  const { user, refreshUser } = useAuth();
+  const { user } = useAuth();
+  const { addToCart } = useCart();
   const navigate = useNavigate();
   const [item, setItem] = useState<MarketplaceItem | null>(null);
   const [loading, setLoading] = useState(true);
-  const [buying, setBuying] = useState(false);
   const [activeMedia, setActiveMedia] = useState(0);
 
+  // Edit Mode State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editPrice, setEditPrice] = useState(0);
+  const [editStock, setEditStock] = useState(0);
+  const [editDiscount, setEditDiscount] = useState(0);
+
   useEffect(() => {
-    if (!id) return;
+    if (!id) {
+        setLoading(false);
+        return;
+    }
+    
+    setLoading(true);
     db.getMarketplaceItem(id).then(i => {
         setItem(i);
+        setEditPrice(i.price);
+        setEditStock(i.stock);
+        setEditDiscount(i.discountPercent);
         setLoading(false);
     }).catch(() => setLoading(false));
   }, [id]);
 
-  const handleBuy = async () => {
-      if (!user || !item) return;
-      if (item.sellerId === user.id) return;
-      if (!confirm(`Confirm purchase for ${item.price} Saldo?`)) return;
+  const handleAddToCart = () => {
+      if (item) {
+          addToCart(item);
+          alert("Added to cart");
+      }
+  };
 
-      setBuying(true);
+  const handleSaveEdit = async () => {
+      if (!user || !item) return;
       try {
-          await db.buyMarketplaceItem(user.id, item.id);
-          alert("Purchase Successful!");
-          refreshUser();
-          navigate('/marketplace');
-      } catch (e: any) {
-          alert("Failed: " + e.message);
-      } finally {
-          setBuying(false);
+          await db.editListing(item.id, user.id, {
+              price: editPrice,
+              stock: editStock,
+              discountPercent: editDiscount
+          });
+          setItem({ ...item, price: editPrice, stock: editStock, discountPercent: editDiscount });
+          setIsEditing(false);
+          alert("Updated successfully");
+      } catch(e: any) {
+          alert("Update failed: " + e.message);
       }
   };
 
   if (loading) return <div className="flex justify-center h-screen items-center"><Loader2 className="animate-spin text-emerald-500" size={32}/></div>;
   if (!item) return <div className="text-center p-10 text-slate-500">Item not found.</div>;
+
+  const isSeller = user && user.id === item.sellerId;
+  const isSoldOut = item.stock <= 0;
+  const originalPrice = item.price / (1 - (item.discountPercent / 100));
 
   return (
     <div className="max-w-4xl mx-auto pb-20">
@@ -60,9 +85,9 @@ export default function MarketplaceItemView() {
                              <video src={item.media[activeMedia].url} className="w-full h-full object-cover" controls />
                          )
                      )}
-                     {item.status === 'SOLD' && (
+                     {isSoldOut && (
                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                             <span className="bg-red-600 text-white font-black text-2xl px-6 py-2 transform -rotate-12 border-4 border-white">SOLD</span>
+                             <span className="bg-slate-700 text-white font-black text-2xl px-6 py-2 transform -rotate-12 border-4 border-white">SOLD OUT</span>
                          </div>
                      )}
                 </div>
@@ -80,16 +105,56 @@ export default function MarketplaceItemView() {
             {/* Info */}
             <div>
                 <h1 className="text-3xl font-bold text-white mb-2">{item.title}</h1>
-                <div className="text-4xl font-mono font-bold text-emerald-400 mb-6">{item.price} <span className="text-lg text-emerald-700">Saldo</span></div>
+                
+                {isEditing ? (
+                    <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 mb-4 space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                             <div>
+                                 <label className="text-xs text-slate-500 uppercase font-bold">Price</label>
+                                 <input type="number" value={editPrice} onChange={e=>setEditPrice(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white" />
+                             </div>
+                             <div>
+                                 <label className="text-xs text-slate-500 uppercase font-bold">Stock</label>
+                                 <input type="number" value={editStock} onChange={e=>setEditStock(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white" />
+                             </div>
+                        </div>
+                        <div>
+                             <label className="text-xs text-slate-500 uppercase font-bold">Discount %</label>
+                             <input type="number" value={editDiscount} onChange={e=>setEditDiscount(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white" />
+                        </div>
+                        <button onClick={handleSaveEdit} className="w-full bg-emerald-600 text-white font-bold py-2 rounded flex items-center justify-center gap-2"><Save size={16}/> Save Changes</button>
+                    </div>
+                ) : (
+                    <div className="mb-6">
+                        {item.discountPercent > 0 && (
+                             <div className="text-sm text-slate-400 line-through font-mono">{originalPrice.toFixed(2)} $</div>
+                        )}
+                        <div className="text-4xl font-mono font-bold text-emerald-400">{item.price} <span className="text-lg text-emerald-700">Saldo</span></div>
+                        
+                        {item.discountPercent > 0 && (
+                            <span className="inline-block mt-1 bg-red-600/20 text-red-400 text-xs font-bold px-2 py-0.5 rounded border border-red-500/20">
+                                {item.discountPercent}% OFF
+                            </span>
+                        )}
+                        {item.stock < 3 && item.stock > 0 && (
+                             <span className="inline-block mt-1 ml-2 bg-amber-600/20 text-amber-400 text-xs font-bold px-2 py-0.5 rounded border border-amber-500/20">
+                                Only {item.stock} left!
+                            </span>
+                        )}
+                    </div>
+                )}
 
                 <div className="bg-slate-900 rounded-xl p-4 border border-slate-800 mb-6 flex items-center gap-4">
                     <div className="w-12 h-12 rounded-full bg-slate-800 overflow-hidden shrink-0">
                         {item.sellerAvatarUrl ? <img src={item.sellerAvatarUrl} className="w-full h-full object-cover"/> : <User size={24} className="m-3 text-slate-500"/>}
                     </div>
-                    <div>
+                    <div className="flex-1">
                         <div className="text-xs text-slate-500 font-bold uppercase">Seller</div>
                         <div className="font-bold text-white text-lg">{item.sellerName}</div>
                     </div>
+                    {isSeller && !isEditing && (
+                        <button onClick={() => setIsEditing(true)} className="p-2 bg-slate-800 text-slate-400 rounded-full hover:text-white"><Edit2 size={16}/></button>
+                    )}
                 </div>
 
                 <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 mb-8">
@@ -97,26 +162,18 @@ export default function MarketplaceItemView() {
                     <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{item.description}</p>
                 </div>
 
-                {item.status === 'ACTIVE' && user && user.id !== item.sellerId && (
+                {!isSoldOut && !isSeller && (
                     <button 
-                        onClick={handleBuy} 
-                        disabled={buying}
-                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handleAddToCart}
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-emerald-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
                     >
-                        {buying ? <Loader2 className="animate-spin" /> : <ShieldCheck size={20} />}
-                        {buying ? 'Processing...' : 'Buy Now Securely'}
+                        <ShoppingCart size={20} /> Add to Cart
                     </button>
                 )}
 
-                {user && user.id === item.sellerId && (
+                {isSeller && (
                     <div className="bg-indigo-900/20 text-indigo-300 p-4 rounded-xl text-center font-bold border border-indigo-500/30">
-                        You are selling this item.
-                    </div>
-                )}
-
-                {item.status === 'SOLD' && (
-                    <div className="bg-slate-800 text-slate-400 p-4 rounded-xl text-center font-bold">
-                        This item has been sold.
+                        You are selling this item. Stock: {item.stock}
                     </div>
                 )}
             </div>

@@ -1,10 +1,12 @@
 
+
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from '../components/Router';
 import { db } from '../services/db';
-import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save } from 'lucide-react';
-import { Video, Transaction, VideoCategory } from '../types';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, ShoppingBag } from 'lucide-react';
+import { Video, Transaction, VideoCategory, Order } from '../types';
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
@@ -15,8 +17,11 @@ export default function Profile() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [myVideos, setMyVideos] = useState<Video[]>([]);
   
+  // Orders
+  const [orders, setOrders] = useState<{bought: Order[], sold: Order[]}>({bought: [], sold: []});
+
   // Security Tab
-  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING'>('OVERVIEW');
+  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING' | 'ORDERS'>('OVERVIEW');
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
@@ -38,6 +43,7 @@ export default function Profile() {
 
       db.getUserTransactions(user.id).then(setTransactions);
       db.getVideosByCreator(user.id).then(setMyVideos);
+      db.getUserOrders(user.id).then(setOrders);
       
       // Fetch custom categories
       db.getSystemSettings().then(s => {
@@ -105,14 +111,17 @@ export default function Profile() {
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-          <button onClick={() => setTab('OVERVIEW')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='OVERVIEW'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+      <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800 overflow-x-auto">
+          <button onClick={() => setTab('OVERVIEW')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='OVERVIEW'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <UserIcon size={16}/> Overview
           </button>
-          <button onClick={() => setTab('PRICING')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='PRICING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+          <button onClick={() => setTab('ORDERS')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='ORDERS'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+              <ShoppingBag size={16}/> Orders
+          </button>
+          <button onClick={() => setTab('PRICING')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='PRICING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <Tag size={16}/> Pricing
           </button>
-          <button onClick={() => setTab('SECURITY')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='SECURITY'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+          <button onClick={() => setTab('SECURITY')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='SECURITY'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <Shield size={16}/> Security
           </button>
       </div>
@@ -282,6 +291,63 @@ export default function Profile() {
             </div>
         </div>
       </>
+      )}
+
+      {tab === 'ORDERS' && (
+          <div className="space-y-6">
+              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                  <h3 className="font-bold text-white mb-4">My Purchases</h3>
+                  <div className="space-y-4">
+                      {orders.bought.length === 0 ? <p className="text-slate-500 text-sm">No purchases yet.</p> : orders.bought.map(order => (
+                          <div key={order.id} className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+                              <div className="flex justify-between items-start mb-2">
+                                  <div>
+                                      <div className="text-xs text-slate-500">Order #{order.id.slice(0,8)}</div>
+                                      <div className="text-xs text-slate-400">{new Date(order.timestamp).toLocaleString()}</div>
+                                  </div>
+                                  <div className="font-bold text-emerald-400">{order.totalAmount} Saldo</div>
+                              </div>
+                              <div className="space-y-1">
+                                  {order.items.map(i => (
+                                      <div key={i.itemId} className="text-sm text-slate-300 flex justify-between">
+                                          <span>{i.quantity}x {i.title}</span>
+                                          <span>{i.price}</span>
+                                      </div>
+                                  ))}
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+
+              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                  <h3 className="font-bold text-white mb-4">My Sales</h3>
+                   <div className="space-y-4">
+                      {orders.sold.length === 0 ? <p className="text-slate-500 text-sm">No sales yet.</p> : orders.sold.map(order => (
+                          <div key={order.id} className="bg-slate-950 p-4 rounded-lg border border-slate-800">
+                              <div className="flex justify-between items-start mb-2">
+                                  <div>
+                                      <div className="text-xs text-slate-500">Order #{order.id.slice(0,8)}</div>
+                                      <div className="font-bold text-white text-sm">Buyer: {order.shippingData.name}</div>
+                                  </div>
+                                  <div className="font-bold text-emerald-400">+{order.totalAmount}</div>
+                              </div>
+                              <div className="bg-slate-900 p-2 rounded text-xs text-slate-400 mb-2">
+                                  <div>Phone: {order.shippingData.phoneNumber || 'N/A'}</div>
+                                  <div>Notes: {order.shippingData.notes || 'None'}</div>
+                              </div>
+                              <div className="space-y-1 border-t border-slate-800 pt-2">
+                                  {order.items.map(i => (
+                                      <div key={i.itemId} className="text-sm text-slate-300 flex justify-between">
+                                          <span>{i.quantity}x {i.title}</span>
+                                      </div>
+                                  ))}
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          </div>
       )}
 
       {tab === 'PRICING' && (

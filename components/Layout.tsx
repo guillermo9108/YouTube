@@ -1,9 +1,11 @@
 
 
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
+import { useCart } from '../context/CartContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
 import { db } from '../services/db';
 import { Notification as AppNotification } from '../types';
@@ -168,6 +170,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
 export default function Layout() {
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { cartCount } = useCart();
   const [showSidebar, setShowSidebar] = useState(false);
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
@@ -211,6 +214,10 @@ export default function Layout() {
                     <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-emerald-400 hover:text-emerald-200 hover:bg-emerald-900/20 rounded-lg font-medium">
                         <ShoppingBag size={20}/> Marketplace
                     </Link>
+                    <Link to="/marketplace/cart" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
+                        <ShoppingCart size={20}/> Cart ({cartCount})
+                    </Link>
+                    <div className="h-px bg-slate-800 my-2"></div>
                     <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <DownloadCloud size={20}/> Requests
                     </Link>
@@ -250,6 +257,10 @@ export default function Layout() {
           <Link to="/marketplace" className={isActive('/marketplace')}>Market</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
           <Link to="/upload" className={isActive('/upload')}>Upload</Link>
+          <Link to="/marketplace/cart" className="relative text-slate-400 hover:text-white">
+              <ShoppingCart size={24} />
+              {cartCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{cartCount}</span>}
+          </Link>
           <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>
             <Avatar size={24} />
           </Link>
@@ -271,9 +282,9 @@ export default function Layout() {
             <span className="text-[10px]">Home</span>
           </Link>
 
-          <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}>
-            <Smartphone size={22} />
-            <span className="text-[10px]">Shorts</span>
+          <Link to="/marketplace" className={`flex flex-col items-center gap-1 ${isActive('/marketplace')}`}>
+            <ShoppingBag size={22} />
+            <span className="text-[10px]">Market</span>
           </Link>
           
           <div className="relative -top-5">
@@ -282,10 +293,13 @@ export default function Layout() {
              </Link>
           </div>
 
-          <div className="flex flex-col items-center gap-1">
-             <NotificationBell isMobile={true} />
-             <span className={`text-[10px] ${isActive('NOTIFS')}`}>Alerts</span>
-          </div>
+          <Link to="/marketplace/cart" className={`flex flex-col items-center gap-1 relative ${isActive('/marketplace/cart')}`}>
+             <div className="relative">
+                 <ShoppingCart size={22} />
+                 {cartCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center">{cartCount}</span>}
+             </div>
+             <span className="text-[10px]">Cart</span>
+          </Link>
 
           <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>
             <Avatar size={22} />
