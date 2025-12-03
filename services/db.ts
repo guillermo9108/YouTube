@@ -196,7 +196,8 @@ class DatabaseService {
             try {
                 json = JSON.parse(text);
             } catch (e) {
-                throw new Error(`JSON inválido de la API.`);
+                console.error("Invalid JSON received:", text);
+                throw new Error(`JSON inválido de la API. Verifica la consola.`);
             }
             
             if (!json.success) {
