@@ -1,8 +1,5 @@
 
-
-
-
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useLayoutEffect } from 'react';
 import { useParams } from '../components/Router';
 import { db } from '../services/db';
 import { User, Video } from '../types';
@@ -21,6 +18,10 @@ export default function Channel() {
   const [stats, setStats] = useState({ views: 0, uploads: 0 });
   const [purchases, setPurchases] = useState<string[]>([]);
   const [isSubscribed, setIsSubscribed] = useState(false);
+
+  useLayoutEffect(() => {
+      window.scrollTo(0, 0);
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) {

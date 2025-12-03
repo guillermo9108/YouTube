@@ -31,7 +31,8 @@ interface HomeSnapshot {
     activeCategory: string;
     searchQuery: string;
     visibleCount: number;
-    scrollPosition: number;
+    // Changed from single number to Map of Category -> ScrollY
+    scrollPositions: Record<string, number>;
     purchases: Set<string>;
     checkedPurchaseIds: Set<string>;
     categories: { id: string, label: string }[];
@@ -95,6 +96,9 @@ export default function Home() {
   const [processedList, setProcessedList] = useState<Video[]>([]);
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   
+  // Ref to track scroll positions per category
+  const scrollPositionsRef = useRef<Record<string, number>>({});
+  
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const searchWrapperRef = useRef<HTMLDivElement>(null);
@@ -155,6 +159,9 @@ export default function Home() {
             setVisibleCount(homeSnapshot.visibleCount);
             setPurchases(homeSnapshot.purchases);
             setCheckedPurchaseIds(homeSnapshot.checkedPurchaseIds);
+            // Restore scroll map
+            scrollPositionsRef.current = homeSnapshot.scrollPositions || {};
+            
             if(homeSnapshot.categories.length > INITIAL_CATEGORIES.length) setCategoryList(homeSnapshot.categories);
             setLoading(false);
             
@@ -191,8 +198,12 @@ export default function Home() {
     init();
 
     return () => {
+        // Save Snapshot on Unmount
         const s = stateRef.current;
         if (s.videos.length > 0) {
+            // Save current category scroll before unmounting
+            scrollPositionsRef.current[s.activeCategory] = window.scrollY;
+            
             homeSnapshot = {
                 videos: s.videos,
                 shuffledList: s.shuffledMasterList,
@@ -201,7 +212,7 @@ export default function Home() {
                 activeCategory: s.activeCategory,
                 searchQuery: s.searchQuery,
                 visibleCount: s.visibleCount,
-                scrollPosition: window.scrollY,
+                scrollPositions: scrollPositionsRef.current,
                 purchases: s.purchases,
                 checkedPurchaseIds: s.checkedPurchaseIds,
                 categories: s.categoryList
@@ -210,11 +221,22 @@ export default function Home() {
     };
   }, [user]);
 
+  // --- SCROLL RESTORATION LOGIC ---
   useLayoutEffect(() => {
-      if (!loading && homeSnapshot && homeSnapshot.scrollPosition > 0) {
-          window.scrollTo(0, homeSnapshot.scrollPosition);
+      if (!loading) {
+          const savedScroll = scrollPositionsRef.current[activeCategory] || 0;
+          window.scrollTo(0, savedScroll);
       }
-  }, [loading]);
+  }, [loading, activeCategory]);
+
+  const changeCategory = (newCat: string) => {
+      // Save current scroll before switching
+      scrollPositionsRef.current[activeCategory] = window.scrollY;
+      
+      setActiveCategory(newCat);
+      setShowSidebar(false);
+      // restoration happens in useLayoutEffect when activeCategory changes
+  };
 
   useEffect(() => {
       if (user && activeCategory === 'SUBSCRIPTIONS') {
@@ -273,12 +295,12 @@ export default function Home() {
       
       setProcessedList(filtered);
       
-      if (!loading) {
-         if (homeSnapshot && activeCategory === homeSnapshot.activeCategory && debouncedSearch === homeSnapshot.searchQuery) {
-             // restore
-         } else {
-             setVisibleCount(ITEMS_PER_PAGE);
-         }
+      // If we are restoring from snapshot, don't reset visible count
+      if (!loading && homeSnapshot && activeCategory === homeSnapshot.activeCategory) {
+          // Keep snapshot visible count if we just restored
+      } else if (!loading) {
+          // Reset count if we changed category manually
+          setVisibleCount(ITEMS_PER_PAGE);
       }
 
   }, [shuffledMasterList, activeCategory, debouncedSearch, subscribedCreators, loading]);
@@ -390,7 +412,7 @@ export default function Home() {
                     <Link to="/marketplace" className="flex items-center gap-4 px-4 py-3 text-emerald-400 hover:text-emerald-200 hover:bg-emerald-900/20 rounded-lg font-medium">
                         <ShoppingBag size={20}/> Tienda
                     </Link>
-                    <button onClick={() => { setActiveCategory('SUBSCRIPTIONS'); setShowSidebar(false); }} className="w-full flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium text-left">
+                    <button onClick={() => changeCategory('SUBSCRIPTIONS')} className="w-full flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium text-left">
                         <Compass size={20}/> Suscripciones
                     </button>
                     <div className="h-px bg-slate-800 my-2"></div>
@@ -464,7 +486,7 @@ export default function Home() {
             <div className="hidden md:flex bg-slate-800/50 p-1.5 rounded-lg text-slate-400 shrink-0"><Compass size={18} /></div>
             <div className="hidden md:block h-6 w-px bg-slate-800 mx-1 shrink-0"></div>
             {categoryList.map(cat => (
-                <button key={cat.id} onClick={() => setActiveCategory(cat.id)} className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${activeTabClass(activeCategory, cat.id)}`}>
+                <button key={cat.id} onClick={() => changeCategory(cat.id)} className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${activeTabClass(activeCategory, cat.id)}`}>
                     {cat.label}
                 </button>
             ))}

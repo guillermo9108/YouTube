@@ -1,10 +1,20 @@
-import React, { useEffect, useState } from 'react';
+
+import React, { useEffect, useState, useLayoutEffect } from 'react';
 import { db } from '../services/db';
 import { MarketplaceItem } from '../types';
 import { Link } from '../components/Router';
 import { Plus, Tag, Search, ShoppingBag, Loader2, Image as ImageIcon, Zap, TrendingUp, Percent } from 'lucide-react';
 
 type FilterType = 'ALL' | 'FLASH_SALE' | 'BEST_SELLER' | 'SUPER_OFFER';
+
+// --- MARKETPLACE SNAPSHOT ---
+interface MarketplaceSnapshot {
+    items: MarketplaceItem[];
+    filter: FilterType;
+    search: string;
+    scrollY: number;
+}
+let marketplaceSnapshot: MarketplaceSnapshot | null = null;
 
 export default function Marketplace() {
   const [items, setItems] = useState<MarketplaceItem[]>([]);
@@ -13,11 +23,38 @@ export default function Marketplace() {
   const [filter, setFilter] = useState<FilterType>('ALL');
 
   useEffect(() => {
-    db.getMarketplaceItems().then(data => {
-        setItems(data);
+    // Restore from snapshot if exists
+    if (marketplaceSnapshot) {
+        setItems(marketplaceSnapshot.items);
+        setFilter(marketplaceSnapshot.filter);
+        setSearch(marketplaceSnapshot.search);
         setLoading(false);
-    });
-  }, []);
+    } else {
+        db.getMarketplaceItems().then(data => {
+            setItems(data);
+            setLoading(false);
+        });
+    }
+
+    // Save snapshot on cleanup
+    return () => {
+        if (items.length > 0) {
+            marketplaceSnapshot = {
+                items,
+                filter,
+                search,
+                scrollY: window.scrollY
+            };
+        }
+    };
+  }, []); // Only on mount/unmount
+
+  // Restore Scroll Position
+  useLayoutEffect(() => {
+      if (!loading && marketplaceSnapshot) {
+          window.scrollTo(0, marketplaceSnapshot.scrollY);
+      }
+  }, [loading]);
 
   const getFilteredItems = () => {
       let filtered = items.filter(i => 

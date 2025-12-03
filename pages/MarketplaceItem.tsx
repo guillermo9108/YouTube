@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+
+import React, { useEffect, useState, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from '../components/Router';
 import { db } from '../services/db';
 import { MarketplaceItem } from '../types';
@@ -21,6 +22,10 @@ export default function MarketplaceItemView() {
   const [editStock, setEditStock] = useState(0);
   const [editDiscount, setEditDiscount] = useState(0);
   const [editFinalPrice, setEditFinalPrice] = useState(0);
+
+  useLayoutEffect(() => {
+      window.scrollTo(0, 0);
+  }, [id]);
 
   useEffect(() => {
     if (!id) {

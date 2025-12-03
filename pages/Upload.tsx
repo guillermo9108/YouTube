@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
@@ -188,6 +189,10 @@ export default function Upload() {
 
   // Global Settings
   const [desc, setDesc] = useState('');
+
+  useLayoutEffect(() => {
+      window.scrollTo(0, 0);
+  }, []);
 
   useEffect(() => {
       // Load Custom Categories and Default Prices

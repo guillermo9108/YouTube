@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
+
+import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction, VideoCategory } from '../types';
@@ -70,6 +71,11 @@ export default function Watch() {
   const [autoStatus, setAutoStatus] = useState<'IDLE' | 'SKIPPING_WATCHED' | 'AUTO_BUYING' | 'PLAYING_NEXT' | 'WAITING_CONFIRMATION'>('IDLE');
   const [showDebug, setShowDebug] = useState(false);
   const repairAttempted = useRef(false);
+
+  // Scroll to top on mount
+  useLayoutEffect(() => {
+      window.scrollTo(0, 0);
+  }, [id]);
 
   // ID Change Handler
   useEffect(() => {
