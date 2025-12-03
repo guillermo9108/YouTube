@@ -145,6 +145,7 @@ export interface SystemSettings {
   categoryPrices: Record<string, number>; 
   customCategories: string[]; 
   localLibraryPath: string; 
+  serverUploadLimit?: number; // In Bytes
 }
 
 export interface SmartCleanerResult {

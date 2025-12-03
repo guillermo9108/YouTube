@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -79,7 +76,7 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
             if (brightness < 20 && currentAttempt < attemptPoints.length - 1) {
                 currentAttempt++;
                 if (duration > 0) {
-                    const nextTime = Math.max(1.0, duration * attemptPoints[currentAttempt]);
+                    const nextTime = Math.max(0.1, duration * attemptPoints[currentAttempt]);
                     video.currentTime = nextTime;
                     return; // Wait for seeked event again
                 }
@@ -107,7 +104,9 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
     };
 
     video.onloadedmetadata = () => {
-        video.currentTime = 1.0;
+        // Safe seek for very short videos
+        const seekPoint = Math.min(Math.max(0.1, video.duration * 0.1), 1.0);
+        video.currentTime = seekPoint;
     };
 
     video.onseeked = captureFrame;
@@ -120,29 +119,52 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
   });
 };
 
+// Internal Component to handle Object URL lifecycle and prevent memory leaks
+const ThumbPreview = ({ file }: { file: File }) => {
+    const [src, setSrc] = useState<string | null>(null);
+
+    useEffect(() => {
+        const url = URL.createObjectURL(file);
+        setSrc(url);
+        return () => {
+            URL.revokeObjectURL(url);
+        };
+    }, [file]);
+
+    if (!src) return <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />;
+    return <img src={src} alt="Thumb" className="w-full h-full object-cover" />;
+};
+
+interface PendingUploadItem {
+    id: string; // Unique ID to track item regardless of array index
+    file: File;
+    title: string;
+    thumbnail: File | null;
+    duration: number;
+    category: string;
+    price: number;
+    processed: boolean;
+}
+
 export default function Upload() {
   const { user } = useAuth();
   const { addToQueue, isUploading } = useUpload();
   const navigate = useNavigate();
   
-  const [files, setFiles] = useState<File[]>([]);
-  const [titles, setTitles] = useState<string[]>([]);
-  const [thumbnails, setThumbnails] = useState<(File | null)[]>([]);
-  const [durations, setDurations] = useState<number[]>([]);
-  
-  // Important: categories is now string[] to support custom ones
-  const [categories, setCategories] = useState<string[]>([]);
-  const [prices, setPrices] = useState<number[]>([]); // New: Individual prices
+  // Single Source of Truth
+  const [uploads, setUploads] = useState<PendingUploadItem[]>([]);
   
   // Configuration Data
   const [availableCategories, setAvailableCategories] = useState<string[]>(Object.values(VideoCategory));
   const [systemCategoryPrices, setSystemCategoryPrices] = useState<Record<string, number>>({});
-  
+  const [serverUploadLimit, setServerUploadLimit] = useState<number>(0);
+
   // Queue Processing State
   const [isProcessingQueue, setIsProcessingQueue] = useState(false);
   const [queueProgress, setQueueProgress] = useState({ current: 0, total: 0 });
-  const processingRef = useRef(false); 
-  const queueRef = useRef<{file: File, index: number}[]>([]);
+  const processingRef = useRef(false);
+  // We store IDs to process, not objects, to avoid stale state
+  const processingQueueIds = useRef<string[]>([]);
 
   // Global Settings
   const [desc, setDesc] = useState('');
@@ -159,6 +181,7 @@ export default function Upload() {
               setAvailableCategories([...standard, ...custom]);
 
               setSystemCategoryPrices(settings.categoryPrices || {});
+              setServerUploadLimit(settings.serverUploadLimit || 0);
           } catch(e) { console.error(e); }
       };
       loadConfig();
@@ -189,155 +212,138 @@ export default function Upload() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles = Array.from(e.target.files) as File[];
-      const startIndex = files.length;
+      const validFiles: File[] = [];
+      const rejectedFiles: string[] = [];
 
-      // 1. Update UI placeholders immediately
-      const newTitles = newFiles.map(f => f.name.replace(/\.[^/.]+$/, ""));
-      
-      setFiles(prev => [...prev, ...newFiles]);
-      setTitles(prev => [...prev, ...newTitles]);
-      setThumbnails(prev => [...prev, ...new Array(newFiles.length).fill(null)]); // Null means "pending"
-      setDurations(prev => [...prev, ...new Array(newFiles.length).fill(0)]);
-      
-      // Default to 'OTHER' initially, will be refined by duration later
-      const defaultCat = VideoCategory.OTHER;
-      const defaultPrice = getPriceForCategory(defaultCat);
-
-      setCategories(prev => [...prev, ...new Array(newFiles.length).fill(defaultCat)]);
-      setPrices(prev => [...prev, ...new Array(newFiles.length).fill(defaultPrice)]);
-
-      // 2. Add to processing queue
-      newFiles.forEach((file, i) => {
-          queueRef.current.push({ file, index: startIndex + i });
+      newFiles.forEach(f => {
+          if (serverUploadLimit > 0 && f.size > serverUploadLimit) {
+              rejectedFiles.push(f.name);
+          } else {
+              validFiles.push(f);
+          }
       });
 
-      setQueueProgress(prev => ({ ...prev, total: prev.total + newFiles.length }));
-      
-      // 3. Trigger processor if idle
-      if (!processingRef.current) {
-          processQueue();
+      if (rejectedFiles.length > 0) {
+          alert(`Algunos archivos son demasiado grandes para el servidor y fueron ignorados:\n${rejectedFiles.join('\n')}\n\nLímite: ${(serverUploadLimit/1024/1024).toFixed(0)}MB`);
       }
+
+      if (validFiles.length > 0) {
+          const newItems: PendingUploadItem[] = validFiles.map(file => {
+              const id = Math.random().toString(36).substr(2, 9); // Simple unique ID
+              return {
+                  id,
+                  file,
+                  title: file.name.replace(/\.[^/.]+$/, ""),
+                  thumbnail: null,
+                  duration: 0,
+                  category: VideoCategory.OTHER,
+                  price: getPriceForCategory(VideoCategory.OTHER),
+                  processed: false
+              };
+          });
+
+          setUploads(prev => [...prev, ...newItems]);
+          setQueueProgress(prev => ({ ...prev, total: prev.total + validFiles.length }));
+      }
+      
+      // Reset input value to allow re-selection of same file if needed
+      e.target.value = '';
     }
   };
 
-  // The Queue Processor - Recursive with Delays
-  const processQueue = async () => {
-      if (queueRef.current.length === 0) {
-          processingRef.current = false;
-          setIsProcessingQueue(false);
-          return;
+  // RE-IMPLEMENTED QUEUE PROCESSOR
+  // We use a useEffect that watches for "unprocessed" items in the list
+  useEffect(() => {
+      const unprocessed = uploads.find(u => !u.processed);
+      if (unprocessed && !processingRef.current) {
+          processItem(unprocessed);
       }
+  }, [uploads]);
 
+  const processItem = async (item: PendingUploadItem) => {
       processingRef.current = true;
       setIsProcessingQueue(true);
-
-      // Get next task
-      const task = queueRef.current.shift(); 
-      if (task) {
+      
+      try {
+          const { thumbnail, duration } = await generateThumbnail(item.file);
+          const cat = detectCategory(duration);
+          const price = getPriceForCategory(cat);
+          
+          setUploads(prev => prev.map(u => {
+              if (u.id !== item.id) return u;
+              // Only update category if user hasn't touched it (still default)
+              const finalCat = u.category === VideoCategory.OTHER ? cat : u.category;
+              return {
+                  ...u,
+                  thumbnail,
+                  duration,
+                  category: finalCat,
+                  price: u.category === VideoCategory.OTHER ? price : u.price,
+                  processed: true
+              };
+          }));
+          
           setQueueProgress(prev => ({ ...prev, current: prev.current + 1 }));
-          
-          try {
-              // Generate Thumbnail
-              const { thumbnail, duration } = await generateThumbnail(task.file);
-              
-              // Smart Category Detection
-              const cat = detectCategory(duration);
-              const price = getPriceForCategory(cat);
+      } catch (e) {
+          console.error("Processing failed for", item.title);
+          // Mark as processed anyway to avoid infinite loop
+          setUploads(prev => prev.map(u => u.id === item.id ? { ...u, processed: true } : u));
+      }
 
-              // Update State for this specific index
-              // Check if index still valid (user might have deleted items)
-              setThumbnails(prev => {
-                  if (prev.length <= task.index) return prev;
-                  const n = [...prev]; n[task.index] = thumbnail; return n;
-              });
-              setDurations(prev => {
-                  if (prev.length <= task.index) return prev;
-                  const n = [...prev]; n[task.index] = duration; return n;
-              });
-              
-              // Only auto-set category if it is currently 'OTHER' (user hasn't manually changed it yet)
-              setCategories(prev => {
-                  if (prev.length <= task.index) return prev;
-                  // If user changed it while processing, don't overwrite
-                  if (prev[task.index] !== VideoCategory.OTHER) return prev;
-                  const n = [...prev]; n[task.index] = cat; return n;
-              });
+      await new Promise(r => setTimeout(r, 200)); // GC Pause
+      processingRef.current = false;
+      
+      // The useEffect will trigger next item automatically
+      if (uploads.every(u => u.processed)) setIsProcessingQueue(false);
+  };
 
-              setPrices(prev => {
-                  if (prev.length <= task.index) return prev;
-                  const n = [...prev]; n[task.index] = price; return n;
-              });
-
-          } catch (e) {
-              console.error("Thumb gen failed", e);
-          }
-
-          // CRITICAL: Delay to allow Garbage Collector to free RAM from the large video blob
-          await new Promise(r => setTimeout(r, 300));
-          
-          // Next iteration
-          processQueue();
+  const removeUpload = (id: string) => {
+      setUploads(prev => prev.filter(u => u.id !== id));
+      // If we remove an item, total in queue progress should decrease conceptually, 
+      // but simpler to just leave it as is visually or reset if empty.
+      if (uploads.length <= 1) {
+          setQueueProgress({ current: 0, total: 0 });
+          setIsProcessingQueue(false);
+          processingRef.current = false;
       }
   };
 
-  const removeFile = (index: number) => {
-    if (isProcessingQueue) {
-        alert("Por favor espera a que termine el análisis antes de eliminar items para evitar errores.");
-        return;
-    }
-
-    setFiles(prev => prev.filter((_, i) => i !== index));
-    setTitles(prev => prev.filter((_, i) => i !== index));
-    setThumbnails(prev => prev.filter((_, i) => i !== index));
-    setDurations(prev => prev.filter((_, i) => i !== index));
-    setCategories(prev => prev.filter((_, i) => i !== index));
-    setPrices(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const updateTitle = (index: number, val: string) => {
-    setTitles(prev => { const next = [...prev]; next[index] = val; return next; });
-  };
-
-  const updateCategory = (index: number, val: string) => {
-    setCategories(prev => { const next = [...prev]; next[index] = val; return next; });
-    // Auto-update price when category changes manually
-    const newPrice = getPriceForCategory(val);
-    updatePrice(index, newPrice);
-  };
-  
-  const updatePrice = (index: number, val: number) => {
-    setPrices(prev => { const next = [...prev]; next[index] = val; return next; });
+  const updateField = (id: string, field: keyof PendingUploadItem, value: any) => {
+      setUploads(prev => prev.map(u => {
+          if (u.id !== id) return u;
+          if (field === 'category') {
+             // Auto update price
+             const newPrice = getPriceForCategory(value as string);
+             return { ...u, category: value, price: newPrice };
+          }
+          return { ...u, [field]: value };
+      }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || files.length === 0) return;
+    if (!user || uploads.length === 0) return;
 
-    const queue = files.map((file, i) => ({
-        title: titles[i],
+    const queue = uploads.map(u => ({
+        title: u.title,
         description: desc,
-        price: prices[i],
-        category: categories[i] as VideoCategory, // Cast string to VideoCategory (DB supports string actually)
-        duration: durations[i],
-        file: file,
-        thumbnail: thumbnails[i]
+        price: u.price,
+        category: u.category as VideoCategory,
+        duration: u.duration,
+        file: u.file,
+        thumbnail: u.thumbnail
     }));
 
     addToQueue(queue, user);
     
     // Reset
-    setFiles([]);
-    setTitles([]);
-    setThumbnails([]);
-    setDurations([]);
-    setCategories([]);
-    setPrices([]);
+    setUploads([]);
     setQueueProgress({ current: 0, total: 0 });
     navigate('/'); 
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto pb-24">
       <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
         <UploadIcon className="text-indigo-500" />
         Subir Contenido
@@ -356,17 +362,13 @@ export default function Upload() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-1 space-y-4">
            {/* Add Button */}
-           <div className={`relative border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:bg-slate-800/50 transition-colors group cursor-pointer aspect-square flex flex-col items-center justify-center bg-slate-900/50 ${isProcessingQueue ? 'pointer-events-none opacity-50' : ''}`}>
-            <input type="file" accept="video/*" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" disabled={isProcessingQueue} />
+           <div className={`relative border-2 border-dashed border-slate-700 rounded-xl p-6 text-center hover:bg-slate-800/50 transition-colors group cursor-pointer aspect-square flex flex-col items-center justify-center bg-slate-900/50 ${isProcessingQueue ? 'opacity-80' : ''}`}>
+            <input type="file" accept="video/*" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
             <div className="flex flex-col items-center justify-center gap-2 pointer-events-none">
                 {isProcessingQueue ? (
                     <>
                         <Loader2 size={32} className="text-indigo-500 animate-spin" />
                         <span className="text-slate-400 text-xs mt-2 font-bold">Procesando...</span>
-                        <span className="text-slate-500 text-[10px]">Cola: {queueProgress.current} / {queueProgress.total}</span>
-                        <div className="w-20 h-1 bg-slate-800 rounded-full mt-1 overflow-hidden">
-                           <div className="h-full bg-indigo-500 transition-all" style={{ width: `${queueProgress.total > 0 ? (queueProgress.current / queueProgress.total) * 100 : 0}%`}}></div>
-                        </div>
                     </>
                 ) : (
                     <>
@@ -394,21 +396,21 @@ export default function Upload() {
         <div className="md:col-span-2">
            <form onSubmit={handleSubmit} className="bg-slate-900 rounded-xl border border-slate-800 shadow-xl overflow-hidden flex flex-col h-full max-h-[600px]">
               <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
-                 <h3 className="font-bold text-slate-200">Seleccionados ({files.length})</h3>
-                 {files.length > 0 && !isProcessingQueue && <button type="button" onClick={() => { setFiles([]); setTitles([]); setThumbnails([]); setDurations([]); setCategories([]); setPrices([]); }} className="text-xs text-red-400 hover:text-red-300">Borrar Todo</button>}
+                 <h3 className="font-bold text-slate-200">Seleccionados ({uploads.length})</h3>
+                 {uploads.length > 0 && <button type="button" onClick={() => { setUploads([]); setQueueProgress({current:0, total:0}); }} className="text-xs text-red-400 hover:text-red-300">Borrar Todo</button>}
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {files.length === 0 ? (
+                {uploads.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 py-10">
                      <FileVideo size={48} className="mb-2" />
                      <p>No hay videos seleccionados</p>
                   </div>
                 ) : (
-                  files.map((file, idx) => (
-                    <div key={`${file.name}-${idx}`} className="flex gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800 items-start">
+                  uploads.map((item) => (
+                    <div key={item.id} className="flex gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800 items-start">
                        <div className="w-20 h-14 rounded bg-slate-800 shrink-0 overflow-hidden relative border border-slate-700 group">
-                         {thumbnails[idx] ? (
-                           <img src={URL.createObjectURL(thumbnails[idx]!)} alt="Thumb" className="w-full h-full object-cover" />
+                         {item.thumbnail ? (
+                           <ThumbPreview file={item.thumbnail} />
                          ) : (
                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900">
                                <Loader2 className="w-4 h-4 text-indigo-500 animate-spin mb-1" />
@@ -416,18 +418,18 @@ export default function Upload() {
                            </div>
                          )}
                          <div className="absolute bottom-0 right-0 bg-black/70 text-[9px] px-1 text-white font-mono">
-                            {Math.floor(durations[idx]/60)}:{(durations[idx]%60).toFixed(0).padStart(2,'0')}
+                            {Math.floor(item.duration/60)}:{(item.duration%60).toFixed(0).padStart(2,'0')}
                          </div>
                        </div>
                        <div className="flex-1 min-w-0 space-y-2">
-                          <input type="text" value={titles[idx]} onChange={(e) => updateTitle(idx, e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-slate-700 focus:border-indigo-500 outline-none text-sm font-bold text-slate-200 p-0 pb-1 transition-colors" placeholder="Título" required />
+                          <input type="text" value={item.title} onChange={(e) => updateField(item.id, 'title', e.target.value)} className="w-full bg-transparent border-b border-transparent hover:border-slate-700 focus:border-indigo-500 outline-none text-sm font-bold text-slate-200 p-0 pb-1 transition-colors" placeholder="Título" required />
                           
                           <div className="flex items-center gap-2">
                              <div className="relative">
                                 <Tag size={12} className="absolute left-2 top-1.5 text-slate-500" />
                                 <select 
-                                    value={categories[idx]} 
-                                    onChange={(e) => updateCategory(idx, e.target.value)}
+                                    value={item.category} 
+                                    onChange={(e) => updateField(item.id, 'category', e.target.value)}
                                     className="bg-slate-900 border border-slate-700 rounded text-xs text-slate-300 py-1 pl-6 pr-2 outline-none focus:border-indigo-500 uppercase font-bold"
                                 >
                                     {availableCategories.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
@@ -440,16 +442,16 @@ export default function Upload() {
                                 <input 
                                     type="number" 
                                     min="0"
-                                    value={prices[idx]}
-                                    onChange={(e) => updatePrice(idx, parseInt(e.target.value))}
+                                    value={item.price}
+                                    onChange={(e) => updateField(item.id, 'price', parseInt(e.target.value) || 0)}
                                     className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-amber-400 font-bold py-1 pl-5 pr-1 outline-none focus:border-indigo-500"
                                 />
                              </div>
 
-                             <span className="text-[10px] text-slate-500">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                             <span className="text-[10px] text-slate-500">{(item.file.size / 1024 / 1024).toFixed(1)} MB</span>
                           </div>
                        </div>
-                       <button type="button" onClick={() => removeFile(idx)} disabled={isProcessingQueue} className={`text-slate-500 hover:text-red-400 transition-colors p-1 ${isProcessingQueue ? 'opacity-30 cursor-not-allowed' : ''}`}><X size={16} /></button>
+                       <button type="button" onClick={() => removeUpload(item.id)} className="text-slate-500 hover:text-red-400 transition-colors p-1"><X size={16}/></button>
                     </div>
                   ))
                 )}
@@ -457,10 +459,10 @@ export default function Upload() {
               <div className="p-4 bg-slate-900/50 border-t border-slate-800">
                 <button 
                     type="submit" 
-                    disabled={isProcessingQueue || files.length === 0} 
-                    className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all flex justify-center items-center gap-2 ${isProcessingQueue || files.length === 0 ? 'bg-slate-700 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-500 active:scale-95'}`}
+                    disabled={isProcessingQueue || uploads.length === 0} 
+                    className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all flex justify-center items-center gap-2 ${isProcessingQueue || uploads.length === 0 ? 'bg-slate-700 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-500 active:scale-95'}`}
                 >
-                  {isProcessingQueue ? <><Loader2 className="animate-spin" size={20} /> Procesando Miniaturas ({queueProgress.current}/{queueProgress.total})...</> : `Publicar ${files.length} Video${files.length !== 1 ? 's' : ''} en Segundo Plano`}
+                  {isProcessingQueue ? <><Loader2 className="animate-spin" size={20} /> Procesando Miniaturas...</> : `Publicar ${uploads.length} Video${uploads.length !== 1 ? 's' : ''} en Segundo Plano`}
                 </button>
               </div>
            </form>

@@ -181,8 +181,8 @@ export default function Profile() {
                 <input 
                     type="number" 
                     min="0"
-                    value={autoLimit}
-                    onChange={(e) => setAutoLimit(parseInt(e.target.value))}
+                    value={isNaN(autoLimit) ? '' : autoLimit}
+                    onChange={(e) => { const v = parseInt(e.target.value); setAutoLimit(isNaN(v) ? 0 : v); }}
                     className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
                 />
                 <button 
@@ -210,8 +210,8 @@ export default function Profile() {
                     <input 
                     type="number" 
                     min="1"
-                    value={bulkPrice}
-                    onChange={(e) => setBulkPrice(parseInt(e.target.value))}
+                    value={isNaN(bulkPrice) ? '' : bulkPrice}
+                    onChange={(e) => { const v = parseInt(e.target.value); setBulkPrice(isNaN(v) ? 0 : v); }}
                     className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
                     />
                     <button 
@@ -369,9 +369,9 @@ export default function Profile() {
                                 type="number" 
                                 min="0" 
                                 className="w-16 bg-slate-900 border border-slate-700 rounded text-center text-amber-400 font-bold py-1 focus:border-indigo-500 outline-none"
-                                value={defaultPrices[cat] ?? ''}
+                                value={isNaN(defaultPrices[cat]) ? '' : defaultPrices[cat]}
                                 placeholder="Auto"
-                                onChange={(e) => setDefaultPrices({...defaultPrices, [cat]: parseInt(e.target.value) || 0})}
+                                onChange={(e) => { const v = parseInt(e.target.value); setDefaultPrices({...defaultPrices, [cat]: isNaN(v) ? 0 : v}) }}
                               />
                           </div>
                       </div>

@@ -1,6 +1,3 @@
-
-
-
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud, Clock, Trash2, ShieldCheck, ShoppingBag } from 'lucide-react';
 import { db } from '../services/db';
@@ -25,7 +22,6 @@ const INITIAL_CATEGORIES = [
 const ITEMS_PER_PAGE = 12;
 
 // --- GLOBAL STATE SNAPSHOT (Lives outside component lifecycle) ---
-// This acts as a "Keep-Alive" cache for the Home view
 interface HomeSnapshot {
     videos: Video[];
     shuffledList: Video[];
@@ -35,6 +31,7 @@ interface HomeSnapshot {
     visibleCount: number;
     scrollPosition: number;
     purchases: Set<string>;
+    checkedPurchaseIds: Set<string>; // Added to snapshot
     categories: { id: string, label: string }[];
 }
 
@@ -42,59 +39,60 @@ let homeSnapshot: HomeSnapshot | null = null;
 
 export default function Home() {
   const [videos, setVideos] = useState<Video[]>([]);
-  // Use a shuffled copy of videos to maintain stability during filtering
   const [shuffledMasterList, setShuffledMasterList] = useState<Video[]>([]);
   
-  // Store purchases as a Set for O(1) lookup performance
+  // Store purchases and CHECKED statuses
   const [purchases, setPurchases] = useState<Set<string>>(new Set());
+  const [checkedPurchaseIds, setCheckedPurchaseIds] = useState<Set<string>>(new Set());
+  
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
   const [loading, setLoading] = useState(true);
   const [subscribedCreators, setSubscribedCreators] = useState<string[]>([]);
   const [showSidebar, setShowSidebar] = useState(false);
   const { user, logout } = useAuth();
   
-  // Dynamic Category List
   const [categoryList, setCategoryList] = useState(INITIAL_CATEGORIES);
-
-  // Full Processed List (Filtered)
   const [processedList, setProcessedList] = useState<Video[]>([]);
-  // Visible Chunk
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
+  
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const searchWrapperRef = useRef<HTMLDivElement>(null);
 
-  // Recent Search State
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [showRecent, setShowRecent] = useState(false);
 
-  // State Ref to hold latest values for unmount saving (Prevents stale closures)
   const stateRef = useRef({
-      videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList
+      videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList
   });
 
-  // Always keep ref updated
   useEffect(() => {
       stateRef.current = {
-          videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList
+          videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList
       };
-  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList]);
+  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, checkedPurchaseIds, categoryList]);
+
+  // Debounce logic
+  useEffect(() => {
+      const handler = setTimeout(() => {
+          setDebouncedSearch(searchQuery);
+      }, 300);
+      return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   // --- INIT & SNAPSHOT RESTORATION ---
   useEffect(() => {
     const init = async () => {
-        // Fetch System Settings to get Custom Categories
         try {
             const settings = await db.getSystemSettings();
             if (settings.customCategories) {
                 const custom = settings.customCategories.map(c => ({ id: c, label: c.replace('_', ' ') }));
-                // Merge with initial, avoiding duplicates if any
                 setCategoryList(prev => {
-                    // Start with initial
                     const base = [...INITIAL_CATEGORIES];
-                    // Append custom
                     custom.forEach(c => {
                         if (!base.find(b => b.id === c.id)) base.push(c);
                     });
@@ -103,45 +101,39 @@ export default function Home() {
             }
         } catch (e) {}
 
-        // Load recent searches
         try {
             const saved = localStorage.getItem('sp_recent_searches');
             if (saved) setRecentSearches(JSON.parse(saved));
         } catch(e) {}
 
-        // Check for "Dirty" flag (New upload happened?)
         const isDirty = localStorage.getItem('sp_home_dirty') === 'true';
 
-        // 1. Try to restore from Snapshot if clean
         if (!isDirty && homeSnapshot) {
-            // console.log("Restoring Home from Snapshot");
             setVideos(homeSnapshot.videos);
             setShuffledMasterList(homeSnapshot.shuffledList);
             setActiveCategory(homeSnapshot.activeCategory);
             setSearchQuery(homeSnapshot.searchQuery);
+            setDebouncedSearch(homeSnapshot.searchQuery); 
             setProcessedList(homeSnapshot.processedList);
             setVisibleCount(homeSnapshot.visibleCount);
             setPurchases(homeSnapshot.purchases);
+            setCheckedPurchaseIds(homeSnapshot.checkedPurchaseIds);
             if(homeSnapshot.categories.length > INITIAL_CATEGORIES.length) setCategoryList(homeSnapshot.categories);
             setLoading(false);
             
-            // Background update for watched status (cheap)
             if (user) {
                 db.getUserActivity(user.id).then(act => setWatchedIds(act.watched || []));
             }
             return;
         }
 
-        // 2. Fresh Load (If dirty or no snapshot)
         setLoading(true);
-        if (isDirty) localStorage.removeItem('sp_home_dirty'); // Clear flag
+        if (isDirty) localStorage.removeItem('sp_home_dirty'); 
         
         try {
-            // Use aggressive caching here handled by db.ts
             const allVideos = await db.getAllVideos();
             setVideos(allVideos);
             
-            // Generate shuffle ONCE when data loads
             const shuffled = [...allVideos].sort(() => Math.random() - 0.5);
             setShuffledMasterList(shuffled);
             
@@ -157,7 +149,6 @@ export default function Home() {
     };
     init();
 
-    // SNAPSHOT SAVE on Unmount ONLY
     return () => {
         const s = stateRef.current;
         if (s.videos.length > 0) {
@@ -170,27 +161,25 @@ export default function Home() {
                 visibleCount: s.visibleCount,
                 scrollPosition: window.scrollY,
                 purchases: s.purchases,
+                checkedPurchaseIds: s.checkedPurchaseIds,
                 categories: s.categoryList
             };
         }
     };
   }, [user]);
 
-  // RESTORE SCROLL POSITION
   useLayoutEffect(() => {
       if (!loading && homeSnapshot && homeSnapshot.scrollPosition > 0) {
           window.scrollTo(0, homeSnapshot.scrollPosition);
       }
   }, [loading]);
 
-  // Fetch subscriptions
   useEffect(() => {
       if (user && activeCategory === 'SUBSCRIPTIONS') {
           db.getSubscriptions(user.id).then(setSubscribedCreators);
       }
   }, [user, activeCategory]);
 
-  // Handle Search History
   const addToHistory = (term: string) => {
       if (!term.trim()) return;
       const val = term.trim();
@@ -210,7 +199,6 @@ export default function Home() {
       });
   };
 
-  // Close recent searches on click outside
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
           if (searchWrapperRef.current && !searchWrapperRef.current.contains(event.target as Node)) {
@@ -221,11 +209,9 @@ export default function Home() {
       return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Logic to Process List (Filter Only - No Shuffle)
   useEffect(() => {
       if (shuffledMasterList.length === 0) return;
       
-      // Use the pre-shuffled list
       let filtered = shuffledMasterList;
       
       if (activeCategory === 'SUBSCRIPTIONS') {
@@ -234,9 +220,8 @@ export default function Home() {
           filtered = shuffledMasterList.filter(v => v.category === activeCategory);
       }
 
-      // B. Search
-      if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
+      if (debouncedSearch.trim()) {
+          const q = debouncedSearch.toLowerCase();
           filtered = filtered.filter(v => 
               v.title.toLowerCase().includes(q) || 
               v.description.toLowerCase().includes(q) || 
@@ -246,27 +231,23 @@ export default function Home() {
       
       setProcessedList(filtered);
       
-      // Reset count when filters change (unless it's the initial load/restore)
       if (!loading) {
-         if (homeSnapshot && activeCategory === homeSnapshot.activeCategory && searchQuery === homeSnapshot.searchQuery) {
-             // If matches snapshot (restore), keep snapshot count (handled by init)
+         if (homeSnapshot && activeCategory === homeSnapshot.activeCategory && debouncedSearch === homeSnapshot.searchQuery) {
+             // restore
          } else {
              setVisibleCount(ITEMS_PER_PAGE);
          }
       }
 
-  }, [shuffledMasterList, activeCategory, searchQuery, subscribedCreators, loading]);
+  }, [shuffledMasterList, activeCategory, debouncedSearch, subscribedCreators, loading]);
 
-  // Infinite Scroll Observer - OPTIMIZED FOR NAS
   useEffect(() => {
-      if (loading) return; // Don't attach observer while loading
+      if (loading) return;
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
-              // Increase by chunk size
               setVisibleCount(prev => prev + ITEMS_PER_PAGE);
           }
       }, { 
-          // CRITICAL OPTIMIZATION: Look 1500px ahead
           rootMargin: '1500px' 
       });
 
@@ -276,39 +257,53 @@ export default function Home() {
 
   const displayList = processedList.slice(0, visibleCount);
 
-  // Lazy Load Purchases for Visible Items (NAS OPTIMIZATION)
+  // OPTIMIZED PURCHASE CHECKER
   useEffect(() => {
       if (!user || displayList.length === 0) return;
 
       const fetchVisiblePurchases = async () => {
-          // Only check videos we haven't checked yet
+          // Check items that are:
+          // 1. Paid
+          // 2. Not my own
+          // 3. Not already known as purchased
+          // 4. CRITICAL: Not already checked (prevent infinite loop)
           const toCheck = displayList.filter(v => 
               Number(v.price) > 0 && 
               v.creatorId !== user.id && 
-              !purchases.has(v.id)
+              !purchases.has(v.id) && 
+              !checkedPurchaseIds.has(v.id) 
           );
 
           if (toCheck.length === 0) return;
 
-          // Limit concurrency to avoid choking the NAS
           const BATCH_SIZE = 6; 
           
           for (let i = 0; i < toCheck.length; i += BATCH_SIZE) {
                const batch = toCheck.slice(i, i + BATCH_SIZE);
-               const newIds: string[] = [];
+               const newPurchasedIds: string[] = [];
+               const newCheckedIds: string[] = [];
 
                await Promise.all(batch.map(async (v) => {
+                   newCheckedIds.push(v.id); // Mark as checked regardless of result
                    try {
                        const has = await db.hasPurchased(user.id, v.id);
-                       if (has) newIds.push(v.id);
+                       if (has) newPurchasedIds.push(v.id);
                    } catch (e) { console.warn("Purchase check failed", e); }
                }));
 
-               // Update state once per batch to reduce renders
-               if (newIds.length > 0) {
+               // Batch update state
+               if (newCheckedIds.length > 0) {
+                   setCheckedPurchaseIds(prev => {
+                       const next = new Set(prev);
+                       newCheckedIds.forEach(id => next.add(id));
+                       return next;
+                   });
+               }
+
+               if (newPurchasedIds.length > 0) {
                    setPurchases(prev => {
                        const next = new Set(prev);
-                       newIds.forEach(id => next.add(id));
+                       newPurchasedIds.forEach(id => next.add(id));
                        return next;
                    });
                }
@@ -316,7 +311,7 @@ export default function Home() {
       };
 
       fetchVisiblePurchases();
-  }, [displayList, user]); 
+  }, [displayList, user, purchases, checkedPurchaseIds]); 
 
   const isUnlocked = (videoId: string, creatorId: string) => {
     return purchases.has(videoId) || (user?.id === creatorId);
@@ -342,25 +337,20 @@ export default function Home() {
                 </div>
                 
                 <div className="space-y-1 flex-1">
-                    {/* Admin Link */}
                     {user?.role === 'ADMIN' && (
                         <Link to="/admin" className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-900/10 hover:bg-amber-900/20 rounded-lg font-medium mb-4 border border-amber-500/20">
                             <ShieldCheck size={20}/> Panel Admin
                         </Link>
                     )}
-
                     <Link to="/" className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
                         <HomeIcon size={20}/> Inicio
                     </Link>
                     <Link to="/shorts" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <Smartphone size={20}/> Shorts
                     </Link>
-                    
-                    {/* Marketplace Link */}
                     <Link to="/marketplace" className="flex items-center gap-4 px-4 py-3 text-emerald-400 hover:text-emerald-200 hover:bg-emerald-900/20 rounded-lg font-medium">
                         <ShoppingBag size={20}/> Tienda
                     </Link>
-
                     <button onClick={() => { setActiveCategory('SUBSCRIPTIONS'); setShowSidebar(false); }} className="w-full flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium text-left">
                         <Compass size={20}/> Suscripciones
                     </button>
@@ -385,10 +375,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* Sticky Header: Search & Categories */}
+      {/* Sticky Header */}
       <div className="sticky top-0 z-40 bg-black/95 backdrop-blur-md border-b border-slate-800/50 pb-2 pt-2 transition-all">
-         
-         {/* Search Bar */}
          <div className="px-4 md:px-6 mb-2 flex items-center gap-4">
             <button onClick={() => setShowSidebar(true)} className="md:hidden text-white p-2 hover:bg-slate-800 rounded-full">
                 <Menu size={24} />
@@ -412,41 +400,20 @@ export default function Home() {
                 />
                 
                 {searchQuery ? (
-                    <button 
-                        onClick={() => setSearchQuery('')}
-                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white z-20"
-                    >
-                        <X size={18} />
-                    </button>
+                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-slate-500 hover:text-white z-20"><X size={18} /></button>
                 ) : (
-                    <button 
-                        onClick={handleManualRefresh}
-                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white z-20"
-                        title="Refrescar"
-                    >
-                        <RefreshCw size={14} />
-                    </button>
+                    <button onClick={handleManualRefresh} className="absolute right-3 top-2.5 text-slate-500 hover:text-white z-20" title="Refrescar"><RefreshCw size={14} /></button>
                 )}
 
-                {/* Recent Searches Dropdown */}
                 {showRecent && filteredRecent.length > 0 && (
                     <div className="absolute top-full left-0 right-0 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 mt-2 overflow-hidden animate-in fade-in zoom-in-95 origin-top">
                         {filteredRecent.map(term => (
-                            <div 
-                                key={term} 
-                                onClick={() => { setSearchQuery(term); addToHistory(term); setShowRecent(false); }}
-                                className="flex items-center justify-between px-4 py-3 hover:bg-slate-800/80 cursor-pointer group/item transition-colors border-b border-slate-800/50 last:border-0"
-                            >
+                            <div key={term} onClick={() => { setSearchQuery(term); addToHistory(term); setShowRecent(false); }} className="flex items-center justify-between px-4 py-3 hover:bg-slate-800/80 cursor-pointer group/item transition-colors border-b border-slate-800/50 last:border-0">
                                 <div className="flex items-center gap-3 text-slate-300">
                                     <Clock size={16} className="text-slate-500" />
                                     <span className="text-sm font-medium">{term}</span>
                                 </div>
-                                <button 
-                                    onClick={(e) => removeHistory(e, term)} 
-                                    className="text-slate-600 hover:text-red-400 p-1.5 hover:bg-slate-700/50 rounded-full transition-all opacity-0 group-hover/item:opacity-100"
-                                >
-                                    <Trash2 size={14} />
-                                </button>
+                                <button onClick={(e) => removeHistory(e, term)} className="text-slate-600 hover:text-red-400 p-1.5 hover:bg-slate-700/50 rounded-full transition-all opacity-0 group-hover/item:opacity-100"><Trash2 size={14} /></button>
                             </div>
                         ))}
                     </div>
@@ -454,25 +421,17 @@ export default function Home() {
             </div>
          </div>
 
-         {/* Categories Pills */}
          <div className="flex items-center gap-2 overflow-x-auto px-4 md:px-6 scrollbar-hide pb-2">
-            <div className="hidden md:flex bg-slate-800/50 p-1.5 rounded-lg text-slate-400 shrink-0">
-                <Compass size={18} />
-            </div>
+            <div className="hidden md:flex bg-slate-800/50 p-1.5 rounded-lg text-slate-400 shrink-0"><Compass size={18} /></div>
             <div className="hidden md:block h-6 w-px bg-slate-800 mx-1 shrink-0"></div>
             {categoryList.map(cat => (
-                <button
-                    key={cat.id}
-                    onClick={() => setActiveCategory(cat.id)}
-                    className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${activeTabClass(activeCategory, cat.id)}`}
-                >
+                <button key={cat.id} onClick={() => setActiveCategory(cat.id)} className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${activeTabClass(activeCategory, cat.id)}`}>
                     {cat.label}
                 </button>
             ))}
          </div>
       </div>
 
-      {/* Main Grid */}
       <div className="px-0 md:px-6 pb-20 pt-2">
          {loading ? (
              <div className="flex flex-col items-center justify-center py-20 text-slate-500">
@@ -506,8 +465,6 @@ export default function Home() {
                   />
                 ))}
              </div>
-             
-             {/* Invisible Trigger for Infinite Scroll */}
              {visibleCount < processedList.length && (
                 <div ref={loadMoreRef} className="py-24 flex justify-center">
                     <RefreshCw className="animate-spin text-slate-600" />

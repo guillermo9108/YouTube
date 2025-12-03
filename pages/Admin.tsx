@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, FileWarning, CheckSquare, Square } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -26,11 +26,18 @@ export default function Admin() {
   const [cleanerPreview, setCleanerPreview] = useState<Video[]>([]);
   const [cleanerStats, setCleanerStats] = useState({ totalVideos: 0, videosToDelete: 0, spaceReclaimed: '0 MB' });
   const [loadingCleaner, setLoadingCleaner] = useState(false);
+  const [selectedCleanIds, setSelectedCleanIds] = useState<Set<string>>(new Set());
+  
+  // Orphaned Files State
+  const [orphans, setOrphans] = useState<{path: string, size: number}[]>([]);
+  const [orphanStats, setOrphanStats] = useState({ totalSize: '0 KB', count: 0 });
+  const [scanningOrphans, setScanningOrphans] = useState(false);
 
   // Library State
   const [localPath, setLocalPath] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanLog, setScanLog] = useState<string[]>([]);
+  const scanSourceRef = useRef<EventSource | null>(null);
 
   // Category State
   const [newCatName, setNewCatName] = useState('');
@@ -41,6 +48,15 @@ export default function Admin() {
         setSettings(s);
         if (s.localLibraryPath) setLocalPath(s.localLibraryPath);
     });
+  }, []);
+
+  // Cleanup EventSource on unmount
+  useEffect(() => {
+      return () => {
+          if (scanSourceRef.current) {
+              scanSourceRef.current.close();
+          }
+      };
   }, []);
 
   const loadData = async () => {
@@ -128,6 +144,8 @@ export default function Admin() {
 
   const handleScanLibrary = async () => {
       if (!localPath.trim()) return;
+      if (scanSourceRef.current) scanSourceRef.current.close();
+      
       setScanning(true);
       setScanLog(['Iniciando escaneo en tiempo real...']);
       
@@ -141,18 +159,19 @@ export default function Admin() {
       }
 
       try {
-          // Use new streaming method
-          await db.scanLocalLibraryStream(cleanPath, (msg, type) => {
+          // Store ref to close it later
+          scanSourceRef.current = db.scanLocalLibraryStream(cleanPath, (msg, type) => {
                setScanLog(prev => {
-                   // Keep log size manageable (last 100 lines)
                    const newLog = [...prev, type === 'log' ? msg : `[${type.toUpperCase()}] ${msg}`];
                    if (newLog.length > 100) return newLog.slice(newLog.length - 100);
                    return newLog;
                });
+               if (msg === 'Fin.' || type === 'error') {
+                   setScanning(false);
+               }
           });
       } catch (e: any) {
           setScanLog(prev => [...prev, `ERROR: ${e.message}`]);
-      } finally {
           setScanning(false);
       }
   };
@@ -188,25 +207,60 @@ export default function Admin() {
 
   const previewCleaner = async () => {
       setLoadingCleaner(true);
+      setCleanerPreview([]);
       try {
           const res = await db.getSmartCleanerPreview(cleanerCategory, cleanerPercent, cleanerSafeDays);
           setCleanerPreview(res.preview);
           setCleanerStats(res.stats);
+          // Auto select all initially
+          setSelectedCleanIds(new Set(res.preview.map(v => v.id)));
       } finally { setLoadingCleaner(false); }
   };
 
   const executeCleaner = async () => {
-      if (!confirm(`ADVERTENCIA: Esto eliminará permanentemente ${cleanerStats.videosToDelete} videos. No se puede deshacer.\n\nEscribe 'DELETE' para confirmar (en tu mente, solo pulsa OK).`)) return;
+      const count = selectedCleanIds.size;
+      if (count === 0) return;
+
+      if (!confirm(`ADVERTENCIA FINAL: Estás a punto de eliminar ${count} videos. Esta acción es IRREVERSIBLE.\n\n¿Proceder?`)) return;
       
       try {
-          const ids = cleanerPreview.map(v => v.id);
-          const res = await db.executeSmartCleaner(ids) as { deleted: number };
+          const res = await db.executeSmartCleaner(Array.from(selectedCleanIds)) as { deleted: number };
           alert(`Eliminados ${res.deleted} videos exitosamente.`);
           setCleanerPreview([]);
+          setSelectedCleanIds(new Set());
           setCleanerStats({ totalVideos: 0, videosToDelete: 0, spaceReclaimed: '0 MB' });
       } catch (e: any) {
           alert("Error ejecutando limpiador: " + e.message);
       }
+  };
+
+  const toggleCleanSelection = (id: string) => {
+      const next = new Set(selectedCleanIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      setSelectedCleanIds(next);
+  };
+
+  const scanOrphans = async () => {
+      setScanningOrphans(true);
+      try {
+          const res = await db.adminScanOrphans();
+          setOrphans(res.orphans);
+          setOrphanStats({ count: res.count, totalSize: res.totalSize });
+      } catch(e) { alert("Error escaneando huérfanos"); }
+      finally { setScanningOrphans(false); }
+  };
+
+  const deleteOrphans = async () => {
+      if (orphans.length === 0) return;
+      if (!confirm(`¿Eliminar ${orphans.length} archivos basura (${orphanStats.totalSize})?`)) return;
+      
+      try {
+          await db.adminDeleteOrphans(orphans.map(o => o.path));
+          setOrphans([]);
+          setOrphanStats({ count: 0, totalSize: '0 KB' });
+          alert("Archivos basura eliminados.");
+      } catch(e) { alert("Error eliminando"); }
   };
 
   const filteredUsers = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
@@ -378,88 +432,140 @@ export default function Admin() {
 
       {activeTab === 'CLEANER' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6">
-                  <h3 className="font-bold text-white flex items-center gap-2"><Brush size={18} /> Configuración del Limpiador</h3>
-                  <p className="text-xs text-slate-400">
-                      El algoritmo calcula una puntuación para cada video basada en Vistas, Likes, Dislikes y Antigüedad.
-                      Los videos con menor puntuación serán seleccionados para eliminación.
-                  </p>
-                  
-                  <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Categoría Objetivo</label>
-                      <select value={cleanerCategory} onChange={e => setCleanerCategory(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
-                          <option value="ALL">Todas las Categorías</option>
-                          {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
+              <div className="space-y-6">
+                  {/* Smart Cleaner Config */}
+                  <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6">
+                      <h3 className="font-bold text-white flex items-center gap-2"><Brush size={18} /> Algoritmo de Limpieza</h3>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                          El algoritmo calcula el valor de retención usando: 
+                          <br/><code className="bg-slate-800 px-1 rounded text-emerald-400">Score = (Views*0.5) + (Likes*5) - (Dislikes*10)</code>.
+                          <br/>Los videos con menor puntuación son candidatos.
+                      </p>
+                      
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Categoría Objetivo</label>
+                          <select value={cleanerCategory} onChange={e => setCleanerCategory(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                              <option value="ALL">Todas las Categorías</option>
+                              {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Porcentaje a Eliminar: {cleanerPercent}%</label>
+                          <input 
+                            type="range" 
+                            min="5" 
+                            max="50" 
+                            value={cleanerPercent} 
+                            onChange={e => setCleanerPercent(parseInt(e.target.value))} 
+                            className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                          />
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Antigüedad Mínima: {cleanerSafeDays} Días</label>
+                          <input 
+                            type="range" 
+                            min="0" 
+                            max="60" 
+                            value={cleanerSafeDays} 
+                            onChange={e => setCleanerSafeDays(parseInt(e.target.value))} 
+                            className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                          />
+                      </div>
+
+                      <button onClick={previewCleaner} disabled={loadingCleaner} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                          {loadingCleaner ? <Loader2 className="animate-spin"/> : <Search size={18}/>} Analizar Candidatos
+                      </button>
                   </div>
 
-                  <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Porcentaje a Eliminar: {cleanerPercent}%</label>
-                      <input 
-                        type="range" 
-                        min="5" 
-                        max="50" 
-                        value={cleanerPercent} 
-                        onChange={e => setCleanerPercent(parseInt(e.target.value))} 
-                        className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                      />
-                      <p className="text-[10px] text-slate-500 mt-1">Selecciona el {cleanerPercent}% inferior de videos.</p>
+                  {/* Orphaned Files Tool */}
+                  <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
+                      <h3 className="font-bold text-white flex items-center gap-2"><FileWarning size={18} /> Archivos Huérfanos</h3>
+                      <p className="text-xs text-slate-400">Escanea la carpeta de subidas en busca de archivos que no están registrados en la base de datos (basura).</p>
+                      
+                      {orphans.length > 0 ? (
+                          <div className="bg-red-900/10 border border-red-500/20 p-3 rounded-lg text-center">
+                              <div className="text-xl font-bold text-red-400">{orphans.length} Archivos</div>
+                              <div className="text-xs text-red-300">Ocupando {orphanStats.totalSize}</div>
+                              <button onClick={deleteOrphans} className="mt-3 w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded text-xs flex items-center justify-center gap-2">
+                                  <Trash2 size={12}/> Eliminar Basura
+                              </button>
+                          </div>
+                      ) : (
+                          <button onClick={scanOrphans} disabled={scanningOrphans} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2 rounded border border-slate-700 text-xs flex items-center justify-center gap-2">
+                              {scanningOrphans ? <Loader2 className="animate-spin" size={12}/> : <Search size={12}/>} Buscar Huérfanos
+                          </button>
+                      )}
                   </div>
-
-                  <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Antigüedad Mínima: {cleanerSafeDays} Días</label>
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max="30" 
-                        value={cleanerSafeDays} 
-                        onChange={e => setCleanerSafeDays(parseInt(e.target.value))} 
-                        className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                      />
-                      <p className="text-[10px] text-slate-500 mt-1">Videos más nuevos de {cleanerSafeDays} días NO serán eliminados.</p>
-                  </div>
-
-                  <button onClick={previewCleaner} disabled={loadingCleaner} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                      {loadingCleaner ? <Loader2 className="animate-spin"/> : <Search size={18}/>} Previsualizar Candidatos
-                  </button>
               </div>
 
+              {/* Candidates List */}
               <div className="lg:col-span-2 bg-slate-900 p-6 rounded-xl border border-slate-800 flex flex-col h-[600px]">
                   <div className="flex justify-between items-center mb-4">
-                      <h3 className="font-bold text-white">Candidatos para Eliminación</h3>
+                      <div>
+                         <h3 className="font-bold text-white">Candidatos ({selectedCleanIds.size}/{cleanerPreview.length})</h3>
+                         <p className="text-xs text-slate-500">Selecciona los videos que confirmas eliminar.</p>
+                      </div>
                       {cleanerStats.videosToDelete > 0 && (
                           <span className="text-xs bg-red-900/30 text-red-400 px-2 py-1 rounded font-mono">
-                              {cleanerStats.videosToDelete} Videos (~{cleanerStats.spaceReclaimed})
+                              Recuperar: ~{cleanerStats.spaceReclaimed}
                           </span>
                       )}
                   </div>
 
                   <div className="flex-1 overflow-y-auto border border-slate-800 rounded-lg bg-slate-950/50">
                       {cleanerPreview.length === 0 ? (
-                          <div className="h-full flex items-center justify-center text-slate-500 text-sm">
-                              Ejecuta la previsualización para ver videos aquí.
+                          <div className="h-full flex flex-col items-center justify-center text-slate-500 text-sm gap-2 opacity-50">
+                              <Brush size={32}/>
+                              <p>Ejecuta el análisis para ver candidatos.</p>
                           </div>
                       ) : (
                           <table className="w-full text-left text-xs">
-                              <thead className="bg-slate-900 text-slate-400 sticky top-0">
+                              <thead className="bg-slate-900 text-slate-400 sticky top-0 z-10">
                                   <tr>
+                                      <th className="p-3 w-10 text-center">
+                                          <button 
+                                            onClick={() => {
+                                                if (selectedCleanIds.size === cleanerPreview.length) setSelectedCleanIds(new Set());
+                                                else setSelectedCleanIds(new Set(cleanerPreview.map(v => v.id)));
+                                            }}
+                                            className="text-indigo-400 hover:text-white"
+                                          >
+                                              {selectedCleanIds.size === cleanerPreview.length ? <CheckSquare size={16}/> : <Square size={16}/>}
+                                          </button>
+                                      </th>
                                       <th className="p-3">Video</th>
-                                      <th className="p-3">Vistas</th>
-                                      <th className="p-3">Likes</th>
-                                      <th className="p-3">Dislikes</th>
-                                      <th className="p-3">Edad (Días)</th>
+                                      <th className="p-3">Stats</th>
+                                      <th className="p-3">Score</th>
                                   </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-800">
-                                  {cleanerPreview.map(v => (
-                                      <tr key={v.id} className="hover:bg-slate-900/50">
-                                          <td className="p-3 text-slate-300 truncate max-w-[200px]">{v.title}</td>
-                                          <td className="p-3 text-slate-400">{v.views}</td>
-                                          <td className="p-3 text-emerald-400">{v.likes}</td>
-                                          <td className="p-3 text-red-400">{v.dislikes}</td>
-                                          <td className="p-3 text-slate-400">{Math.floor((Date.now() - v.createdAt) / 86400000)}</td>
-                                      </tr>
-                                  ))}
+                                  {cleanerPreview.map(v => {
+                                      const isSelected = selectedCleanIds.has(v.id);
+                                      const score = (v as any).score;
+                                      return (
+                                        <tr key={v.id} className={`hover:bg-slate-900/50 transition-colors ${isSelected ? 'bg-red-900/5' : ''}`}>
+                                            <td className="p-3 text-center">
+                                                <button onClick={() => toggleCleanSelection(v.id)} className={`${isSelected ? 'text-red-500' : 'text-slate-600'}`}>
+                                                    {isSelected ? <CheckSquare size={16}/> : <Square size={16}/>}
+                                                </button>
+                                            </td>
+                                            <td className="p-3">
+                                                <div className="font-bold text-slate-200 truncate max-w-[200px]">{v.title}</div>
+                                                <div className="text-[10px] text-slate-500">{new Date(v.createdAt).toLocaleDateString()}</div>
+                                            </td>
+                                            <td className="p-3 text-slate-400">
+                                                <div className="flex gap-2">
+                                                    <span className="text-blue-400">{v.views}v</span>
+                                                    <span className="text-emerald-400">{v.likes}L</span>
+                                                    <span className="text-red-400">{v.dislikes}D</span>
+                                                </div>
+                                            </td>
+                                            <td className="p-3 font-mono text-slate-500">{Number(score).toFixed(1)}</td>
+                                        </tr>
+                                      );
+                                  })}
                               </tbody>
                           </table>
                       )}
@@ -468,10 +574,10 @@ export default function Admin() {
                   <div className="mt-4 pt-4 border-t border-slate-800">
                       <button 
                         onClick={executeCleaner}
-                        disabled={cleanerPreview.length === 0}
-                        className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
+                        disabled={selectedCleanIds.size === 0}
+                        className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-red-900/20"
                       >
-                          <Trash2 size={18}/> Confirmar y Eliminar Permanentemente
+                          <Trash2 size={18}/> Eliminar {selectedCleanIds.size} Videos Permanentemente
                       </button>
                   </div>
               </div>

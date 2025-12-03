@@ -1,5 +1,3 @@
-
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const RouterContext = createContext<{ pathname: string }>({ pathname: '/' });
@@ -18,7 +16,8 @@ export function useNavigate() {
 export function useParams(): Record<string, string | undefined> {
   const { pathname } = useLocation();
   
-  // Fixed Regex to be more robust for URLs like /watch/ID?param=1
+  // Robust Regex for extracting IDs
+  // Matches /watch/123-abc, /watch/123-abc/, but not /watch
   const watchMatch = pathname.match(/\/watch\/([^/?&]+)/);
   if (watchMatch) {
     return { id: watchMatch[1] };
@@ -31,7 +30,7 @@ export function useParams(): Record<string, string | undefined> {
 
   // Add regex for Marketplace items (excluding 'create' route)
   const marketMatch = pathname.match(/\/marketplace\/([^/?&]+)/);
-  if (marketMatch && marketMatch[1] !== 'create') {
+  if (marketMatch && marketMatch[1] !== 'create' && marketMatch[1] !== 'cart') {
     return { id: marketMatch[1] };
   }
 
@@ -117,6 +116,7 @@ export function Routes({ children }: { children?: React.ReactNode }) {
       else if (path === pathname) isMatch = true;
       else if (path && path.includes(':')) {
            const prefix = path.split(':')[0];
+           // Simple prefix matching for :id params, works for now
            if (pathname.startsWith(prefix)) isMatch = true;
       }
 

@@ -2,6 +2,8 @@
 
 
 
+
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2 } from 'lucide-react';
 import { db } from '../services/db';
@@ -113,17 +115,19 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
             }
         }
     } else {
-        // Inactive Slide
+        // Inactive Slide - PAUSE AND MUTE IMMEDIATELY
         el.pause();
+        el.muted = true; // Ensure no ghost audio
         el.currentTime = 0; // Reset to start
     }
     
-    // Strict Cleanup for MEMORY, but loosely for DOM
+    // Strict Cleanup for MEMORY
     return () => {
-        if (!shouldLoad && el) {
+        if (el) {
             el.pause();
+            el.muted = true;
             el.removeAttribute('src'); // Force drop buffer
-            el.load();
+            el.load(); // Reset media element
         }
     };
   }, [isActive, isUnlocked, shouldLoad]);

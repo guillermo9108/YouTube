@@ -27,7 +27,7 @@ if ($action === 'check') {
 if ($action === 'verify_db') {
     $host = $input['host'] ?? 'localhost';
     try {
-        $pdo = new PDO("mysql:host=$host;port={$input['port']}", $input['username'], $input['password']);
+        $pdo = new PDO("mysql:host=$host;port={$input['port']};charset=utf8mb4", $input['username'], $input['password']);
         respond(true, ['message' => 'Conexión exitosa']);
     } catch (PDOException $e) { respond(false, null, 'Conexión fallida: ' . $e->getMessage()); }
 }

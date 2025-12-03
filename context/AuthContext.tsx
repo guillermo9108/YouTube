@@ -1,6 +1,3 @@
-
-
-
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User } from '../types';
 import { db } from '../services/db';
@@ -28,29 +25,40 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   const heartbeatRef = useRef<number | null>(null);
   
   useEffect(() => {
-    const savedId = localStorage.getItem('sp_current_user_id');
-    const savedToken = localStorage.getItem('sp_session_token');
+    const checkAuth = async () => {
+        const savedId = localStorage.getItem('sp_current_user_id');
+        const savedToken = localStorage.getItem('sp_session_token');
 
-    if (savedId && savedToken) {
-      db.getUser(savedId)
-        .then(u => {
-            if(u) {
-                // Attach the local token to the user object for validation
-                u.sessionToken = savedToken;
-                setUser(u);
-            }
-            else {
-                logout();
-            }
-        })
-        .catch(err => {
-            console.error("Auth check failed:", err);
-            // Don't logout on network error immediately
-        })
-        .finally(() => setIsLoading(false));
-    } else {
+        if (savedId && savedToken) {
+          try {
+              const u = await db.getUser(savedId);
+              if(u) {
+                  // Attach the local token to the user object for validation
+                  u.sessionToken = savedToken;
+                  setUser(u);
+              } else {
+                  logout();
+              }
+          } catch (err) {
+              console.error("Auth check failed:", err);
+          }
+        } else {
+            setUser(null);
+        }
         setIsLoading(false);
-    }
+    };
+
+    checkAuth();
+
+    // Cross-tab sync
+    const handleStorageChange = (e: StorageEvent) => {
+        if (e.key === 'sp_current_user_id' || e.key === 'sp_session_token') {
+            checkAuth();
+        }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   // Heartbeat Logic

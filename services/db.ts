@@ -90,6 +90,7 @@ class DatabaseService {
                       items.push({ key: k, timestamp: parsed.timestamp || 0 });
                   }
               } catch(e) {
+                  // Corrupt JSON or non-JSON data, safe to remove or ignore
                   items.push({ key: k, timestamp: 0 });
               }
           }
@@ -116,7 +117,16 @@ class DatabaseService {
   }
 
   public invalidateCache(endpointKey: string) {
+      // Remove specific key
       localStorage.removeItem(`sp_cache_${endpointKey}`);
+      
+      // Also remove strict matches if query params differ order (simple check)
+      for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.includes(endpointKey)) {
+              localStorage.removeItem(k);
+          }
+      }
   }
 
   public setHomeDirty() {
@@ -199,6 +209,7 @@ class DatabaseService {
   // --- Profile ---
   async updateUserProfile(userId: string, updates: Partial<User>) {
       await this.request('update_user', 'POST', { userId, updates });
+      this.invalidateCache(`get_user&id=${userId}`);
   }
 
   async uploadAvatar(userId: string, file: File) {
@@ -209,6 +220,7 @@ class DatabaseService {
       if (!res.ok) throw new Error("Upload failed");
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
+      this.invalidateCache(`get_user&id=${userId}`);
       return json.data;
   }
 
@@ -233,7 +245,7 @@ class DatabaseService {
       return this.request(`get_creator_videos&creatorId=${creatorId}`);
   }
 
-  async uploadVideo(title: string, description: string, price: number, category: string, duration: number, user: User, file: File, thumbnail: File | null, onProgress: (percent: number, loaded: number, total: number) => void) {
+  async uploadVideo(title: string, description: string, price: number, category: string, duration: number, user: User, file: File, thumbnail: File | null, onProgress: (percent: number, loaded: number, total: number) => void, signal?: AbortSignal) {
       const fd = new FormData();
       fd.append('title', title);
       fd.append('description', description);
@@ -248,6 +260,13 @@ class DatabaseService {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', `${API_BASE}/index.php?action=upload_video`);
           
+          if (signal) {
+              signal.addEventListener('abort', () => {
+                  xhr.abort();
+                  reject(new DOMException("Upload cancelled", "AbortError"));
+              });
+          }
+
           xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
                   const percent = (e.loaded / e.total) * 100;
@@ -273,13 +292,18 @@ class DatabaseService {
           };
 
           xhr.onerror = () => reject(new Error("Network Error"));
+          xhr.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"));
+          
           xhr.send(fd);
       });
   }
 
   async purchaseVideo(userId: string, videoId: string) {
       await this.request('purchase_video', 'POST', { userId, videoId });
+      // Invalidate purchase status AND user balance/profile
       this.invalidateCache(`has_purchased&userId=${userId}&videoId=${videoId}`);
+      this.invalidateCache(`get_user&id=${userId}`);
+      this.invalidateCache(`get_transactions&userId=${userId}`);
   }
 
   async hasPurchased(userId: string, videoId: string): Promise<boolean> {
@@ -313,6 +337,7 @@ class DatabaseService {
 
   async toggleWatchLater(userId: string, videoId: string): Promise<string[]> {
       const res = await this.request<{list: string[]}>('toggle_watch_later', 'POST', { userId, videoId });
+      this.invalidateCache(`get_user&id=${userId}`);
       return res.list;
   }
 
@@ -338,14 +363,23 @@ class DatabaseService {
       const res = await fetch(`${API_BASE}/index.php?action=create_marketplace_item`, { method: 'POST', body: fd });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
+      this.invalidateCache('get_marketplace_items');
   }
 
   async editListing(itemId: string, sellerId: string, updates: Partial<MarketplaceItem>) {
-      return this.request('edit_marketplace_item', 'POST', { itemId, sellerId, updates });
+      const res = await this.request('edit_marketplace_item', 'POST', { itemId, sellerId, updates });
+      this.invalidateCache(`get_marketplace_item&id=${itemId}`);
+      this.invalidateCache('get_marketplace_items');
+      return res;
   }
 
   async checkoutCart(buyerId: string, items: {id: string, quantity: number}[], shippingData: any) {
-      return this.request('checkout_cart', 'POST', { buyerId, items, shippingData });
+      const res = await this.request('checkout_cart', 'POST', { buyerId, items, shippingData });
+      // Critical: Invalidate User Balance
+      this.invalidateCache(`get_user&id=${buyerId}`);
+      this.invalidateCache(`get_user_orders&userId=${buyerId}`);
+      this.invalidateCache('get_marketplace_items');
+      return res;
   }
 
   async getUserOrders(userId: string): Promise<{bought: Order[], sold: Order[]}> {
@@ -367,7 +401,8 @@ class DatabaseService {
   }
 
   async adminAddBalance(adminId: string, targetUserId: string, amount: number) {
-      return this.request('admin_add_balance', 'POST', { adminId, targetUserId, amount });
+      await this.request('admin_add_balance', 'POST', { adminId, targetUserId, amount });
+      this.invalidateCache(`get_user&id=${targetUserId}`);
   }
 
   async adminRepairDb() {
@@ -382,29 +417,29 @@ class DatabaseService {
       return this.request('process_queue', 'POST');
   }
 
-  async scanLocalLibraryStream(path: string, onMessage: (msg: string, type: string) => void) {
-      return new Promise<void>((resolve, reject) => {
-          const evtSource = new EventSource(`${API_BASE}/index.php?action=scan_local_library&path=${encodeURIComponent(path)}`);
-          
-          evtSource.onmessage = (e) => {
-              if (e.data === '[DONE]') {
-                  evtSource.close();
-                  resolve();
-                  return;
-              }
-              try {
-                  const data = JSON.parse(e.data);
-                  onMessage(data.msg, data.type);
-              } catch(err) {
-                  onMessage(e.data, 'log');
-              }
-          };
-
-          evtSource.onerror = () => {
+  // Returns EventSource so caller can close it
+  scanLocalLibraryStream(path: string, onMessage: (msg: string, type: string) => void): EventSource {
+      const evtSource = new EventSource(`${API_BASE}/index.php?action=scan_local_library&path=${encodeURIComponent(path)}`);
+      
+      evtSource.onmessage = (e) => {
+          if (e.data === '[DONE]') {
               evtSource.close();
-              reject(new Error("Conexión perdida con el escáner"));
-          };
-      });
+              return;
+          }
+          try {
+              const data = JSON.parse(e.data);
+              onMessage(data.msg, data.type);
+          } catch(err) {
+              onMessage(e.data, 'log');
+          }
+      };
+
+      evtSource.onerror = () => {
+          evtSource.close();
+          onMessage("Conexión finalizada o error de stream", 'error');
+      };
+
+      return evtSource;
   }
 
   async getRequests(): Promise<ContentRequest[]> {
@@ -450,7 +485,6 @@ class DatabaseService {
   }
 
   async initializeSystem(dbConfig: any, adminConfig: any) {
-      // 1. Write Config
       const res = await fetch(`${API_BASE}/install.php?action=install`, {
            method: 'POST', headers: {'Content-Type': 'application/json'}, 
            body: JSON.stringify({ ...dbConfig, ...adminConfig })
@@ -459,16 +493,8 @@ class DatabaseService {
       const json = await res.json();
       if(!json.success) throw new Error(json.error);
 
-      // 2. Init Tables via Main API
       await this.request('admin_repair_db', 'POST');
-      // 3. Register Admin
       await this.register(adminConfig.username, adminConfig.password);
-      // 4. Set Role
-      // Note: First user registered is usually not admin automatically in this logic, 
-      // but since we just installed, we can manually assume or update via SQL if needed.
-      // For now, let's assume the install script handled the user creation or we do it here.
-      // Actually, standard register is fine. The install.php usually writes db_config.json.
-      
       this.isInstalled = true;
   }
 
@@ -485,7 +511,18 @@ class DatabaseService {
   }
 
   async executeSmartCleaner(videoIds: string[]) {
-      return this.request('admin_smart_cleaner_execute', 'POST', { videoIds });
+      const res = await this.request('admin_smart_cleaner_execute', 'POST', { videoIds });
+      this.invalidateCache('get_videos');
+      this.setHomeDirty();
+      return res;
+  }
+
+  async adminScanOrphans(): Promise<{ orphans: {path: string, size: number}[], count: number, totalSize: string }> {
+      return this.request('admin_scan_orphans');
+  }
+
+  async adminDeleteOrphans(files: string[]) {
+      return this.request('admin_delete_orphans', 'POST', { files });
   }
 
   async toggleSubscribe(userId: string, creatorId: string) {
