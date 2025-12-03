@@ -279,7 +279,6 @@ if ($action === 'get_videos') {
                          LEFT JOIN users u ON v.creatorId = u.id 
                          ORDER BY v.createdAt DESC");
     $videos = $stmt->fetchAll();
-    // Prefix relative paths if needed
     foreach ($videos as &$v) {
         $v['price'] = floatval($v['price']);
         if ($v['isLocal']) {
@@ -315,13 +314,34 @@ if ($action === 'get_video') {
         if ($video['isLocal']) {
             $video['videoUrl'] = "api/index.php?action=stream_video&id=" . $video['id'];
         }
-        
-        // Increment views
         $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$id]);
-        
         respond(true, $video);
     }
     respond(false, null, 'Video no encontrado');
+}
+
+if ($action === 'get_related_videos') {
+    $id = $_GET['id'];
+    // Simple heuristic: same category or same creator
+    $stmt = $pdo->prepare("SELECT category, creatorId FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $current = $stmt->fetch();
+    
+    if ($current) {
+        $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                               FROM videos v 
+                               LEFT JOIN users u ON v.creatorId = u.id 
+                               WHERE v.id != ? AND (v.category = ? OR v.creatorId = ?) 
+                               LIMIT 10");
+        $stmt->execute([$id, $current['category'], $current['creatorId']]);
+        $videos = $stmt->fetchAll();
+        foreach ($videos as &$v) {
+            $v['price'] = floatval($v['price']);
+            if ($v['isLocal']) $v['videoUrl'] = "api/index.php?action=stream_video&id=" . $v['id'];
+        }
+        respond(true, $videos);
+    }
+    respond(true, []);
 }
 
 if ($action === 'get_creator_videos') {
@@ -364,7 +384,7 @@ if ($action === 'upload_video') {
         move_uploaded_file($_FILES['video']['tmp_name'], UPLOAD_DIR . $vName);
         $videoUrl = "api/" . UPLOAD_DIR . $vName;
     } else {
-        // External URL import
+        // External URL import (from Server Import Queue)
         $videoUrl = $_POST['videoUrl'];
     }
 
@@ -404,7 +424,6 @@ if ($action === 'purchase_video') {
 
     $pdo->beginTransaction();
     try {
-        // Check if already purchased
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
         $stmt->execute([$buyerId, $videoId]);
         if ($stmt->fetchColumn() > 0) {
@@ -421,12 +440,9 @@ if ($action === 'purchase_video') {
         $balance = $bStmt->fetchColumn();
 
         if ($video && $balance >= $video['price']) {
-            // Deduct from buyer
             $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$video['price'], $buyerId]);
-            // Add to creator
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$video['price'], $video['creatorId']]);
             
-            // Record Transaction
             $tid = uniqid('tx_');
             $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'PURCHASE')")
                 ->execute([$tid, $buyerId, $video['creatorId'], $videoId, $video['price'], time()]);
@@ -454,9 +470,8 @@ if ($action === 'has_purchased') {
 if ($action === 'rate_video') {
     $uid = $input['userId'];
     $vid = $input['videoId'];
-    $rating = $input['rating']; // 'like' or 'dislike'
+    $rating = $input['rating']; 
     
-    // Get current interaction
     $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?");
     $stmt->execute([$uid, $vid]);
     $current = $stmt->fetch();
@@ -465,12 +480,11 @@ if ($action === 'rate_video') {
     $disliked = $current['disliked'] ?? 0;
     $isWatched = $current['isWatched'] ?? 0;
 
-    // Toggle logic
     if ($rating === 'like') {
-        if ($liked) $liked = 0; // Untoggle
+        if ($liked) $liked = 0; 
         else { $liked = 1; $disliked = 0; }
     } else {
-        if ($disliked) $disliked = 0; // Untoggle
+        if ($disliked) $disliked = 0; 
         else { $disliked = 1; $liked = 0; }
     }
 
@@ -480,10 +494,8 @@ if ($action === 'rate_video') {
         $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked, isWatched) VALUES (?, ?, ?, ?, ?)")->execute([$uid, $vid, $liked, $disliked, $isWatched]);
     }
 
-    // Recalc totals for video
     $pdo->prepare("UPDATE videos SET likes = (SELECT COUNT(*) FROM interactions WHERE videoId = ? AND liked = 1), dislikes = (SELECT COUNT(*) FROM interactions WHERE videoId = ? AND disliked = 1) WHERE id = ?")->execute([$vid, $vid, $vid]);
 
-    // Get new counts
     $stmt = $pdo->prepare("SELECT likes, dislikes FROM videos WHERE id = ?");
     $stmt->execute([$vid]);
     $counts = $stmt->fetch();
@@ -511,7 +523,6 @@ if ($action === 'get_interaction') {
 if ($action === 'mark_watched') {
     $uid = $input['userId'];
     $vid = $input['videoId'];
-    
     $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?");
     $stmt->execute([$uid, $vid]);
     if ($stmt->fetch()) {
@@ -522,7 +533,6 @@ if ($action === 'mark_watched') {
     respond(true);
 }
 
-// --- COMMENTS ---
 if ($action === 'get_comments') {
     $stmt = $pdo->prepare("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE videoId = ? ORDER BY timestamp DESC");
     $stmt->execute([$_GET['videoId']]);
@@ -534,7 +544,6 @@ if ($action === 'add_comment') {
     $stmt = $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)");
     $stmt->execute([$id, $input['videoId'], $input['userId'], $input['text'], time()]);
     
-    // Return the full comment object for UI
     $uStmt = $pdo->prepare("SELECT username, avatarUrl FROM users WHERE id = ?");
     $uStmt->execute([$input['userId']]);
     $u = $uStmt->fetch();
@@ -548,6 +557,72 @@ if ($action === 'add_comment') {
         'username' => $u['username'],
         'userAvatarUrl' => $u['avatarUrl']
     ]);
+}
+
+if ($action === 'toggle_watch_later') {
+    $uid = $input['userId'];
+    $vid = $input['videoId'];
+    $stmt = $pdo->prepare("SELECT watchLater FROM users WHERE id = ?");
+    $stmt->execute([$uid]);
+    $list = json_decode($stmt->fetchColumn() ?? '[]', true) ?: [];
+
+    if (in_array($vid, $list)) {
+        $list = array_values(array_diff($list, [$vid]));
+    } else {
+        $list[] = $vid;
+    }
+    
+    $pdo->prepare("UPDATE users SET watchLater = ? WHERE id = ?")->execute([json_encode($list), $uid]);
+    respond(true, ['list' => $list]);
+}
+
+if ($action === 'update_prices_bulk') {
+    $uid = $input['creatorId'];
+    $price = $input['newPrice'];
+    $pdo->prepare("UPDATE videos SET price = ? WHERE creatorId = ?")->execute([$price, $uid]);
+    respond(true);
+}
+
+if ($action === 'admin_cleanup_videos') {
+    $stmt = $pdo->query("SELECT id, videoUrl, thumbnailUrl, isLocal FROM videos");
+    $videos = $stmt->fetchAll();
+    $deleted = 0;
+    foreach ($videos as $v) {
+        // Skip local videos from cleanup for safety unless strictly missing
+        if ($v['isLocal']) continue; 
+        
+        $vPath = str_replace('api/', '', $v['videoUrl']);
+        if (!empty($vPath) && !file_exists($vPath) && !str_starts_with($v['videoUrl'], 'http')) {
+             $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]);
+             $deleted++;
+        }
+    }
+    respond(true, ['deleted' => $deleted]);
+}
+
+if ($action === 'repair_thumbnail') {
+    $vid = $_POST['videoId'];
+    if (isset($_FILES['thumbnail'])) {
+        $ext = pathinfo($_FILES['thumbnail']['name'], PATHINFO_EXTENSION);
+        $tName = "thumb_{$vid}_repaired.{$ext}";
+        move_uploaded_file($_FILES['thumbnail']['tmp_name'], THUMB_DIR . $tName);
+        $url = "api/" . THUMB_DIR . $tName;
+        $pdo->prepare("UPDATE videos SET thumbnailUrl = ? WHERE id = ?")->execute([$url, $vid]);
+    }
+    respond(true);
+}
+
+if ($action === 'get_user_activity') {
+    $uid = $_GET['userId'];
+    $stmt = $pdo->prepare("SELECT videoId FROM interactions WHERE userId = ? AND liked = 1");
+    $stmt->execute([$uid]);
+    $liked = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    $stmt = $pdo->prepare("SELECT videoId FROM interactions WHERE userId = ? AND isWatched = 1");
+    $stmt->execute([$uid]);
+    $watched = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    respond(true, ['liked' => $liked, 'watched' => $watched]);
 }
 
 // --- MARKETPLACE ---
@@ -619,7 +694,6 @@ if ($action === 'edit_marketplace_item') {
     $sellerId = $input['sellerId'];
     $updates = $input['updates'];
 
-    // Verify ownership
     $stmt = $pdo->prepare("SELECT sellerId FROM marketplace_items WHERE id = ?");
     $stmt->execute([$itemId]);
     if ($stmt->fetchColumn() !== $sellerId) respond(false, null, "No autorizado");
@@ -640,14 +714,13 @@ if ($action === 'edit_marketplace_item') {
 
 if ($action === 'checkout_cart') {
     $buyerId = $input['buyerId'];
-    $cartItems = $input['items']; // [{id, quantity}]
+    $cartItems = $input['items']; 
     $shipping = json_encode($input['shippingData']);
     
     $pdo->beginTransaction();
     try {
-        // 1. Verify Buyer Balance
         $totalCost = 0;
-        $sellerPayouts = []; // sellerId => amount
+        $sellerPayouts = [];
         $orderItems = [];
 
         foreach ($cartItems as $ci) {
@@ -659,7 +732,6 @@ if ($action === 'checkout_cart') {
                 throw new Exception("Stock insuficiente para: " . ($item['title'] ?? 'Item desconocido'));
             }
 
-            // Calc price with discount
             $price = floatval($item['price']);
             if ($item['discountPercent'] > 0) {
                 $price = $price * (1 - ($item['discountPercent'] / 100));
@@ -667,11 +739,9 @@ if ($action === 'checkout_cart') {
             $lineTotal = $price * $ci['quantity'];
             $totalCost += $lineTotal;
 
-            // Prepare payouts
             if (!isset($sellerPayouts[$item['sellerId']])) $sellerPayouts[$item['sellerId']] = 0;
             $sellerPayouts[$item['sellerId']] += $lineTotal;
 
-            // Deduct stock
             $newStock = $item['stock'] - $ci['quantity'];
             $status = $newStock === 0 ? 'OUT_OF_STOCK' : 'ACTIVE';
             $pdo->prepare("UPDATE marketplace_items SET stock = ?, status = ?, salesCount = salesCount + ? WHERE id = ?")->execute([$newStock, $status, $ci['quantity'], $item['id']]);
@@ -685,7 +755,6 @@ if ($action === 'checkout_cart') {
             ];
         }
 
-        // 2. Charge Buyer
         $bStmt = $pdo->prepare("SELECT balance FROM users WHERE id = ?");
         $bStmt->execute([$buyerId]);
         $balance = $bStmt->fetchColumn();
@@ -694,11 +763,6 @@ if ($action === 'checkout_cart') {
         
         $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$totalCost, $buyerId]);
 
-        // 3. Pay Sellers & Create Orders
-        // Group items by seller to create distinct orders per seller? Or one big order?
-        // Let's create one Order record PER SELLER for simplicity in "My Sales"
-        
-        // Group order items by seller
         $bySeller = [];
         foreach ($orderItems as $oi) {
             $bySeller[$oi['sellerId']][] = $oi;
@@ -712,7 +776,6 @@ if ($action === 'checkout_cart') {
              $pdo->prepare("INSERT INTO marketplace_orders (id, buyerId, sellerId, items, totalAmount, shippingData, timestamp, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED')")
                  ->execute([$oid, $buyerId, $sid, json_encode($items), $sellerTotal, $shipping, time()]);
              
-             // Transaction record
              $tid = uniqid('tx_');
              $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type, orderId) VALUES (?, ?, ?, NULL, ?, ?, 'MARKETPLACE', ?)")
                  ->execute([$tid, $buyerId, $sid, $sellerTotal, time(), $oid]);
@@ -729,13 +792,10 @@ if ($action === 'checkout_cart') {
 
 if ($action === 'get_user_orders') {
     $uid = $_GET['userId'];
-    
-    // Bought
     $stmt = $pdo->prepare("SELECT * FROM marketplace_orders WHERE buyerId = ? ORDER BY timestamp DESC");
     $stmt->execute([$uid]);
     $bought = $stmt->fetchAll();
     
-    // Sold
     $stmt = $pdo->prepare("SELECT * FROM marketplace_orders WHERE sellerId = ? ORDER BY timestamp DESC");
     $stmt->execute([$uid]);
     $sold = $stmt->fetchAll();
@@ -745,22 +805,85 @@ if ($action === 'get_user_orders') {
         $o['shippingData'] = json_decode($o['shippingData']);
         $o['totalAmount'] = floatval($o['totalAmount']);
     }
-    
     respond(true, ['bought' => $bought, 'sold' => $sold]);
 }
 
-// --- ADMIN & SYSTEM ---
+// --- SYSTEM SETTINGS & REQUESTS ---
+
+if ($action === 'get_system_settings') {
+    $stmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
+    $settings = $stmt->fetch() ?: [
+        'downloadStartTime' => '00:00',
+        'downloadEndTime' => '23:59',
+        'isQueuePaused' => 0,
+        'batchSize' => 5,
+        'maxDuration' => 600,
+        'maxResolution' => 1080,
+        'pexelsKey' => '',
+        'pixabayKey' => '',
+        'ytDlpPath' => './yt-dlp',
+        'enableYoutube' => 0,
+        'categoryPrices' => '{}',
+        'customCategories' => '[]',
+        'localLibraryPath' => ''
+    ];
+    // Cast types
+    $settings['isQueuePaused'] = (bool)$settings['isQueuePaused'];
+    $settings['batchSize'] = (int)$settings['batchSize'];
+    $settings['enableYoutube'] = (bool)$settings['enableYoutube'];
+    $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}') ?: (object)[];
+    $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]') ?: [];
+    
+    respond(true, $settings);
+}
+
+if ($action === 'update_system_settings') {
+    $s = $input['settings'];
+    $pdo->prepare("DELETE FROM system_settings")->execute();
+    
+    $sql = "INSERT INTO system_settings (downloadStartTime, downloadEndTime, isQueuePaused, batchSize, maxDuration, maxResolution, pexelsKey, pixabayKey, ytDlpPath, enableYoutube, categoryPrices, customCategories, localLibraryPath) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    $pdo->prepare($sql)->execute([
+        $s['downloadStartTime'],
+        $s['downloadEndTime'],
+        $s['isQueuePaused'] ? 1 : 0,
+        $s['batchSize'],
+        $s['maxDuration'],
+        $s['maxResolution'],
+        $s['pexelsKey'],
+        $s['pixabayKey'],
+        $s['ytDlpPath'],
+        $s['enableYoutube'] ? 1 : 0,
+        json_encode($s['categoryPrices']),
+        json_encode($s['customCategories']),
+        $s['localLibraryPath'] ?? ''
+    ]);
+    respond(true);
+}
+
+if ($action === 'get_requests') {
+    $sql = "SELECT * FROM content_requests ORDER BY createdAt DESC";
+    respond(true, $pdo->query($sql)->fetchAll());
+}
+
+if ($action === 'request_content') {
+    $id = uniqid('req_');
+    $pdo->prepare("INSERT INTO content_requests (id, userId, query, status, createdAt, useLocalNetwork) VALUES (?, ?, ?, 'PENDING', ?, ?)")
+        ->execute([$id, $input['userId'], $input['query'], time(), $input['useLocalNetwork']?1:0]);
+    respond(true);
+}
+
+if ($action === 'delete_request') {
+    $pdo->prepare("DELETE FROM content_requests WHERE id = ?")->execute([$input['requestId']]);
+    respond(true);
+}
+
+// --- ADMIN & TOOLS ---
 
 if ($action === 'scan_local_library') {
-    // Enable Server-Sent Events for streaming logs
     header('Content-Type: text/event-stream');
     header('Cache-Control: no-cache');
     header('Connection: keep-alive');
-    
-    // Disable buffering
     if (ob_get_level()) ob_end_clean();
-    
-    // Unlimited execution time for scan
     set_time_limit(0);
 
     $input = json_decode(file_get_contents('php://input'), true);
@@ -773,7 +896,6 @@ if ($action === 'scan_local_library') {
 
     if (empty($path) || !is_dir($path)) {
         sendLog("Directorio no encontrado o inaccesible: $path", 'error');
-        // Check open_basedir restriction
         $basedir = ini_get('open_basedir');
         if ($basedir) sendLog("Hint: PHP open_basedir está activo. Solo puedes acceder a: $basedir", 'error');
         echo "data: [DONE]\n\n";
@@ -781,7 +903,6 @@ if ($action === 'scan_local_library') {
     }
 
     sendLog("Iniciando escaneo en: $path");
-    
     $imported = 0;
     $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
     
@@ -792,36 +913,25 @@ if ($action === 'scan_local_library') {
                 $fullPath = $file->getRealPath();
                 $filename = $file->getFilename();
                 
-                // Deduplicate by hash? Or path? Path is faster.
-                // But path might change if mounted differently.
-                // Let's use path for now.
-                
-                // Check if exists using SQL (faster than checking hashes)
                 $stmt = $pdo->prepare("SELECT id FROM videos WHERE videoUrl = ?");
-                $stmt->execute([$fullPath]); // We store full path in videoUrl for local files
-                if ($stmt->fetch()) continue; // Already indexed
+                $stmt->execute([$fullPath]); 
+                if ($stmt->fetch()) continue; 
 
-                // Metadata parsing from filename
                 $title = pathinfo($filename, PATHINFO_FILENAME);
                 $category = 'OTHER';
                 
-                // Heuristic detection
                 if (preg_match('/S\d+E\d+/i', $title) || preg_match('/Season \d+/i', $title)) {
                     $category = 'SERIES';
                 } elseif (preg_match('/Capitulo|Episodio/i', $title)) {
                     $category = 'NOVELAS';
-                } elseif ($file->getSize() > 500 * 1024 * 1024) { // > 500MB likely movie
+                } elseif ($file->getSize() > 500 * 1024 * 1024) { 
                     $category = 'MOVIE';
                 }
 
-                // Look for cover image
                 $base = pathinfo($fullPath, PATHINFO_DIRNAME) . '/' . pathinfo($fullPath, PATHINFO_FILENAME);
                 $thumbUrl = null;
                 foreach(['jpg', 'jpeg', 'png', 'webp'] as $imgExt) {
                     if (file_exists("$base.$imgExt")) {
-                        // We need to make this accessible via web. 
-                        // Since it's outside webroot, we might need a proxy script or copy it.
-                        // For efficiency, let's copy thumbnail to public dir.
                         $newThumb = uniqid('t_local_') . ".$imgExt";
                         copy("$base.$imgExt", THUMB_DIR . $newThumb);
                         $thumbUrl = "api/" . THUMB_DIR . $newThumb;
@@ -830,7 +940,6 @@ if ($action === 'scan_local_library') {
                 }
 
                 $id = uniqid('v_loc_');
-                // Insert
                 $pdo->prepare("INSERT INTO videos (id, title, description, price, category, duration, creatorId, videoUrl, thumbnailUrl, createdAt, isLocal) VALUES (?, ?, 'Importado de Librería Local', 0, ?, 0, 'admin', ?, ?, ?, 1)")
                     ->execute([$id, $title, $category, $fullPath, $thumbUrl, time()]);
 
@@ -846,34 +955,16 @@ if ($action === 'scan_local_library') {
 }
 
 if ($action === 'admin_repair_db') {
-    // Create missing tables if any
     try {
-        $pdo->exec("CREATE TABLE IF NOT EXISTS marketplace_items (
-            id VARCHAR(50) PRIMARY KEY,
-            sellerId VARCHAR(50),
-            title VARCHAR(255),
-            description TEXT,
-            price DECIMAL(10, 2),
-            media JSON,
-            status VARCHAR(20),
-            createdAt BIGINT,
-            stock INT DEFAULT 1,
-            discountPercent INT DEFAULT 0,
-            salesCount INT DEFAULT 0
-        )");
-        
-        $pdo->exec("CREATE TABLE IF NOT EXISTS marketplace_orders (
-            id VARCHAR(50) PRIMARY KEY,
-            buyerId VARCHAR(50),
-            sellerId VARCHAR(50),
-            items JSON,
-            totalAmount DECIMAL(10, 2),
-            shippingData JSON,
-            timestamp BIGINT,
-            status VARCHAR(20)
-        )");
-        
-        // Add columns if missing
+        // Core tables
+        $pdo->exec("CREATE TABLE IF NOT EXISTS marketplace_items (id VARCHAR(50) PRIMARY KEY, sellerId VARCHAR(50), title VARCHAR(255), description TEXT, price DECIMAL(10, 2), media JSON, status VARCHAR(20), createdAt BIGINT, stock INT DEFAULT 1, discountPercent INT DEFAULT 0, salesCount INT DEFAULT 0)");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS marketplace_orders (id VARCHAR(50) PRIMARY KEY, buyerId VARCHAR(50), sellerId VARCHAR(50), items JSON, totalAmount DECIMAL(10, 2), shippingData JSON, timestamp BIGINT, status VARCHAR(20))");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS system_settings (downloadStartTime VARCHAR(10), downloadEndTime VARCHAR(10), isQueuePaused TINYINT, batchSize INT, maxDuration INT, maxResolution INT, pexelsKey VARCHAR(255), pixabayKey VARCHAR(255), ytDlpPath VARCHAR(255), enableYoutube TINYINT, categoryPrices JSON, customCategories JSON, localLibraryPath VARCHAR(255))");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS content_requests (id VARCHAR(50) PRIMARY KEY, userId VARCHAR(50), query VARCHAR(255), status VARCHAR(20), createdAt BIGINT, useLocalNetwork TINYINT)");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (id VARCHAR(50) PRIMARY KEY, userId VARCHAR(50), type VARCHAR(20), text VARCHAR(255), link VARCHAR(255), isRead TINYINT DEFAULT 0, timestamp BIGINT)");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS subscriptions (subscriberId VARCHAR(50), creatorId VARCHAR(50), createdAt BIGINT, PRIMARY KEY(subscriberId, creatorId))");
+
+        // Columns check
         try { $pdo->exec("ALTER TABLE transactions ADD COLUMN orderId VARCHAR(50) DEFAULT NULL"); } catch(Exception $e){}
         try { $pdo->exec("ALTER TABLE users ADD COLUMN defaultPrices JSON DEFAULT NULL"); } catch(Exception $e){}
         
@@ -881,6 +972,87 @@ if ($action === 'admin_repair_db') {
     } catch (Exception $e) {
         respond(false, null, $e->getMessage());
     }
+}
+
+// --- EXTERNAL SEARCH & CLEANER ---
+
+if ($action === 'search_external') {
+    $query = urlencode($input['query']);
+    $source = $input['source'];
+    $stmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
+    $settings = $stmt->fetch();
+    $results = [];
+
+    if ($source === 'STOCK') {
+        if ($settings['pexelsKey']) {
+            $ch = curl_init("https://api.pexels.com/videos/search?query=$query&per_page=15&orientation=landscape");
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: " . $settings['pexelsKey']]);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            $res = json_decode(curl_exec($ch), true);
+            curl_close($ch);
+            if (!empty($res['videos'])) {
+                foreach ($res['videos'] as $v) {
+                    $results[] = [
+                        'id' => 'px_' . $v['id'],
+                        'source' => 'Pexels',
+                        'thumbnail' => $v['image'],
+                        'title' => 'Pexels Video ' . $v['id'],
+                        'downloadUrl' => $v['video_files'][0]['link'],
+                        'author' => $v['user']['name'],
+                        'duration' => $v['duration']
+                    ];
+                }
+            }
+        }
+    }
+    respond(true, $results);
+}
+
+if ($action === 'admin_smart_cleaner_preview') {
+    $cat = $input['category'];
+    $pct = $input['percentage'];
+    $days = $input['safeHarborDays'];
+    
+    $where = "1=1";
+    if ($cat !== 'ALL') $where = "category = '$cat'";
+    
+    $videos = $pdo->query("SELECT * FROM videos WHERE $where")->fetchAll();
+    $candidates = [];
+    $now = time();
+    $safeTime = $days * 86400;
+
+    foreach ($videos as $v) {
+        if ($now - $v['createdAt'] < $safeTime) continue; // Safe harbor
+        // Score: Likes * 5 + Views - Dislikes * 10
+        $score = ($v['likes'] * 5) + $v['views'] - ($v['dislikes'] * 10);
+        $v['score'] = $score;
+        $candidates[] = $v;
+    }
+
+    usort($candidates, function($a, $b) { return $a['score'] - $b['score']; });
+    $count = ceil(count($candidates) * ($pct / 100));
+    $toDelete = array_slice($candidates, 0, $count);
+    
+    respond(true, ['preview' => $toDelete, 'stats' => ['videosToDelete' => count($toDelete)]]);
+}
+
+if ($action === 'admin_smart_cleaner_execute') {
+    $ids = $input['videoIds'];
+    $count = 0;
+    foreach ($ids as $id) {
+        $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl, isLocal FROM videos WHERE id = ?");
+        $stmt->execute([$id]);
+        $v = $stmt->fetch();
+        if ($v && !$v['isLocal']) {
+            $vPath = str_replace('api/', '', $v['videoUrl']);
+            $tPath = str_replace('api/', '', $v['thumbnailUrl']);
+            if (file_exists($vPath)) unlink($vPath);
+            if (file_exists($tPath)) unlink($tPath);
+        }
+        $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+        $count++;
+    }
+    respond(true, ['deleted' => $count]);
 }
 
 if ($action === 'get_all_users') {
@@ -892,19 +1064,12 @@ if ($action === 'admin_add_balance') {
     $adminId = $input['adminId'];
     $targetId = $input['targetUserId'];
     $amount = floatval($input['amount']);
-    
-    // Verify admin
     $stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
     $stmt->execute([$adminId]);
     if ($stmt->fetchColumn() !== 'ADMIN') respond(false, null, 'No autorizado');
-
     $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
-    
-    // Transaction Log
     $tid = uniqid('tx_dep_');
-    $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, ?, NULL, ?, ?, 'DEPOSIT')")
-        ->execute([$tid, $targetId, $adminId, $amount, time()]);
-        
+    $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, ?, NULL, ?, ?, 'DEPOSIT')")->execute([$tid, $targetId, $adminId, $amount, time()]);
     respond(true);
 }
 
@@ -930,7 +1095,6 @@ if ($action === 'mark_notification_read') {
 if ($action === 'toggle_subscribe') {
     $uid = $input['userId'];
     $cid = $input['creatorId'];
-    
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM subscriptions WHERE subscriberId = ? AND creatorId = ?");
     $stmt->execute([$uid, $cid]);
     if ($stmt->fetchColumn() > 0) {
