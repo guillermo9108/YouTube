@@ -296,7 +296,13 @@ if ($action === 'get_user_orders') {
     $uid = $_GET['userId'];
     $b = $pdo->prepare("SELECT * FROM marketplace_orders WHERE buyerId = ? ORDER BY timestamp DESC"); $b->execute([$uid]); $bought = $b->fetchAll();
     $s = $pdo->prepare("SELECT * FROM marketplace_orders WHERE sellerId = ? ORDER BY timestamp DESC"); $s->execute([$uid]); $sold = $s->fetchAll();
-    foreach([...$bought, ...$sold] as &$o) { $o['items'] = json_decode($o['items']); $o['shippingData'] = json_decode($o['shippingData']); $o['totalAmount'] = floatval($o['totalAmount']); }
+    
+    // Fix for older PHP: Use array_merge instead of ... spread operator
+    $all = array_merge($bought, $sold);
+    // Explicitly iterate to decode JSON fields
+    foreach($bought as &$o) { $o['items'] = json_decode($o['items']); $o['shippingData'] = json_decode($o['shippingData']); $o['totalAmount'] = floatval($o['totalAmount']); }
+    foreach($sold as &$o) { $o['items'] = json_decode($o['items']); $o['shippingData'] = json_decode($o['shippingData']); $o['totalAmount'] = floatval($o['totalAmount']); }
+    
     respond(true, ['bought' => $bought, 'sold' => $sold]);
 }
 
