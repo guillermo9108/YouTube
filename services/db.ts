@@ -160,16 +160,17 @@ class DatabaseService {
         if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
         
         const text = await response.text();
+        let json;
         try {
-            const json = JSON.parse(text);
-            if (!json.success) throw new Error(json.error || 'API Error');
-            if (method === 'GET') this.saveToCache(endpoint, json.data);
-            return json.data;
-        } catch (e: any) {
-            console.error("Invalid JSON:", text.substring(0, 500));
-            // Show a bit of the text in the error message for debugging
-            throw new Error(`JSON inválido de la API: ${text.substring(0, 100)}...`);
+            json = JSON.parse(text);
+        } catch (e) {
+            console.error("Invalid JSON response:", text.substring(0, 500));
+            throw new Error(`Respuesta inválida del servidor (JSON): ${text.substring(0, 100)}...`);
         }
+        
+        if (!json.success) throw new Error(json.error || 'API Error');
+        if (method === 'GET') this.saveToCache(endpoint, json.data);
+        return json.data;
     } catch (e: any) {
         throw e;
     }

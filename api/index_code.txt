@@ -1,3 +1,4 @@
+
 <?php
 ob_start();
 ini_set('display_errors', 0);
@@ -414,6 +415,10 @@ if ($action === 'admin_repair_db') {
         try { $pdo->exec("ALTER TABLE marketplace_items ADD COLUMN stock INT DEFAULT 1"); } catch(Exception $e){}
         try { $pdo->exec("ALTER TABLE marketplace_items ADD COLUMN discountPercent INT DEFAULT 0"); } catch(Exception $e){}
         try { $pdo->exec("ALTER TABLE marketplace_items ADD COLUMN salesCount INT DEFAULT 0"); } catch(Exception $e){}
+        
+        // Fix for the reported error: Ensure marketplace_orders has 'items' and 'shippingData'
+        try { $pdo->exec("ALTER TABLE marketplace_orders ADD COLUMN items JSON"); } catch(Exception $e){}
+        try { $pdo->exec("ALTER TABLE marketplace_orders ADD COLUMN shippingData JSON"); } catch(Exception $e){}
         
         // Columns for Smart Cleaner
         try { $pdo->exec("ALTER TABLE videos ADD COLUMN views INT DEFAULT 0"); } catch(Exception $e){}
