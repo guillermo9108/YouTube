@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud, Clock, Trash2, ShieldCheck, ShoppingBag, Play } from 'lucide-react';
 import { db } from '../services/db';
@@ -32,7 +33,7 @@ interface HomeSnapshot {
     visibleCount: number;
     scrollPosition: number;
     purchases: Set<string>;
-    checkedPurchaseIds: Set<string>; // Added to snapshot
+    checkedPurchaseIds: Set<string>;
     categories: { id: string, label: string }[];
 }
 
@@ -41,7 +42,7 @@ let homeSnapshot: HomeSnapshot | null = null;
 const ShortsShelf = ({ videos }: { videos: Video[] }) => {
     if (videos.length === 0) return null;
     return (
-        <div className="col-span-full py-2 mb-4">
+        <div className="col-span-full py-2 mb-6">
             <div className="flex items-center gap-2 mb-4 px-1">
                 <div className="p-1 bg-red-600 rounded text-white">
                     <Smartphone size={16} strokeWidth={3} />
@@ -67,7 +68,7 @@ const ShortsShelf = ({ videos }: { videos: Video[] }) => {
                     </Link>
                 ))}
             </div>
-            <div className="h-px bg-slate-800/50 w-full mt-4"></div>
+            <div className="h-px bg-slate-800/50 w-full mt-2"></div>
         </div>
     );
 };
@@ -77,7 +78,6 @@ export default function Home() {
   const [shuffledMasterList, setShuffledMasterList] = useState<Video[]>([]);
   const [shortsShelf, setShortsShelf] = useState<Video[]>([]);
   
-  // Store purchases and CHECKED statuses
   const [purchases, setPurchases] = useState<Set<string>>(new Set());
   const [checkedPurchaseIds, setCheckedPurchaseIds] = useState<Set<string>>(new Set());
   
@@ -304,11 +304,6 @@ export default function Home() {
       if (!user || displayList.length === 0) return;
 
       const fetchVisiblePurchases = async () => {
-          // Check items that are:
-          // 1. Paid
-          // 2. Not my own
-          // 3. Not already known as purchased
-          // 4. CRITICAL: Not already checked (prevent infinite loop)
           const toCheck = displayList.filter(v => 
               Number(v.price) > 0 && 
               v.creatorId !== user.id && 
@@ -326,14 +321,13 @@ export default function Home() {
                const newCheckedIds: string[] = [];
 
                await Promise.all(batch.map(async (v) => {
-                   newCheckedIds.push(v.id); // Mark as checked regardless of result
+                   newCheckedIds.push(v.id); 
                    try {
                        const has = await db.hasPurchased(user.id, v.id);
                        if (has) newPurchasedIds.push(v.id);
                    } catch (e) { console.warn("Purchase check failed", e); }
                }));
 
-               // Batch update state
                if (newCheckedIds.length > 0) {
                    setCheckedPurchaseIds(prev => {
                        const next = new Set(prev);
@@ -366,13 +360,8 @@ export default function Home() {
 
   const filteredRecent = recentSearches.filter(s => s.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  // Logic to show shorts shelf
-  // Only show on 'ALL' category, if no search query, and if we have shorts
+  // Show shelf if: Category is ALL, No Search Query, and we have Shorts
   const shouldShowShelf = activeCategory === 'ALL' && !searchQuery && shortsShelf.length > 0;
-  
-  // Split list to insert shelf
-  // Insert after the first 8 videos (2 rows on desktop)
-  const insertionIndex = 8;
 
   return (
     <div className="min-h-screen" ref={containerRef}>
@@ -505,45 +494,17 @@ export default function Home() {
              </div>
          ) : (
             <>
+             {/* Shorts Shelf injected at the top */}
+             {shouldShowShelf && <ShortsShelf videos={shortsShelf} />}
+
              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-8 gap-x-4">
-                {/* First Batch of Videos */}
-                {displayList.slice(0, shouldShowShelf ? insertionIndex : undefined).map(video => (
+                {displayList.map(video => (
                   <VideoCard 
                     key={video.id} 
                     video={video} 
                     isUnlocked={isUnlocked(video.id, video.creatorId)}
                     isWatched={watchedIds.includes(video.id)}
                   />
-                ))}
-
-                {/* Shorts Shelf injected in the grid */}
-                {shouldShowShelf && <ShortsShelf videos={shortsShelf} />}
-
-                {/* Remaining Videos */}
-                {displayList.slice(shouldShowShelf ? insertionIndex : 0).map(video => {
-                    // Avoid duplicating items if shelf was not shown (the logic above handles slice)
-                    // If shelf shown, slice starts from insertionIndex.
-                    // If shelf NOT shown, we handled all items in the first map? No.
-                    // Correction:
-                    if (!shouldShowShelf) return null; // Logic is split above.
-                    return (
-                        <VideoCard 
-                            key={video.id} 
-                            video={video} 
-                            isUnlocked={isUnlocked(video.id, video.creatorId)}
-                            isWatched={watchedIds.includes(video.id)}
-                        />
-                    )
-                })}
-
-                {/* Fallback for when shelf is NOT shown, renders everything here */}
-                {!shouldShowShelf && displayList.map(video => (
-                     <VideoCard 
-                        key={video.id} 
-                        video={video} 
-                        isUnlocked={isUnlocked(video.id, video.creatorId)}
-                        isWatched={watchedIds.includes(video.id)}
-                    />
                 ))}
              </div>
              {visibleCount < processedList.length && (

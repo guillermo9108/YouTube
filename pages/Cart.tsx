@@ -4,10 +4,10 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/db';
 import { useNavigate } from '../components/Router';
-import { Trash2, Plus, Minus, ArrowRight, Loader2, CreditCard, History, ShoppingBag, AlertCircle } from 'lucide-react';
+import { Trash2, Plus, Minus, ArrowRight, Loader2, CreditCard, History, ShoppingBag, AlertCircle, Percent } from 'lucide-react';
 
 export default function Cart() {
-  const { items, updateQuantity, removeFromCart, cartTotal, clearCart } = useCart();
+  const { items, updateQuantity, removeFromCart, cartTotal, cartOriginalTotal, totalSaved, totalSavedPercent, clearCart } = useCart();
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState<'REVIEW' | 'SHIPPING'>('REVIEW');
@@ -98,7 +98,9 @@ export default function Cart() {
        {step === 'REVIEW' && (
            <>
                <div className="space-y-4 mb-8">
-                   {items.map(item => (
+                   {items.map(item => {
+                       const finalPrice = item.price * (1 - (item.discountPercent / 100));
+                       return (
                        <div key={item.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex gap-4 items-center animate-in slide-in-from-bottom-2 duration-300">
                            <div className="w-20 h-20 bg-slate-800 rounded-lg overflow-hidden shrink-0 relative group">
                                {item.media[0].type === 'image' ? (
@@ -106,11 +108,17 @@ export default function Cart() {
                                ) : (
                                    <div className="w-full h-full bg-slate-900 flex items-center justify-center"><ShoppingBag size={20} className="text-slate-600"/></div>
                                )}
+                               {item.discountPercent > 0 && (
+                                   <div className="absolute top-0 left-0 bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br">-{item.discountPercent}%</div>
+                               )}
                            </div>
                            <div className="flex-1 min-w-0">
                                <h3 className="font-bold text-white truncate text-sm md:text-base">{item.title}</h3>
                                <p className="text-xs text-slate-400 mb-1">@{item.sellerName}</p>
-                               <div className="text-emerald-400 font-bold font-mono">{item.price} Saldo</div>
+                               <div className="flex items-center gap-2">
+                                    <div className="text-emerald-400 font-bold font-mono">{finalPrice.toFixed(2)} $</div>
+                                    {item.discountPercent > 0 && <div className="text-slate-500 text-xs line-through">{item.price.toFixed(2)} $</div>}
+                               </div>
                            </div>
                            <div className="flex flex-col items-end gap-2">
                                <button onClick={() => removeFromCart(item.id)} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"><Trash2 size={16}/></button>
@@ -121,14 +129,29 @@ export default function Cart() {
                                </div>
                            </div>
                        </div>
-                   ))}
+                   )})}
                </div>
                
                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-xl">
-                   <div className="flex justify-between items-center mb-4">
-                       <span className="text-slate-400 text-sm font-bold uppercase">Total Estimado</span>
-                       <span className="text-3xl font-bold text-emerald-400 font-mono">{cartTotal.toFixed(2)}</span>
+                   <h3 className="font-bold text-white text-sm mb-4 border-b border-slate-800 pb-2">Resumen del Pedido</h3>
+                   
+                   <div className="flex justify-between items-center mb-2 text-sm text-slate-400">
+                       <span>Subtotal (Precio Lista)</span>
+                       <span className="font-mono line-through">{cartOriginalTotal.toFixed(2)} $</span>
                    </div>
+
+                   {totalSaved > 0 && (
+                       <div className="flex justify-between items-center mb-4 text-sm text-emerald-400 font-bold bg-emerald-900/10 p-2 rounded border border-emerald-500/20">
+                           <span className="flex items-center gap-1"><Percent size={14}/> Descuento ({totalSavedPercent.toFixed(0)}%)</span>
+                           <span className="font-mono">-{totalSaved.toFixed(2)} $</span>
+                       </div>
+                   )}
+
+                   <div className="flex justify-between items-center mb-6 pt-2 border-t border-slate-800">
+                       <span className="text-white font-bold uppercase">Total a Pagar</span>
+                       <span className="text-3xl font-bold text-emerald-400 font-mono">{cartTotal.toFixed(2)} $</span>
+                   </div>
+                   
                    <button onClick={() => setStep('SHIPPING')} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 active:scale-95 transition-all">
                        Proceder al Pago <ArrowRight size={18}/>
                    </button>

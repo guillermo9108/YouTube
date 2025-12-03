@@ -1,7 +1,8 @@
+
 import React, { useState } from 'react';
-import { Video } from '../types';
+import { Video, VideoCategory } from '../types';
 import { Link } from './Router';
-import { CheckCircle2, MoreVertical, ImageOff } from 'lucide-react';
+import { CheckCircle2, MoreVertical, ImageOff, Smartphone } from 'lucide-react';
 
 interface VideoCardProps {
   video: Video;
@@ -10,10 +11,7 @@ interface VideoCardProps {
 }
 
 const formatTimeAgo = (timestamp: number) => {
-  // Fix: Normalizar timestamp de PHP (segundos) a JS (milisegundos)
-  // Si es menor a 10 billones (año 2286), asumimos que son segundos.
   const timeMs = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
-
   const seconds = Math.floor((Date.now() - timeMs) / 1000);
   let interval = seconds / 31536000;
   if (interval > 1) return "hace " + Math.floor(interval) + " años";
@@ -40,17 +38,18 @@ const formatDuration = (seconds: number) => {
 
 // React.memo to prevent re-renders of cards that didn't change when parent state updates
 const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched }) => {
-  // Normalizar createdAt para cálculo de "Nuevo"
   const createdAtMs = video.createdAt < 10000000000 ? video.createdAt * 1000 : video.createdAt;
-  // Check if video is "New" (less than 24 hours old)
   const isNew = (Date.now() - createdAtMs) < 24 * 60 * 60 * 1000;
-  
   const [imgError, setImgError] = useState(false);
+
+  // Determine if it's a short for linking
+  const isShort = video.category === VideoCategory.SHORTS || video.duration <= 60;
+  const targetLink = isShort ? `/shorts?id=${video.id}` : `/watch/${video.id}`;
 
   return (
     <div className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
       {/* Thumbnail Container */}
-      <Link to={`/watch/${video.id}`} className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm group-hover:rounded-none transition-all duration-200 block">
+      <Link to={targetLink} className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm group-hover:rounded-none transition-all duration-200 block">
         {!imgError ? (
             <img 
               src={video.thumbnailUrl} 
@@ -67,7 +66,8 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         )}
         
         {/* Duration Badge */}
-        <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm">
+        <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm flex items-center gap-1">
+           {isShort && <Smartphone size={8} />}
            {formatDuration(video.duration)}
         </div>
 
@@ -110,7 +110,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
 
         {/* Text Info */}
         <div className="flex-1 min-w-0 flex flex-col">
-            <Link to={`/watch/${video.id}`} title={video.title}>
+            <Link to={targetLink} title={video.title}>
                 <h3 className="text-sm md:text-[15px] font-semibold text-white leading-snug line-clamp-2 mb-1 group-hover:text-indigo-400 transition-colors">
                     {video.title}
                 </h3>

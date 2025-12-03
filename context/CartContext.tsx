@@ -9,6 +9,9 @@ interface CartContextType {
   updateQuantity: (itemId: string, delta: number) => void;
   clearCart: () => void;
   cartTotal: number;
+  cartOriginalTotal: number;
+  totalSaved: number;
+  totalSavedPercent: number;
   cartCount: number;
 }
 
@@ -38,7 +41,7 @@ export const CartProvider = ({ children }: { children?: React.ReactNode }) => {
           if (existing) {
               // Check stock limit
               if (existing.cartQuantity >= product.stock) {
-                  alert("Max stock reached for this item");
+                  alert("Stock máximo alcanzado para este artículo");
                   return prev;
               }
               return prev.map(i => i.id === product.id ? { ...i, cartQuantity: i.cartQuantity + 1 } : i);
@@ -58,7 +61,7 @@ export const CartProvider = ({ children }: { children?: React.ReactNode }) => {
                   const newQty = i.cartQuantity + delta;
                   if (newQty < 1) return i;
                   if (newQty > i.stock) {
-                      alert("Max stock reached");
+                      alert("Stock máximo alcanzado");
                       return i;
                   }
                   return { ...i, cartQuantity: newQty };
@@ -70,11 +73,36 @@ export const CartProvider = ({ children }: { children?: React.ReactNode }) => {
 
   const clearCart = () => setItems([]);
 
-  const cartTotal = items.reduce((acc, item) => acc + (item.price * item.cartQuantity), 0);
+  // Calculations
+  const cartTotal = items.reduce((acc, item) => {
+      // Apply discount
+      const finalPrice = item.price * (1 - (item.discountPercent / 100));
+      return acc + (finalPrice * item.cartQuantity);
+  }, 0);
+
+  const cartOriginalTotal = items.reduce((acc, item) => {
+      // Original list price
+      return acc + (item.price * item.cartQuantity);
+  }, 0);
+
+  const totalSaved = cartOriginalTotal - cartTotal;
+  const totalSavedPercent = cartOriginalTotal > 0 ? (totalSaved / cartOriginalTotal) * 100 : 0;
+
   const cartCount = items.reduce((acc, item) => acc + item.cartQuantity, 0);
 
   return (
-    <CartContext.Provider value={{ items, addToCart, removeFromCart, updateQuantity, clearCart, cartTotal, cartCount }}>
+    <CartContext.Provider value={{ 
+        items, 
+        addToCart, 
+        removeFromCart, 
+        updateQuantity, 
+        clearCart, 
+        cartTotal, 
+        cartOriginalTotal,
+        totalSaved,
+        totalSavedPercent,
+        cartCount 
+    }}>
       {children}
     </CartContext.Provider>
   );
