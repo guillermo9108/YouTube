@@ -1,6 +1,4 @@
 
-
-
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from '../components/Router';
@@ -30,7 +28,7 @@ export default function Login() {
     setError('');
     
     if (!username.trim() || !password.trim()) {
-      setError("Usuario y contraseña son obligatorios");
+      setError("Username and password are required");
       return;
     }
 
@@ -42,7 +40,7 @@ export default function Login() {
       }
       navigate('/');
     } catch (err: any) {
-      setError(err.message || "Ocurrió un error");
+      setError(err.message || "An error occurred");
     }
   };
 
@@ -56,7 +54,7 @@ export default function Login() {
           <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
             StreamPay
           </h1>
-          <p className="text-slate-400 mt-2">La plataforma Pay-Per-View premium.</p>
+          <p className="text-slate-400 mt-2">The premier Pay-Per-View marketplace.</p>
         </div>
 
         <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-2xl">
@@ -65,13 +63,13 @@ export default function Login() {
                 onClick={() => { setIsLogin(true); setError(''); }}
                 className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${isLogin ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
              >
-               Iniciar Sesión
+               Login
              </button>
              <button 
                 onClick={() => { setIsLogin(false); setError(''); }}
                 className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${!isLogin ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
              >
-               Registrarse
+               Register
              </button>
           </div>
 
@@ -101,27 +99,27 @@ export default function Login() {
              )}
 
              <div>
-               <label className="block text-xs font-medium text-slate-400 mb-1 uppercase tracking-wider">Usuario</label>
+               <label className="block text-xs font-medium text-slate-400 mb-1 uppercase tracking-wider">Username</label>
                <input
                  type="text"
                  value={username}
                  onChange={(e) => setUsername(e.target.value)}
                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                 placeholder="Ingresa tu usuario"
+                 placeholder="Enter your username"
                />
                {!isLogin && (
-                 <p className="text-xs text-slate-500 mt-1">Elige un nombre de usuario único.</p>
+                 <p className="text-xs text-slate-500 mt-1">Choose a unique username.</p>
                )}
              </div>
 
              <div>
-               <label className="block text-xs font-medium text-slate-400 mb-1 uppercase tracking-wider">Contraseña</label>
+               <label className="block text-xs font-medium text-slate-400 mb-1 uppercase tracking-wider">Password</label>
                <input
                  type="password"
                  value={password}
                  onChange={(e) => setPassword(e.target.value)}
                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                 placeholder="Ingresa tu contraseña"
+                 placeholder="Enter your password"
                />
              </div>
              
@@ -133,7 +131,7 @@ export default function Login() {
              )}
 
              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg transition-all transform active:scale-95 shadow-lg shadow-indigo-900/20">
-               {isLogin ? 'Entrar' : 'Crear Cuenta'}
+               {isLogin ? 'Sign In' : 'Create Account'}
              </button>
           </form>
         </div>

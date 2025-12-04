@@ -1,5 +1,5 @@
 {
-  "name": "StreamPay",
-  "description": "Una plataforma de video Pay-Per-View móvil que utiliza una moneda interna (Saldo).",
+  "name": "YouTube 1.0",
+  "description": "A mobile-first Pay-Per-View video platform using an internal currency (Saldo).",
   "requestFramePermissions": []
 }

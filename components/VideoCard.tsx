@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
-import { Video, VideoCategory } from '../types';
+import { Video } from '../types';
 import { Link } from './Router';
-import { CheckCircle2, MoreVertical, ImageOff, Smartphone } from 'lucide-react';
+import { CheckCircle2, MoreVertical, ImageOff } from 'lucide-react';
 
 interface VideoCardProps {
   video: Video;
@@ -11,19 +10,18 @@ interface VideoCardProps {
 }
 
 const formatTimeAgo = (timestamp: number) => {
-  const timeMs = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
-  const seconds = Math.floor((Date.now() - timeMs) / 1000);
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
   let interval = seconds / 31536000;
-  if (interval > 1) return "hace " + Math.floor(interval) + " años";
+  if (interval > 1) return Math.floor(interval) + " years ago";
   interval = seconds / 2592000;
-  if (interval > 1) return "hace " + Math.floor(interval) + " meses";
+  if (interval > 1) return Math.floor(interval) + " months ago";
   interval = seconds / 86400;
-  if (interval > 1) return "hace " + Math.floor(interval) + " días";
+  if (interval > 1) return Math.floor(interval) + " days ago";
   interval = seconds / 3600;
-  if (interval > 1) return "hace " + Math.floor(interval) + " horas";
+  if (interval > 1) return Math.floor(interval) + " hours ago";
   interval = seconds / 60;
-  if (interval > 1) return "hace " + Math.floor(interval) + " min";
-  return "Justo ahora";
+  if (interval > 1) return Math.floor(interval) + " min ago";
+  return "Just now";
 };
 
 const formatDuration = (seconds: number) => {
@@ -38,19 +36,14 @@ const formatDuration = (seconds: number) => {
 
 // React.memo to prevent re-renders of cards that didn't change when parent state updates
 const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched }) => {
-  const createdAtMs = video.createdAt < 10000000000 ? video.createdAt * 1000 : video.createdAt;
-  const isNew = (Date.now() - createdAtMs) < 24 * 60 * 60 * 1000;
+  // Check if video is "New" (less than 24 hours old)
+  const isNew = (Date.now() - video.createdAt) < 24 * 60 * 60 * 1000;
   const [imgError, setImgError] = useState(false);
-
-  // Robust Short detection: Force number casting and case-insensitive check if needed
-  const duration = Number(video.duration);
-  const isShort = video.category === VideoCategory.SHORTS || duration <= 60;
-  const targetLink = isShort ? `/shorts?id=${video.id}` : `/watch/${video.id}`;
 
   return (
     <div className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
       {/* Thumbnail Container */}
-      <Link to={targetLink} className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm group-hover:rounded-none transition-all duration-200 block">
+      <Link to={`/watch/${video.id}`} className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm group-hover:rounded-none transition-all duration-200 block">
         {!imgError ? (
             <img 
               src={video.thumbnailUrl} 
@@ -67,15 +60,14 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         )}
         
         {/* Duration Badge */}
-        <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm flex items-center gap-1">
-           {isShort && <Smartphone size={8} />}
-           {formatDuration(duration)}
+        <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm">
+           {formatDuration(video.duration)}
         </div>
 
         {/* NEW Badge */}
         {isNew && !isWatched && (
             <div className="absolute top-1.5 left-1.5 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm animate-pulse">
-                NUEVO
+                NEW
             </div>
         )}
 
@@ -83,7 +75,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         {isWatched && (
              <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                  <div className="flex items-center gap-1 text-slate-200 bg-black/40 px-2 py-1 rounded backdrop-blur-md border border-white/10">
-                    <CheckCircle2 size={14} /> <span className="text-[10px] font-bold tracking-wider">VISTO</span>
+                    <CheckCircle2 size={14} /> <span className="text-[10px] font-bold tracking-wider">WATCHED</span>
                  </div>
              </div>
         )}
@@ -111,7 +103,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
 
         {/* Text Info */}
         <div className="flex-1 min-w-0 flex flex-col">
-            <Link to={targetLink} title={video.title}>
+            <Link to={`/watch/${video.id}`} title={video.title}>
                 <h3 className="text-sm md:text-[15px] font-semibold text-white leading-snug line-clamp-2 mb-1 group-hover:text-indigo-400 transition-colors">
                     {video.title}
                 </h3>
@@ -124,7 +116,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
                     <CheckCircle2 size={10} className="text-slate-500 fill-slate-800" />
                 </Link>
                 <div className="flex items-center gap-1">
-                    <span>{video.views} vistas</span>
+                    <span>{video.views} views</span>
                     <span className="text-slate-600">•</span>
                     <span>{formatTimeAgo(video.createdAt)}</span>
                 </div>

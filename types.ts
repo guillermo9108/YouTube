@@ -1,4 +1,5 @@
 
+
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -15,26 +16,17 @@ export enum VideoCategory {
   OTHER = 'OTHER'
 }
 
-export interface ShippingDetails {
-  fullName: string;
-  phoneNumber: string;
-  address: string;
-  bankAccount?: string;
-  notes?: string;
-}
-
 export interface User {
   id: string;
   username: string;
   password?: string;
   role: UserRole;
   balance: number;
-  autoPurchaseLimit: number; 
-  watchLater: string[]; 
-  sessionToken?: string; 
-  avatarUrl?: string; 
-  defaultPrices?: Record<string, number>; 
-  shippingDetails?: ShippingDetails;
+  autoPurchaseLimit: number; // Default 1
+  watchLater: string[]; // Video IDs
+  sessionToken?: string; // New: For single session enforcement
+  avatarUrl?: string; // New: Profile Picture
+  defaultPrices?: Record<string, number>; // New: User specific price overrides
 }
 
 export interface Video {
@@ -50,48 +42,11 @@ export interface Video {
   createdAt: number;
   likes: number;
   dislikes: number;
-  category: string; 
-  duration: number; 
-  fileHash?: string; 
+  category: string; // Changed from VideoCategory to string to support custom ones
+  duration: number; // Seconds
+  fileHash?: string; // New: MD5 Hash for deduplication
   creatorAvatarUrl?: string;
-  isLocal?: boolean; 
-}
-
-export interface MarketplaceItem {
-  id: string;
-  title: string;
-  description: string;
-  price: number;
-  sellerId: string;
-  sellerName: string;
-  sellerAvatarUrl?: string;
-  media: { type: 'image' | 'video', url: string }[];
-  status: 'ACTIVE' | 'SOLD' | 'OUT_OF_STOCK';
-  createdAt: number;
-  stock: number;         // New: Quantity available
-  discountPercent: number; // New: 0-100
-  salesCount: number;    // New: For "Best Seller" logic
-}
-
-export interface CartItem extends MarketplaceItem {
-  cartQuantity: number;
-}
-
-export interface Order {
-  id: string;
-  buyerId: string;
-  sellerId: string; // Grouped by seller usually, but for simplicity flattened
-  items: { itemId: string, title: string, price: number, quantity: number }[];
-  totalAmount: number;
-  shippingData: {
-    name: string;
-    bankAccount?: string;
-    phoneNumber?: string;
-    address?: string;
-    notes?: string;
-  };
-  timestamp: number;
-  status: 'COMPLETED' | 'REFUNDED';
+  isLocal?: boolean; // New: Flag for local NAS files
 }
 
 export interface Transaction {
@@ -101,8 +56,7 @@ export interface Transaction {
   videoId: string | null;
   amount: number;
   timestamp: number;
-  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE';
-  orderId?: string; // Link to the order
+  type: 'PURCHASE' | 'DEPOSIT';
 }
 
 export interface Comment {
@@ -141,6 +95,14 @@ export interface ContentRequest {
   useLocalNetwork: boolean; 
 }
 
+export interface FtpSettings {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    rootPath: string;
+}
+
 export interface SystemSettings {
   downloadStartTime: string; 
   downloadEndTime: string;   
@@ -150,12 +112,12 @@ export interface SystemSettings {
   maxResolution: number;     
   pexelsKey: string;
   pixabayKey: string;
-  ytDlpPath: string;    
-  enableYoutube: boolean; 
-  categoryPrices: Record<string, number>; 
-  customCategories: string[]; 
-  localLibraryPath: string; 
-  serverUploadLimit?: number; // In Bytes
+  ytDlpPath: string;    // New: Path to yt-dlp binary
+  enableYoutube: boolean; // New: Toggle for YouTube features
+  categoryPrices: Record<string, number>; // New: Global default prices
+  customCategories: string[]; // New: List of admin added categories
+  localLibraryPath: string; // New: Path to local NAS video folder
+  ftpSettings?: FtpSettings; // New: FTP Configuration
 }
 
 export interface SmartCleanerResult {
@@ -163,17 +125,17 @@ export interface SmartCleanerResult {
   stats: {
     totalVideos: number;
     videosToDelete: number;
-    spaceReclaimed: string; 
+    spaceReclaimed: string; // Estimate
   }
 }
 
 export interface Notification {
   id: string;
-  userId: string; 
+  userId: string; // The recipient
   type: 'UPLOAD' | 'SYSTEM';
   text: string;
-  link: string; 
+  link: string; // URL to go to
   isRead: boolean;
   timestamp: number;
-  avatarUrl?: string; 
+  avatarUrl?: string; // Optional image for the notif
 }

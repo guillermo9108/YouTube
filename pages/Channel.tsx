@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useLayoutEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from '../components/Router';
 import { db } from '../services/db';
 import { User, Video } from '../types';
@@ -19,10 +19,6 @@ export default function Channel() {
   const [purchases, setPurchases] = useState<string[]>([]);
   const [isSubscribed, setIsSubscribed] = useState(false);
 
-  useLayoutEffect(() => {
-      window.scrollTo(0, 0);
-  }, [userId]);
-
   useEffect(() => {
     if (!userId) {
         setLoading(false);
@@ -36,16 +32,16 @@ export default function Channel() {
             const u = await db.getUser(userId);
             setChannelUser(u);
 
-            // 2. Get User Videos (Now works with backend get_creator_videos)
+            // 2. Get User Videos
             const vids = await db.getVideosByCreator(userId);
-            setVideos(vids || []);
+            setVideos(vids);
 
             // 3. Calc Stats
-            const totalViews = vids ? vids.reduce((acc, curr) => acc + Number(curr.views), 0) : 0;
-            setStats({ views: totalViews, uploads: vids ? vids.length : 0 });
+            const totalViews = vids.reduce((acc, curr) => acc + Number(curr.views), 0);
+            setStats({ views: totalViews, uploads: vids.length });
 
             // 4. Check purchases & Subscription
-            if (currentUser && vids) {
+            if (currentUser) {
                 const checks = vids.map(v => db.hasPurchased(currentUser.id, v.id));
                 const results = await Promise.all(checks);
                 const p = vids.filter((_, i) => results[i]).map(v => v.id);
@@ -74,7 +70,7 @@ export default function Channel() {
           setIsSubscribed(res.isSubscribed);
       } catch (e) { 
           setIsSubscribed(oldState); // Revert on error
-          alert("Error al suscribirse"); 
+          alert("Failed to subscribe"); 
       }
   };
 
@@ -83,7 +79,7 @@ export default function Channel() {
   };
 
   if (loading) return <div className="flex justify-center items-center h-[50vh]"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>;
-  if (!channelUser) return <div className="text-center p-10 text-slate-500">Usuario no encontrado</div>;
+  if (!channelUser) return <div className="text-center p-10 text-slate-500">User not found</div>;
 
   return (
     <div className="pb-20 min-h-screen">
@@ -114,7 +110,7 @@ export default function Channel() {
                    <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
                    <span>{stats.uploads} videos</span>
                    <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
-                   <span>{stats.views} vistas</span>
+                   <span>{stats.views} views</span>
                </div>
                
                {currentUser?.id !== channelUser.id && (
@@ -123,9 +119,9 @@ export default function Channel() {
                        className={`px-8 py-3 rounded-full font-bold text-sm transition-all transform active:scale-95 flex items-center gap-2 mx-auto ${isSubscribed ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-white text-black hover:bg-slate-200'}`}
                    >
                        {isSubscribed ? (
-                           <><Check size={18}/> Suscrito</>
+                           <><Check size={18}/> Subscribed</>
                        ) : (
-                           <><Bell size={18}/> Suscribirse</>
+                           <><Bell size={18}/> Subscribe</>
                        )}
                    </button>
                )}
@@ -136,7 +132,7 @@ export default function Channel() {
        <div className="px-4 md:px-12 relative z-10">
            <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-slate-800 pb-2">Videos</h2>
            {videos.length === 0 ? (
-               <div className="text-center py-20 text-slate-500">Este usuario no ha subido videos aún.</div>
+               <div className="text-center py-20 text-slate-500">This user hasn't uploaded any videos yet.</div>
            ) : (
                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-8">
                    {videos.map(video => (

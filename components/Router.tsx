@@ -17,8 +17,7 @@ export function useNavigate() {
 export function useParams(): Record<string, string | undefined> {
   const { pathname } = useLocation();
   
-  // Robust Regex for extracting IDs
-  // Matches /watch/123-abc, /watch/123-abc/, but not /watch
+  // Fixed Regex to be more robust for URLs like /watch/ID?param=1
   const watchMatch = pathname.match(/\/watch\/([^/?&]+)/);
   if (watchMatch) {
     return { id: watchMatch[1] };
@@ -27,12 +26,6 @@ export function useParams(): Record<string, string | undefined> {
   const channelMatch = pathname.match(/\/channel\/([^/?&]+)/);
   if (channelMatch) {
     return { userId: channelMatch[1] };
-  }
-
-  // Add regex for Marketplace items (excluding 'create' route)
-  const marketMatch = pathname.match(/\/marketplace\/([^/?&]+)/);
-  if (marketMatch && marketMatch[1] !== 'create' && marketMatch[1] !== 'cart') {
-    return { id: marketMatch[1] };
   }
 
   return {};
@@ -86,9 +79,6 @@ interface RouteProps {
 export function Routes({ children }: { children?: React.ReactNode }) {
   const { pathname } = useLocation();
   const routes = React.Children.toArray(children) as React.ReactElement<RouteProps>[];
-  
-  // Clean path for matching (remove query params)
-  const currentPath = pathname.split('?')[0];
 
   for (const route of routes) {
     const { path, element, children: nested } = route.props;
@@ -100,10 +90,10 @@ export function Routes({ children }: { children?: React.ReactNode }) {
         let isMatch = false;
 
         if (cp === '*') isMatch = true;
-        else if (cp === currentPath) isMatch = true;
+        else if (cp === pathname) isMatch = true;
         else if (cp && cp.includes(':')) {
            const prefix = cp.split(':')[0];
-           if (currentPath.startsWith(prefix)) isMatch = true;
+           if (pathname.startsWith(prefix)) isMatch = true;
         }
 
         if (isMatch) {
@@ -117,11 +107,10 @@ export function Routes({ children }: { children?: React.ReactNode }) {
     } else {
       let isMatch = false;
       if (path === '*') isMatch = true;
-      else if (path === currentPath) isMatch = true;
+      else if (path === pathname) isMatch = true;
       else if (path && path.includes(':')) {
            const prefix = path.split(':')[0];
-           // Simple prefix matching for :id params, works for now
-           if (currentPath.startsWith(prefix)) isMatch = true;
+           if (pathname.startsWith(prefix)) isMatch = true;
       }
 
       if (isMatch) return element;

@@ -1,8 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
-import { useCart } from '../context/CartContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
 import { db } from '../services/db';
 import { Notification as AppNotification } from '../types';
@@ -26,8 +26,8 @@ const UploadIndicator = () => {
           <span className="absolute text-[10px] font-bold text-white">{Math.round(progress)}%</span>
        </div>
        <div className="flex flex-col min-w-[100px]">
-          <span className="text-xs font-bold text-white">Subiendo...</span>
-          <span className="text-[10px] text-slate-400">Archivo {currentFileIndex} de {totalFiles}</span>
+          <span className="text-xs font-bold text-white">Uploading...</span>
+          <span className="text-[10px] text-slate-400">File {currentFileIndex} of {totalFiles}</span>
           <span className="text-[10px] text-indigo-400 font-mono">{uploadSpeed}</span>
        </div>
     </div>
@@ -120,7 +120,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                         }
                     `}>
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/90 backdrop-blur-md sticky top-0 z-10">
-                            <h3 className="font-bold text-white flex items-center gap-2"><Bell size={18} className="text-indigo-400"/> Notificaciones</h3>
+                            <h3 className="font-bold text-white flex items-center gap-2"><Bell size={18} className="text-indigo-400"/> Notifications</h3>
                             <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-slate-800 rounded-full bg-slate-900 border border-slate-800"><X size={18} className="text-slate-400 hover:text-white"/></button>
                         </div>
                         
@@ -130,7 +130,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                                     <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center opacity-50">
                                         <Bell size={32}/>
                                     </div>
-                                    <p>No hay notificaciones</p>
+                                    <p>No new notifications</p>
                                 </div>
                             ) : (
                                 <div className="divide-y divide-slate-800/50 pb-8">
@@ -146,7 +146,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                                             <div className="flex-1 min-w-0">
                                                 <p className={`text-sm leading-snug ${!n.isRead ? 'text-white font-semibold' : 'text-slate-400'}`}>{n.text}</p>
                                                 <span className="text-[10px] text-slate-600 block mt-1.5 flex items-center gap-1">
-                                                    <Clock size={10}/> {new Date(n.timestamp < 10000000000 ? n.timestamp * 1000 : n.timestamp).toLocaleString()}
+                                                    <Clock size={10}/> {new Date(n.timestamp).toLocaleString()}
                                                 </span>
                                             </div>
                                             {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 shrink-0 animate-pulse"></div>}
@@ -167,12 +167,10 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
 export default function Layout() {
   const location = useLocation();
   const { user, logout } = useAuth();
-  const { cartCount } = useCart();
   const [showSidebar, setShowSidebar] = useState(false);
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
-  // Use startsWith to correctly handle URLs like /shorts?id=...
-  const isShortsMode = location.pathname.startsWith('/shorts');
+  const isShortsMode = location.pathname === '/shorts';
 
   const Avatar = ({ size=24, className='' }: {size?: number, className?: string}) => (
       user?.avatarUrl ? (
@@ -198,38 +196,31 @@ export default function Layout() {
                 <div className="space-y-1 flex-1">
                     {(user?.role === 'ADMIN') && (
                         <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-900/10 hover:bg-amber-900/20 rounded-lg font-medium mb-4 border border-amber-500/20">
-                            <ShieldCheck size={20}/> Panel Admin
+                            <ShieldCheck size={20}/> Admin Panel
                         </Link>
                     )}
 
                     <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
-                        <Home size={20}/> Inicio
+                        <Home size={20}/> Home
                     </Link>
                     <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <Smartphone size={20}/> Shorts
                     </Link>
                     <div className="h-px bg-slate-800 my-2"></div>
-                    <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-emerald-400 hover:text-emerald-200 hover:bg-emerald-900/20 rounded-lg font-medium">
-                        <ShoppingBag size={20}/> Tienda
-                    </Link>
-                    <Link to="/marketplace/cart" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <ShoppingCart size={20}/> Carrito ({cartCount})
-                    </Link>
-                    <div className="h-px bg-slate-800 my-2"></div>
                     <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <DownloadCloud size={20}/> Peticiones
+                        <DownloadCloud size={20}/> Requests
                     </Link>
                     <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <Upload size={20}/> Subir
+                        <Upload size={20}/> Upload
                     </Link>
                     <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <User size={20}/> Perfil
+                        <User size={20}/> Profile
                     </Link>
                 </div>
 
                 <div className="border-t border-slate-800 pt-4">
                     <button onClick={() => { logout(); setShowSidebar(false); }} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-lg font-medium w-full text-left">
-                        <LogOut size={20}/> Salir
+                        <LogOut size={20}/> Logout
                     </button>
                 </div>
             </div>
@@ -237,7 +228,6 @@ export default function Layout() {
       )}
 
       {/* HEADER (Desktop) */}
-      {!isShortsMode && (
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
             <button onClick={() => setShowSidebar(true)} className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
@@ -252,20 +242,14 @@ export default function Layout() {
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">
              {user?.balance} Saldo
           </span>
-          <Link to="/" className={isActive('/')}>Inicio</Link>
-          <Link to="/marketplace" className={isActive('/marketplace')}>Tienda</Link>
+          <Link to="/" className={isActive('/')}>Browse</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
-          <Link to="/upload" className={isActive('/upload')}>Subir</Link>
-          <Link to="/marketplace/cart" className="relative text-slate-400 hover:text-white">
-              <ShoppingCart size={24} />
-              {cartCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{cartCount}</span>}
-          </Link>
+          <Link to="/upload" className={isActive('/upload')}>Upload</Link>
           <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>
             <Avatar size={24} />
           </Link>
         </div>
       </header>
-      )}
 
       {/* Main Content */}
       <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : 'flex-1 container mx-auto px-4 pt-2 md:pt-8 max-w-5xl'}>
@@ -279,12 +263,12 @@ export default function Layout() {
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex justify-around items-center py-3 z-50 safe-area-bottom">
           <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/')}`}>
             <Home size={22} />
-            <span className="text-[10px]">Inicio</span>
+            <span className="text-[10px]">Home</span>
           </Link>
 
-          <Link to="/marketplace" className={`flex flex-col items-center gap-1 ${isActive('/marketplace')}`}>
-            <ShoppingBag size={22} />
-            <span className="text-[10px]">Tienda</span>
+          <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}>
+            <Smartphone size={22} />
+            <span className="text-[10px]">Shorts</span>
           </Link>
           
           <div className="relative -top-5">
@@ -293,17 +277,14 @@ export default function Layout() {
              </Link>
           </div>
 
-          <Link to="/marketplace/cart" className={`flex flex-col items-center gap-1 relative ${isActive('/marketplace/cart')}`}>
-             <div className="relative">
-                 <ShoppingCart size={22} />
-                 {cartCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center">{cartCount}</span>}
-             </div>
-             <span className="text-[10px]">Carrito</span>
-          </Link>
+          <div className="flex flex-col items-center gap-1">
+             <NotificationBell isMobile={true} />
+             <span className={`text-[10px] ${isActive('NOTIFS')}`}>Alerts</span>
+          </div>
 
           <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>
             <Avatar size={22} />
-            <span className="text-[10px]">Perfil</span>
+            <span className="text-[10px]">Profile</span>
           </Link>
         </nav>
       )}

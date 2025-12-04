@@ -1,5 +1,6 @@
 
-import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
+
+import React, { useEffect, useState, useRef } from 'react';
 import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction, VideoCategory } from '../types';
@@ -13,19 +14,15 @@ const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) 
    useEffect(() => {
      if(userId) {
         db.getInteraction(userId, rv.id).then(i => setWatched(i.isWatched)).catch(() => {});
-        if (userId === rv.creatorId) {
-            setPurchased(true);
-        } else {
-            db.hasPurchased(userId, rv.id).then(setPurchased).catch(() => {});
-        }
+        db.hasPurchased(userId, rv.id).then(setPurchased).catch(() => {});
      }
-   }, [userId, rv.id, rv.creatorId]);
+   }, [userId, rv.id]);
 
    return (
     <Link to={`/watch/${rv.id}`} className="flex gap-3 group">
       <div className="relative w-32 aspect-video shrink-0 bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group-hover:border-indigo-500 transition-colors">
          <img src={rv.thumbnailUrl} alt="" className="w-full h-full object-cover opacity-80 group-hover:opacity-100" />
-         {watched && <div className="absolute inset-0 bg-black/60 flex items-center justify-center"><span className="text-[10px] font-bold text-white bg-slate-800/80 px-1.5 py-0.5 rounded">VISTO</span></div>}
+         {watched && <div className="absolute inset-0 bg-black/60 flex items-center justify-center"><span className="text-[10px] font-bold text-white bg-slate-800/80 px-1.5 py-0.5 rounded">WATCHED</span></div>}
          {!purchased && !watched && <div className="absolute bottom-1 right-1 bg-amber-400 text-black text-[10px] px-1.5 py-0.5 rounded font-bold shadow-sm">{rv.price} $</div>}
       </div>
       <div className="min-w-0 py-1 flex flex-col justify-center">
@@ -38,7 +35,7 @@ const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) 
              )}
              <p className="text-[10px] text-slate-500 truncate">{rv.creatorName}</p>
          </div>
-         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400"><span>{rv.views} vistas</span></div>
+         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400"><span>{rv.views} views</span></div>
       </div>
     </Link>
    );
@@ -72,15 +69,10 @@ export default function Watch() {
   const [showDebug, setShowDebug] = useState(false);
   const repairAttempted = useRef(false);
 
-  // Scroll to top on mount
-  useLayoutEffect(() => {
-      window.scrollTo(0, 0);
-  }, [id]);
-
   // ID Change Handler
   useEffect(() => {
     if (!id) {
-        setErrorMsg("No se proporcionó ID de video");
+        setErrorMsg("No Video ID provided in URL");
         setLoading(false);
         return;
     }
@@ -93,7 +85,6 @@ export default function Watch() {
     setCountdown(null);
     setNextVideo(null);
     repairAttempted.current = false;
-    setIsUnlocked(false);
 
     const fetchVideo = async () => {
         try {
@@ -101,7 +92,7 @@ export default function Watch() {
             if (!isMounted) return;
             
             if (!v) {
-                setErrorMsg("Video no encontrado o eliminado (404)");
+                setErrorMsg("Video not found or deleted (404)");
                 setLoading(false);
                 return;
             }
@@ -109,24 +100,18 @@ export default function Watch() {
             setVideo(v);
 
             if (user) {
-                // Determine Unlocked Status: Owned or Creator
-                if (user.id === v.creatorId) {
-                    setIsUnlocked(true);
-                } else {
-                    db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Error verificando compra", e));
-                }
-                
-                db.getInteraction(user.id, v.id).then(res => isMounted && setInteraction(res)).catch(e => console.warn("Error recuperando interacción", e));
+                db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Purchase check failed", e));
+                db.getInteraction(user.id, v.id).then(res => isMounted && setInteraction(res)).catch(e => console.warn("Interaction fetch failed", e));
                 if (user.watchLater) setIsWatchLater(user.watchLater.includes(v.id));
             }
 
-            db.getComments(v.id).then(res => isMounted && setComments(res || [])).catch(e => console.warn("Error comentarios", e));
-            db.getRelatedVideos(v.id).then(res => isMounted && setRelatedVideos(res || [])).catch(e => console.warn("Error videos relacionados", e));
+            db.getComments(v.id).then(res => isMounted && setComments(res || [])).catch(e => console.warn("Comments failed", e));
+            db.getRelatedVideos(v.id).then(res => isMounted && setRelatedVideos(res || [])).catch(e => console.warn("Related failed", e));
 
             setLoading(false);
         } catch (e: any) {
             if (isMounted) {
-                setErrorMsg(e.message || "Error de Conexión");
+                setErrorMsg(e.message || "Connection Error");
                 setLoading(false);
             }
         }
@@ -204,8 +189,7 @@ export default function Watch() {
 
   const prepareNextVideo = async (target: Video) => {
       if (!user) return;
-      const owned = (user.id === target.creatorId) || (await db.hasPurchased(user.id, target.id));
-      
+      const owned = await db.hasPurchased(user.id, target.id);
       setNextVideo(target);
       if (owned) {
           setAutoStatus('PLAYING_NEXT');
@@ -237,13 +221,13 @@ export default function Watch() {
 
   const handlePurchase = async () => {
       if (!user || !video || purchasing) return;
-      if (Number(user.balance) < Number(video.price)) { alert("Saldo Insuficiente"); return; }
+      if (Number(user.balance) < Number(video.price)) { alert("Insufficient Balance"); return; }
       setPurchasing(true);
       try {
           await db.purchaseVideo(user.id, video.id);
           refreshUser();
           setIsUnlocked(true);
-      } catch (e) { alert("Error en la compra"); } finally { setPurchasing(false); }
+      } catch (e) { alert("Purchase failed"); } finally { setPurchasing(false); }
   };
 
   const postComment = async (e: React.FormEvent) => {
@@ -263,21 +247,21 @@ export default function Watch() {
       }
   };
 
-  if (loading && !video) return <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 text-slate-500"><RefreshCw className="animate-spin text-indigo-500" size={32} /><p>Cargando video...</p></div>;
+  if (loading && !video) return <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 text-slate-500"><RefreshCw className="animate-spin text-indigo-500" size={32} /><p>Loading video...</p></div>;
   
   if ((!video && !loading) || errorMsg) return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6 text-slate-400">
           <AlertCircle size={48} className="text-red-500" />
           <div className="text-center px-4">
-              <h2 className="text-xl font-bold text-white">Video No Disponible</h2>
-              <p className="text-sm mt-1 mb-4">{errorMsg || "El ID del video puede ser incorrecto, eliminado o no tienes conexión."}</p>
+              <h2 className="text-xl font-bold text-white">Video Unavailable</h2>
+              <p className="text-sm mt-1 mb-4">{errorMsg || "The video ID might be incorrect, deleted, or you may be offline."}</p>
               <div className="flex gap-2 justify-center">
                   <div className="text-xs font-mono bg-slate-900 p-2 rounded text-slate-500">ID: {id}</div>
                   <button onClick={() => setShowDebug(!showDebug)} className="text-xs bg-slate-800 p-2 rounded hover:text-white"><Info size={14}/></button>
               </div>
               {showDebug && <div className="mt-4 text-[10px] text-left bg-black p-2 rounded font-mono max-w-xs overflow-auto">Backend: /api/index.php?action=get_video&id={id}</div>}
           </div>
-          <button onClick={() => window.location.reload()} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors">Recargar Página</button>
+          <button onClick={() => window.location.reload()} className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition-colors">Reload Page</button>
       </div>
   );
 
@@ -291,7 +275,7 @@ export default function Watch() {
                 {loading && (
                     <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center">
                         <RefreshCw className="animate-spin text-indigo-500 mb-2" size={32} />
-                        <span className="text-slate-500 text-xs">Cargando siguiente video...</span>
+                        <span className="text-slate-500 text-xs">Loading next video...</span>
                     </div>
                 )}
 
@@ -310,12 +294,12 @@ export default function Watch() {
                         />
                         {countdown !== null && countdown > 0 && nextVideo && (
                             <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-20 animate-in fade-in">
-                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4">Siguiente</p>
+                                <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4">Up Next</p>
                                 <h3 className="text-xl font-bold text-white mb-6 text-center px-4">{nextVideo.title}</h3>
                                 <div className="text-4xl font-mono font-bold text-indigo-400 mb-6">{countdown}</div>
                                 <div className="flex gap-4">
-                                    <button onClick={() => setCountdown(null)} className="px-4 py-2 bg-slate-800 rounded text-white text-sm">Cancelar</button>
-                                    <button onClick={() => setCountdown(0)} className="px-4 py-2 bg-indigo-600 rounded text-white text-sm font-bold">Reproducir Ahora</button>
+                                    <button onClick={() => setCountdown(null)} className="px-4 py-2 bg-slate-800 rounded text-white text-sm">Cancel</button>
+                                    <button onClick={() => setCountdown(0)} className="px-4 py-2 bg-indigo-600 rounded text-white text-sm font-bold">Play Now</button>
                                 </div>
                             </div>
                         )}
@@ -325,8 +309,8 @@ export default function Watch() {
                         <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity hover:bg-black/40" />
                         <div className="relative z-20 flex flex-col items-center p-3 bg-black/60 border border-white/10 rounded-xl backdrop-blur-md shadow-2xl transform transition-transform active:scale-95 max-w-[200px]">
                              <div className="flex items-center gap-1 mb-1"><span className="text-3xl font-black text-amber-400 drop-shadow-lg">{video.price}</span><span className="text-[10px] font-bold text-amber-200 uppercase mt-1">Saldo</span></div>
-                             <div className="flex items-center gap-2 text-white/90">{purchasing ? <RefreshCw className="animate-spin" size={14}/> : <Lock size={14}/>}<span className="font-bold text-[10px] uppercase tracking-wider">{purchasing ? 'Desbloqueando...' : (canAfford ? 'Tocar para Desbloquear' : 'Bloqueado')}</span></div>
-                             {!canAfford && <div className="mt-2 text-[9px] bg-red-500/20 text-red-200 px-2 py-0.5 rounded border border-red-500/20">Saldo Insuficiente</div>}
+                             <div className="flex items-center gap-2 text-white/90">{purchasing ? <RefreshCw className="animate-spin" size={14}/> : <Lock size={14}/>}<span className="font-bold text-[10px] uppercase tracking-wider">{purchasing ? 'Unlocking...' : (canAfford ? 'Tap to Unlock' : 'Locked')}</span></div>
+                             {!canAfford && <div className="mt-2 text-[9px] bg-red-500/20 text-red-200 px-2 py-0.5 rounded border border-red-500/20">Insufficient Funds</div>}
                         </div>
                     </div>
                   )
@@ -347,8 +331,8 @@ export default function Watch() {
                             <span className="text-slate-300 font-medium group-hover:underline">{video.creatorName}</span>
                          </Link>
                          
-                         <span>{video.views} vistas</span>
-                         <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] font-bold uppercase text-slate-500">{video.category || 'OTRO'}</span>
+                         <span>{video.views} views</span>
+                         <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] font-bold uppercase text-slate-500">{video.category || 'OTHER'}</span>
                      </div>
                      <div className="flex gap-2">
                          <div className="flex items-center bg-slate-800 rounded-full overflow-hidden">
@@ -367,8 +351,8 @@ export default function Watch() {
              )}
 
              <div className="mt-4">
-                 <h3 className="font-bold text-sm text-slate-300 mb-3 flex items-center gap-2"><MessageSquare size={14}/> Comentarios</h3>
-                 <form onSubmit={postComment} className="flex gap-2 mb-4"><input type="text" value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Añadir comentario..." className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"/><button disabled={!newComment.trim()} type="submit" className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-500 disabled:opacity-50"><Send size={16}/></button></form>
+                 <h3 className="font-bold text-sm text-slate-300 mb-3 flex items-center gap-2"><MessageSquare size={14}/> Comments</h3>
+                 <form onSubmit={postComment} className="flex gap-2 mb-4"><input type="text" value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Add a comment..." className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"/><button disabled={!newComment.trim()} type="submit" className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-500 disabled:opacity-50"><Send size={16}/></button></form>
                  <div className="space-y-3">
                     {comments.map(c => (
                         <div key={c.id} className="flex gap-3">
@@ -380,7 +364,7 @@ export default function Watch() {
                             <div>
                                 <div className="flex gap-2 items-baseline">
                                     <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-300 hover:underline">{c.username}</Link>
-                                    <span className="text-[10px] text-slate-600">{new Date(c.timestamp < 10000000000 ? c.timestamp * 1000 : c.timestamp).toLocaleDateString()}</span>
+                                    <span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span>
                                 </div>
                                 <p className="text-xs text-slate-400">{c.text}</p>
                             </div>
@@ -390,10 +374,11 @@ export default function Watch() {
              </div>
         </div>
         <div>
-            <h3 className="font-bold text-sm text-slate-400 mb-3 uppercase tracking-wider mt-6 lg:mt-0">Siguiente</h3>
+            <h3 className="font-bold text-sm text-slate-400 mb-3 uppercase tracking-wider mt-6 lg:mt-0">Up Next</h3>
             <div className="space-y-2">{relatedVideos.map(rv => <RelatedVideoItem key={rv.id} rv={rv} userId={user?.id} />)}</div>
         </div>
       </div>
     </div>
   );
 }
+

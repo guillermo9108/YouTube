@@ -1,15 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Link, useLocation } from '../components/Router';
+import { Link } from '../components/Router';
 import { db } from '../services/db';
-import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, ShoppingBag, Truck, AlertTriangle, MessageSquare, Send, X, Package } from 'lucide-react';
-import { Video, Transaction, VideoCategory, Order } from '../types';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save } from 'lucide-react';
+import { Video, Transaction, VideoCategory } from '../types';
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
-  const { pathname } = useLocation(); // In HashRouter shim, this is the hash part (e.g. /profile?tab=ORDERS)
-  
   const [bulkPrice, setBulkPrice] = useState<number>(1);
   const [showBulk, setShowBulk] = useState(false);
   const [autoLimit, setAutoLimit] = useState<number>(1);
@@ -17,16 +15,8 @@ export default function Profile() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [myVideos, setMyVideos] = useState<Video[]>([]);
   
-  // Orders
-  const [orders, setOrders] = useState<{bought: Order[], sold: Order[]}>({bought: [], sold: []});
-  const [claimModal, setClaimModal] = useState<{isOpen: boolean, orderId: string, type: 'BOUGHT'|'SOLD'} | null>(null);
-  const [claimReason, setClaimReason] = useState('');
-  const [claimSubmitting, setClaimSubmitting] = useState(false);
-
-  // Tabs
-  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING' | 'ORDERS' | 'SHIPPING'>('OVERVIEW');
-  
   // Security Tab
+  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING'>('OVERVIEW');
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
@@ -36,48 +26,20 @@ export default function Profile() {
   const [defaultPrices, setDefaultPrices] = useState<Record<string, number>>({});
   const [availableCategories, setAvailableCategories] = useState<string[]>(Object.values(VideoCategory));
 
-  // Shipping Tab
-  const [shipping, setShipping] = useState({
-      fullName: '',
-      phoneNumber: '',
-      address: '',
-      bankAccount: '',
-      notes: ''
-  });
-
-  // Check URL for Tab - Robust Check
-  useEffect(() => {
-      // Handle ?tab=X in hash path
-      if (pathname.includes('tab=ORDERS')) setTab('ORDERS');
-      else if (pathname.includes('tab=SHIPPING')) setTab('SHIPPING');
-      else if (pathname.includes('tab=PRICING')) setTab('PRICING');
-      else if (pathname.includes('tab=SECURITY')) setTab('SECURITY');
-      else if (pathname.includes('tab=OVERVIEW')) setTab('OVERVIEW');
-  }, [pathname]);
-
   useEffect(() => {
     if (user) {
       setAutoLimit(user.autoPurchaseLimit);
       setDefaultPrices(user.defaultPrices || {});
       
-      if (user.shippingDetails) {
-          setShipping({
-              fullName: user.shippingDetails.fullName || '',
-              phoneNumber: user.shippingDetails.phoneNumber || '',
-              address: user.shippingDetails.address || '',
-              bankAccount: user.shippingDetails.bankAccount || '',
-              notes: user.shippingDetails.notes || ''
-          });
-      }
-      
+      // Async fetches
       Promise.all(user.watchLater.map(id => db.getVideo(id))).then(res => {
           setWatchLaterVideos(res.filter(v => !!v) as Video[]);
       });
 
       db.getUserTransactions(user.id).then(setTransactions);
       db.getVideosByCreator(user.id).then(setMyVideos);
-      db.getUserOrders(user.id).then(setOrders);
       
+      // Fetch custom categories
       db.getSystemSettings().then(s => {
           if (s.customCategories) {
               setAvailableCategories([...Object.values(VideoCategory), ...s.customCategories]);
@@ -89,9 +51,9 @@ export default function Profile() {
   if (!user) return null;
 
   const handleBulkUpdate = async () => {
-     if (confirm(`¿Estás seguro de que quieres poner TODOS tus videos a ${bulkPrice} Saldo?`)) {
+     if (confirm(`Are you sure you want to set ALL your videos to ${bulkPrice} Saldo?`)) {
        await db.updatePricesBulk(user.id, bulkPrice);
-       alert("Precios actualizados!");
+       alert("Prices updated!");
        setShowBulk(false);
        refreshUser();
      }
@@ -100,19 +62,13 @@ export default function Profile() {
   const handleAutoLimitChange = async () => {
     await db.updateUserProfile(user.id, { autoPurchaseLimit: autoLimit });
     refreshUser();
-    alert("Límite de autocompra actualizado.");
+    alert("Auto-purchase limit updated.");
   };
 
   const savePricingConfig = async () => {
       await db.updateUserProfile(user.id, { defaultPrices });
       refreshUser();
-      alert("Preferencias de precios guardadas!");
-  };
-
-  const saveShipping = async () => {
-      await db.updateUserProfile(user.id, { shippingDetails: shipping });
-      refreshUser();
-      alert("Datos de envío guardados. Se usarán automáticamente en el carrito.");
+      alert("Default pricing preferences saved!");
   };
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -122,67 +78,42 @@ export default function Profile() {
               await db.uploadAvatar(user.id, file);
               refreshUser();
           } catch(e: any) {
-              alert("Error al subir avatar: " + e.message);
+              alert("Avatar upload failed: " + e.message);
           }
       }
   };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
       e.preventDefault();
-      if(newPass !== confirmPass) { setPassMsg("Las contraseñas no coinciden"); return; }
-      if(!oldPass || !newPass) { setPassMsg("Todos los campos son obligatorios"); return; }
+      if(newPass !== confirmPass) { setPassMsg("Passwords do not match"); return; }
+      if(!oldPass || !newPass) { setPassMsg("All fields required"); return; }
       
       try {
           await db.changePassword(user.id, oldPass, newPass);
-          setPassMsg("Contraseña cambiada exitosamente!");
+          setPassMsg("Password changed successfully!");
           setOldPass(''); setNewPass(''); setConfirmPass('');
       } catch(e: any) {
           setPassMsg(e.message);
       }
   };
 
-  const openClaim = (orderId: string, type: 'BOUGHT'|'SOLD') => {
-      setClaimModal({ isOpen: true, orderId, type });
-      setClaimReason('');
-  };
-
-  const submitClaim = async () => {
-      if (!claimModal || !claimReason.trim()) return;
-      setClaimSubmitting(true);
-      try {
-          await db.submitOrderClaim(claimModal.orderId, claimReason);
-          alert("Reclamo enviado a administración. Revisarán el caso pronto.");
-          setClaimModal(null);
-      } catch(e: any) {
-          alert("Error al enviar reclamo: " + e.message);
-      } finally {
-          setClaimSubmitting(false);
-      }
-  };
-
   return (
-    <div className="space-y-6 pb-20 relative">
+    <div className="space-y-6 pb-20">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Mi Perfil</h2>
-        <button onClick={logout} className="text-sm text-red-400 hover:text-red-300 underline">Cerrar Sesión</button>
+        <h2 className="text-2xl font-bold">My Profile</h2>
+        <button onClick={logout} className="text-sm text-red-400 hover:text-red-300 underline">Logout</button>
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800 overflow-x-auto scrollbar-hide">
-          <button onClick={() => setTab('OVERVIEW')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='OVERVIEW'?'bg-indigo-600 text-white':'text-slate-400'}`}>
-              <UserIcon size={16}/> Resumen
+      <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+          <button onClick={() => setTab('OVERVIEW')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='OVERVIEW'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+              <UserIcon size={16}/> Overview
           </button>
-          <button onClick={() => setTab('ORDERS')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='ORDERS'?'bg-indigo-600 text-white':'text-slate-400'}`}>
-              <ShoppingBag size={16}/> Pedidos
+          <button onClick={() => setTab('PRICING')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='PRICING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+              <Tag size={16}/> Pricing
           </button>
-          <button onClick={() => setTab('SHIPPING')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='SHIPPING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
-              <Truck size={16}/> Envío
-          </button>
-          <button onClick={() => setTab('PRICING')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='PRICING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
-              <Tag size={16}/> Precios
-          </button>
-          <button onClick={() => setTab('SECURITY')} className={`flex-1 min-w-[80px] py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='SECURITY'?'bg-indigo-600 text-white':'text-slate-400'}`}>
-              <Shield size={16}/> Seguridad
+          <button onClick={() => setTab('SECURITY')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='SECURITY'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+              <Shield size={16}/> Security
           </button>
       </div>
 
@@ -207,7 +138,7 @@ export default function Profile() {
             <div className="relative z-10">
             <div className="flex items-center gap-2 text-indigo-300 mb-1">
                 <Wallet size={18} />
-                <span className="font-medium uppercase tracking-wide text-xs">Saldo Actual</span>
+                <span className="font-medium uppercase tracking-wide text-xs">Current Balance</span>
             </div>
             <div className="text-4xl font-mono font-bold text-white tracking-tight">
                 {user.balance} <span className="text-lg text-slate-400">SALDO</span>
@@ -224,8 +155,8 @@ export default function Profile() {
                         <DownloadCloud size={24} />
                     </div>
                     <div>
-                        <h3 className="font-bold text-white text-lg">Pedir Contenido</h3>
-                        <p className="text-slate-400 text-sm">Solicita videos de YouTube</p>
+                        <h3 className="font-bold text-white text-lg">Request Content</h3>
+                        <p className="text-slate-400 text-sm">Ask for videos from YouTube</p>
                     </div>
                 </div>
                 <ChevronRight className="text-slate-600 group-hover:text-white transition-colors" />
@@ -237,22 +168,22 @@ export default function Profile() {
             {/* Auto Purchase Limit */}
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
             <h3 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
-                <PlayCircle size={16} className="text-indigo-400" /> Límite Autocompra
+                <PlayCircle size={16} className="text-indigo-400" /> Auto-Purchase Limit
             </h3>
-            <p className="text-xs text-slate-500 mb-3">Precio máximo para autocomprar al hacer scroll.</p>
+            <p className="text-xs text-slate-500 mb-3">Max price to auto-buy during continuous playback.</p>
             <div className="flex gap-2">
                 <input 
                     type="number" 
                     min="0"
-                    value={isNaN(autoLimit) ? '' : autoLimit}
-                    onChange={(e) => { const v = parseInt(e.target.value); setAutoLimit(isNaN(v) ? 0 : v); }}
+                    value={autoLimit}
+                    onChange={(e) => setAutoLimit(parseInt(e.target.value))}
                     className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
                 />
                 <button 
                     onClick={handleAutoLimitChange}
                     className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
                 >
-                    Guardar
+                    Save
                 </button>
             </div>
             </div>
@@ -261,32 +192,32 @@ export default function Profile() {
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
             <div className="flex justify-between items-center cursor-pointer mb-2" onClick={() => setShowBulk(!showBulk)}>
                 <div className="flex items-center gap-2 text-slate-200 font-semibold text-sm">
-                <Settings2 size={16} className="text-indigo-400" /> Precio Masivo
+                <Settings2 size={16} className="text-indigo-400" /> Bulk Pricing
                 </div>
-                <span className="text-indigo-400 text-xs">{showBulk ? 'Cerrar' : 'Abrir'}</span>
+                <span className="text-indigo-400 text-xs">{showBulk ? 'Close' : 'Open'}</span>
             </div>
             
             {showBulk ? (
                 <div className="mt-2">
-                <p className="text-xs text-slate-500 mb-2">Fijar precio para tus {myVideos.length} videos.</p>
+                <p className="text-xs text-slate-500 mb-2">Set price for all {myVideos.length} videos.</p>
                 <div className="flex gap-2">
                     <input 
                     type="number" 
                     min="1"
-                    value={isNaN(bulkPrice) ? '' : bulkPrice}
-                    onChange={(e) => { const v = parseInt(e.target.value); setBulkPrice(isNaN(v) ? 0 : v); }}
+                    value={bulkPrice}
+                    onChange={(e) => setBulkPrice(parseInt(e.target.value))}
                     className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
                     />
                     <button 
                     onClick={handleBulkUpdate}
                     className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-sm font-medium"
                     >
-                    Aplicar
+                    Apply
                     </button>
                 </div>
                 </div>
             ) : (
-                <p className="text-xs text-slate-500">Actualiza el precio de todos tus videos.</p>
+                <p className="text-xs text-slate-500">Update all your video prices at once.</p>
             )}
             </div>
         </div>
@@ -294,11 +225,11 @@ export default function Profile() {
         {/* Watch Later */}
         <div>
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-            <Clock size={18} /> Ver Más Tarde
+            <Clock size={18} /> Watch Later
             </h3>
             {watchLaterVideos.length === 0 ? (
             <div className="bg-slate-900 rounded-xl p-6 text-center text-slate-500 text-sm border border-slate-800">
-                Tu lista está vacía.
+                Your list is empty.
             </div>
             ) : (
             <div className="grid grid-cols-1 gap-3">
@@ -319,11 +250,11 @@ export default function Profile() {
         {/* Transactions */}
         <div>
             <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-            <History size={18} /> Historial de Transacciones
+            <History size={18} /> Transaction History
             </h3>
             <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden max-h-60 overflow-y-auto">
             {transactions.length === 0 ? (
-                <div className="p-6 text-center text-slate-500 text-sm">No hay transacciones aún.</div>
+                <div className="p-6 text-center text-slate-500 text-sm">No transactions yet.</div>
             ) : (
                 <div className="divide-y divide-slate-800">
                 {transactions.map(tx => {
@@ -334,10 +265,10 @@ export default function Profile() {
                     <div key={tx.id} className="p-4 flex justify-between items-center">
                         <div>
                         <div className="font-medium text-slate-200 text-sm">
-                            {isSystem ? 'Depósito Admin' : (isIncoming ? 'Video Vendido' : 'Compra Video')}
+                            {isSystem ? 'Admin Deposit' : (isIncoming ? 'Video Sold' : 'Video Purchase')}
                         </div>
                         <div className="text-xs text-slate-500">
-                            {new Date(tx.timestamp < 10000000000 ? tx.timestamp * 1000 : tx.timestamp).toLocaleString()}
+                            {new Date(tx.timestamp).toLocaleString()}
                         </div>
                         </div>
                         <div className={`font-mono font-bold text-sm ${isIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -353,130 +284,15 @@ export default function Profile() {
       </>
       )}
 
-      {tab === 'SHIPPING' && (
-          <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-              <div className="flex justify-between items-center mb-4">
-                  <div>
-                      <h3 className="font-bold text-white">Datos de Envío</h3>
-                      <p className="text-xs text-slate-400">Estos datos se rellenarán automáticamente en el carrito.</p>
-                  </div>
-                  <button onClick={saveShipping} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
-                      <Save size={16}/> Guardar
-                  </button>
-              </div>
-
-              <div className="space-y-4">
-                  <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nombre Completo</label>
-                      <input type="text" value={shipping.fullName} onChange={e => setShipping({...shipping, fullName: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="Juan Pérez" />
-                  </div>
-                  <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Dirección de Envío</label>
-                      <input type="text" value={shipping.address} onChange={e => setShipping({...shipping, address: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="Calle 123, Ciudad" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                      <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Teléfono Móvil</label>
-                          <input type="tel" value={shipping.phoneNumber} onChange={e => setShipping({...shipping, phoneNumber: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="+505..." />
-                      </div>
-                      <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Cuenta Bancaria (Opcional)</label>
-                          <input type="text" value={shipping.bankAccount} onChange={e => setShipping({...shipping, bankAccount: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="Para reembolsos" />
-                      </div>
-                  </div>
-                  <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Notas Predeterminadas</label>
-                      <textarea value={shipping.notes} onChange={e => setShipping({...shipping, notes: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" placeholder="Ej: Llamar antes de entregar..." rows={2} />
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {tab === 'ORDERS' && (
-          <div className="space-y-6">
-              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-                  <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Package size={20}/> Compras Realizadas</h3>
-                  <div className="space-y-4">
-                      {orders.bought.length === 0 ? <p className="text-slate-500 text-sm italic">Aún no has comprado nada.</p> : orders.bought.map(order => (
-                          <div key={order.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative group">
-                              <div className="flex justify-between items-start mb-3">
-                                  <div>
-                                      <div className="flex items-center gap-2">
-                                          <div className="text-xs font-bold bg-slate-800 px-2 py-0.5 rounded text-slate-400">#{order.id.slice(0,8)}</div>
-                                          <div className="text-[10px] bg-emerald-900/30 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase tracking-wide">Completado</div>
-                                      </div>
-                                      <div className="text-xs text-slate-500 mt-1">
-                                          {new Date(order.timestamp < 10000000000 ? order.timestamp * 1000 : order.timestamp).toLocaleString()}
-                                      </div>
-                                  </div>
-                                  <div className="font-black text-emerald-400 text-lg">{order.totalAmount} $</div>
-                              </div>
-                              <div className="space-y-2 mb-3">
-                                  {order.items.map(i => (
-                                      <div key={i.itemId} className="text-sm text-slate-300 flex justify-between items-center bg-slate-900/50 p-2 rounded">
-                                          <span className="font-medium">{i.quantity}x {i.title}</span>
-                                          <span className="text-slate-500">{i.price}</span>
-                                      </div>
-                                  ))}
-                              </div>
-                              <div className="border-t border-slate-800 pt-3 flex justify-end">
-                                  <button onClick={() => openClaim(order.id, 'BOUGHT')} className="text-xs font-bold text-slate-500 hover:text-amber-400 flex items-center gap-1 transition-colors">
-                                      <AlertTriangle size={12}/> Reportar Problema
-                                  </button>
-                              </div>
-                          </div>
-                      ))}
-                  </div>
-              </div>
-
-              <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-                  <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Tag size={20}/> Ventas Realizadas</h3>
-                   <div className="space-y-4">
-                      {orders.sold.length === 0 ? <p className="text-slate-500 text-sm italic">Aún no has vendido nada.</p> : orders.sold.map(order => (
-                          <div key={order.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                              <div className="flex justify-between items-start mb-3">
-                                  <div>
-                                      <div className="flex items-center gap-2">
-                                          <div className="text-xs font-bold bg-slate-800 px-2 py-0.5 rounded text-slate-400">#{order.id.slice(0,8)}</div>
-                                          <div className="text-[10px] font-bold text-indigo-400">Comprador: {order.shippingData.name}</div>
-                                      </div>
-                                      <div className="text-xs text-slate-500 mt-1">
-                                          {new Date(order.timestamp < 10000000000 ? order.timestamp * 1000 : order.timestamp).toLocaleString()}
-                                      </div>
-                                  </div>
-                                  <div className="font-black text-emerald-400 text-lg">+{order.totalAmount} $</div>
-                              </div>
-                              
-                              <div className="bg-slate-900 p-3 rounded-lg text-xs text-slate-300 mb-3 border border-slate-800">
-                                  <div className="font-bold text-slate-500 uppercase mb-1 text-[10px]">Datos de Envío</div>
-                                  <div><span className="text-slate-500">Dirección:</span> {order.shippingData.address || 'N/A'}</div>
-                                  <div><span className="text-slate-500">Móvil:</span> {order.shippingData.phoneNumber || 'N/A'}</div>
-                                  {order.shippingData.notes && <div className="mt-1 text-amber-200/80 italic">Nota: "{order.shippingData.notes}"</div>}
-                              </div>
-
-                              <div className="space-y-1">
-                                  {order.items.map(i => (
-                                      <div key={i.itemId} className="text-sm text-slate-300 flex justify-between items-center">
-                                          <span>{i.quantity}x {i.title}</span>
-                                      </div>
-                                  ))}
-                              </div>
-                          </div>
-                      ))}
-                  </div>
-              </div>
-          </div>
-      )}
-
       {tab === 'PRICING' && (
           <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
               <div className="flex items-center justify-between mb-4">
                   <div>
-                      <h3 className="font-bold text-white">Precios por Defecto</h3>
-                      <p className="text-xs text-slate-400">Fija tu precio preferido por categoría para subidas futuras.</p>
+                      <h3 className="font-bold text-white">Default Upload Prices</h3>
+                      <p className="text-xs text-slate-400">Set your preferred price for each category. These will be auto-filled when you upload.</p>
                   </div>
                   <button onClick={savePricingConfig} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
-                      <Save size={16}/> Guardar
+                      <Save size={16}/> Save
                   </button>
               </div>
 
@@ -485,14 +301,14 @@ export default function Profile() {
                       <div key={cat} className="bg-slate-950 p-3 rounded-lg border border-slate-800 flex justify-between items-center">
                           <span className="text-xs font-bold text-slate-300 uppercase">{cat.replace('_', ' ')}</span>
                           <div className="flex items-center gap-2">
-                              <span className="text-xs text-slate-500">Precio:</span>
+                              <span className="text-xs text-slate-500">Price:</span>
                               <input 
                                 type="number" 
                                 min="0" 
                                 className="w-16 bg-slate-900 border border-slate-700 rounded text-center text-amber-400 font-bold py-1 focus:border-indigo-500 outline-none"
-                                value={isNaN(defaultPrices[cat]) ? '' : defaultPrices[cat]}
+                                value={defaultPrices[cat] ?? ''}
                                 placeholder="Auto"
-                                onChange={(e) => { const v = parseInt(e.target.value); setDefaultPrices({...defaultPrices, [cat]: isNaN(v) ? 0 : v}) }}
+                                onChange={(e) => setDefaultPrices({...defaultPrices, [cat]: parseInt(e.target.value) || 0})}
                               />
                           </div>
                       </div>
@@ -503,58 +319,23 @@ export default function Profile() {
 
       {tab === 'SECURITY' && (
           <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-              <h3 className="font-bold text-white mb-4">Cambiar Contraseña</h3>
+              <h3 className="font-bold text-white mb-4">Change Password</h3>
               <form onSubmit={handlePasswordChange} className="space-y-4">
                   <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Contraseña Actual</label>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Current Password</label>
                       <input type="password" value={oldPass} onChange={e=>setOldPass(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
                   </div>
                   <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Nueva Contraseña</label>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">New Password</label>
                       <input type="password" value={newPass} onChange={e=>setNewPass(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
                   </div>
                   <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1">Confirmar Nueva Contraseña</label>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">Confirm New Password</label>
                       <input type="password" value={confirmPass} onChange={e=>setConfirmPass(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
                   </div>
                   {passMsg && <div className="text-xs font-bold text-indigo-400">{passMsg}</div>}
-                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg">Actualizar Contraseña</button>
+                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg">Update Password</button>
               </form>
-          </div>
-      )}
-
-      {/* Claim Modal */}
-      {claimModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setClaimModal(null)}></div>
-              <div className="bg-slate-900 w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl relative z-10 p-6 animate-in zoom-in-95 duration-200">
-                  <div className="flex justify-between items-start mb-4">
-                      <h3 className="text-lg font-bold text-white flex items-center gap-2"><AlertTriangle className="text-amber-500"/> Reportar Pedido</h3>
-                      <button onClick={() => setClaimModal(null)} className="text-slate-400 hover:text-white"><X size={20}/></button>
-                  </div>
-                  <p className="text-sm text-slate-400 mb-4">
-                      Describe el problema con el pedido <span className="text-white font-mono">#{claimModal.orderId.slice(0,8)}</span>. 
-                      La administración revisará el caso y contactará contigo.
-                  </p>
-                  
-                  <textarea 
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-amber-500 min-h-[100px] mb-4" 
-                    placeholder="Ej: No recibí el producto, llegó dañado, es una estafa..."
-                    value={claimReason}
-                    onChange={e => setClaimReason(e.target.value)}
-                  ></textarea>
-
-                  <div className="flex justify-end gap-3">
-                      <button onClick={() => setClaimModal(null)} className="px-4 py-2 rounded-lg text-slate-400 hover:text-white font-bold">Cancelar</button>
-                      <button 
-                        onClick={submitClaim} 
-                        disabled={claimSubmitting || !claimReason.trim()}
-                        className="px-6 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold flex items-center gap-2 disabled:opacity-50"
-                      >
-                         <Send size={16}/> Enviar Reporte
-                      </button>
-                  </div>
-              </div>
           </div>
       )}
     </div>

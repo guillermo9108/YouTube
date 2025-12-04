@@ -37,10 +37,7 @@ export const UploadProvider = ({ children }: { children?: React.ReactNode }) => 
   const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const [totalFiles, setTotalFiles] = useState(0);
   const [uploadSpeed, setUploadSpeed] = useState("0 MB/s");
-  
-  // Abort Control
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const isCancelledRef = useRef(false);
+  const abortController = useRef<AbortController | null>(null);
 
   // Speed calculation vars
   const lastLoaded = useRef(0);
@@ -56,14 +53,8 @@ export const UploadProvider = ({ children }: { children?: React.ReactNode }) => 
     setTotalFiles(items.length);
     setCurrentFileIndex(0);
     setProgress(0);
-    
-    // New controller for this batch
-    abortControllerRef.current = new AbortController();
-    isCancelledRef.current = false;
 
     for (let i = 0; i < items.length; i++) {
-        if (isCancelledRef.current) break;
-
         setCurrentFileIndex(i + 1);
         const item = items[i];
         
@@ -94,14 +85,9 @@ export const UploadProvider = ({ children }: { children?: React.ReactNode }) => 
                         lastLoaded.current = loaded;
                         lastTime.current = now;
                     }
-                },
-                abortControllerRef.current.signal
+                }
             );
-        } catch (error: any) {
-            if (error.name === 'AbortError') {
-                console.log("Upload aborted by user");
-                break;
-            }
+        } catch (error) {
             console.error(`Failed to upload ${item.title}`, error);
             // Optionally add to a "failed" list, but for now we continue
         }
@@ -111,19 +97,13 @@ export const UploadProvider = ({ children }: { children?: React.ReactNode }) => 
     setUploadSpeed("0 MB/s");
     setTotalFiles(0);
     setCurrentFileIndex(0);
-    
-    if (!isCancelledRef.current) {
-        alert("All uploads completed!");
-    }
+    alert("All uploads completed!");
   }, [isUploading]);
 
   const cancelUploads = () => {
-      if (abortControllerRef.current) {
-          isCancelledRef.current = true;
-          abortControllerRef.current.abort();
-      }
-      setIsUploading(false);
-      setProgress(0);
+    // Requires deeper DB integration to abort XHR, simplified for now
+    setIsUploading(false);
+    window.location.reload(); 
   };
 
   return (
