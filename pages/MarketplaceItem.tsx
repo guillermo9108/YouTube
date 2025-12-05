@@ -15,7 +15,11 @@ export default function MarketplaceItemView() {
     const [activeImg, setActiveImg] = useState(0);
 
     useEffect(() => {
-        if(id) db.getMarketplaceItem(id).then(setItem).finally(() => setLoading(false));
+        if(id) {
+            db.getMarketplaceItem(id)
+                .then((data) => setItem(data || null))
+                .finally(() => setLoading(false));
+        }
     }, [id]);
 
     if (loading) return <div className="text-center p-10 text-slate-500">Loading...</div>;
