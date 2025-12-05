@@ -1,6 +1,5 @@
 
 
-
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User } from '../types';
 import { db } from '../services/db';
@@ -119,6 +118,9 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     localStorage.removeItem('sp_current_user_id');
     localStorage.removeItem('sp_session_token');
     if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+    
+    // Dispatch event to clear cart
+    window.dispatchEvent(new Event('sp_logout'));
   };
 
   return (

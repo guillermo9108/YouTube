@@ -16,6 +16,25 @@ export enum VideoCategory {
   OTHER = 'OTHER'
 }
 
+export interface MarketplaceItem {
+  id: string;
+  title: string;
+  description: string;
+  price: number;
+  images: string[];
+  sellerId: string;
+  sellerName: string;
+  sellerAvatarUrl?: string;
+  category: string;
+  condition: 'NEW' | 'USED' | 'REFURBISHED';
+  createdAt: number;
+  status: 'ACTIVE' | 'SOLD' | 'DELETED';
+}
+
+export interface CartItem extends MarketplaceItem {
+    cartId?: string;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -27,6 +46,14 @@ export interface User {
   sessionToken?: string; // New: For single session enforcement
   avatarUrl?: string; // New: Profile Picture
   defaultPrices?: Record<string, number>; // New: User specific price overrides
+  shippingDetails?: {
+      fullName: string;
+      address: string;
+      city: string;
+      zipCode: string;
+      country: string;
+      phoneNumber: string;
+  };
 }
 
 export interface Video {
@@ -53,10 +80,11 @@ export interface Transaction {
   id: string;
   buyerId: string;
   creatorId: string | null;
-  videoId: string | null;
+  videoId: string | null; // Can be null for Marketplace items
+  marketplaceItemId?: string; // New: For marketplace
   amount: number;
   timestamp: number;
-  type: 'PURCHASE' | 'DEPOSIT';
+  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE';
 }
 
 export interface Comment {
@@ -132,7 +160,7 @@ export interface SmartCleanerResult {
 export interface Notification {
   id: string;
   userId: string; // The recipient
-  type: 'UPLOAD' | 'SYSTEM';
+  type: 'UPLOAD' | 'SYSTEM' | 'SALE';
   text: string;
   link: string; // URL to go to
   isRead: boolean;

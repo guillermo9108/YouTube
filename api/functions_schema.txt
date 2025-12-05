@@ -1,0 +1,172 @@
+<?php
+// DEFINICIÓN DEL ESQUEMA MAESTRO
+// Este archivo es la ÚNICA fuente de verdad para la estructura de la base de datos.
+// Se usa tanto en install.php (instalación nueva) como en functions_admin.php (reparación).
+
+$schema = [
+    'users' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'username' => 'VARCHAR(50) UNIQUE NOT NULL',
+            'password_hash' => 'VARCHAR(255) NOT NULL',
+            'role' => "ENUM('USER', 'ADMIN') DEFAULT 'USER'",
+            'balance' => 'DECIMAL(10, 2) DEFAULT 0.00',
+            'autoPurchaseLimit' => 'DECIMAL(10, 2) DEFAULT 1.00',
+            'watchLater' => 'JSON',
+            'currentSessionId' => 'VARCHAR(64) DEFAULT NULL',
+            'lastActive' => 'BIGINT DEFAULT 0',
+            'avatarUrl' => 'VARCHAR(255) DEFAULT NULL',
+            'defaultPrices' => 'JSON DEFAULT NULL',
+            'shippingDetails' => 'JSON DEFAULT NULL'
+        ]
+    ],
+    'videos' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'title' => 'VARCHAR(255) NOT NULL',
+            'description' => 'TEXT',
+            'price' => 'DECIMAL(10, 2) DEFAULT 0.00',
+            'thumbnailUrl' => 'VARCHAR(255)',
+            'videoUrl' => 'VARCHAR(255)',
+            'creatorId' => 'VARCHAR(50)',
+            'views' => 'INT DEFAULT 0',
+            'createdAt' => 'BIGINT',
+            'likes' => 'INT DEFAULT 0',
+            'dislikes' => 'INT DEFAULT 0',
+            'category' => "VARCHAR(50) DEFAULT 'OTHER'",
+            'duration' => 'INT DEFAULT 0',
+            'fileHash' => 'VARCHAR(32)',
+            'isLocal' => 'TINYINT(1) DEFAULT 0'
+        ]
+    ],
+    'marketplace_items' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'title' => 'VARCHAR(255)',
+            'description' => 'TEXT',
+            'price' => 'DECIMAL(10, 2)',
+            'images' => 'JSON',
+            'sellerId' => 'VARCHAR(50)',
+            'category' => 'VARCHAR(50)',
+            'itemCondition' => 'VARCHAR(20)',
+            'status' => "VARCHAR(20) DEFAULT 'ACTIVE'",
+            'createdAt' => 'BIGINT'
+        ]
+    ],
+    'transactions' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'buyerId' => 'VARCHAR(50)',
+            'creatorId' => 'VARCHAR(50)',
+            'videoId' => 'VARCHAR(50)',
+            'marketplaceItemId' => 'VARCHAR(50) DEFAULT NULL',
+            'amount' => 'DECIMAL(10, 2)',
+            'timestamp' => 'BIGINT',
+            'type' => 'VARCHAR(20)'
+        ]
+    ],
+    'comments' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'videoId' => 'VARCHAR(50)',
+            'userId' => 'VARCHAR(50)',
+            'text' => 'TEXT',
+            'timestamp' => 'BIGINT'
+        ]
+    ],
+    'interactions' => [
+        'cols' => [
+            'userId' => 'VARCHAR(50)',
+            'videoId' => 'VARCHAR(50)',
+            'liked' => 'TINYINT(1) DEFAULT 0',
+            'disliked' => 'TINYINT(1) DEFAULT 0',
+            'isWatched' => 'TINYINT(1) DEFAULT 0'
+        ],
+        'pk' => 'PRIMARY KEY (userId, videoId)'
+    ],
+    'requests' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'userId' => 'VARCHAR(50)',
+            'query' => 'VARCHAR(255)',
+            'status' => "ENUM('PENDING','PROCESSING','COMPLETED','FAILED','MANUAL_UPLOAD') DEFAULT 'PENDING'",
+            'createdAt' => 'BIGINT',
+            'useLocalNetwork' => 'TINYINT(1) DEFAULT 0'
+        ]
+    ],
+    'system_settings' => [
+        'cols' => [
+            'id' => 'INT PRIMARY KEY DEFAULT 1',
+            'downloadStartTime' => "VARCHAR(10) DEFAULT '01:00'",
+            'downloadEndTime' => "VARCHAR(10) DEFAULT '06:00'",
+            'isQueuePaused' => 'TINYINT(1) DEFAULT 0',
+            'batchSize' => 'INT DEFAULT 5',
+            'maxDuration' => 'INT DEFAULT 600',
+            'maxResolution' => 'INT DEFAULT 1080',
+            'pexelsKey' => 'VARCHAR(255)',
+            'pixabayKey' => 'VARCHAR(255)',
+            'ytDlpPath' => 'VARCHAR(255)',
+            'enableYoutube' => 'TINYINT(1) DEFAULT 0',
+            'categoryPrices' => 'JSON DEFAULT NULL',
+            'customCategories' => 'JSON DEFAULT NULL',
+            'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
+            'ftpSettings' => 'JSON DEFAULT NULL'
+        ]
+    ],
+    'subscriptions' => [
+        'cols' => [
+            'subscriberId' => 'VARCHAR(50)',
+            'creatorId' => 'VARCHAR(50)',
+            'createdAt' => 'BIGINT'
+        ],
+        'pk' => 'PRIMARY KEY (subscriberId, creatorId)'
+    ],
+    'notifications' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'userId' => 'VARCHAR(50)',
+            'type' => 'VARCHAR(20)',
+            'text' => 'VARCHAR(255)',
+            'link' => 'VARCHAR(255)',
+            'isRead' => 'TINYINT(1) DEFAULT 0',
+            'timestamp' => 'BIGINT'
+        ]
+    ]
+];
+
+// Función universal para crear o actualizar tablas
+function syncTable($pdo, $tableName, $def) {
+    try {
+        // 1. Verificar si la tabla existe
+        $result = $pdo->query("SHOW TABLES LIKE '$tableName'");
+        if ($result->rowCount() == 0) {
+            // Crear Tabla
+            $sql = "CREATE TABLE $tableName (";
+            $cols = [];
+            foreach ($def['cols'] as $colName => $colDef) {
+                $cols[] = "$colName $colDef";
+            }
+            $sql .= implode(", ", $cols);
+            if (isset($def['pk'])) $sql .= ", " . $def['pk'];
+            $sql .= ") CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
+            $pdo->exec($sql);
+        } else {
+            // La tabla existe, verificar columnas
+            $stmt = $pdo->query("SHOW COLUMNS FROM $tableName");
+            $existingCols = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            
+            foreach ($def['cols'] as $colName => $colDef) {
+                if (!in_array($colName, $existingCols)) {
+                    // Agregar columna faltante
+                    // Nota: Quitamos PRIMARY KEY de la definición al hacer ALTER para evitar errores
+                    $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
+                    $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
+                }
+            }
+        }
+    } catch (Exception $e) {
+        error_log("Sync Table Error ($tableName): " . $e->getMessage());
+        // No lanzamos error para permitir que el proceso continúe con otras tablas
+    }
+}
+?>

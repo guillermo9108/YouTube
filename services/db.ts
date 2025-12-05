@@ -1,4 +1,4 @@
-import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
 // This ensures it works in subfolders (e.g., 192.168.x.x/streampay/) on Synology/XAMPP
@@ -378,6 +378,14 @@ class DatabaseService {
           return undefined; 
       } 
   }
+  
+  async deleteVideo(id: string, userId: string): Promise<void> {
+      await this.request('index.php?action=delete_video', 'POST', { id, userId });
+      // Invalidate cache
+      this.invalidateCache('index.php?action=get_videos');
+      this.setHomeDirty();
+  }
+
   async getRelatedVideos(currentVideoId: string): Promise<Video[]> { return this.request<Video[]>(`index.php?action=get_related_videos&id=${currentVideoId}`); }
   async hasPurchased(userId: string, videoId: string): Promise<boolean> { const res = await this.request<{ hasPurchased: boolean }>(`index.php?action=has_purchased&userId=${userId}&videoId=${videoId}`); return res.hasPurchased; }
   async getInteraction(userId: string, videoId: string): Promise<UserInteraction> { return this.request<UserInteraction>(`index.php?action=get_interaction&userId=${userId}&videoId=${videoId}`); }
@@ -472,6 +480,16 @@ class DatabaseService {
       return res;
   }
 
+  // FTP LIBRARY SCAN
+  async scanFtpLibrary(ftpConfig: FtpSettings): Promise<ScanResult> {
+      const res = await this.request<ScanResult>('index.php?action=scan_ftp_library', 'POST', { ftp: ftpConfig });
+      if (res.imported > 0) {
+          this.invalidateCache('index.php?action=get_videos');
+          this.setHomeDirty();
+      }
+      return res;
+  }
+
   async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> { await this.request('index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice }); }
   async getAllUsers(): Promise<User[]> { try { const u = await this.request<User[]>('index.php?action=get_all_users'); return Array.isArray(u) ? u : []; } catch (e) { return []; } }
   async adminAddBalance(adminId: string, targetUserId: string, amount: number): Promise<void> { await this.request('index.php?action=admin_add_balance', 'POST', { adminId, targetUserId, amount }); }
@@ -528,6 +546,37 @@ class DatabaseService {
   }
   async getSubscriptions(userId: string): Promise<string[]> {
       return this.request<string[]>(`index.php?action=get_subscriptions&userId=${userId}`);
+  }
+
+  // --- MARKETPLACE METHODS ---
+  async getMarketplaceItems(filters?: any): Promise<MarketplaceItem[]> {
+      return this.request<MarketplaceItem[]>('index.php?action=get_marketplace_items', 'POST', filters); 
+  }
+  
+  async adminGetMarketplaceItems(): Promise<MarketplaceItem[]> {
+      return this.request<MarketplaceItem[]>('index.php?action=admin_get_marketplace_items', 'POST', {}); 
+  }
+
+  async adminDeleteListing(id: string): Promise<void> {
+      await this.request('index.php?action=admin_delete_listing', 'POST', { id });
+  }
+
+  async getMarketplaceItem(id: string): Promise<MarketplaceItem | undefined> {
+      try {
+          return await this.request<MarketplaceItem>(`index.php?action=get_marketplace_item&id=${id}`);
+      } catch { return undefined; }
+  }
+
+  async createListing(formData: FormData): Promise<void> {
+      await this.request('index.php?action=create_listing', 'POST', formData);
+  }
+
+  async editListing(id: string, data: Partial<MarketplaceItem>): Promise<void> {
+      await this.request('index.php?action=edit_listing', 'POST', { id, data });
+  }
+
+  async checkoutCart(userId: string, cart: CartItem[], shippingDetails: NonNullable<User['shippingDetails']>): Promise<void> {
+      await this.request('index.php?action=checkout_cart', 'POST', { userId, cart, shippingDetails });
   }
 }
 

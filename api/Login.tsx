@@ -1,3 +1,2 @@
-// This file was created by mistake and is causing build errors.
-// The correct file is located at pages/Login.tsx
-export default function Placeholder() { return null; }
+// ESTE ARCHIVO YA NO ES NECESARIO. PUEDES BORRARLO.
+// THIS FILE IS DEPRECATED. PLEASE DELETE IT.

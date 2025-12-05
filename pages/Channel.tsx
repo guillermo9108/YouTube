@@ -1,11 +1,10 @@
-
 import React, { useEffect, useState } from 'react';
 import { useParams } from '../components/Router';
 import { db } from '../services/db';
 import { User, Video } from '../types';
 import VideoCard from '../components/VideoCard';
 import { useAuth } from '../context/AuthContext';
-import { User as UserIcon, Bell, Loader2, Check } from 'lucide-react';
+import { User as UserIcon, Bell, Loader2, Check, Trash2 } from 'lucide-react';
 
 export default function Channel() {
   const { userId } = useParams();
@@ -74,6 +73,17 @@ export default function Channel() {
       }
   };
 
+  const handleDeleteVideo = async (videoId: string) => {
+      if (!currentUser || !confirm("Permanently delete this video?")) return;
+      try {
+          await db.deleteVideo(videoId, currentUser.id);
+          setVideos(prev => prev.filter(v => v.id !== videoId));
+          setStats(prev => ({...prev, uploads: prev.uploads - 1}));
+      } catch(e: any) {
+          alert("Delete failed: " + e.message);
+      }
+  };
+
   const isUnlocked = (videoId: string, creatorId: string) => {
     return purchases.includes(videoId) || (currentUser?.id === creatorId);
   };
@@ -136,12 +146,22 @@ export default function Channel() {
            ) : (
                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-8">
                    {videos.map(video => (
-                        <VideoCard 
-                            key={video.id} 
-                            video={video} 
-                            isUnlocked={isUnlocked(video.id, video.creatorId)}
-                            isWatched={false} 
-                        />
+                        <div key={video.id} className="relative group">
+                            <VideoCard 
+                                video={video} 
+                                isUnlocked={isUnlocked(video.id, video.creatorId)}
+                                isWatched={false} 
+                            />
+                            {(currentUser?.id === channelUser.id || currentUser?.role === 'ADMIN') && (
+                                <button 
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteVideo(video.id); }} 
+                                    className="absolute top-2 left-2 bg-red-600/80 text-white p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                                    title="Delete Video"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            )}
+                        </div>
                    ))}
                </div>
            )}

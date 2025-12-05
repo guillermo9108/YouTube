@@ -1,0 +1,129 @@
+<?php
+function market_get_items($pdo) {
+    $stmt = $pdo->query("
+        SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl 
+        FROM marketplace_items m 
+        LEFT JOIN users u ON m.sellerId = u.id 
+        WHERE m.status = 'ACTIVE' 
+        ORDER BY m.createdAt DESC
+    ");
+    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($items as &$i) $i['images'] = json_decode($i['images'], true);
+    respond(true, $items);
+}
+
+function market_admin_get_items($pdo) {
+    $stmt = $pdo->query("
+        SELECT m.*, u.username as sellerName 
+        FROM marketplace_items m 
+        LEFT JOIN users u ON m.sellerId = u.id 
+        ORDER BY m.createdAt DESC
+    ");
+    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($items as &$i) $i['images'] = json_decode($i['images'], true);
+    respond(true, $items);
+}
+
+function market_delete_listing($pdo, $input) {
+    $pdo->prepare("UPDATE marketplace_items SET status = 'DELETED' WHERE id = ?")->execute([$input['id']]);
+    respond(true);
+}
+
+function market_get_item($pdo, $id) {
+    $stmt = $pdo->prepare("
+        SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl 
+        FROM marketplace_items m 
+        LEFT JOIN users u ON m.sellerId = u.id 
+        WHERE m.id = ?
+    ");
+    $stmt->execute([$id]);
+    $item = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($item) {
+        $item['images'] = json_decode($item['images'], true);
+        respond(true, $item);
+    }
+    respond(false, null, 'Item not found');
+}
+
+function market_create_listing($pdo, $post, $files) {
+    $id = 'm_' . uniqid();
+    $title = $post['title'];
+    $desc = $post['description'];
+    $price = $post['price'];
+    $cat = $post['category'];
+    $cond = $post['condition'];
+    $seller = $post['sellerId'];
+    
+    $images = [];
+    if (isset($files['images'])) {
+        // Normalize array structure
+        $fileAry = $files['images'];
+        $count = count($fileAry['name']);
+        
+        for ($i = 0; $i < $count; $i++) {
+            if ($fileAry['error'][$i] === UPLOAD_ERR_OK) {
+                $ext = strtolower(pathinfo($fileAry['name'][$i], PATHINFO_EXTENSION));
+                $name = "{$id}_{$i}.{$ext}";
+                $target = MARKET_DIR . $name;
+                if (move_uploaded_file($fileAry['tmp_name'][$i], $target)) {
+                    $images[] = "api/" . $target; // Public URL relative to root
+                }
+            }
+        }
+    }
+    
+    $stmt = $pdo->prepare("INSERT INTO marketplace_items (id, title, description, price, images, sellerId, category, itemCondition, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)");
+    $stmt->execute([$id, $title, $desc, $price, json_encode($images), $seller, $cat, $cond, time()]);
+    
+    respond(true);
+}
+
+function market_checkout($pdo, $input) {
+    $userId = $input['userId'];
+    $cart = $input['cart'];
+    $shipping = $input['shippingDetails'];
+    
+    $pdo->beginTransaction();
+    try {
+        foreach ($cart as $item) {
+            // Verify item is active and price matches
+            $stmt = $pdo->prepare("SELECT price, sellerId, status, title FROM marketplace_items WHERE id = ? FOR UPDATE");
+            $stmt->execute([$item['id']]);
+            $realItem = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if (!$realItem || $realItem['status'] !== 'ACTIVE') throw new Exception("Item '{$item['title']}' is no longer available.");
+            
+            // Check Buyer Balance
+            $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
+            $stmt->execute([$userId]);
+            $balance = $stmt->fetchColumn();
+            
+            if ($balance < $realItem['price']) throw new Exception("Insufficient balance for '{$item['title']}'");
+            
+            // Transfer Funds
+            $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$realItem['price'], $userId]);
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$realItem['price'], $realItem['sellerId']]);
+            
+            // Mark Item Sold
+            $pdo->prepare("UPDATE marketplace_items SET status = 'SOLD' WHERE id = ?")->execute([$item['id']]);
+            
+            // Log Transaction
+            $tid = uniqid('tx_m_');
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, marketplaceItemId, amount, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'MARKETPLACE')")
+                ->execute([$tid, $userId, $realItem['sellerId'], $item['id'], $realItem['price'], time()]);
+                
+            // Notify Seller with Shipping Info
+            $shippingText = "Ship to: {$shipping['fullName']}, {$shipping['address']}, {$shipping['city']}";
+            $nid = uniqid('n_');
+            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SALE', ?, '/profile', 0, ?)")
+                ->execute([$nid, $realItem['sellerId'], "Sold '{$realItem['title']}'. $shippingText", time()]);
+        }
+        
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        respond(false, null, $e->getMessage());
+    }
+}
+?>

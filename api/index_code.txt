@@ -1,11 +1,8 @@
-
-
-
-
 <?php
 ob_start();
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
+set_time_limit(300);
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
@@ -13,7 +10,13 @@ header('Access-Control-Allow-Headers: Content-Type, Range');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { ob_clean(); http_response_code(200); exit(); }
 
-// CATCH FATAL ERRORS
+// Global Constants
+define('UPLOAD_DIR', 'uploads/videos/');
+define('THUMB_DIR', 'uploads/thumbnails/');
+define('AVATAR_DIR', 'uploads/avatars/');
+define('MARKET_DIR', 'uploads/market/');
+
+// Error Handler
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
@@ -24,719 +27,117 @@ register_shutdown_function(function() {
     }
 });
 
-define('UPLOAD_DIR', 'uploads/videos/');
-define('THUMB_DIR', 'uploads/thumbnails/');
-define('AVATAR_DIR', 'uploads/avatars/');
-
+// DB Connection
 $configFile = 'db_config.json';
-if (!file_exists($configFile)) { 
-    ob_clean(); 
+if (!file_exists($configFile)) {
     header('Content-Type: application/json');
-    echo json_encode(['success'=>false, 'error'=>'Not installed']); 
-    exit(); 
+    echo json_encode(['success'=>false, 'error'=>'Not installed']);
+    exit();
 }
 
 $db_config = json_decode(file_get_contents($configFile), true);
 
-function respond($success, $data = null, $error = null) {
-    ob_clean();
-    header('Content-Type: application/json');
-    echo json_encode(['success' => $success, 'data' => $data, 'error' => $error]);
-    exit();
-}
-
-// HELPER: Get System Settings (for FTP creds)
-function getSystemSettings($pdo) {
-    $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
-    $s = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($s) {
-        $s['ftpSettings'] = isset($s['ftpSettings']) ? json_decode($s['ftpSettings'], true) : null;
-    }
-    return $s;
-}
-
-// STREAMING FUNCTION (LOCAL + FTP FALLBACK)
-function streamVideo($filePath, $pdo) {
-    // 1. Try Local Access First
-    if (file_exists($filePath) && is_readable($filePath)) {
-        $streamPath = $filePath;
-        $size = filesize($filePath);
-    } else {
-        // 2. Fallback to FTP Streaming if local fails (permissions/open_basedir)
-        $settings = getSystemSettings($pdo);
-        if ($settings && !empty($settings['ftpSettings'])) {
-            $ftp = $settings['ftpSettings'];
-            $ftpUrl = "ftp://" . urlencode($ftp['user']) . ":" . urlencode($ftp['pass']) . "@" . $ftp['host'] . ":" . $ftp['port'] . $filePath;
-            
-            // Check if file exists via FTP wrapper
-            $headers = @get_headers($ftpUrl, 1);
-            if (!$headers || strpos($headers[0], '200') === false) {
-                 // Try getting size via direct FTP connection to verify existence and get size
-                 $conn_id = @ftp_connect($ftp['host'], $ftp['port']);
-                 if ($conn_id && @ftp_login($conn_id, $ftp['user'], $ftp['pass'])) {
-                     $res = ftp_size($conn_id, $filePath);
-                     ftp_close($conn_id);
-                     if ($res != -1) {
-                         $size = $res;
-                         $streamPath = $ftpUrl;
-                     } else {
-                         http_response_code(404); die("File not found via FTP");
-                     }
-                 } else {
-                     http_response_code(500); die("Cannot connect to FTP for streaming fallback");
-                 }
-            } else {
-                // If get_headers worked (rare for FTP), extract content-length
-                $size = isset($headers['Content-Length']) ? $headers['Content-Length'] : 0;
-                $streamPath = $ftpUrl;
-            }
-        } else {
-            http_response_code(403);
-            die("Access Denied: File exists but PHP cannot read it. Configure FTP in Admin > Library for fallback.");
-        }
-    }
-
-    // Common Streaming Logic
-    $length = $size;
-    $start = 0;
-    $end = $size - 1;
-
-    ob_end_clean();
-    header('Content-Type: video/mp4');
-    header('Accept-Ranges: bytes');
-
-    if (isset($_SERVER['HTTP_RANGE'])) {
-        $c_start = $start;
-        $c_end = $end;
-        list(, $range) = explode('=', $_SERVER['HTTP_RANGE'], 2);
-        if (strpos($range, ',') !== false) {
-            header('HTTP/1.1 416 Requested Range Not Satisfiable');
-            header("Content-Range: bytes $start-$end/$size");
-            exit;
-        }
-        if ($range == '-') {
-            $c_start = $size - substr($range, 1);
-        } else {
-            $range = explode('-', $range);
-            $c_start = $range[0];
-            $c_end = (isset($range[1]) && is_numeric($range[1])) ? $range[1] : $size;
-        }
-        
-        $c_end = ($c_end > $end) ? $end : $c_end;
-        if ($c_start > $c_end || $c_start > $size - 1 || $c_end >= $size) {
-            header('HTTP/1.1 416 Requested Range Not Satisfiable');
-            header("Content-Range: bytes $start-$end/$size");
-            exit;
-        }
-        
-        $start = $c_start;
-        $end = $c_end;
-        $length = $end - $start + 1;
-        header('HTTP/1.1 206 Partial Content');
-        header("Content-Range: bytes $start-$end/$size");
-    }
-    
-    header("Content-Length: " . $length);
-    
-    $fp = fopen($streamPath, 'rb');
-    if (!$fp) { http_response_code(500); die("Error opening stream"); }
-    
-    fseek($fp, $start);
-    
-    $buffer = 1024 * 8;
-    while (!feof($fp) && ($p = ftell($fp)) <= $end) {
-        if ($p + $buffer > $end) {
-            $buffer = $end - $p + 1;
-        }
-        echo fread($fp, $buffer);
-        flush();
-    }
-    fclose($fp);
-    exit;
-}
-
-// SMART RENAMER HELPER
-function parseVideoName($filename) {
-    $info = ['category' => 'OTHER', 'title' => '', 'description' => ''];
-    $cleanName = pathinfo($filename, PATHINFO_FILENAME);
-    $cleanName = str_replace(['.', '_'], ' ', $cleanName);
-    
-    // Series: S01E02 or 1x02
-    if (preg_match('/(.*)\s+[S|s](\d+)[E|e](\d+)/', $cleanName, $matches)) {
-        $info['category'] = 'SERIES';
-        $info['title'] = trim($matches[1]);
-        $info['description'] = "Season " . intval($matches[2]) . ", Episode " . intval($matches[3]);
-        return $info;
-    }
-    
-    // Series alternate: 1x02
-    if (preg_match('/(.*)\s+(\d+)x(\d+)/', $cleanName, $matches)) {
-        $info['category'] = 'SERIES';
-        $info['title'] = trim($matches[1]);
-        $info['description'] = "Season " . intval($matches[2]) . ", Episode " . intval($matches[3]);
-        return $info;
-    }
-    
-    // Novelas: Capitulo 45 / Episodio 45
-    if (preg_match('/(.*)\s+(Capitulo|Episodio)\s+(\d+)/i', $cleanName, $matches)) {
-        $info['category'] = 'NOVELAS';
-        $info['title'] = trim($matches[1]);
-        $info['description'] = ucfirst($matches[2]) . " " . intval($matches[3]);
-        return $info;
-    }
-
-    // Default: Movie or Other
-    $info['title'] = trim($cleanName);
-    if (strlen($info['title']) > 3 && preg_match('/(19|20)\d{2}/', $info['title'])) {
-        $info['category'] = 'MOVIE';
-    } else {
-        $info['category'] = 'OTHER'; // Fallback
-    }
-    return $info;
-}
-
-// FTP RECURSIVE SCANNER
-function ftpScanRecursive($conn_id, $dir, &$log, &$importedCount, $adminId, $allowedExts, $pdo) {
-    $files = ftp_nlist($conn_id, $dir);
-    if ($files === false) {
-        // Try passive mode toggle if listing fails
-        ftp_pasv($conn_id, true);
-        $files = ftp_nlist($conn_id, $dir);
-        if ($files === false) return;
-    }
-
-    foreach ($files as $file) {
-        if ($file == '.' || $file == '..') continue;
-        
-        // Handle weird FTP paths (sometimes nlist returns full path, sometimes relative)
-        $fullPath = (strpos($file, $dir) === false) ? rtrim($dir, '/') . '/' . $file : $file;
-        $baseName = basename($fullPath);
-        
-        if ($baseName == '.' || $baseName == '..') continue;
-
-        // Determine if it's a directory or file
-        // ftp_size returns -1 for directories
-        if (ftp_size($conn_id, $fullPath) == -1) {
-            // It might be a directory, try to chdir into it to verify
-            $current = ftp_pwd($conn_id);
-            if (@ftp_chdir($conn_id, $fullPath)) {
-                ftp_chdir($conn_id, $current); // Go back
-                ftpScanRecursive($conn_id, $fullPath, $log, $importedCount, $adminId, $allowedExts, $pdo);
-            }
-        } else {
-            // It is a file
-            $ext = strtolower(pathinfo($baseName, PATHINFO_EXTENSION));
-            if (in_array($ext, $allowedExts)) {
-                $size = ftp_size($conn_id, $fullPath);
-                
-                // Fast Hash: MD5 of (Filename + Size)
-                // Cannot do full file hash over FTP efficiently
-                $fileHash = md5($baseName . $size); 
-
-                // Check Deduplication
-                $exists = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE fileHash = ?");
-                $exists->execute([$fileHash]);
-                if ($exists->fetchColumn() > 0) {
-                    $log[] = "Skip (Exists): $baseName";
-                    continue;
-                }
-
-                // Parse Info
-                $info = parseVideoName($baseName);
-                
-                // Insert
-                $id = 'v_' . uniqid();
-                // Note: We store the FTP path in videoUrl. The streamVideo function handles streaming it.
-                $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, category, duration, fileHash, isLocal) VALUES (?, ?, ?, 1.00, 'placeholder.jpg', ?, ?, 0, ?, ?, 0, ?, 1)")
-                    ->execute([$id, $info['title'], $info['description'], $fullPath, $adminId, time()*1000, $info['category'], $fileHash]);
-                
-                $log[] = "Imported (FTP): " . $info['title'];
-                $importedCount++;
-            }
-        }
-    }
-}
-
 try {
     $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']}", $db_config['user'], $db_config['password'], [PDO::ATTR_PERSISTENT => true]);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    
-    // Ensure ftpSettings column exists (Lazy Migration)
-    try {
-        $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
-    } catch (Exception $e) {
-        $pdo->exec("ALTER TABLE system_settings ADD COLUMN ftpSettings JSON DEFAULT NULL");
-    }
+} catch (PDOException $e) {
+    header('Content-Type: application/json');
+    echo json_encode(['success' => false, 'error' => 'DB Connection Error: ' . $e->getMessage()]);
+    exit();
+}
 
-    $action = $_GET['action'] ?? null;
-    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+// Load Modules (Converted to .php by build script)
+require_once 'functions_utils.php';
+require_once 'functions_auth.php';
+require_once 'functions_videos.php';
+require_once 'functions_interactions.php';
+require_once 'functions_market.php';
+require_once 'functions_admin.php';
 
-    // --- HANDLE STREAMING ACTION ---
-    if ($action === 'stream') {
-        $vid = $_GET['id'] ?? '';
-        $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ?");
-        $stmt->execute([$vid]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+// Request Handling
+$action = $_GET['action'] ?? null;
+$input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
-        if ($row && $row['isLocal']) {
-            streamVideo($row['videoUrl'], $pdo);
-        } else {
-            http_response_code(404);
-            die("Invalid stream target");
-        }
-        exit;
-    }
+// Stream is special
+if ($action === 'stream') {
+    $vid = $_GET['id'] ?? '';
+    $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ?");
+    $stmt->execute([$vid]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row && $row['isLocal']) streamVideo($row['videoUrl'], $pdo);
+    else { http_response_code(404); die("Invalid stream target"); }
+    exit;
+}
 
+try {
     switch ($action) {
-        case 'login':
-            $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
-            $stmt->execute([$input['username']]);
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($user && password_verify($input['password'], $user['password_hash'])) {
-                $now = time() * 1000;
-                $newToken = bin2hex(random_bytes(16));
-                $pdo->prepare("UPDATE users SET currentSessionId = ?, lastActive = ? WHERE id = ?")->execute([$newToken, $now, $user['id']]);
-                unset($user['password_hash']);
-                $user['watchLater'] = json_decode($user['watchLater'] ?? '[]');
-                $user['defaultPrices'] = json_decode($user['defaultPrices'] ?? '{}');
-                $user['sessionToken'] = $newToken;
-                respond(true, $user);
-            }
-            respond(false, null, 'Invalid login');
-            break;
+        // Auth
+        case 'login': auth_login($pdo, $input); break;
+        case 'logout': auth_logout($pdo, $input); break;
+        case 'heartbeat': auth_heartbeat($pdo, $input); break;
+        case 'register': auth_register($pdo, $input); break;
+        case 'get_user': auth_get_user($pdo, $_GET['id']); break;
+        case 'update_user': auth_update_user($pdo, $input); break;
+        case 'update_avatar': auth_update_avatar($pdo, $input); break;
+        case 'change_password': auth_change_password($pdo, $input); break;
+        case 'get_all_users': auth_get_all_users($pdo); break;
 
-        case 'logout':
-            $pdo->prepare("UPDATE users SET currentSessionId = NULL, lastActive = 0 WHERE id = ?")->execute([$input['userId']]);
-            respond(true);
-            break;
+        // Videos
+        case 'get_videos': video_get_all($pdo); break;
+        case 'get_video': video_get_one($pdo, $_GET['id']); break;
+        case 'get_creator_videos': video_get_by_creator($pdo, $_GET['creatorId']); break;
+        case 'get_related_videos': video_get_related($pdo, $_GET['id']); break;
+        case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;
+        case 'delete_video': video_delete($pdo, $input); break;
+        case 'upload_avatar': auth_update_avatar($pdo, $input); break;
+        case 'repair_thumbnail': video_repair_thumbnail($pdo, $_POST, $_FILES); break;
+        case 'server_import_video': video_server_import($pdo, $input); break;
+        case 'scan_local_library': video_scan_local($pdo, $input); break;
+        case 'scan_ftp_library': video_scan_ftp($pdo, $input); break;
+        case 'update_prices_bulk': video_update_prices_bulk($pdo, $input); break;
 
-        case 'heartbeat':
-            $now = time() * 1000;
-            $dbToken = $pdo->query("SELECT currentSessionId FROM users WHERE id='{$input['userId']}'")->fetchColumn();
-            if ($dbToken === $input['token']) {
-                $pdo->prepare("UPDATE users SET lastActive = ? WHERE id = ?")->execute([$now, $input['userId']]);
-                respond(true);
-            } else respond(false, null, 'Session invalid');
-            break;
+        // Interactions
+        case 'has_purchased': interact_has_purchased($pdo, $_GET['userId'], $_GET['videoId']); break;
+        case 'purchase_video': interact_purchase($pdo, $input); break;
+        case 'get_user_activity': interact_get_activity($pdo, $_GET['userId']); break;
+        case 'get_interaction': interact_get($pdo, $_GET['userId'], $_GET['videoId']); break;
+        case 'rate_video': interact_rate($pdo, $input); break;
+        case 'mark_watched': interact_mark_watched($pdo, $input); break;
+        case 'get_comments': interact_get_comments($pdo, $_GET['videoId']); break;
+        case 'add_comment': interact_add_comment($pdo, $input); break;
+        case 'toggle_subscribe': interact_toggle_subscribe($pdo, $input); break;
+        case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'], $_GET['creatorId']); break;
+        case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId']); break;
+        case 'get_notifications': interact_get_notifications($pdo, $_GET['userId']); break;
+        case 'mark_notification_read': interact_mark_notification_read($pdo, $input); break;
+        case 'get_transactions': interact_get_transactions($pdo, $_GET['userId']); break;
 
-        case 'register':
-            $username = $_POST['username'] ?? $input['username'];
-            $password = $_POST['password'] ?? $input['password'];
-            
-            $id = 'u_' . uniqid();
-            $hash = password_hash($password, PASSWORD_DEFAULT);
-            $newToken = bin2hex(random_bytes(16));
-            $now = time() * 1000;
-            $avatarUrl = null;
-            
-            if (!empty($_FILES['avatar']['tmp_name'])) {
-                if (!file_exists(AVATAR_DIR)) mkdir(AVATAR_DIR, 0777, true);
-                $ext = pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION);
-                $avatarName = "avt_{$id}.{$ext}";
-                if (move_uploaded_file($_FILES['avatar']['tmp_name'], AVATAR_DIR . $avatarName)) {
-                    $avatarUrl = '/api/' . AVATAR_DIR . $avatarName;
-                }
-            }
+        // Admin
+        case 'admin_add_balance': admin_add_balance($pdo, $input); break;
+        case 'admin_cleanup_videos': admin_cleanup_videos($pdo); break;
+        case 'admin_repair_db': admin_repair_db($pdo); break;
+        case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
+        case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
+        case 'get_requests': admin_get_requests($pdo, $_GET['status'] ?? ''); break;
+        case 'request_content': admin_request_content($pdo, $input); break;
+        case 'delete_request': admin_delete_request($pdo, $input); break;
+        case 'process_queue': admin_process_queue($pdo); break;
+        case 'get_system_settings': admin_get_settings($pdo); break;
+        case 'update_system_settings': admin_update_settings($pdo, $input); break;
+        case 'search_external': admin_search_external($pdo, $input); break;
 
-            $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater, currentSessionId, lastActive, avatarUrl) VALUES (?, ?, ?, 'USER', 0, 1, '[]', ?, ?, ?)")
-                ->execute([$id, $username, $hash, $newToken, $now, $avatarUrl]);
-                
-            respond(true, ['id' => $id, 'username' => $username, 'role' => 'USER', 'balance' => 0, 'autoPurchaseLimit'=>1, 'watchLater'=>[], 'sessionToken'=>$newToken, 'avatarUrl'=>$avatarUrl, 'defaultPrices'=>[]]);
-            break;
+        // Market
+        case 'get_marketplace_items': market_get_items($pdo); break;
+        case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;
+        case 'admin_delete_listing': market_delete_listing($pdo, $input); break;
+        case 'get_marketplace_item': market_get_item($pdo, $_GET['id']); break;
+        case 'create_listing': market_create_listing($pdo, $_POST, $_FILES); break;
+        case 'checkout_cart': market_checkout($pdo, $input); break;
 
-        case 'get_videos':
-            $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v JOIN users u ON v.creatorId = u.id ORDER BY v.createdAt DESC");
-            $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($videos as &$v) {
-                if (isset($v['isLocal']) && $v['isLocal']) {
-                    $v['videoUrl'] = 'api/index.php?action=stream&id=' . $v['id'];
-                }
-            }
-            respond(true, $videos);
-            break;
-
-        case 'get_video':
-            $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v JOIN users u ON v.creatorId = u.id WHERE v.id = ?");
-            $stmt->execute([$_GET['id']]);
-            $video = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($video) {
-                if (isset($video['isLocal']) && $video['isLocal']) {
-                    $video['videoUrl'] = 'api/index.php?action=stream&id=' . $video['id'];
-                }
-                respond(true, $video);
-            }
-            else respond(false, null, 'Video not found');
-            break;
-
-        case 'get_related_videos':
-            $id = $_GET['id'];
-            $cat = $pdo->query("SELECT category FROM videos WHERE id = '$id'")->fetchColumn();
-            $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.category = ? LIMIT 10");
-            $stmt->execute([$id, $cat]);
-            $vids = $stmt->fetchAll(PDO::FETCH_ASSOC);
-             foreach ($vids as &$v) {
-                if (isset($v['isLocal']) && $v['isLocal']) {
-                    $v['videoUrl'] = 'api/index.php?action=stream&id=' . $v['id'];
-                }
-            }
-            respond(true, $vids);
-            break;
-
-        case 'has_purchased':
-            $userId = $_GET['userId'];
-            $videoId = $_GET['videoId'];
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
-            $stmt->execute([$userId, $videoId]);
-            respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);
-            break;
-
-        case 'purchase_video':
-            $userId = $input['userId'];
-            $videoId = $input['videoId'];
-            
-            $pdo->beginTransaction();
-            try {
-                $user = $pdo->query("SELECT balance FROM users WHERE id = '$userId'")->fetch(PDO::FETCH_ASSOC);
-                $video = $pdo->query("SELECT price, creatorId FROM videos WHERE id = '$videoId'")->fetch(PDO::FETCH_ASSOC);
-                
-                if ($user['balance'] < $video['price']) {
-                    $pdo->rollBack();
-                    respond(false, null, 'Insufficient balance');
-                }
-                
-                // Deduct from Buyer
-                $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$video['price'], $userId]);
-                
-                // Add to Creator
-                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$video['price'], $video['creatorId']]);
-                
-                // Record Transaction
-                $txId = 'tx_'.uniqid();
-                $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'PURCHASE')")
-                    ->execute([$txId, $userId, $video['creatorId'], $videoId, $video['price'], time()*1000]);
-                
-                $pdo->commit();
-                respond(true);
-            } catch (Exception $e) {
-                $pdo->rollBack();
-                respond(false, null, $e->getMessage());
-            }
-            break;
-
-        case 'upload_video':
-            $creatorId = $_POST['creatorId'];
-            
-            // Handle Video File
-            if (!file_exists(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
-            $videoExt = pathinfo($_FILES['video']['name'], PATHINFO_EXTENSION);
-            $videoName = 'vid_' . uniqid() . '.' . $videoExt;
-            $videoPath = UPLOAD_DIR . $videoName;
-            
-            if (!move_uploaded_file($_FILES['video']['tmp_name'], $videoPath)) {
-                respond(false, null, 'Failed to save video file');
-            }
-
-            // Calculate Hash for deduplication
-            $fileHash = md5_file($videoPath);
-
-            // Handle Thumbnail
-            $thumbPath = 'placeholder.jpg'; // Default
-            if (!empty($_FILES['thumbnail']['tmp_name'])) {
-                if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
-                $thumbName = 'thumb_' . uniqid() . '.jpg';
-                if (move_uploaded_file($_FILES['thumbnail']['tmp_name'], THUMB_DIR . $thumbName)) {
-                    $thumbPath = '/api/' . THUMB_DIR . $thumbName;
-                }
-            } else {
-                // If no thumb, check if deduplication finds one, otherwise use placeholder
-                $existing = $pdo->prepare("SELECT thumbnailUrl FROM videos WHERE fileHash = ? LIMIT 1");
-                $existing->execute([$fileHash]);
-                $prev = $existing->fetchColumn();
-                if ($prev && strpos($prev, 'placeholder') === false) {
-                    $thumbPath = $prev;
-                }
-            }
-
-            $id = 'v_' . uniqid();
-            $title = $_POST['title'];
-            $desc = $_POST['description'];
-            $price = $_POST['price'];
-            $cat = $_POST['category'];
-            $dur = $_POST['duration'];
-            $videoUrl = '/api/' . $videoPath;
-
-            $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, category, duration, fileHash, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)")
-                ->execute([$id, $title, $desc, $price, $thumbPath, $videoUrl, $creatorId, time()*1000, $cat, $dur, $fileHash]);
-            
-            respond(true);
-            break;
-
-        case 'scan_ftp_library':
-            $ftp = $input['ftp'];
-            $conn_id = @ftp_connect($ftp['host'], $ftp['port']);
-            if (!$conn_id) respond(false, null, "Could not connect to FTP server {$ftp['host']}");
-
-            if (!@ftp_login($conn_id, $ftp['user'], $ftp['pass'])) {
-                ftp_close($conn_id);
-                respond(false, null, "FTP Login failed");
-            }
-            
-            ftp_pasv($conn_id, true);
-
-            // Save Settings
-            $s = getSystemSettings($pdo);
-            $s['ftpSettings'] = $ftp;
-            $updated = json_encode($s['ftpSettings']);
-            $pdo->prepare("UPDATE system_settings SET ftpSettings = ? WHERE id = 1")->execute([$updated]);
-
-            // Start Scan
-            $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
-            $log = [];
-            $importedCount = 0;
-            $allowedExts = ['mp4', 'mkv', 'webm', 'mov'];
-            
-            $log[] = "Connected to FTP. Scanning {$ftp['rootPath']}...";
-
-            ftpScanRecursive($conn_id, $ftp['rootPath'], $log, $importedCount, $adminId, $allowedExts, $pdo);
-            
-            ftp_close($conn_id);
-            respond(true, ['imported' => $importedCount, 'log' => $log]);
-            break;
-
-        case 'scan_local_library':
-            $path = rtrim($input['path'], '/');
-            
-            // 1. CHECK OPEN_BASEDIR (Synology Limit)
-            $open_basedir = ini_get('open_basedir');
-            $allowed = false;
-            if ($open_basedir) {
-                $paths = explode(':', $open_basedir);
-                foreach ($paths as $p) {
-                    if (strpos($path, $p) === 0) {
-                        $allowed = true;
-                        break;
-                    }
-                }
-                if (!$allowed) {
-                    respond(false, null, "PHP BLOCKED: This path is outside open_basedir. Please use FTP Scan tab instead.");
-                }
-            }
-
-            // 2. CHECK DIRECTORY EXISTS
-            if (!is_dir($path)) {
-                respond(false, null, "Directory not found: $path (Check path spelling)");
-            }
-            
-            // Get Admin ID
-            $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
-
-            $log = [];
-            $importedCount = 0;
-            $allowedExts = ['mp4', 'mkv', 'webm', 'mov'];
-            
-            try {
-                $dirIterator = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
-                $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
-                $iterator->setMaxDepth(10);
-
-                foreach ($iterator as $file) {
-                    try {
-                        if ($file->isFile()) {
-                            $ext = strtolower($file->getExtension());
-                            if (in_array($ext, $allowedExts)) {
-                                $fullPath = $file->getRealPath();
-                                if (!is_readable($fullPath)) {
-                                    $log[] = "SKIP (Unreadable): " . $file->getFilename();
-                                    continue;
-                                }
-
-                                $fileHash = md5($fullPath); 
-                                
-                                $exists = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE fileHash = ?");
-                                $exists->execute([$fileHash]);
-                                if ($exists->fetchColumn() > 0) {
-                                    $log[] = "Skip (Exists): " . $file->getFilename();
-                                    continue;
-                                }
-
-                                $info = parseVideoName($file->getFilename());
-                                $thumbPath = 'placeholder.jpg';
-                                
-                                // Local thumb check logic here...
-
-                                $id = 'v_' . uniqid();
-                                $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, views, createdAt, category, duration, fileHash, isLocal) VALUES (?, ?, ?, 1.00, ?, ?, ?, 0, ?, ?, 0, ?, 1)")
-                                    ->execute([$id, $info['title'], $info['description'], $thumbPath, $fullPath, $adminId, time()*1000, $info['category'], $fileHash]);
-                                
-                                $log[] = "Imported: " . $info['title'];
-                                $importedCount++;
-                            }
-                        }
-                    } catch (Exception $e) {
-                         $log[] = "Error processing file: " . $e->getMessage();
-                    }
-                }
-            } catch (Exception $e) {
-                respond(false, null, "Scan Error: " . $e->getMessage());
-            }
-            
-            respond(true, ['imported' => $importedCount, 'log' => $log]);
-            break;
-            
-        case 'repair_thumbnail':
-            $videoId = $_POST['videoId'];
-            $current = $pdo->query("SELECT thumbnailUrl FROM videos WHERE id = '$videoId'")->fetchColumn();
-            if ($current && strpos($current, 'placeholder') === false && strpos($current, 'thumb_') !== false) {
-                respond(true, null, 'Already has valid thumbnail');
-            }
-
-            if (!empty($_FILES['thumbnail']['tmp_name'])) {
-                if (!file_exists(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
-                $thumbName = 'thumb_' . $videoId . '_' . uniqid() . '.jpg';
-                if (move_uploaded_file($_FILES['thumbnail']['tmp_name'], THUMB_DIR . $thumbName)) {
-                    $thumbPath = '/api/' . THUMB_DIR . $thumbName;
-                    $pdo->prepare("UPDATE videos SET thumbnailUrl = ? WHERE id = ?")->execute([$thumbPath, $videoId]);
-                    respond(true, ['newUrl' => $thumbPath]);
-                }
-            }
-            respond(false, null, 'Upload failed');
-            break;
-
-        case 'get_system_settings':
-            $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
-            $s = $stmt->fetch(PDO::FETCH_ASSOC);
-            if($s) {
-                $s['categoryPrices'] = json_decode($s['categoryPrices']);
-                $s['customCategories'] = json_decode($s['customCategories']);
-                $s['ftpSettings'] = isset($s['ftpSettings']) ? json_decode($s['ftpSettings']) : null;
-            }
-            respond(true, $s);
-            break;
-            
-        case 'update_system_settings':
-            $s = $input['settings'];
-            $cp = isset($s['categoryPrices']) ? json_encode($s['categoryPrices']) : NULL;
-            $cc = isset($s['customCategories']) ? json_encode($s['customCategories']) : NULL;
-            $ftp = isset($s['ftpSettings']) ? json_encode($s['ftpSettings']) : NULL;
-            $localPath = isset($s['localLibraryPath']) ? $s['localLibraryPath'] : '';
-            
-            $sql = "UPDATE system_settings SET 
-                downloadStartTime = ?, downloadEndTime = ?, isQueuePaused = ?, 
-                batchSize = ?, maxDuration = ?, maxResolution = ?, 
-                pexelsKey = ?, pixabayKey = ?, ytDlpPath = ?, enableYoutube = ?,
-                categoryPrices = ?, customCategories = ?, localLibraryPath = ?, ftpSettings = ?
-                WHERE id = 1";
-            
-            $pdo->prepare($sql)->execute([
-                $s['downloadStartTime'], $s['downloadEndTime'], $s['isQueuePaused'] ? 1 : 0,
-                $s['batchSize'], $s['maxDuration'], $s['maxResolution'],
-                $s['pexelsKey'], $s['pixabayKey'], $s['ytDlpPath'], $s['enableYoutube'] ? 1 : 0,
-                $cp, $cc, $localPath, $ftp
-            ]);
-            respond(true);
-            break;
-
-        case 'get_user_activity':
-            $uid = $_GET['userId'];
-            $liked = $pdo->query("SELECT videoId FROM interactions WHERE userId = '$uid' AND liked = 1")->fetchAll(PDO::FETCH_COLUMN);
-            $watched = $pdo->query("SELECT videoId FROM interactions WHERE userId = '$uid' AND isWatched = 1")->fetchAll(PDO::FETCH_COLUMN);
-            respond(true, ['liked' => $liked, 'watched' => $watched]);
-            break;
-            
-        case 'get_interaction':
-            $uid = $_GET['userId'];
-            $vid = $_GET['videoId'];
-            $i = $pdo->query("SELECT * FROM interactions WHERE userId = '$uid' AND videoId = '$vid'")->fetch(PDO::FETCH_ASSOC);
-            respond(true, $i ? $i : ['liked'=>false, 'disliked'=>false, 'isWatched'=>false]);
-            break;
-
-        case 'rate_video':
-            $uid = $input['userId'];
-            $vid = $input['videoId'];
-            $rating = $input['rating'];
-            
-            $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?");
-            $stmt->execute([$uid, $vid]);
-            $current = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            $newLike = 0; $newDislike = 0;
-            
-            if (!$current) {
-                if ($rating == 'like') $newLike = 1;
-                else $newDislike = 1;
-                $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked) VALUES (?, ?, ?, ?)")->execute([$uid, $vid, $newLike, $newDislike]);
-            } else {
-                $newLike = $current['liked'];
-                $newDislike = $current['disliked'];
-                if ($rating == 'like') {
-                    $newLike = $current['liked'] ? 0 : 1;
-                    $newDislike = 0;
-                } else {
-                    $newDislike = $current['disliked'] ? 0 : 1;
-                    $newLike = 0;
-                }
-                $pdo->prepare("UPDATE interactions SET liked = ?, disliked = ? WHERE userId = ? AND videoId = ?")->execute([$newLike, $newDislike, $uid, $vid]);
-            }
-            
-            $pdo->prepare("UPDATE videos SET likes = (SELECT COUNT(*) FROM interactions WHERE videoId = ? AND liked = 1), dislikes = (SELECT COUNT(*) FROM interactions WHERE videoId = ? AND disliked = 1) WHERE id = ?")->execute([$vid, $vid, $vid]);
-            $stats = $pdo->query("SELECT likes, dislikes FROM videos WHERE id = '$vid'")->fetch(PDO::FETCH_ASSOC);
-            
-            respond(true, ['liked' => (bool)$newLike, 'disliked' => (bool)$newDislike, 'isWatched' => ($current ? (bool)$current['isWatched'] : false), 'newLikeCount' => $stats['likes'], 'newDislikeCount' => $stats['dislikes']]);
-            break;
-            
-        case 'mark_watched':
-            $pdo->prepare("INSERT INTO interactions (userId, videoId, isWatched) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE isWatched = 1")->execute([$input['userId'], $input['videoId']]);
-            $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$input['videoId']]);
-            respond(true);
-            break;
-
-        case 'get_comments':
-            $stmt = $pdo->prepare("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.videoId = ? ORDER BY c.timestamp DESC");
-            $stmt->execute([$_GET['videoId']]);
-            respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
-            break;
-
-        case 'add_comment':
-            $cid = 'c_'.uniqid();
-            $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")
-                ->execute([$cid, $input['videoId'], $input['userId'], $input['text'], time()*1000]);
-            
-            $user = $pdo->query("SELECT username, avatarUrl as userAvatarUrl FROM users WHERE id = '{$input['userId']}'")->fetch(PDO::FETCH_ASSOC);
-            respond(true, array_merge(['id'=>$cid, 'userId'=>$input['userId'], 'text'=>$input['text'], 'timestamp'=>time()*1000], $user));
-            break;
-            
-        case 'get_all_users':
-            respond(true, $pdo->query("SELECT * FROM users ORDER BY balance DESC")->fetchAll(PDO::FETCH_ASSOC));
-            break;
-            
-        case 'admin_add_balance':
-            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$input['amount'], $input['targetUserId']]);
-            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, ?, NULL, ?, ?, 'DEPOSIT')")
-                ->execute(['tx_'.uniqid(), 'admin', $input['targetUserId'], $input['amount'], time()*1000]);
-            respond(true);
-            break;
-
-        case 'toggle_subscribe':
-            $uid = $input['userId']; $cid = $input['creatorId'];
-            $exists = $pdo->query("SELECT COUNT(*) FROM subscriptions WHERE subscriberId = '$uid' AND creatorId = '$cid'")->fetchColumn();
-            if ($exists) {
-                $pdo->exec("DELETE FROM subscriptions WHERE subscriberId = '$uid' AND creatorId = '$cid'");
-                respond(true, ['isSubscribed' => false]);
-            } else {
-                $pdo->prepare("INSERT INTO subscriptions (subscriberId, creatorId, createdAt) VALUES (?, ?, ?)")->execute([$uid, $cid, time()*1000]);
-                respond(true, ['isSubscribed' => true]);
-            }
-            break;
-
-        case 'check_subscription':
-            $val = $pdo->query("SELECT COUNT(*) FROM subscriptions WHERE subscriberId = '{$_GET['userId']}' AND creatorId = '{$_GET['creatorId']}'")->fetchColumn();
-            respond(true, ['isSubscribed' => $val > 0]);
-            break;
-            
         default:
             respond(false, null, 'Invalid action');
     }
-} catch (PDOException $e) {
-    respond(false, null, 'DB Error: ' . $e->getMessage());
+} catch (Exception $e) {
+    respond(false, null, 'Error: ' . $e->getMessage());
 }
 ?>

@@ -1,0 +1,336 @@
+<?php
+function video_get_all($pdo) {
+    $stmt = $pdo->query("
+        SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+        FROM videos v 
+        LEFT JOIN users u ON v.creatorId = u.id 
+        ORDER BY v.createdAt DESC
+    ");
+    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function video_get_one($pdo, $id) {
+    $stmt = $pdo->prepare("
+        SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+        FROM videos v 
+        LEFT JOIN users u ON v.creatorId = u.id 
+        WHERE v.id = ?
+    ");
+    $stmt->execute([$id]);
+    $video = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($video) {
+        // Increment views (simple)
+        $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$id]);
+        respond(true, $video);
+    }
+    respond(false, null, 'Video not found');
+}
+
+function video_get_by_creator($pdo, $creatorId) {
+    $stmt = $pdo->prepare("
+        SELECT v.*, u.username as creatorName 
+        FROM videos v 
+        LEFT JOIN users u ON v.creatorId = u.id 
+        WHERE v.creatorId = ? 
+        ORDER BY v.createdAt DESC
+    ");
+    $stmt->execute([$creatorId]);
+    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function video_get_related($pdo, $id) {
+    $stmt = $pdo->prepare("SELECT category, creatorId FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $source = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$source) respond(true, []);
+    
+    // Algorithm: Same Category + Random mix
+    $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+            FROM videos v 
+            LEFT JOIN users u ON v.creatorId = u.id
+            WHERE v.id != ? AND (v.category = ? OR v.creatorId = ?)
+            ORDER BY RAND() LIMIT 8";
+            
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$id, $source['category'], $source['creatorId']]);
+    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function video_upload($pdo, $post, $files) {
+    $title = $post['title'];
+    $price = $post['price'];
+    $creatorId = $post['creatorId'];
+    $duration = $post['duration'];
+    $category = $post['category'];
+    $desc = $post['description'] ?? '';
+
+    if (!isset($files['video']) || $files['video']['error'] !== UPLOAD_ERR_OK) {
+        respond(false, null, 'Video file missing or error');
+    }
+
+    $vidId = 'v_' . uniqid();
+    $vidExt = strtolower(pathinfo($files['video']['name'], PATHINFO_EXTENSION));
+    $vidName = "{$vidId}.{$vidExt}";
+    $vidPath = UPLOAD_DIR . $vidName;
+
+    // Move Video
+    if (!move_uploaded_file($files['video']['tmp_name'], $vidPath)) {
+        respond(false, null, 'Failed to save video file');
+    }
+
+    // Handle Thumbnail
+    $thumbPath = ''; // Default or placeholder
+    if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
+        $thumbExt = strtolower(pathinfo($files['thumbnail']['name'], PATHINFO_EXTENSION));
+        $thumbName = "{$vidId}.{$thumbExt}";
+        $thumbPath = THUMB_DIR . $thumbName;
+        move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
+    } else {
+        // Fallback placeholder
+        $thumbPath = "https://via.placeholder.com/640x360.png?text=" . urlencode($title);
+    }
+
+    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
+    $stmt->execute([$vidId, $title, $desc, $price, $thumbPath, "api/$vidPath", $creatorId, time(), $category, $duration]);
+    
+    // Notify Subscribers
+    $stmt = $pdo->prepare("SELECT subscriberId FROM subscriptions WHERE creatorId = ?");
+    $stmt->execute([$creatorId]);
+    $subs = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    foreach ($subs as $subId) {
+        $nid = uniqid('n_');
+        $text = "New upload: $title";
+        $link = "/watch/$vidId";
+        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'UPLOAD', ?, ?, 0, ?)")
+            ->execute([$nid, $subId, $text, $link, time()]);
+    }
+
+    respond(true, ['id' => $vidId]);
+}
+
+function video_repair_thumbnail($pdo, $post, $files) {
+    $videoId = $post['videoId'];
+    if (!isset($files['thumbnail'])) respond(false);
+
+    $thumbExt = 'jpg';
+    $thumbName = "{$videoId}_repaired.{$thumbExt}";
+    $thumbPath = THUMB_DIR . $thumbName;
+    
+    if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) {
+        $pdo->prepare("UPDATE videos SET thumbnailUrl = ? WHERE id = ?")->execute([$thumbPath, $videoId]);
+        respond(true);
+    }
+    respond(false);
+}
+
+function video_delete($pdo, $input) {
+    $id = $input['id'];
+    $userId = $input['userId'];
+    
+    // Check ownership
+    $stmt = $pdo->prepare("SELECT creatorId, videoUrl, thumbnailUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $v = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$v) respond(false, null, 'Video not found');
+    
+    // Check if user is owner OR admin
+    $isAdmin = false;
+    $stmtRole = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+    $stmtRole->execute([$userId]);
+    if ($stmtRole->fetchColumn() === 'ADMIN') $isAdmin = true;
+
+    if ($v['creatorId'] !== $userId && !$isAdmin) {
+        respond(false, null, 'Unauthorized');
+    }
+    
+    // Delete files if local
+    $vidPath = str_replace('api/', '', $v['videoUrl']);
+    // Sanity check: Ensure we are deleting inside uploads/ or known path
+    if (file_exists($vidPath) && (strpos($vidPath, 'uploads/') === 0)) unlink($vidPath);
+    
+    $thumbPath = str_replace('api/', '', $v['thumbnailUrl']);
+    if (file_exists($thumbPath) && (strpos($thumbPath, 'uploads/') === 0)) unlink($thumbPath);
+
+    $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+    $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
+    $pdo->prepare("DELETE FROM interactions WHERE videoId = ?")->execute([$id]);
+    $pdo->prepare("DELETE FROM comments WHERE videoId = ?")->execute([$id]);
+
+    respond(true);
+}
+
+function video_server_import($pdo, $input) {
+    $url = $input['url'];
+    
+    // Find Admin User ID
+    $stmt = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1");
+    $adminId = $stmt->fetchColumn();
+    
+    $rid = uniqid('req_');
+    $pdo->prepare("INSERT INTO requests (id, userId, query, status, createdAt, useLocalNetwork) VALUES (?, ?, ?, 'PENDING', ?, 0)")
+        ->execute([$rid, $adminId, $url, time()]);
+        
+    respond(true, ['message' => 'Queued for import']);
+}
+
+function video_scan_local($pdo, $input) {
+    $path = $input['path'];
+    $log = [];
+    $imported = 0;
+    
+    // 1. Detect permissions/open_basedir
+    if (!is_dir($path) && !@scandir($path)) {
+        $log[] = "ERROR: Cannot read directory '$path'. Check permissions or open_basedir.";
+        $log[] = "HINT: Try using the FTP Scan tab if this fails.";
+        respond(true, ['imported' => 0, 'log' => $log, 'errors' => ['Access Denied']]);
+    }
+
+    try {
+        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
+    } catch (Exception $e) {
+        $log[] = "CRITICAL: " . $e->getMessage();
+        $log[] = "This usually means PHP does not have permission to read subdirectories.";
+        respond(true, ['imported' => 0, 'log' => $log, 'errors' => ['Access Denied']]);
+        return;
+    }
+
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
+    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'OTHER', 0, 1)");
+    
+    // Get Admin ID for ownership
+    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+
+    foreach ($files as $file) {
+        try {
+            if ($file->isFile()) {
+                $ext = strtolower($file->getExtension());
+                if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov'])) {
+                    $fullPath = $file->getPathname();
+                    
+                    // Check if exists
+                    $stmt->execute([$fullPath]);
+                    if ($stmt->fetchColumn() == 0) {
+                        $vidId = 'loc_' . md5($fullPath);
+                        $title = $file->getBasename('.' . $ext);
+                        
+                        $insert->execute([
+                            $vidId, 
+                            $title, 
+                            "Scanned from NAS: " . $fullPath,
+                            "https://via.placeholder.com/640x360.png?text=NAS+Video", // Placeholder thumb
+                            $fullPath,
+                            $adminId,
+                            time()
+                        ]);
+                        $imported++;
+                        $log[] = "Imported: $title";
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // Skip unreadable files
+            continue;
+        }
+    }
+    
+    if ($imported === 0) $log[] = "Scan finished. No new videos found.";
+    
+    respond(true, ['imported' => $imported, 'log' => $log, 'errors' => []]);
+}
+
+function video_scan_ftp($pdo, $input) {
+    $config = $input['ftp'];
+    $log = [];
+    $imported = 0;
+    
+    if (!function_exists('ftp_connect')) {
+         respond(false, null, "PHP FTP extension is missing");
+    }
+
+    $conn = @ftp_connect($config['host'], $config['port']);
+    if (!$conn) {
+        respond(false, null, "Could not connect to FTP host");
+    }
+    
+    if (!@ftp_login($conn, $config['user'], $config['pass'])) {
+        respond(false, null, "FTP Login Failed");
+    }
+    
+    ftp_pasv($conn, true);
+    
+    // Recursive FTP Scan Function
+    function scanFtpDir($conn, $dir, &$fileList) {
+        $files = ftp_nlist($conn, $dir);
+        if (is_array($files)) {
+            foreach ($files as $file) {
+                if ($file == '.' || $file == '..') continue;
+                
+                // Try to guess if directory (this is tricky in FTP without rawlist parsing)
+                // A simple trick is trying to chdir into it
+                if (@ftp_chdir($conn, $file)) {
+                    scanFtpDir($conn, $file, $fileList);
+                    ftp_chdir($conn, ".."); // Go back up
+                } else {
+                    // It's likely a file
+                    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+                    if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov'])) {
+                        $fileList[] = $file; // $file usually contains full path in recursive nlist depending on server
+                    }
+                }
+            }
+        }
+    }
+    
+    $foundFiles = [];
+    // We assume the user provided root path is valid
+    $raw = ftp_nlist($conn, $config['rootPath']);
+    if ($raw === false) {
+        $log[] = "FTP ERROR: Could not list directory. Check path.";
+    } else {
+        foreach($raw as $f) {
+             $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
+             if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov'])) {
+                 $foundFiles[] = $f;
+             }
+        }
+    }
+    
+    // Import Logic
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
+    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'OTHER', 0, 1)");
+    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+
+    foreach ($foundFiles as $fullPath) {
+        $stmt->execute([$fullPath]);
+        if ($stmt->fetchColumn() == 0) {
+            $vidId = 'ftp_' . md5($fullPath);
+            $title = basename($fullPath);
+            
+            $insert->execute([
+                $vidId, 
+                $title, 
+                "Scanned via FTP: " . $fullPath,
+                "https://via.placeholder.com/640x360.png?text=FTP+Video",
+                $fullPath,
+                $adminId,
+                time()
+            ]);
+            $imported++;
+            $log[] = "Imported: $title";
+        }
+    }
+    
+    ftp_close($conn);
+    respond(true, ['imported' => $imported, 'log' => $log, 'errors' => []]);
+}
+
+function video_update_prices_bulk($pdo, $input) {
+    $uid = $input['creatorId'];
+    $price = $input['newPrice'];
+    $pdo->prepare("UPDATE videos SET price = ? WHERE creatorId = ?")->execute([$price, $uid]);
+    respond(true);
+}
+?>

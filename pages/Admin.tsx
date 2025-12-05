@@ -1,12 +1,8 @@
-
-
-
-
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
-import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings } from '../types';
+import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -20,7 +16,7 @@ export default function Admin() {
   const [processingQueue, setProcessingQueue] = useState(false);
   const [processResult, setProcessResult] = useState('');
   const [requests, setRequests] = useState<ContentRequest[]>([]);
-  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES' | 'LIBRARY' | 'FTP'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES' | 'LIBRARY' | 'FTP' | 'MARKET'>('USERS');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
 
   // Cleaner State
@@ -43,6 +39,10 @@ export default function Admin() {
   // Category State
   const [newCatName, setNewCatName] = useState('');
 
+  // Market State
+  const [marketItems, setMarketItems] = useState<MarketplaceItem[]>([]);
+  const [marketSearch, setMarketSearch] = useState('');
+
   useEffect(() => {
     loadData();
     db.getSystemSettings().then(s => {
@@ -51,6 +51,12 @@ export default function Admin() {
         if (s.ftpSettings) setFtpConfig(s.ftpSettings);
     });
   }, []);
+
+  useEffect(() => {
+      if (activeTab === 'MARKET') {
+          db.adminGetMarketplaceItems().then(setMarketItems);
+      }
+  }, [activeTab]);
 
   const loadData = async () => {
     setLoadingUsers(true);
@@ -167,8 +173,7 @@ export default function Admin() {
       setScanLog(['Starting FTP connection...']);
       
       try {
-           // We use a direct DB request here as it's specific
-           const res = await db['request']<{imported: number, log: string[]}>('index.php?action=scan_ftp_library', 'POST', { ftp: ftpConfig });
+           const res = await db.scanFtpLibrary(ftpConfig);
            setScanLog(res.log);
            alert(`FTP Scan complete. Imported ${res.imported} videos.`);
            
@@ -235,6 +240,12 @@ export default function Admin() {
       }
   };
 
+  const deleteMarketItem = async (id: string) => {
+      if (!confirm("Permanently delete this item?")) return;
+      await db.adminDeleteListing(id);
+      setMarketItems(prev => prev.filter(i => i.id !== id));
+  };
+
   const filteredUsers = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
 
   // Categories list union
@@ -276,9 +287,59 @@ export default function Admin() {
            <button onClick={() => setActiveTab('CATEGORIES')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CATEGORIES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cat & Prices</button>
            <button onClick={() => setActiveTab('LIBRARY')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'LIBRARY' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Local Scan</button>
            <button onClick={() => setActiveTab('FTP')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'FTP' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>FTP Scan</button>
+           <button onClick={() => setActiveTab('MARKET')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'MARKET' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Market</button>
            <button onClick={() => setActiveTab('CLEANER')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CLEANER' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cleaner</button>
         </div>
       </div>
+
+      {activeTab === 'MARKET' && (
+          <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                  <h3 className="font-bold text-white flex items-center gap-2"><ShoppingBag size={18}/> Manage Listings ({marketItems.length})</h3>
+                  <div className="relative">
+                      <Search size={14} className="absolute left-2 top-2.5 text-slate-500"/>
+                      <input type="text" value={marketSearch} onChange={e => setMarketSearch(e.target.value)} placeholder="Search..." className="bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-2 py-1.5 text-xs text-white focus:border-indigo-500 outline-none" />
+                  </div>
+              </div>
+              <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-950 text-slate-400 uppercase font-bold">
+                          <tr>
+                              <th className="p-3">Item</th>
+                              <th className="p-3">Price</th>
+                              <th className="p-3">Seller</th>
+                              <th className="p-3">Status</th>
+                              <th className="p-3 text-center">Action</th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                          {marketItems.filter(i => i.title.toLowerCase().includes(marketSearch.toLowerCase())).map(item => (
+                              <tr key={item.id} className="hover:bg-slate-800/50">
+                                  <td className="p-3">
+                                      <div className="flex items-center gap-2">
+                                          <div className="w-8 h-8 rounded bg-slate-800 overflow-hidden">
+                                              {item.images && item.images[0] && <img src={item.images[0]} className="w-full h-full object-cover"/>}
+                                          </div>
+                                          <span className="font-medium text-white">{item.title}</span>
+                                      </div>
+                                  </td>
+                                  <td className="p-3 text-amber-400 font-bold">{item.price} $</td>
+                                  <td className="p-3 text-slate-400">{item.sellerName}</td>
+                                  <td className="p-3">
+                                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${item.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                                          {item.status}
+                                      </span>
+                                  </td>
+                                  <td className="p-3 text-center">
+                                      <button onClick={() => deleteMarketItem(item.id)} className="text-slate-500 hover:text-red-400 p-1"><Trash2 size={14}/></button>
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+      )}
 
       {activeTab === 'FTP' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from '../components/Router';
 import { db } from '../services/db';
-import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save } from 'lucide-react';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck } from 'lucide-react';
 import { Video, Transaction, VideoCategory } from '../types';
 
 export default function Profile() {
@@ -16,11 +16,21 @@ export default function Profile() {
   const [myVideos, setMyVideos] = useState<Video[]>([]);
   
   // Security Tab
-  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING'>('OVERVIEW');
+  const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING' | 'SHIPPING'>('OVERVIEW');
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
   const [passMsg, setPassMsg] = useState('');
+
+  // Shipping Tab
+  const [shipping, setShipping] = useState({
+      fullName: '',
+      address: '',
+      city: '',
+      zipCode: '',
+      country: '',
+      phoneNumber: ''
+  });
 
   // Pricing Tab
   const [defaultPrices, setDefaultPrices] = useState<Record<string, number>>({});
@@ -30,6 +40,7 @@ export default function Profile() {
     if (user) {
       setAutoLimit(user.autoPurchaseLimit);
       setDefaultPrices(user.defaultPrices || {});
+      if (user.shippingDetails) setShipping(user.shippingDetails);
       
       // Async fetches
       Promise.all(user.watchLater.map(id => db.getVideo(id))).then(res => {
@@ -71,6 +82,12 @@ export default function Profile() {
       alert("Default pricing preferences saved!");
   };
 
+  const saveShipping = async () => {
+      await db.updateUserProfile(user.id, { shippingDetails: shipping });
+      refreshUser();
+      alert("Shipping details saved!");
+  };
+
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
           const file = e.target.files[0];
@@ -105,14 +122,17 @@ export default function Profile() {
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
-          <button onClick={() => setTab('OVERVIEW')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='OVERVIEW'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+      <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800 overflow-x-auto">
+          <button onClick={() => setTab('OVERVIEW')} className={`flex-1 py-2 px-3 text-sm font-bold rounded flex items-center justify-center gap-2 whitespace-nowrap ${tab==='OVERVIEW'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <UserIcon size={16}/> Overview
           </button>
-          <button onClick={() => setTab('PRICING')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='PRICING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+          <button onClick={() => setTab('PRICING')} className={`flex-1 py-2 px-3 text-sm font-bold rounded flex items-center justify-center gap-2 whitespace-nowrap ${tab==='PRICING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <Tag size={16}/> Pricing
           </button>
-          <button onClick={() => setTab('SECURITY')} className={`flex-1 py-2 text-sm font-bold rounded flex items-center justify-center gap-2 ${tab==='SECURITY'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+          <button onClick={() => setTab('SHIPPING')} className={`flex-1 py-2 px-3 text-sm font-bold rounded flex items-center justify-center gap-2 whitespace-nowrap ${tab==='SHIPPING'?'bg-indigo-600 text-white':'text-slate-400'}`}>
+              <Truck size={16}/> Shipping
+          </button>
+          <button onClick={() => setTab('SECURITY')} className={`flex-1 py-2 px-3 text-sm font-bold rounded flex items-center justify-center gap-2 whitespace-nowrap ${tab==='SECURITY'?'bg-indigo-600 text-white':'text-slate-400'}`}>
               <Shield size={16}/> Security
           </button>
       </div>
@@ -315,6 +335,45 @@ export default function Profile() {
                   ))}
               </div>
           </div>
+      )}
+
+      {tab === 'SHIPPING' && (
+           <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                      <h3 className="font-bold text-white flex items-center gap-2"><Truck size={18}/> Default Shipping Address</h3>
+                      <p className="text-xs text-slate-400">These details will be pre-filled when you purchase items from the marketplace.</p>
+                  </div>
+                  <button onClick={saveShipping} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
+                      <Save size={16}/> Save Changes
+                  </button>
+                </div>
+                
+                <div className="space-y-4 max-w-lg">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Full Name</label>
+                        <input type="text" value={shipping.fullName} onChange={e => setShipping({...shipping, fullName: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Address</label>
+                        <input type="text" value={shipping.address} onChange={e => setShipping({...shipping, address: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">City</label>
+                            <input type="text" value={shipping.city} onChange={e => setShipping({...shipping, city: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Zip Code</label>
+                            <input type="text" value={shipping.zipCode} onChange={e => setShipping({...shipping, zipCode: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Phone Number</label>
+                        <input type="text" value={shipping.phoneNumber} onChange={e => setShipping({...shipping, phoneNumber: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                    </div>
+                </div>
+           </div>
       )}
 
       {tab === 'SECURITY' && (

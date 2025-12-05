@@ -1,4 +1,3 @@
-
 import React, { Suspense, PropsWithChildren, useState, useEffect } from 'react';
 import Login from './pages/Login';
 import Home from './pages/Home';
@@ -10,9 +9,14 @@ import Shorts from './pages/Shorts';
 import Setup from './pages/Setup';
 import Requests from './pages/Requests';
 import Channel from './pages/Channel';
+import Marketplace from './pages/Marketplace';
+import MarketplaceItem from './pages/MarketplaceItem';
+import MarketplaceCreate from './pages/MarketplaceCreate';
+import Cart from './pages/Cart';
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UploadProvider } from './context/UploadContext';
+import { CartProvider } from './context/CartContext';
 import { db } from './services/db';
 import { Loader2, WifiOff } from 'lucide-react';
 
@@ -86,33 +90,42 @@ export default function App() {
   return (
     <AuthProvider>
       <UploadProvider>
-        <HashRouter>
-          <OfflineBanner />
-          <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>
-            <Routes>
-              <Route path="/setup" element={<Setup />} />
-              
-              <Route path="/login" element={
-                <SetupGuard>
-                  <Login />
-                </SetupGuard>
-              } />
-              
-              <Route element={<Layout />}>
-                <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
-                <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
-                <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
-                <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
-                <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
-                <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
-                <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
-                <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
-              </Route>
+        <CartProvider>
+            <HashRouter>
+            <OfflineBanner />
+            <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>
+                <Routes>
+                <Route path="/setup" element={<Setup />} />
+                
+                <Route path="/login" element={
+                    <SetupGuard>
+                    <Login />
+                    </SetupGuard>
+                } />
+                
+                <Route element={<Layout />}>
+                    <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
+                    
+                    {/* Marketplace Routes */}
+                    <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
+                    
+                    <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                </Route>
 
-              <Route path="*" element={<Navigate to="/" />} />
-            </Routes>
-          </Suspense>
-        </HashRouter>
+                <Route path="*" element={<Navigate to="/" />} />
+                </Routes>
+            </Suspense>
+            </HashRouter>
+        </CartProvider>
       </UploadProvider>
     </AuthProvider>
   );

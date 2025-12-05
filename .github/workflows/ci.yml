@@ -39,9 +39,19 @@ jobs:
         cp api/index_code.txt dist/api/index.php
         cp api/install_code.txt dist/api/install.php
         
+        # Convert modular TXT files to PHP
+        for file in api/functions_*.txt; do
+            if [ -f "$file" ]; then
+                filename=$(basename "$file" .txt)
+                cp "$file" "dist/api/$filename.php"
+            fi
+        done
+        
         # Create uploads directories structure
         mkdir -p dist/api/uploads/videos
         mkdir -p dist/api/uploads/thumbnails
+        mkdir -p dist/api/uploads/avatars
+        mkdir -p dist/api/uploads/market
         
         # Verify structure
         ls -R dist/api

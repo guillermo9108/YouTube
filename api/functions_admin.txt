@@ -1,0 +1,227 @@
+<?php
+function admin_add_balance($pdo, $input) {
+    $adminId = $input['adminId'];
+    // Verify admin
+    $stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+    $stmt->execute([$adminId]);
+    if ($stmt->fetchColumn() !== 'ADMIN') respond(false, null, 'Unauthorized');
+
+    $target = $input['targetUserId'];
+    $amount = $input['amount'];
+
+    $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $target]);
+    
+    // Log deposit
+    $tid = uniqid('tx_dep_');
+    $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'DEPOSIT')")
+        ->execute([$tid, $target, $amount, time()]);
+        
+    respond(true);
+}
+
+function admin_cleanup_videos($pdo) {
+    $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE isLocal = 0");
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $deleted = 0;
+    
+    foreach ($videos as $v) {
+        $path = str_replace('api/', '', $v['videoUrl']);
+        
+        // SECURITY: Only delete if inside uploads directory
+        if (strpos($path, 'uploads/') !== 0) continue;
+        
+        if (!file_exists($path)) {
+            $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]);
+            $deleted++;
+        }
+    }
+    respond(true, ['deleted' => $deleted]);
+}
+
+function admin_repair_db($pdo) {
+    // Uses the shared schema definition to perform a robust repair/sync
+    require_once 'functions_schema.php';
+    global $schema;
+    
+    foreach ($schema as $tableName => $def) {
+        syncTable($pdo, $tableName, $def);
+    }
+    
+    respond(true);
+}
+
+function admin_smart_cleaner_preview($pdo, $input) {
+    $cat = $input['category'];
+    $percent = $input['percentage'];
+    $safeDays = $input['safeHarborDays'];
+    
+    // Build Query
+    $where = "WHERE 1=1";
+    if ($cat !== 'ALL') $where .= " AND category = '$cat'";
+    
+    // Safe Harbor
+    $cutoff = time() - ($safeDays * 86400);
+    $where .= " AND createdAt < $cutoff";
+    
+    // Score: Views + (Likes * 5) - (Dislikes * 10)
+    // We want to delete LOWEST scores.
+    $sql = "SELECT *, (views + (likes * 5) - (dislikes * 10)) as score FROM videos $where ORDER BY score ASC";
+    $stmt = $pdo->query($sql);
+    $allCandidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $count = count($allCandidates);
+    $limit = floor($count * ($percent / 100));
+    $toDelete = array_slice($allCandidates, 0, $limit);
+    
+    // Estimate space (very rough, average 50MB if file missing)
+    $space = 0;
+    foreach ($toDelete as $v) {
+        $path = str_replace('api/', '', $v['videoUrl']);
+        if (file_exists($path)) $space += filesize($path);
+    }
+    
+    respond(true, [
+        'preview' => $toDelete,
+        'stats' => [
+            'totalVideos' => $count,
+            'videosToDelete' => count($toDelete),
+            'spaceReclaimed' => round($space / 1024 / 1024, 2) . " MB"
+        ]
+    ]);
+}
+
+function admin_smart_cleaner_execute($pdo, $input) {
+    $ids = $input['videoIds'];
+    $deleted = 0;
+    foreach ($ids as $id) {
+        $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
+        $stmt->execute([$id]);
+        $v = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($v) {
+            // Delete Files
+            $vidPath = str_replace('api/', '', $v['videoUrl']);
+            // SECURITY: Only delete if inside uploads directory
+            if (file_exists($vidPath) && strpos($vidPath, 'uploads/') === 0) unlink($vidPath);
+            
+            $thumbPath = str_replace('api/', '', $v['thumbnailUrl']);
+            // Only delete if local upload (not http) and safe
+            if (strpos($thumbPath, 'http') === false && file_exists($thumbPath) && strpos($thumbPath, 'uploads/') === 0) unlink($thumbPath);
+            
+            $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+            $deleted++;
+        }
+    }
+    respond(true, ['deleted' => $deleted]);
+}
+
+function admin_get_requests($pdo, $status) {
+    $sql = "SELECT r.*, u.username FROM requests r LEFT JOIN users u ON r.userId = u.id";
+    if ($status) $sql .= " WHERE r.status = '$status'";
+    $sql .= " ORDER BY r.createdAt DESC";
+    
+    $stmt = $pdo->query($sql);
+    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function admin_request_content($pdo, $input) {
+    $rid = uniqid('req_');
+    $pdo->prepare("INSERT INTO requests (id, userId, query, status, createdAt, useLocalNetwork) VALUES (?, ?, ?, 'PENDING', ?, ?)")
+        ->execute([$rid, $input['userId'], $input['query'], time(), $input['useLocalNetwork'] ? 1 : 0]);
+    respond(true, ['id' => $rid]);
+}
+
+function admin_delete_request($pdo, $input) {
+    $pdo->prepare("DELETE FROM requests WHERE id = ?")->execute([$input['requestId']]);
+    respond(true);
+}
+
+function admin_get_settings($pdo) {
+    $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
+    $s = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($s) {
+        $s['categoryPrices'] = json_decode($s['categoryPrices'], true);
+        $s['customCategories'] = json_decode($s['customCategories'], true);
+        $s['ftpSettings'] = json_decode($s['ftpSettings'], true);
+    }
+    respond(true, $s);
+}
+
+function admin_update_settings($pdo, $input) {
+    $s = $input['settings'];
+    $sql = "UPDATE system_settings SET 
+            downloadStartTime = ?, 
+            downloadEndTime = ?, 
+            isQueuePaused = ?, 
+            batchSize = ?, 
+            maxDuration = ?, 
+            maxResolution = ?, 
+            pexelsKey = ?, 
+            pixabayKey = ?,
+            ytDlpPath = ?,
+            enableYoutube = ?,
+            categoryPrices = ?,
+            customCategories = ?,
+            localLibraryPath = ?,
+            ftpSettings = ?
+            WHERE id = 1";
+            
+    $pdo->prepare($sql)->execute([
+        $s['downloadStartTime'], 
+        $s['downloadEndTime'], 
+        $s['isQueuePaused'] ? 1 : 0, 
+        $s['batchSize'], 
+        $s['maxDuration'], 
+        $s['maxResolution'], 
+        $s['pexelsKey'], 
+        $s['pixabayKey'],
+        $s['ytDlpPath'],
+        $s['enableYoutube'] ? 1 : 0,
+        json_encode($s['categoryPrices']),
+        json_encode($s['customCategories']),
+        $s['localLibraryPath'] ?? '',
+        json_encode($s['ftpSettings'] ?? null)
+    ]);
+    respond(true);
+}
+
+function admin_search_external($pdo, $input) {
+    $query = $input['query'];
+    $source = $input['source'];
+    $results = [];
+    
+    $stmt = $pdo->query("SELECT pexelsKey, pixabayKey, enableYoutube, ytDlpPath FROM system_settings LIMIT 1");
+    $keys = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($source === 'YOUTUBE') {
+        $results = get_youtube_video($query, $keys);
+    } else {
+        // STOCK LOGIC (Pexels/Pixabay) - Simplified for brevity
+        if (!empty($keys['pixabayKey'])) {
+             $url = "https://pixabay.com/api/videos/?key={$keys['pixabayKey']}&q=" . urlencode($query);
+             $res = @file_get_contents($url);
+             if ($res) {
+                 $data = json_decode($res, true);
+                 foreach ($data['hits'] as $hit) {
+                     $results[] = [
+                         'id' => 'pix_' . $hit['id'],
+                         'source' => 'Pixabay',
+                         'thumbnail' => $hit['userImageURL'] ?: "https://via.placeholder.com/150",
+                         'title' => "Stock Video " . $hit['id'],
+                         'downloadUrl' => $hit['videos']['medium']['url'],
+                         'author' => $hit['user'],
+                         'duration' => $hit['duration']
+                     ];
+                 }
+             }
+        }
+    }
+    respond(true, $results);
+}
+
+function admin_process_queue($pdo) {
+    // This is a stub for manual trigger. 
+    // In a real env, this would invoke the background worker script.
+    // We return success to the UI.
+    respond(true, ['processed' => 0, 'message' => 'Queue triggered (Simulation)']);
+}
+?>

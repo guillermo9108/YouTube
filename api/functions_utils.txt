@@ -1,0 +1,135 @@
+<?php
+function respond($success, $data = null, $error = null) {
+    ob_clean();
+    header('Content-Type: application/json');
+    echo json_encode(['success' => $success, 'data' => $data, 'error' => $error]);
+    exit();
+}
+
+function get_youtube_video($query, $config) {
+    if (empty($config['enableYoutube']) || empty($config['ytDlpPath'])) return [];
+    
+    $bin = $config['ytDlpPath'];
+    // Search 10 results, get JSON
+    $cmd = "$bin \"ytsearch10:$query\" --dump-json --flat-playlist --no-warnings 2>&1";
+    exec($cmd, $output, $ret);
+    
+    $results = [];
+    foreach ($output as $line) {
+        $data = json_decode($line, true);
+        if ($data) {
+            $results[] = [
+                'id' => $data['id'],
+                'source' => 'YouTube',
+                'thumbnail' => "https://i.ytimg.com/vi/{$data['id']}/hqdefault.jpg",
+                'title' => $data['title'],
+                'duration' => $data['duration'] ?? 0,
+                'downloadUrl' => "https://www.youtube.com/watch?v={$data['id']}", // Helper URL for backend import
+                'author' => $data['uploader'] ?? 'Unknown'
+            ];
+        }
+    }
+    return $results;
+}
+
+function download_image($url, $path) {
+    $ch = curl_init($url);
+    $fp = fopen($path, 'wb');
+    curl_setopt($ch, CURLOPT_FILE, $fp);
+    curl_setopt($ch, CURLOPT_HEADER, 0);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0');
+    curl_exec($ch);
+    curl_close($ch);
+    fclose($fp);
+}
+
+// Advanced Streaming with open_basedir bypass support (via FTP fallback)
+function streamVideo($path, $pdo) {
+    // 1. Check direct file access
+    if (!file_exists($path)) {
+        // 2. If missing, check if it's a NAS path blocked by open_basedir
+        // We try to read FTP config from DB to fallback
+        $stmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
+        $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+        $ftpConfig = $settings ? json_decode($settings['ftpSettings'], true) : null;
+
+        if ($ftpConfig && !empty($ftpConfig['host']) && function_exists('ftp_connect')) {
+            // Attempt FTP Stream
+            $ftp_conn = @ftp_connect($ftpConfig['host'], $ftpConfig['port']);
+            if ($ftp_conn && @ftp_login($ftp_conn, $ftpConfig['user'], $ftpConfig['pass'])) {
+                ftp_pasv($ftp_conn, true);
+                
+                // Determine file size via FTP
+                $size = @ftp_size($ftp_conn, $path);
+                if ($size != -1) {
+                    // It exists on FTP. Stream it through PHP output.
+                    header("Content-Type: video/mp4");
+                    header("Content-Length: " . $size);
+                    // Use a temporary handle to stream output
+                    $out = fopen('php://output', 'w');
+                    @ftp_fget($ftp_conn, $out, $path, FTP_BINARY);
+                    fclose($out);
+                    ftp_close($ftp_conn);
+                    exit;
+                }
+                ftp_close($ftp_conn);
+            }
+        }
+        
+        http_response_code(404);
+        die("Video file not found: " . $path);
+    }
+
+    // 3. Standard Local Streaming
+    $size = filesize($path);
+    $length = $size;
+    $start = 0;
+    $end = $size - 1;
+
+    header("Content-Type: video/mp4");
+    header("Accept-Ranges: bytes");
+
+    if (isset($_SERVER['HTTP_RANGE'])) {
+        list(, $range) = explode('=', $_SERVER['HTTP_RANGE'], 2);
+        if (strpos($range, ',') !== false) {
+            header('HTTP/1.1 416 Requested Range Not Satisfiable');
+            header("Content-Range: bytes $start-$end/$size");
+            exit;
+        }
+        if ($range == '-') {
+            $c_start = $size - substr($range, 1);
+        } else {
+            $range = explode('-', $range);
+            $c_start = $range[0];
+            $c_end = (isset($range[1]) && is_numeric($range[1])) ? $range[1] : $size;
+        }
+        $c_end = ($c_end > $end) ? $end : $c_end;
+        if ($c_start > $c_end || $c_start > $size - 1 || $c_end >= $size) {
+            header('HTTP/1.1 416 Requested Range Not Satisfiable');
+            header("Content-Range: bytes $start-$end/$size");
+            exit;
+        }
+        $start = $c_start;
+        $end = $c_end;
+        $length = $end - $start + 1;
+        header('HTTP/1.1 206 Partial Content');
+        header("Content-Range: bytes $start-$end/$size");
+    }
+    
+    header("Content-Length: " . $length);
+    $fp = fopen($path, 'rb');
+    fseek($fp, $start);
+    $buffer = 1024 * 8;
+    while (!feof($fp) && ($p = ftell($fp)) <= $end) {
+        if ($p + $buffer > $end) {
+            $buffer = $end - $p + 1;
+        }
+        set_time_limit(0);
+        echo fread($fp, $buffer);
+        flush();
+    }
+    fclose($fp);
+    exit;
+}
+?>
