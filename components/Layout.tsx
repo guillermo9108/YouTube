@@ -205,6 +205,8 @@ export default function Layout() {
       )
   );
 
+  const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
+
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       
@@ -218,9 +220,9 @@ export default function Layout() {
                 </div>
                 
                 <div className="space-y-2 flex-1 overflow-y-auto">
-                    {/* Admin Access Link - Case Insensitive Check */}
-                    {(user?.role?.toUpperCase() === 'ADMIN') && (
-                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-4 text-amber-400 bg-amber-900/20 hover:bg-amber-900/30 rounded-xl font-bold mb-4 border border-amber-500/30 shadow-sm transition-all">
+                    {/* Admin Access Link - Prominent at TOP */}
+                    {isAdmin && (
+                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-4 text-amber-400 bg-amber-950/40 hover:bg-amber-900/30 rounded-xl font-bold mb-6 border border-amber-500/30 shadow-sm transition-all">
                             <ShieldCheck size={22}/> Administración
                         </Link>
                     )}
@@ -269,9 +271,9 @@ export default function Layout() {
         </div>
         <div className="flex items-center gap-6">
           {/* Admin Link for Desktop */}
-          {user?.role?.toUpperCase() === 'ADMIN' && (
-              <Link to="/admin" className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 text-sm bg-amber-900/20 px-3 py-1.5 rounded-full border border-amber-500/20">
-                  <ShieldCheck size={16}/> Admin
+          {isAdmin && (
+              <Link to="/admin" className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 text-sm bg-amber-950/40 px-4 py-2 rounded-full border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)] transition-all">
+                  <ShieldCheck size={16}/> Administración
               </Link>
           )}
 
