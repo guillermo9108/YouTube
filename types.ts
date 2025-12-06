@@ -63,6 +63,7 @@ export interface User {
   watchLater: string[]; 
   sessionToken?: string; 
   avatarUrl?: string; 
+  lastActive?: number;
   defaultPrices?: Record<string, number>; 
   shippingDetails?: {
       fullName: string;

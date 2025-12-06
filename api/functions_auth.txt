@@ -70,8 +70,9 @@ function auth_register($pdo, $input) {
     }
 
     $token = bin2hex(random_bytes(32));
+    $timestamp = time();
     $stmt = $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, avatarUrl, currentSessionId, lastActive, watchLater) VALUES (?, ?, ?, 'USER', 0.00, ?, ?, ?, '[]')");
-    $stmt->execute([$id, $username, $hash, $avatarUrl, $token, time()]);
+    $stmt->execute([$id, $username, $hash, $avatarUrl, $token, $timestamp]);
 
     $user = [
         'id' => $id, 
@@ -80,6 +81,7 @@ function auth_register($pdo, $input) {
         'balance' => 0.00, 
         'avatarUrl' => fix_url($avatarUrl), 
         'sessionToken' => $token,
+        'lastActive' => $timestamp,
         'watchLater' => []
     ];
     respond(true, $user);
