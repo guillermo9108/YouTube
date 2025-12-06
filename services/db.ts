@@ -1,4 +1,4 @@
-import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
 // This ensures it works in subfolders (e.g., 192.168.x.x/streampay/) on Synology/XAMPP
@@ -496,9 +496,16 @@ class DatabaseService {
   async getUserTransactions(userId: string): Promise<Transaction[]> { return this.request<Transaction[]>(`index.php?action=get_transactions&userId=${userId}`); }
   async getVideosByCreator(creatorId: string): Promise<Video[]> { return this.request<Video[]>(`index.php?action=get_creator_videos&creatorId=${creatorId}`); }
   
+  // ADMIN & BALANCE REQUESTS
   async adminRepairDb(): Promise<void> { await this.request('index.php?action=admin_repair_db', 'POST', {}); }
   async adminCleanupVideos(): Promise<{deleted: number}> { return this.request<{deleted: number}>('index.php?action=admin_cleanup_videos', 'POST', {}); }
   
+  async requestBalance(userId: string, amount: number): Promise<void> { await this.request('index.php?action=request_balance', 'POST', { userId, amount }); }
+  async getBalanceRequests(): Promise<BalanceRequest[]> { return this.request<BalanceRequest[]>('index.php?action=admin_get_balance_requests', 'POST', {}); }
+  async handleBalanceRequest(adminId: string, requestId: string, action: 'APPROVED' | 'REJECTED'): Promise<void> {
+      await this.request('index.php?action=admin_handle_balance_request', 'POST', { adminId, requestId, action });
+  }
+
   async getSmartCleanerPreview(category: string, percentage: number, safeHarborDays: number): Promise<SmartCleanerResult> {
       return this.request<SmartCleanerResult>('index.php?action=admin_smart_cleaner_preview', 'POST', { category, percentage, safeHarborDays });
   }

@@ -1,9 +1,10 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from '../components/Router';
 import { db } from '../services/db';
-import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck } from 'lucide-react';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck, PlusCircle } from 'lucide-react';
 import { Video, Transaction, VideoCategory } from '../types';
 
 export default function Profile() {
@@ -15,6 +16,10 @@ export default function Profile() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [myVideos, setMyVideos] = useState<Video[]>([]);
   
+  // Balance Request
+  const [showRequestBalance, setShowRequestBalance] = useState(false);
+  const [reqAmount, setReqAmount] = useState<number>(100);
+
   // Security Tab
   const [tab, setTab] = useState<'OVERVIEW' | 'SECURITY' | 'PRICING' | 'SHIPPING'>('OVERVIEW');
   const [oldPass, setOldPass] = useState('');
@@ -114,6 +119,17 @@ export default function Profile() {
       }
   };
 
+  const requestBalance = async () => {
+      if (reqAmount <= 0) return;
+      try {
+          await db.requestBalance(user.id, reqAmount);
+          alert("Request sent! An admin will review it shortly.");
+          setShowRequestBalance(false);
+      } catch (e: any) {
+          alert("Error: " + e.message);
+      }
+  };
+
   return (
     <div className="space-y-6 pb-20">
       <div className="flex justify-between items-center">
@@ -140,7 +156,7 @@ export default function Profile() {
       {tab === 'OVERVIEW' && (
       <>
         {/* Profile Card & Avatar */}
-        <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-6 rounded-2xl border border-indigo-500/30 shadow-xl relative overflow-hidden flex items-center gap-6">
+        <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-6 rounded-2xl border border-indigo-500/30 shadow-xl relative overflow-hidden flex flex-col md:flex-row items-center gap-6">
             <div className="relative group shrink-0">
                 <div className="w-20 h-20 rounded-full border-4 border-indigo-500/50 overflow-hidden bg-black/50">
                     {user.avatarUrl ? (
@@ -155,15 +171,18 @@ export default function Profile() {
                 </label>
             </div>
             
-            <div className="relative z-10">
-            <div className="flex items-center gap-2 text-indigo-300 mb-1">
-                <Wallet size={18} />
-                <span className="font-medium uppercase tracking-wide text-xs">Current Balance</span>
-            </div>
-            <div className="text-4xl font-mono font-bold text-white tracking-tight">
-                {user.balance} <span className="text-lg text-slate-400">SALDO</span>
-            </div>
-            <p className="text-xs text-slate-400 mt-2">@{user.username}</p>
+            <div className="relative z-10 flex-1 text-center md:text-left">
+                <div className="flex items-center justify-center md:justify-start gap-2 text-indigo-300 mb-1">
+                    <Wallet size={18} />
+                    <span className="font-medium uppercase tracking-wide text-xs">Current Balance</span>
+                </div>
+                <div className="text-4xl font-mono font-bold text-white tracking-tight flex flex-col md:flex-row items-center gap-4">
+                    <span>{user.balance} <span className="text-lg text-slate-400">SALDO</span></span>
+                    <button onClick={() => setShowRequestBalance(true)} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-full flex items-center gap-1">
+                        <PlusCircle size={14}/> Request
+                    </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-2">@{user.username}</p>
             </div>
         </div>
 
@@ -397,6 +416,32 @@ export default function Profile() {
               </form>
           </div>
       )}
+
+      {/* Request Balance Modal */}
+      {showRequestBalance && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 w-full max-w-sm p-6 rounded-2xl border border-slate-700 shadow-2xl animate-in zoom-in-95">
+                  <h3 className="text-xl font-bold text-white mb-2">Request Saldo</h3>
+                  <p className="text-slate-400 text-sm mb-4">Need more funds? Request a balance top-up from the admin.</p>
+                  
+                  <div className="mb-4">
+                      <label className="text-xs font-bold text-slate-500 uppercase">Amount Needed</label>
+                      <input 
+                        type="number" 
+                        value={reqAmount} 
+                        onChange={e => setReqAmount(Math.max(1, parseInt(e.target.value)))}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 text-white text-lg font-bold mt-1"
+                      />
+                  </div>
+
+                  <div className="flex gap-3">
+                      <button onClick={() => setShowRequestBalance(false)} className="flex-1 py-3 rounded-lg font-bold text-slate-400 hover:bg-slate-800 transition-colors">Cancel</button>
+                      <button onClick={requestBalance} className="flex-1 py-3 rounded-lg font-bold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors">Send Request</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
     </div>
   );
 }

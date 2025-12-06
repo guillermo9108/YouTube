@@ -65,6 +65,15 @@ $schema = [
             'type' => 'VARCHAR(20)'
         ]
     ],
+    'balance_requests' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'userId' => 'VARCHAR(50)',
+            'amount' => 'DECIMAL(10, 2)',
+            'status' => "ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING'",
+            'createdAt' => 'BIGINT'
+        ]
+    ],
     'comments' => [
         'cols' => [
             'id' => 'VARCHAR(50) PRIMARY KEY',

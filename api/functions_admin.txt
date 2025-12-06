@@ -19,6 +19,68 @@ function admin_add_balance($pdo, $input) {
     respond(true);
 }
 
+// User Action: Request Balance
+function user_request_balance($pdo, $input) {
+    $id = uniqid('br_');
+    $userId = $input['userId'];
+    $amount = $input['amount'];
+    
+    $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, ?, 'PENDING', ?)")
+        ->execute([$id, $userId, $amount, time()]);
+        
+    respond(true);
+}
+
+// Admin Action: Get Requests
+function admin_get_balance_requests($pdo) {
+    $stmt = $pdo->query("SELECT br.*, u.username FROM balance_requests br LEFT JOIN users u ON br.userId = u.id WHERE br.status = 'PENDING' ORDER BY br.createdAt ASC");
+    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+// Admin Action: Handle Request
+function admin_handle_balance_request($pdo, $input) {
+    $reqId = $input['requestId'];
+    $action = $input['action']; // APPROVED or REJECTED
+    $adminId = $input['adminId'];
+    
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT userId, amount FROM balance_requests WHERE id = ? FOR UPDATE");
+        $stmt->execute([$reqId]);
+        $req = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$req) throw new Exception("Request not found");
+        
+        $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$action, $reqId]);
+        
+        if ($action === 'APPROVED') {
+            // Add Balance
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
+            
+            // Log Transaction
+            $tid = uniqid('tx_dep_');
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'DEPOSIT')")
+                ->execute([$tid, $req['userId'], $req['amount'], time()]);
+                
+            // Notify User
+            $nid = uniqid('n_');
+            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
+                ->execute([$nid, $req['userId'], "Your request for {$req['amount']} Saldo was approved.", time()]);
+        } else {
+             // Notify Rejection
+            $nid = uniqid('n_');
+            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
+                ->execute([$nid, $req['userId'], "Your request for {$req['amount']} Saldo was declined.", time()]);
+        }
+
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        respond(false, null, $e->getMessage());
+    }
+}
+
 function admin_cleanup_videos($pdo) {
     $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE isLocal = 0");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);

@@ -111,9 +111,12 @@ try {
         case 'get_notifications': interact_get_notifications($pdo, $_GET['userId']); break;
         case 'mark_notification_read': interact_mark_notification_read($pdo, $input); break;
         case 'get_transactions': interact_get_transactions($pdo, $_GET['userId']); break;
+        case 'request_balance': user_request_balance($pdo, $input); break;
 
         // Admin
         case 'admin_add_balance': admin_add_balance($pdo, $input); break;
+        case 'admin_get_balance_requests': admin_get_balance_requests($pdo); break;
+        case 'admin_handle_balance_request': admin_handle_balance_request($pdo, $input); break;
         case 'admin_cleanup_videos': admin_cleanup_videos($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
         case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;

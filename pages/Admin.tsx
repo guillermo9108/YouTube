@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
-import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem } from '../types';
+import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -16,7 +16,7 @@ export default function Admin() {
   const [processingQueue, setProcessingQueue] = useState(false);
   const [processResult, setProcessResult] = useState('');
   const [requests, setRequests] = useState<ContentRequest[]>([]);
-  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES' | 'LIBRARY' | 'FTP' | 'MARKET'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'CONFIG' | 'CLEANER' | 'CATEGORIES' | 'LIBRARY' | 'FTP' | 'MARKET' | 'FINANCE'>('USERS');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
 
   // Cleaner State
@@ -42,6 +42,9 @@ export default function Admin() {
   // Market State
   const [marketItems, setMarketItems] = useState<MarketplaceItem[]>([]);
   const [marketSearch, setMarketSearch] = useState('');
+  
+  // Balance Requests
+  const [balanceRequests, setBalanceRequests] = useState<BalanceRequest[]>([]);
 
   useEffect(() => {
     loadData();
@@ -55,6 +58,9 @@ export default function Admin() {
   useEffect(() => {
       if (activeTab === 'MARKET') {
           db.adminGetMarketplaceItems().then(setMarketItems);
+      }
+      if (activeTab === 'FINANCE') {
+          db.getBalanceRequests().then(setBalanceRequests);
       }
   }, [activeTab]);
 
@@ -245,6 +251,18 @@ export default function Admin() {
       await db.adminDeleteListing(id);
       setMarketItems(prev => prev.filter(i => i.id !== id));
   };
+  
+  const handleBalanceRequest = async (req: BalanceRequest, action: 'APPROVED' | 'REJECTED') => {
+      if (!currentUser) return;
+      if (!confirm(`Are you sure you want to ${action} this request?`)) return;
+      
+      try {
+          await db.handleBalanceRequest(currentUser.id, req.id, action);
+          setBalanceRequests(prev => prev.filter(r => r.id !== req.id));
+      } catch (e: any) {
+          alert("Error: " + e.message);
+      }
+  };
 
   const filteredUsers = users.filter(u => u.username.toLowerCase().includes(search.toLowerCase()));
 
@@ -283,6 +301,7 @@ export default function Admin() {
         </div>
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
            <button onClick={() => setActiveTab('USERS')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'USERS' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Users</button>
+           <button onClick={() => setActiveTab('FINANCE')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'FINANCE' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Financials</button>
            <button onClick={() => setActiveTab('CONFIG')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CONFIG' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Config</button>
            <button onClick={() => setActiveTab('CATEGORIES')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CATEGORIES' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cat & Prices</button>
            <button onClick={() => setActiveTab('LIBRARY')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'LIBRARY' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Local Scan</button>
@@ -291,6 +310,50 @@ export default function Admin() {
            <button onClick={() => setActiveTab('CLEANER')} className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold ${activeTab === 'CLEANER' ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cleaner</button>
         </div>
       </div>
+      
+      {activeTab === 'FINANCE' && (
+          <div className="space-y-6">
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                  <h3 className="font-bold text-white flex items-center gap-2 mb-4"><ShoppingBag size={18}/> Pending Saldo Requests</h3>
+                  
+                  {balanceRequests.length === 0 ? (
+                      <div className="text-center p-8 text-slate-500">No pending requests at this time.</div>
+                  ) : (
+                      <div className="overflow-x-auto">
+                          <table className="w-full text-left text-sm">
+                              <thead className="bg-slate-950 text-slate-400 uppercase font-bold text-xs">
+                                  <tr>
+                                      <th className="p-4">User</th>
+                                      <th className="p-4">Amount</th>
+                                      <th className="p-4">Requested At</th>
+                                      <th className="p-4 text-center">Action</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800">
+                                  {balanceRequests.map(req => (
+                                      <tr key={req.id}>
+                                          <td className="p-4 font-bold text-white">{req.username}</td>
+                                          <td className="p-4 font-mono text-amber-400 text-lg">{req.amount}</td>
+                                          <td className="p-4 text-slate-400">{new Date(req.createdAt * 1000).toLocaleString()}</td>
+                                          <td className="p-4">
+                                              <div className="flex items-center justify-center gap-2">
+                                                  <button onClick={() => handleBalanceRequest(req, 'APPROVED')} className="p-2 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-lg transition-colors flex items-center gap-1">
+                                                      <CheckCircle size={16}/> Approve
+                                                  </button>
+                                                  <button onClick={() => handleBalanceRequest(req, 'REJECTED')} className="p-2 bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white rounded-lg transition-colors flex items-center gap-1">
+                                                      <XCircle size={16}/> Reject
+                                                  </button>
+                                              </div>
+                                          </td>
+                                      </tr>
+                                  ))}
+                              </tbody>
+                          </table>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
 
       {activeTab === 'MARKET' && (
           <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">

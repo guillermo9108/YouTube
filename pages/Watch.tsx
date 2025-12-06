@@ -1,7 +1,7 @@
 
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info } from 'lucide-react';
+import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info, Wallet } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -78,6 +78,10 @@ export default function Watch() {
   const [newComment, setNewComment] = useState('');
   const [isPostingComment, setIsPostingComment] = useState(false);
 
+  // Balance Request Modal
+  const [showReqModal, setShowReqModal] = useState(false);
+  const [reqAmount, setReqAmount] = useState(0);
+
   // Playback Control State
   const videoRef = useRef<HTMLVideoElement>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -115,8 +119,11 @@ export default function Watch() {
             }
             
             setVideo(v);
-
-            if (user) {
+            
+            // Auto-unlock for Admins
+            if (user?.role === 'ADMIN') {
+                 setIsUnlocked(true);
+            } else if (user) {
                 db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Purchase check failed", e));
                 db.getInteraction(user.id, v.id).then(res => isMounted && setInteraction(res)).catch(e => console.warn("Interaction fetch failed", e));
                 if (user.watchLater) setIsWatchLater(user.watchLater.includes(v.id));
@@ -238,13 +245,33 @@ export default function Watch() {
 
   const handlePurchase = async () => {
       if (!user || !video || purchasing) return;
-      if (Number(user.balance) < Number(video.price)) { alert("Insufficient Balance"); return; }
+      
+      // Admin Check: Just in case UI didn't update, admins are always unlocked.
+      if (user.role === 'ADMIN') { setIsUnlocked(true); return; }
+
+      if (Number(user.balance) < Number(video.price)) { 
+          setReqAmount(Math.ceil(Number(video.price) - Number(user.balance)) + 5); // Suggest needing 5 more than deficit
+          setShowReqModal(true);
+          return; 
+      }
+
       setPurchasing(true);
       try {
           await db.purchaseVideo(user.id, video.id);
           refreshUser();
           setIsUnlocked(true);
       } catch (e) { alert("Purchase failed"); } finally { setPurchasing(false); }
+  };
+
+  const submitBalanceRequest = async () => {
+      if (!user) return;
+      try {
+          await db.requestBalance(user.id, reqAmount);
+          alert("Request sent successfully to Admin!");
+          setShowReqModal(false);
+      } catch (e: any) {
+          alert("Error: " + e.message);
+      }
   };
 
   const postComment = async (e: React.FormEvent) => {
@@ -290,7 +317,7 @@ export default function Watch() {
       </div>
   );
 
-  const canAfford = Number(user?.balance || 0) >= Number(video?.price || 0);
+  const canAfford = Number(user?.balance || 0) >= Number(video?.price || 0) || user?.role === 'ADMIN';
 
   return (
     <div className="max-w-5xl mx-auto pb-6" key={video?.id || 'loading'}>
@@ -330,7 +357,7 @@ export default function Watch() {
                         )}
                     </>
                   ) : (
-                    <div onClick={canAfford ? handlePurchase : undefined} className={`absolute inset-0 z-10 flex flex-col items-center justify-center bg-cover bg-center ${canAfford ? 'cursor-pointer' : ''}`} style={{backgroundImage: `url(${video.thumbnailUrl})`}}>
+                    <div onClick={handlePurchase} className={`absolute inset-0 z-10 flex flex-col items-center justify-center bg-cover bg-center cursor-pointer`} style={{backgroundImage: `url(${video.thumbnailUrl})`}}>
                         <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity hover:bg-black/40" />
                         <div className="relative z-20 flex flex-col items-center p-3 bg-black/60 border border-white/10 rounded-xl backdrop-blur-md shadow-2xl transform transition-transform active:scale-95 max-w-[200px]">
                              <div className="flex items-center gap-1 mb-1"><span className="text-3xl font-black text-amber-400 drop-shadow-lg">{video.price}</span><span className="text-[10px] font-bold text-amber-200 uppercase mt-1">Saldo</span></div>
@@ -439,6 +466,41 @@ export default function Watch() {
             <div className="space-y-2">{relatedVideos.map(rv => <RelatedVideoItem key={rv.id} rv={rv} userId={user?.id} />)}</div>
         </div>
       </div>
+
+      {/* Saldo Request Modal */}
+      {showReqModal && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 w-full max-w-sm rounded-xl border border-slate-700 p-6 shadow-2xl animate-in zoom-in-95">
+                  <div className="text-center mb-4">
+                      <div className="w-12 h-12 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-3 text-red-500">
+                          <AlertCircle size={32} />
+                      </div>
+                      <h3 className="text-lg font-bold text-white">Insufficient Balance</h3>
+                      <p className="text-sm text-slate-400 mt-1">
+                          You need <span className="text-amber-400 font-bold">{video?.price} Saldo</span> but you only have <span className="text-slate-300">{user?.balance} Saldo</span>.
+                      </p>
+                  </div>
+                  
+                  <div className="bg-slate-950 p-4 rounded-lg mb-4 border border-slate-800">
+                      <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Request Top-up Amount</label>
+                      <div className="flex items-center gap-2">
+                          <Wallet size={16} className="text-indigo-400"/>
+                          <input 
+                            type="number" 
+                            value={reqAmount} 
+                            onChange={e => setReqAmount(Math.max(1, parseInt(e.target.value)))}
+                            className="flex-1 bg-transparent text-white font-bold outline-none border-b border-slate-700 focus:border-indigo-500 py-1"
+                          />
+                      </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                      <button onClick={() => setShowReqModal(false)} className="flex-1 py-2.5 rounded-lg font-bold text-slate-400 hover:bg-slate-800 transition-colors">Cancel</button>
+                      <button onClick={submitBalanceRequest} className="flex-1 py-2.5 rounded-lg font-bold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors">Request Saldo</button>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 }

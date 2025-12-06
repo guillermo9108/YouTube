@@ -1,5 +1,16 @@
 <?php
 function interact_has_purchased($pdo, $userId, $videoId) {
+    // 1. Check if user is ADMIN. Admins have global access.
+    $stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+    $stmt->execute([$userId]);
+    $role = $stmt->fetchColumn();
+    
+    if ($role === 'ADMIN') {
+        respond(true, ['hasPurchased' => true]);
+        return;
+    }
+
+    // 2. Check if owned or purchased
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
     $stmt->execute([$userId, $videoId]);
     respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);

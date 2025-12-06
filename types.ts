@@ -123,6 +123,15 @@ export interface ContentRequest {
   useLocalNetwork: boolean; 
 }
 
+export interface BalanceRequest {
+    id: string;
+    userId: string;
+    username: string; // Joined field
+    amount: number;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    createdAt: number;
+}
+
 export interface FtpSettings {
     host: string;
     port: number;
