@@ -266,6 +266,13 @@ export default function Layout() {
             </Link>
         </div>
         <div className="flex items-center gap-6">
+          {/* Admin Link for Desktop */}
+          {user?.role === 'ADMIN' && (
+              <Link to="/admin" className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 text-sm bg-amber-900/20 px-3 py-1.5 rounded-full border border-amber-500/20">
+                  <ShieldCheck size={16}/> Admin
+              </Link>
+          )}
+
           {user && <NotificationBell />}
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">
              {user?.balance} Saldo

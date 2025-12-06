@@ -29,9 +29,15 @@ export function useParams(): Record<string, string | undefined> {
     return { userId: channelMatch[1] };
   }
 
-  // AGREGADO: Soporte para rutas de Marketplace
+  // AGREGADO: Soporte específico para Editar antes que Ver
+  const marketEditMatch = pathname.match(/\/marketplace\/edit\/([^/?&]+)/);
+  if (marketEditMatch) {
+    return { id: marketEditMatch[1] };
+  }
+
+  // AGREGADO: Soporte para rutas de Marketplace Item
   const marketMatch = pathname.match(/\/marketplace\/([^/?&]+)/);
-  if (marketMatch && !pathname.includes('/marketplace/create') && !pathname.endsWith('/marketplace')) {
+  if (marketMatch && !pathname.includes('/marketplace/create') && !pathname.includes('/marketplace/edit') && !pathname.endsWith('/marketplace')) {
     return { id: marketMatch[1] };
   }
 
