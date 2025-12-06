@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from '../components/Router';
 import { db, SaleRecord } from '../services/db';
-import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck, PlusCircle, Package, MapPin, Phone } from 'lucide-react';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck, PlusCircle, Package, MapPin, Phone, TrendingUp } from 'lucide-react';
 import { Video, Transaction, VideoCategory } from '../types';
 import { useToast } from '../context/ToastContext';
 
@@ -200,7 +200,7 @@ export default function Profile() {
                     <span className="font-medium uppercase tracking-wide text-xs">Saldo Actual</span>
                 </div>
                 <div className="text-4xl font-mono font-bold text-white tracking-tight flex flex-col md:flex-row items-center gap-4">
-                    <span>{user.balance} <span className="text-lg text-slate-400">SALDO</span></span>
+                    <span>{user.balance.toFixed(2)} <span className="text-lg text-slate-400">SALDO</span></span>
                     <button onClick={() => setShowRequestBalance(true)} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-full flex items-center gap-1">
                         <PlusCircle size={14}/> Recargar
                     </button>
@@ -319,7 +319,7 @@ export default function Profile() {
                         </div>
                         </div>
                         <div className={`font-mono font-bold text-sm ${isIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {isIncoming ? '+' : '-'}{tx.amount}
+                        {isIncoming ? '+' : '-'}{Number(tx.amount).toFixed(2)}
                         </div>
                     </div>
                     );
@@ -340,8 +340,13 @@ export default function Profile() {
                   </div>
               ) : (
                   <div className="space-y-4">
-                      {sales.map(sale => (
-                          <div key={sale.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                      {sales.map(sale => {
+                          const gross = Number(sale.amount);
+                          const fee = Number(sale.adminFee || 0);
+                          const net = gross - fee;
+                          
+                          return (
+                          <div key={sale.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
                               {/* Header */}
                               <div className="p-4 flex gap-4 cursor-pointer hover:bg-slate-800/50 transition-colors" onClick={() => setExpandedSale(expandedSale === sale.id ? null : sale.id)}>
                                   <div className="w-16 h-16 bg-black rounded-lg shrink-0 overflow-hidden">
@@ -350,7 +355,7 @@ export default function Profile() {
                                   <div className="flex-1 min-w-0">
                                       <div className="flex justify-between items-start">
                                           <h4 className="font-bold text-white truncate pr-2">{sale.itemTitle}</h4>
-                                          <span className="font-mono text-emerald-400 font-bold">{sale.amount} $</span>
+                                          <span className="font-mono text-emerald-400 font-bold">+{net.toFixed(2)} $</span>
                                       </div>
                                       <div className="flex items-center gap-2 mt-1">
                                           <div className="w-5 h-5 rounded-full overflow-hidden bg-slate-700">
@@ -370,6 +375,22 @@ export default function Profile() {
                               {/* Details (Expanded) */}
                               {expandedSale === sale.id && (
                                   <div className="border-t border-slate-800 p-4 bg-slate-950/50 animate-in slide-in-from-top-2">
+                                      {/* Financial Breakdown */}
+                                      <div className="bg-slate-900 rounded-lg p-3 mb-4 border border-slate-800 text-xs">
+                                          <div className="flex justify-between text-slate-400 mb-1">
+                                              <span>Precio Venta:</span>
+                                              <span>{gross.toFixed(2)} $</span>
+                                          </div>
+                                          <div className="flex justify-between text-red-400 mb-1">
+                                              <span>Comisión Plataforma:</span>
+                                              <span>-{fee.toFixed(2)} $</span>
+                                          </div>
+                                          <div className="flex justify-between font-bold text-emerald-400 pt-2 border-t border-slate-800 mt-2">
+                                              <span className="flex items-center gap-1"><TrendingUp size={12}/> Tu Ganancia:</span>
+                                              <span>{net.toFixed(2)} $</span>
+                                          </div>
+                                      </div>
+
                                       {sale.shippingData ? (
                                           <div className="space-y-3 text-sm">
                                               <div className="flex items-start gap-2 text-slate-300">
@@ -405,7 +426,8 @@ export default function Profile() {
                                   </div>
                               )}
                           </div>
-                      ))}
+                          );
+                      })}
                   </div>
               )}
           </div>

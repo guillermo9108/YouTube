@@ -305,8 +305,9 @@ function market_get_sales($pdo, $userId) {
     
     // We join marketplace_items to get product details at the moment of viewing (image/title might change but ID is same)
     // We join users to get buyer info
+    // CRITICAL: Include adminFee for transparency
     $sql = "
-        SELECT t.id, t.amount, t.timestamp, t.fulfillmentStatus, t.shippingData,
+        SELECT t.id, t.amount, t.adminFee, t.timestamp, t.fulfillmentStatus, t.shippingData,
                m.title as itemTitle, m.images as itemImages,
                u.username as buyerName, u.avatarUrl as buyerAvatar
         FROM transactions t
