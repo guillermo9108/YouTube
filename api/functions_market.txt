@@ -1,3 +1,4 @@
+
 <?php
 // Auto-migrate schema helper
 function market_ensure_schema($pdo) {
@@ -156,24 +157,31 @@ function market_edit_listing($pdo, $input) {
     $params = [];
 
     // Calcular precio con descuento si se aplica
-    if (isset($data['originalPrice']) && isset($data['discountPercent'])) {
-        $orig = floatval($data['originalPrice']);
-        $disc = intval($data['discountPercent']);
+    if (isset($data['originalPrice']) || isset($data['discountPercent'])) {
+        // Necesitamos valores actuales si faltan en input
+        $stmt = $pdo->prepare("SELECT originalPrice, discountPercent FROM marketplace_items WHERE id = ?");
+        $stmt->execute([$id]);
+        $curr = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        $orig = isset($data['originalPrice']) ? floatval($data['originalPrice']) : floatval($curr['originalPrice']);
+        $disc = isset($data['discountPercent']) ? intval($data['discountPercent']) : intval($curr['discountPercent']);
+        
         $newPrice = $orig - ($orig * ($disc / 100));
         
+        if (isset($data['originalPrice'])) { $fields[] = "originalPrice = ?"; $params[] = $orig; }
+        if (isset($data['discountPercent'])) { $fields[] = "discountPercent = ?"; $params[] = $disc; }
+        
         $fields[] = "price = ?"; $params[] = $newPrice;
-        $fields[] = "originalPrice = ?"; $params[] = $orig;
-        $fields[] = "discountPercent = ?"; $params[] = $disc;
     } else if (isset($data['price'])) {
-        // Cambio directo de precio
+        // Cambio legacy directo de precio (resetea descuento)
         $fields[] = "price = ?"; $params[] = floatval($data['price']);
-        $fields[] = "originalPrice = ?"; $params[] = floatval($data['price']); // Reset descuento
+        $fields[] = "originalPrice = ?"; $params[] = floatval($data['price']);
         $fields[] = "discountPercent = ?"; $params[] = 0;
     }
 
     if (isset($data['stock'])) {
         $fields[] = "stock = ?"; $params[] = intval($data['stock']);
-        // Auto activar si stock > 0
+        // Auto activar/desactivar según stock
         if (intval($data['stock']) > 0) {
             $fields[] = "status = 'ACTIVO'";
         } else {
@@ -181,10 +189,7 @@ function market_edit_listing($pdo, $input) {
         }
     }
 
-    if (isset($data['status'])) {
-        $fields[] = "status = ?"; $params[] = $data['status'];
-    }
-    
+    if (isset($data['status'])) { $fields[] = "status = ?"; $params[] = $data['status']; }
     if (isset($data['title'])) { $fields[] = "title = ?"; $params[] = $data['title']; }
     if (isset($data['description'])) { $fields[] = "description = ?"; $params[] = $data['description']; }
 
@@ -248,28 +253,34 @@ function market_checkout($pdo, $input) {
         $adminId = $stmt->fetchColumn();
 
         foreach ($cart as $item) {
+            $qty = isset($item['quantity']) ? intval($item['quantity']) : 1;
+            
             // Verificar stock y estado
             $stmt = $pdo->prepare("SELECT price, sellerId, status, title, stock FROM marketplace_items WHERE id = ? FOR UPDATE");
             $stmt->execute([$item['id']]);
             $realItem = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if (!$realItem) throw new Exception("Artículo '{$item['title']}' no encontrado.");
-            if ($realItem['status'] !== 'ACTIVO' || $realItem['stock'] < 1) throw new Exception("Artículo '{$realItem['title']}' está agotado o no disponible.");
+            if ($realItem['status'] !== 'ACTIVO') throw new Exception("Artículo '{$realItem['title']}' no está activo.");
+            if ($realItem['stock'] < $qty) throw new Exception("Stock insuficiente para '{$realItem['title']}' (Solicitado: $qty, Disponible: {$realItem['stock']})");
+            
+            // Calcular Total del Item
+            $unitPrice = floatval($realItem['price']);
+            $totalItemPrice = $unitPrice * $qty;
             
             // Verificar saldo comprador
             $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
             $stmt->execute([$userId]);
             $balance = $stmt->fetchColumn();
             
-            if ($balance < $realItem['price']) throw new Exception("Saldo insuficiente para '{$item['title']}'");
+            if ($balance < $totalItemPrice) throw new Exception("Saldo insuficiente para pagar $totalItemPrice $ por '{$item['title']}'");
             
             // Calcular split
-            $price = floatval($realItem['price']);
-            $adminFee = $price * $COMMISSION_RATE;
-            $sellerShare = $price - $adminFee;
+            $adminFee = $totalItemPrice * $COMMISSION_RATE;
+            $sellerShare = $totalItemPrice - $adminFee;
             
             // Transferir fondos
-            $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$price, $userId]);
+            $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$totalItemPrice, $userId]);
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$sellerShare, $realItem['sellerId']]);
             
             if ($adminId) {
@@ -277,19 +288,19 @@ function market_checkout($pdo, $input) {
             }
             
             // Reducir stock
-            $newStock = $realItem['stock'] - 1;
+            $newStock = $realItem['stock'] - $qty;
             $newStatus = $newStock > 0 ? 'ACTIVO' : 'AGOTADO';
             $pdo->prepare("UPDATE marketplace_items SET stock = ?, status = ? WHERE id = ?")->execute([$newStock, $newStatus, $item['id']]);
             
             // Registrar transacción
             $tid = uniqid('tx_m_');
             $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, marketplaceItemId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, ?, 'MARKETPLACE')")
-                ->execute([$tid, $userId, $realItem['sellerId'], $item['id'], $price, $adminFee, time()]);
+                ->execute([$tid, $userId, $realItem['sellerId'], $item['id'], $totalItemPrice, $adminFee, time()]);
                 
             // Notificar vendedor
             $shippingText = "Enviar a: {$shipping['fullName']}, {$shipping['address']}, {$shipping['city']}";
             $nid = uniqid('n_');
-            $notifText = "Vendiste '{$realItem['title']}' por {$sellerShare} Saldo (Comisión: {$adminFee}). $shippingText";
+            $notifText = "Vendiste $qty x '{$realItem['title']}' por $sellerShare Saldo (Comisión: $adminFee). $shippingText";
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SALE', ?, '/profile', 0, ?)")
                 ->execute([$nid, $realItem['sellerId'], $notifText, time()]);
         }

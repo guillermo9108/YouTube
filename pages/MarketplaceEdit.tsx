@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/db';
@@ -13,9 +14,9 @@ export default function MarketplaceEdit() {
     const [item, setItem] = useState<MarketplaceItem | null>(null);
 
     // Form State
-    const [basePrice, setBasePrice] = useState(0); // This is originalPrice
-    const [stock, setStock] = useState(1);
-    const [discount, setDiscount] = useState(0);
+    const [basePrice, setBasePrice] = useState<number | string>(0); 
+    const [stock, setStock] = useState<number | string>(1);
+    const [discount, setDiscount] = useState<number | string>(0);
     const [title, setTitle] = useState('');
     const [desc, setDesc] = useState('');
 
@@ -24,10 +25,11 @@ export default function MarketplaceEdit() {
             db.getMarketplaceItem(id).then(data => {
                 if (data) {
                     setItem(data);
-                    // If item has originalPrice, use it as base. Otherwise use current price.
-                    setBasePrice(data.originalPrice && data.originalPrice > 0 ? data.originalPrice : data.price);
-                    setStock(data.stock || 1);
-                    setDiscount(data.discountPercent || 0);
+                    // Use originalPrice if set (showing discount logic was used), else price
+                    const initialPrice = (data.originalPrice && data.originalPrice > 0) ? data.originalPrice : data.price;
+                    setBasePrice(initialPrice);
+                    setStock(data.stock ?? 1);
+                    setDiscount(data.discountPercent ?? 0);
                     setTitle(data.title);
                     setDesc(data.description);
                 }
@@ -43,10 +45,9 @@ export default function MarketplaceEdit() {
             await db.editListing(id, user.id, {
                 title: title,
                 description: desc,
-                originalPrice: basePrice, // Send base price as original
-                discountPercent: discount, // Send discount %
-                stock: stock,
-                // The backend will calculate the final 'price' based on originalPrice - discount
+                originalPrice: Number(basePrice),
+                discountPercent: Number(discount),
+                stock: Number(stock),
             });
             alert("Artículo actualizado correctamente");
             navigate(`/marketplace/${id}`);
@@ -59,7 +60,9 @@ export default function MarketplaceEdit() {
     if (!item || (user && item.sellerId !== user.id)) return <div className="p-10 text-center text-red-500">No autorizado</div>;
 
     // Calculate preview of final price
-    const finalPrice = basePrice - (basePrice * (discount / 100));
+    const numBase = Number(basePrice) || 0;
+    const numDisc = Number(discount) || 0;
+    const finalPrice = numBase - (numBase * (numDisc / 100));
 
     return (
         <div className="max-w-md mx-auto px-4 pt-6 pb-20">
@@ -71,7 +74,7 @@ export default function MarketplaceEdit() {
             
             <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6">
                 <div className="flex items-center gap-4 border-b border-slate-800 pb-4">
-                    <img src={item.images[0]} className="w-16 h-16 rounded object-cover" alt="" />
+                    {item.images && item.images[0] && <img src={item.images[0]} className="w-16 h-16 rounded object-cover" alt="" />}
                     <div className="flex-1 min-w-0">
                         <div className="text-[10px] uppercase font-bold text-slate-500 mb-1">Editando</div>
                         <input 
@@ -93,7 +96,7 @@ export default function MarketplaceEdit() {
                             type="number" 
                             min="0"
                             value={basePrice} 
-                            onChange={e => setBasePrice(parseFloat(e.target.value))} 
+                            onChange={e => setBasePrice(e.target.value)} 
                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white font-mono font-bold focus:border-indigo-500 outline-none"
                         />
                     </div>
@@ -101,15 +104,15 @@ export default function MarketplaceEdit() {
                     <div className="mb-2">
                         <div className="flex justify-between mb-1">
                             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Percent size={12}/> Descuento</label>
-                            <span className="text-xs font-bold text-indigo-400">{discount}% OFF</span>
+                            <span className="text-xs font-bold text-indigo-400">{numDisc}% OFF</span>
                         </div>
                         <input 
                             type="range" 
                             min="0" 
                             max="90" 
                             step="5"
-                            value={discount} 
-                            onChange={e => setDiscount(parseInt(e.target.value))} 
+                            value={numDisc} 
+                            onChange={e => setDiscount(e.target.value)} 
                             className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                         />
                     </div>
@@ -125,17 +128,17 @@ export default function MarketplaceEdit() {
                         <Archive size={14}/> Stock Disponible
                     </label>
                     <div className="flex items-center gap-3">
-                        <button onClick={() => setStock(Math.max(0, stock - 1))} className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold">-</button>
+                        <button onClick={() => setStock(Math.max(0, Number(stock) - 1))} className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold">-</button>
                         <input 
                             type="number" 
                             min="0"
                             value={stock} 
-                            onChange={e => setStock(parseInt(e.target.value))} 
+                            onChange={e => setStock(e.target.value)} 
                             className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-center text-white font-bold"
                         />
-                        <button onClick={() => setStock(stock + 1)} className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold">+</button>
+                        <button onClick={() => setStock(Number(stock) + 1)} className="w-10 h-10 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold">+</button>
                     </div>
-                    {stock === 0 && <div className="text-[10px] text-red-400 mt-2 flex items-center gap-1"><AlertCircle size={10}/> Se marcará como AGOTADO</div>}
+                    {Number(stock) === 0 && <div className="text-[10px] text-red-400 mt-2 flex items-center gap-1"><AlertCircle size={10}/> Se marcará como AGOTADO</div>}
                 </div>
 
                 <div>

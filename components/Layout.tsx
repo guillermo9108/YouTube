@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -236,7 +237,7 @@ export default function Layout() {
                     <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <ShoppingBag size={20}/> Tienda
                     </Link>
-                    {/* Cart Removed from Sidebar */}
+                    
                     <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <Upload size={20}/> Subir
                     </Link>
@@ -273,8 +274,6 @@ export default function Layout() {
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
           <Link to="/marketplace" className={isActive('/marketplace')}>Tienda</Link>
           
-          {/* Cart Removed from Header, only in Marketplace page */}
-
           <Link to="/upload" className={isActive('/upload')}>Subir</Link>
           <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>
             <Avatar size={24} />

@@ -49,6 +49,7 @@ export interface MarketplaceReview {
 
 export interface CartItem extends MarketplaceItem {
     cartId?: string;
+    quantity: number;
 }
 
 export interface User {
