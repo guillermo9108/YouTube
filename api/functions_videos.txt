@@ -209,6 +209,18 @@ function video_server_import($pdo, $input) {
 // Constants
 define('SCAN_QUEUE_FILE', 'scan_queue.json');
 
+// Helper to force UTF-8 for JSON encoding (Recursive)
+function utf8ize($mixed) {
+    if (is_array($mixed)) {
+        foreach ($mixed as $key => $value) {
+            $mixed[$key] = utf8ize($value);
+        }
+    } else if (is_string($mixed)) {
+        return mb_convert_encoding($mixed, "UTF-8", "UTF-8");
+    }
+    return $mixed;
+}
+
 // Step 1: Initialize Scan - Find files, Group by folder, Detect Series
 function video_scan_local($pdo, $input) {
     $path = $input['path'];
@@ -278,6 +290,8 @@ function video_scan_local($pdo, $input) {
         }
     }
 
+    // Sanitize Queue before saving
+    $queue = utf8ize($queue);
     file_put_contents(SCAN_QUEUE_FILE, json_encode($queue));
 
     respond(true, [
@@ -287,19 +301,32 @@ function video_scan_local($pdo, $input) {
     ]);
 }
 
-// Step 2: Process a Batch with Smart Naming & Auto Description
+// Step 2: Process a Batch with FAIL-SAFE strategy
 function video_scan_process_batch($pdo) {
     if (!file_exists(SCAN_QUEUE_FILE)) {
         respond(true, ['completed' => true, 'processed' => []]);
     }
 
-    $queue = json_decode(file_get_contents(SCAN_QUEUE_FILE), true);
-    if (empty($queue)) {
+    $json = file_get_contents(SCAN_QUEUE_FILE);
+    $queue = json_decode($json, true);
+
+    if (!is_array($queue) || empty($queue)) {
         @unlink(SCAN_QUEUE_FILE); 
         respond(true, ['completed' => true, 'processed' => []]);
     }
 
-    $BATCH_SIZE = 3; 
+    // STRATEGY: Pop 1 item, Save Queue, Then Process.
+    // This ensures if the processing crashes (timeout/memory), the bad item is already gone from the queue.
+    $item = array_shift($queue);
+
+    // Save remaining queue immediately
+    if (empty($queue)) {
+        @unlink(SCAN_QUEUE_FILE);
+    } else {
+        $safeQueue = utf8ize($queue);
+        file_put_contents(SCAN_QUEUE_FILE, json_encode($safeQueue));
+    }
+
     $processed = [];
     
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
@@ -308,80 +335,72 @@ function video_scan_process_batch($pdo) {
 
     $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
 
-    $batch = array_splice($queue, 0, $BATCH_SIZE);
+    $fullPath = is_array($item) ? $item['path'] : $item;
+    $detectedType = is_array($item) ? ($item['detectedType'] ?? null) : null;
 
-    foreach ($batch as $item) {
-        $fullPath = is_array($item) ? $item['path'] : $item; // Handle old format if exists
-        $detectedType = is_array($item) ? ($item['detectedType'] ?? null) : null;
+    try {
+        $vidId = 'loc_' . md5($fullPath . time());
+        
+        // SMART PARSING
+        $smartInfo = smartParseFilename($fullPath, $detectedType);
+        $title = $smartInfo['title'];
+        $forcedCategory = $smartInfo['category'];
 
-        try {
-            $vidId = 'loc_' . md5($fullPath . time());
-            
-            // SMART PARSING (Renaming & Categorization Override)
-            $smartInfo = smartParseFilename($fullPath, $detectedType);
-            $title = $smartInfo['title'];
-            $forcedCategory = $smartInfo['category'];
+        // 1. Get Metadata (Duration)
+        $meta = getVideoMetadata($fullPath);
+        $duration = $meta['duration'];
+        
+        // 2. Generate Thumbnail
+        $thumbName = "{$vidId}.jpg";
+        $thumbPath = THUMB_DIR . $thumbName;
+        $thumbResult = generateVideoThumbnail($fullPath, $thumbPath);
+        $finalThumb = $thumbResult ? $thumbPath : "https://via.placeholder.com/640x360.png?text=" . urlencode($title);
 
-            // 1. Get Metadata (Duration)
-            $meta = getVideoMetadata($fullPath);
-            $duration = $meta['duration'];
-            
-            // 2. Generate Thumbnail
-            $thumbName = "{$vidId}.jpg";
-            $thumbPath = THUMB_DIR . $thumbName;
-            $thumbResult = generateVideoThumbnail($fullPath, $thumbPath);
-            $finalThumb = $thumbResult ? $thumbPath : "https://via.placeholder.com/640x360.png?text=" . urlencode($title);
+        // 3. Final Category
+        $category = $forcedCategory ? $forcedCategory : detectCategoryFromDuration($duration);
+        
+        // 4. Price
+        $price = getPriceForCategory($category, $settings);
 
-            // 3. Final Category
-            $category = $forcedCategory ? $forcedCategory : detectCategoryFromDuration($duration);
-            
-            // 4. Price
-            $price = getPriceForCategory($category, $settings);
-
-            // 5. Auto Description (Local -> Online -> Default)
-            $description = findLocalDescription($fullPath);
-            if (!$description) {
-                $description = fetchOnlineDescription($title, $category);
-            }
-            if (!$description) {
-                $description = "Imported from NAS. Folder: " . basename(dirname($fullPath));
-            }
-
-            // 6. Insert
-            $insert->execute([
-                $vidId,
-                $title,
-                $description,
-                $price,
-                $finalThumb,
-                $fullPath,
-                $adminId,
-                time(),
-                $category,
-                $duration
-            ]);
-
-            $processed[] = [
-                'title' => $title,
-                'category' => $category,
-                'duration' => $duration
-            ];
-
-        } catch (Exception $e) {
-            $processed[] = ['title' => basename($fullPath), 'error' => $e->getMessage()];
+        // 5. Auto Description
+        $description = findLocalDescription($fullPath);
+        if (!$description) {
+            $description = fetchOnlineDescription($title, $category);
         }
-    }
+        if (!$description) {
+            $description = "Imported from NAS. Folder: " . basename(dirname($fullPath));
+        }
 
-    if (empty($queue)) {
-        @unlink(SCAN_QUEUE_FILE);
-        $completed = true;
-    } else {
-        file_put_contents(SCAN_QUEUE_FILE, json_encode($queue));
-        $completed = false;
+        // Force UTF-8 for DB
+        $title = mb_convert_encoding($title, 'UTF-8', 'auto');
+        $description = mb_convert_encoding($description, 'UTF-8', 'auto');
+
+        // 6. Insert
+        $insert->execute([
+            $vidId,
+            $title,
+            $description,
+            $price,
+            $finalThumb,
+            $fullPath,
+            $adminId,
+            time(),
+            $category,
+            $duration
+        ]);
+
+        $processed[] = [
+            'title' => $title,
+            'category' => $category,
+            'duration' => $duration
+        ];
+
+    } catch (Exception $e) {
+        $processed[] = ['title' => basename($fullPath), 'error' => $e->getMessage()];
     }
 
     respond(true, [
-        'completed' => $completed,
+        'completed' => empty($queue), // Queue is empty if we popped the last one
         'remaining' => count($queue),
         'processed' => $processed
     ]);

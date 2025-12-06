@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { db } from '../services/db';
 
@@ -101,8 +102,13 @@ export const ServerTaskProvider = ({ children }: { children?: React.ReactNode })
             }
 
         } catch (e: any) {
-            setLog(prev => [...prev, `Batch Error: ${e.message}`]);
-            setIsScanning(false);
+            // RETRY LOGIC: If backend crashed/timed out on a file, it should have been popped from queue.
+            // We log the error and try to continue with the next one.
+            setLog(prev => [...prev, `Batch Error: ${e.message || 'Unknown'}. Retrying in 2s...`]);
+            console.error("Scan Batch Error", e);
+            
+            // Retry after delay
+            setTimeout(() => processBatchLoop(total), 2000);
         }
     };
 
