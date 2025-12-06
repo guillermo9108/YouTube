@@ -1,4 +1,3 @@
-
 <?php
 // Helper to transform video URLs for local content
 function video_process_rows(&$rows) {
@@ -333,13 +332,16 @@ function video_scan_process_batch($pdo) {
     $settingsStmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $settingsStmt->fetch(PDO::FETCH_ASSOC);
 
-    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
+    // FIX: Use INSERT IGNORE to prevent "Duplicate entry" crash if scanning existing files
+    $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
 
     $fullPath = is_array($item) ? $item['path'] : $item;
     $detectedType = is_array($item) ? ($item['detectedType'] ?? null) : null;
 
     try {
-        $vidId = 'loc_' . md5($fullPath . time());
+        // FIX: Remove time() from ID generation so the ID is deterministic (Same File = Same ID)
+        // This prevents duplicate logical copies in the library.
+        $vidId = 'loc_' . md5($fullPath);
         
         // SMART PARSING
         $smartInfo = smartParseFilename($fullPath, $detectedType);
