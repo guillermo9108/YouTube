@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -205,6 +204,7 @@ export default function Layout() {
       )
   );
 
+  // Case-insensitive check
   const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
 
   return (
@@ -214,19 +214,21 @@ export default function Layout() {
         <div className="fixed inset-0 z-[110] flex">
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
             <div className="relative w-72 bg-slate-900 border-r border-slate-800 h-full p-4 flex flex-col animate-in slide-in-from-left duration-200 shadow-2xl">
-                <div className="flex items-center gap-3 mb-8 px-2 mt-2">
+                <div className="flex items-center gap-3 mb-4 px-2 mt-2">
                     <button onClick={() => setShowSidebar(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-300"><Menu size={24} /></button>
                     <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
                 </div>
                 
-                <div className="space-y-2 flex-1 overflow-y-auto">
-                    {/* Admin Access Link - Prominent at TOP */}
-                    {isAdmin && (
-                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-4 text-amber-400 bg-amber-950/40 hover:bg-amber-900/30 rounded-xl font-bold mb-6 border border-amber-500/30 shadow-sm transition-all">
+                {/* Admin Access Link - Fixed at top for visibility */}
+                {isAdmin && (
+                    <div className="px-2 mb-4">
+                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-950/40 hover:bg-amber-900/30 rounded-xl font-bold border border-amber-500/30 shadow-sm transition-all">
                             <ShieldCheck size={22}/> Administración
                         </Link>
-                    )}
+                    </div>
+                )}
 
+                <div className="space-y-2 flex-1 overflow-y-auto px-2">
                     <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800/50 hover:bg-slate-800 rounded-xl font-medium transition-colors">
                         <Home size={22}/> Inicio
                     </Link>

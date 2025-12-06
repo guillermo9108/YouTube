@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest } from '../types';
@@ -202,7 +199,7 @@ export default function Admin() {
                                       <td className="px-4 py-3 font-medium text-white">{u.username}</td>
                                       <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>{u.role}</span></td>
                                       <td className="px-4 py-3 font-mono text-emerald-400">{u.balance.toFixed(2)}</td>
-                                      <td className="px-4 py-3 text-slate-500">{u.lastActive ? new Date(u.lastActive * 1000).toLocaleDateString() : 'N/A'}</td>
+                                      <td className="px-4 py-3 text-slate-500">{(u.lastActive || 0) > 0 ? new Date((u.lastActive || 0) * 1000).toLocaleDateString() : 'N/A'}</td>
                                   </tr>
                               ))}
                           </tbody>

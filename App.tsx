@@ -1,4 +1,3 @@
-
 import React, { Suspense, useState, useEffect } from 'react';
 import Login from './pages/Login';
 import Home from './pages/Home';
@@ -66,7 +65,8 @@ const ProtectedRoute = ({ children }: { children?: React.ReactNode }) => {
 const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   if (isLoading) return null;
-  if (!user || user.role !== 'ADMIN') return <Navigate to="/" replace />;
+  // Case-insensitive check for ADMIN role
+  if (!user || user.role?.toUpperCase() !== 'ADMIN') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
