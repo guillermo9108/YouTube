@@ -10,6 +10,9 @@ header('Access-Control-Allow-Headers: Content-Type, Range');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { ob_clean(); http_response_code(200); exit(); }
 
+// Import shared schema
+require_once 'functions_schema.php';
+
 // Global Constants
 define('UPLOAD_DIR', 'uploads/videos/');
 define('THUMB_DIR', 'uploads/thumbnails/');
@@ -92,8 +95,13 @@ try {
         case 'upload_avatar': auth_update_avatar($pdo, $input); break;
         case 'repair_thumbnail': video_repair_thumbnail($pdo, $_POST, $_FILES); break;
         case 'server_import_video': video_server_import($pdo, $input); break;
+        
+        // Scan System
         case 'scan_local_library': video_scan_local($pdo, $input); break;
+        case 'scan_local_process_batch': video_scan_process_batch($pdo); break;
+        case 'get_scan_status': video_get_scan_status($pdo); break;
         case 'scan_ftp_library': video_scan_ftp($pdo, $input); break;
+        
         case 'update_prices_bulk': video_update_prices_bulk($pdo, $input); break;
 
         // Interactions

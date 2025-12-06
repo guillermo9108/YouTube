@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useCart } from '../context/CartContext';
+import { useServerTask } from '../context/ServerTaskContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
 import { db } from '../services/db';
 import { Notification as AppNotification } from '../types';
@@ -32,6 +33,32 @@ const UploadIndicator = () => {
        </div>
     </div>
   );
+};
+
+const ServerTaskIndicator = () => {
+    const { isScanning, progress, currentFile } = useServerTask();
+    const navigate = useNavigate();
+
+    if (!isScanning) return null;
+
+    return (
+        <div 
+            onClick={() => navigate('/admin')}
+            className="fixed bottom-24 md:bottom-28 right-4 z-[40] bg-slate-900 border border-emerald-900/50 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom-6 cursor-pointer hover:bg-slate-800 transition-colors"
+        >
+            <div className="relative w-12 h-12 flex items-center justify-center bg-emerald-900/20 rounded-full">
+                <Server size={24} className="text-emerald-500 animate-pulse" />
+            </div>
+            <div className="flex flex-col min-w-[120px]">
+                <span className="text-xs font-bold text-white flex items-center gap-1">Escaneando NAS...</span>
+                <span className="text-[10px] text-slate-400 truncate max-w-[120px]">{currentFile || 'Iniciando...'}</span>
+                <div className="w-full h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden">
+                    <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${progress.percent}%` }}></div>
+                </div>
+                <span className="text-[9px] text-emerald-400 mt-0.5 text-right">{progress.current} / {progress.total}</span>
+            </div>
+        </div>
+    );
 };
 
 const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
@@ -192,7 +219,7 @@ export default function Layout() {
                 <div className="space-y-1 flex-1">
                     {(user?.role === 'ADMIN') && (
                         <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-900/10 hover:bg-amber-900/20 rounded-lg font-medium mb-4 border border-amber-500/20">
-                            <ShieldCheck size={20}/> Admin Panel
+                            <ShieldCheck size={20}/> Administración
                         </Link>
                     )}
 
@@ -209,9 +236,7 @@ export default function Layout() {
                     <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <ShoppingBag size={20}/> Tienda
                     </Link>
-                    <Link to="/cart" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <ShoppingCart size={20}/> Carrito ({cart.length})
-                    </Link>
+                    {/* Cart Removed from Sidebar */}
                     <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <Upload size={20}/> Subir
                     </Link>
@@ -248,10 +273,7 @@ export default function Layout() {
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
           <Link to="/marketplace" className={isActive('/marketplace')}>Tienda</Link>
           
-          <Link to="/cart" className="relative text-slate-400 hover:text-white">
-              <ShoppingCart size={22} />
-              {cart.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-indigo-600 rounded-full flex items-center justify-center text-[9px] font-bold text-white">{cart.length}</span>}
-          </Link>
+          {/* Cart Removed from Header, only in Marketplace page */}
 
           <Link to="/upload" className={isActive('/upload')}>Subir</Link>
           <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>
@@ -266,6 +288,7 @@ export default function Layout() {
       </main>
       
       <UploadIndicator />
+      <ServerTaskIndicator />
 
       {/* Bottom Nav (Mobile) */}
       {!isShortsMode && (
@@ -289,12 +312,6 @@ export default function Layout() {
           <Link to="/marketplace" className={`flex flex-col items-center gap-1 ${isActive('/marketplace')}`}>
              <ShoppingBag size={22} />
              <span className="text-[10px]">Tienda</span>
-          </Link>
-
-          <Link to="/cart" className={`flex flex-col items-center gap-1 ${isActive('/cart')} relative`}>
-             <ShoppingCart size={22} />
-             {cart.length > 0 && <span className="absolute top-0 right-3 w-3 h-3 bg-indigo-600 rounded-full border border-black"></span>}
-             <span className="text-[10px]">Carro</span>
           </Link>
 
           <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>

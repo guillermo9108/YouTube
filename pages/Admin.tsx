@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useServerTask } from '../context/ServerTaskContext';
 import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle } from 'lucide-react';
 
 export default function Admin() {
@@ -29,12 +30,12 @@ export default function Admin() {
 
   // Library State
   const [localPath, setLocalPath] = useState('');
-  const [scanning, setScanning] = useState(false);
-  const [scanLog, setScanLog] = useState<string[]>([]);
+  const { isScanning, log: scanLog, startScan, cancelScan } = useServerTask();
   
   // FTP State
   const [ftpConfig, setFtpConfig] = useState<FtpSettings>({ host: '127.0.0.1', port: 21, user: '', pass: '', rootPath: '/volume1/video' });
   const [scanningFtp, setScanningFtp] = useState(false);
+  const [ftpLog, setFtpLog] = useState<string[]>([]);
 
   // Category State
   const [newCatName, setNewCatName] = useState('');
@@ -153,8 +154,7 @@ export default function Admin() {
 
   const handleScanLibrary = async () => {
       if (!localPath.trim()) return;
-      setScanning(true);
-      setScanLog(['Starting scan...']);
+      if (isScanning) { alert("Scan already in progress"); return; }
       
       // Save path first
       if (settings) {
@@ -162,25 +162,16 @@ export default function Admin() {
           await db.updateSystemSettings(updated);
       }
 
-      try {
-          const res = await db.scanLocalLibrary(localPath);
-          setScanLog(res.log);
-          alert(`Scan complete. Imported ${res.imported} new videos.`);
-      } catch (e: any) {
-          setScanLog(prev => [...prev, `ERROR: ${e.message}`]);
-          alert("Scan error: " + e.message);
-      } finally {
-          setScanning(false);
-      }
+      startScan(localPath);
   };
 
   const handleScanFtp = async () => {
       setScanningFtp(true);
-      setScanLog(['Starting FTP connection...']);
+      setFtpLog(['Starting FTP connection...']);
       
       try {
            const res = await db.scanFtpLibrary(ftpConfig);
-           setScanLog(res.log);
+           setFtpLog(res.log);
            alert(`FTP Scan complete. Imported ${res.imported} videos.`);
            
            // Update local settings state with what was saved on server
@@ -188,7 +179,7 @@ export default function Admin() {
                setSettings({...settings, ftpSettings: ftpConfig});
            }
       } catch (e: any) {
-           setScanLog(prev => [...prev, `FTP ERROR: ${e.message}`]);
+           setFtpLog(prev => [...prev, `FTP ERROR: ${e.message}`]);
       } finally {
            setScanningFtp(false);
       }
@@ -457,10 +448,10 @@ export default function Admin() {
                   <div className="flex items-center gap-2 text-slate-500 mb-2 border-b border-slate-800 pb-2">
                       <Terminal size={14}/> FTP Logs
                   </div>
-                  {scanLog.length === 0 ? (
+                  {ftpLog.length === 0 ? (
                       <div className="text-slate-600 italic">Waiting to scan...</div>
                   ) : (
-                      scanLog.map((line, i) => (
+                      ftpLog.map((line, i) => (
                           <div key={i} className={`mb-1 ${line.startsWith('FTP ERROR') ? 'text-red-400 font-bold' : (line.startsWith('Imported') ? 'text-emerald-400' : 'text-slate-300')}`}>
                               <span className="text-slate-600 mr-2">[{new Date().toLocaleTimeString()}]</span>
                               {line}
@@ -476,13 +467,18 @@ export default function Admin() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
                   <h3 className="font-bold text-white flex items-center gap-2"><FolderSearch size={18}/> Local Library Scan</h3>
-                  <div className="p-4 bg-amber-900/10 border border-amber-500/20 rounded-lg text-sm text-amber-200/80 leading-relaxed">
+                  <div className="p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-lg text-sm text-indigo-200/80 leading-relaxed">
                       <div className="flex items-start gap-2">
                           <AlertTriangle className="shrink-0" size={16} />
                           <div className="text-xs">
-                              <strong>Direct File Access</strong><br/>
-                              This scans the file system directly. If you get permission errors or 0 files found on Synology, 
-                              use the <strong>FTP Scan</strong> tab instead.
+                              <strong>Improved Smart Scan</strong><br/>
+                              This process now runs in the background. It will automatically:
+                              <ul className="list-disc ml-4 mt-1 space-y-1">
+                                  <li>Generate thumbnails using server FFMPEG</li>
+                                  <li>Detect video duration</li>
+                                  <li>Auto-categorize based on length</li>
+                                  <li>Auto-price based on category settings</li>
+                              </ul>
                           </div>
                       </div>
                   </div>
@@ -495,35 +491,45 @@ export default function Admin() {
                         onChange={e => setLocalPath(e.target.value)}
                         placeholder="/volume1/video/movies"
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 text-white font-mono text-sm"
+                        disabled={isScanning}
                       />
                       <p className="text-[10px] text-slate-500 mt-1">Example: <code>/var/www/html/videos</code> or <code>/volume1/video</code></p>
                   </div>
 
                   <button 
                     onClick={handleScanLibrary}
-                    disabled={scanning || !localPath}
+                    disabled={isScanning || !localPath}
                     className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
                   >
-                      {scanning ? <Loader2 className="animate-spin" size={20}/> : <FolderSearch size={20}/>}
-                      {scanning ? 'Scanning & Importing...' : 'Start Local Scan'}
+                      {isScanning ? <Loader2 className="animate-spin" size={20}/> : <FolderSearch size={20}/>}
+                      {isScanning ? 'Scanning in Background...' : 'Start Smart Scan'}
                   </button>
+                  
+                  {isScanning && (
+                      <button 
+                        onClick={cancelScan}
+                        className="w-full bg-red-600/20 hover:bg-red-600/30 text-red-400 font-bold py-2 rounded-lg text-xs"
+                      >
+                          Stop Scanning
+                      </button>
+                  )}
               </div>
 
               <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 h-[500px] overflow-y-auto shadow-inner">
                   <div className="flex items-center gap-2 text-slate-500 mb-2 border-b border-slate-800 pb-2">
-                      <Terminal size={14}/> Scan Logs
+                      <Terminal size={14}/> Live Logs
                   </div>
                   {scanLog.length === 0 ? (
                       <div className="text-slate-600 italic">Waiting to scan...</div>
                   ) : (
                       scanLog.map((line, i) => (
-                          <div key={i} className={`mb-1 ${line.startsWith('ERROR') || line.startsWith('PHP BLOCKED') ? 'text-red-400 font-bold' : (line.startsWith('Imported') || line.startsWith('Success') ? 'text-emerald-400' : 'text-slate-300')}`}>
+                          <div key={i} className={`mb-1 ${line.startsWith('Error') || line.startsWith('Failed') ? 'text-red-400 font-bold' : (line.startsWith('Imported') || line.startsWith('Found') ? 'text-emerald-400' : 'text-slate-300')}`}>
                               <span className="text-slate-600 mr-2">[{new Date().toLocaleTimeString()}]</span>
                               {line}
                           </div>
                       ))
                   )}
-                  {scanning && <div className="animate-pulse">_</div>}
+                  {isScanning && <div className="animate-pulse">_</div>}
               </div>
           </div>
       )}

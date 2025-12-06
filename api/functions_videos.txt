@@ -201,70 +201,194 @@ function video_server_import($pdo, $input) {
     respond(true, ['message' => 'Queued for import']);
 }
 
+// ---------------------------------------------------------
+// NEW: SERVER-SIDE BATCH SCANNING LOGIC WITH SMART GROUPING
+// ---------------------------------------------------------
+
+// Constants
+define('SCAN_QUEUE_FILE', 'scan_queue.json');
+
+// Step 1: Initialize Scan - Find files, Group by folder, Detect Series
 function video_scan_local($pdo, $input) {
     $path = $input['path'];
-    $log = [];
-    $imported = 0;
     
-    // 1. Detect permissions/open_basedir
     if (!is_dir($path) && !@scandir($path)) {
-        $log[] = "ERROR: Cannot read directory '$path'. Check permissions or open_basedir.";
-        $log[] = "HINT: Try using the FTP Scan tab if this fails.";
-        respond(true, ['imported' => 0, 'log' => $log, 'errors' => ['Access Denied']]);
+        respond(true, ['success' => false, 'error' => "Cannot access directory: $path"]);
     }
+
+    $filesFound = [];
+    // Count files per directory to detect series/collections
+    $dirCounts = []; 
 
     try {
-        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
-    } catch (Exception $e) {
-        $log[] = "CRITICAL: " . $e->getMessage();
-        $log[] = "This usually means PHP does not have permission to read subdirectories.";
-        respond(true, ['imported' => 0, 'log' => $log, 'errors' => ['Access Denied']]);
-        return;
-    }
-
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
-    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'OTHER', 0, 1)");
-    
-    // Get Admin ID for ownership
-    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
-
-    foreach ($files as $file) {
-        try {
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
+        foreach ($iterator as $file) {
             if ($file->isFile()) {
                 $ext = strtolower($file->getExtension());
-                if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov'])) {
+                if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi'])) {
                     $fullPath = $file->getPathname();
+                    $dir = dirname($fullPath);
                     
-                    // Check if exists
-                    $stmt->execute([$fullPath]);
-                    if ($stmt->fetchColumn() == 0) {
-                        $vidId = 'loc_' . md5($fullPath);
-                        $title = $file->getBasename('.' . $ext);
-                        
-                        $insert->execute([
-                            $vidId, 
-                            $title, 
-                            "Scanned from NAS: " . $fullPath,
-                            "https://via.placeholder.com/640x360.png?text=NAS+Video", // Placeholder thumb
-                            $fullPath,
-                            $adminId,
-                            time()
-                        ]);
-                        $imported++;
-                        $log[] = "Imported: $title";
-                    }
+                    $filesFound[] = $fullPath;
+                    
+                    if (!isset($dirCounts[$dir])) $dirCounts[$dir] = 0;
+                    $dirCounts[$dir]++;
                 }
             }
-        } catch (Exception $e) {
-            // Skip unreadable files
-            continue;
+        }
+    } catch (Exception $e) {
+        respond(true, ['success' => false, 'error' => $e->getMessage()]);
+    }
+
+    // Filter already imported & Build Queue with Context
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
+    $queue = [];
+    
+    foreach ($filesFound as $fullPath) {
+        $stmt->execute([$fullPath]);
+        if ($stmt->fetchColumn() == 0) {
+            $dir = dirname($fullPath);
+            $dirName = basename($dir);
+            $countInDir = $dirCounts[$dir] ?? 0;
+            
+            $detectedType = null;
+            
+            // Heuristic: If more than 2 videos in a folder, it's a series/collection
+            if ($countInDir > 2) {
+                // Determine if Novela or Series based on keywords
+                if (preg_match('/(novela|pasi|amor|coraz|capitulo)/i', $dirName)) {
+                    $detectedType = 'NOVELAS';
+                } else {
+                    $detectedType = 'SERIES';
+                }
+            }
+
+            $queue[] = [
+                'path' => $fullPath,
+                'detectedType' => $detectedType
+            ];
         }
     }
-    
-    if ($imported === 0) $log[] = "Scan finished. No new videos found.";
-    
-    respond(true, ['imported' => $imported, 'log' => $log, 'errors' => []]);
+
+    file_put_contents(SCAN_QUEUE_FILE, json_encode($queue));
+
+    respond(true, [
+        'success' => true,
+        'totalFound' => count($filesFound),
+        'newToImport' => count($queue)
+    ]);
 }
+
+// Step 2: Process a Batch with Smart Naming & Auto Description
+function video_scan_process_batch($pdo) {
+    if (!file_exists(SCAN_QUEUE_FILE)) {
+        respond(true, ['completed' => true, 'processed' => []]);
+    }
+
+    $queue = json_decode(file_get_contents(SCAN_QUEUE_FILE), true);
+    if (empty($queue)) {
+        @unlink(SCAN_QUEUE_FILE); 
+        respond(true, ['completed' => true, 'processed' => []]);
+    }
+
+    $BATCH_SIZE = 3; 
+    $processed = [];
+    
+    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+    $settingsStmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
+    $settings = $settingsStmt->fetch(PDO::FETCH_ASSOC);
+
+    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
+
+    $batch = array_splice($queue, 0, $BATCH_SIZE);
+
+    foreach ($batch as $item) {
+        $fullPath = is_array($item) ? $item['path'] : $item; // Handle old format if exists
+        $detectedType = is_array($item) ? ($item['detectedType'] ?? null) : null;
+
+        try {
+            $vidId = 'loc_' . md5($fullPath . time());
+            
+            // SMART PARSING (Renaming & Categorization Override)
+            $smartInfo = smartParseFilename($fullPath, $detectedType);
+            $title = $smartInfo['title'];
+            $forcedCategory = $smartInfo['category'];
+
+            // 1. Get Metadata (Duration)
+            $meta = getVideoMetadata($fullPath);
+            $duration = $meta['duration'];
+            
+            // 2. Generate Thumbnail
+            $thumbName = "{$vidId}.jpg";
+            $thumbPath = THUMB_DIR . $thumbName;
+            $thumbResult = generateVideoThumbnail($fullPath, $thumbPath);
+            $finalThumb = $thumbResult ? $thumbPath : "https://via.placeholder.com/640x360.png?text=" . urlencode($title);
+
+            // 3. Final Category
+            $category = $forcedCategory ? $forcedCategory : detectCategoryFromDuration($duration);
+            
+            // 4. Price
+            $price = getPriceForCategory($category, $settings);
+
+            // 5. Auto Description (Local -> Online -> Default)
+            $description = findLocalDescription($fullPath);
+            if (!$description) {
+                $description = fetchOnlineDescription($title, $category);
+            }
+            if (!$description) {
+                $description = "Imported from NAS. Folder: " . basename(dirname($fullPath));
+            }
+
+            // 6. Insert
+            $insert->execute([
+                $vidId,
+                $title,
+                $description,
+                $price,
+                $finalThumb,
+                $fullPath,
+                $adminId,
+                time(),
+                $category,
+                $duration
+            ]);
+
+            $processed[] = [
+                'title' => $title,
+                'category' => $category,
+                'duration' => $duration
+            ];
+
+        } catch (Exception $e) {
+            $processed[] = ['title' => basename($fullPath), 'error' => $e->getMessage()];
+        }
+    }
+
+    if (empty($queue)) {
+        @unlink(SCAN_QUEUE_FILE);
+        $completed = true;
+    } else {
+        file_put_contents(SCAN_QUEUE_FILE, json_encode($queue));
+        $completed = false;
+    }
+
+    respond(true, [
+        'completed' => $completed,
+        'remaining' => count($queue),
+        'processed' => $processed
+    ]);
+}
+
+function video_get_scan_status($pdo) {
+    if (!file_exists(SCAN_QUEUE_FILE)) {
+        respond(true, ['active' => false]);
+    } else {
+        $queue = json_decode(file_get_contents(SCAN_QUEUE_FILE), true);
+        respond(true, ['active' => true, 'remaining' => count($queue)]);
+    }
+}
+
+// ---------------------------------------------------------
 
 function video_scan_ftp($pdo, $input) {
     $config = $input['ftp'];

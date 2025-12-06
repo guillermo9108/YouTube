@@ -36,10 +36,16 @@ export interface VideoResult {
 }
 
 export interface ScanResult {
-    scanned: number;
-    imported: number;
-    errors: string[];
-    log: string[];
+    success: boolean;
+    totalFound: number;
+    newToImport: number;
+    errors?: string[];
+}
+
+export interface ScanBatchResult {
+    completed: boolean;
+    remaining: number;
+    processed: any[];
 }
 
 class DatabaseService {
@@ -421,17 +427,22 @@ class DatabaseService {
       await this.request('index.php?action=repair_thumbnail', 'POST', formData, true);
   }
 
+  // --- LOCAL SCANNING (UPDATED) ---
+  
   async scanLocalLibrary(path: string): Promise<ScanResult> {
-      const res = await this.request<ScanResult>('index.php?action=scan_local_library', 'POST', { path });
-      if (res.imported > 0) {
-          this.invalidateCache('index.php?action=get_videos');
-          this.setHomeDirty();
-      }
-      return res;
+      return this.request<ScanResult>('index.php?action=scan_local_library', 'POST', { path });
   }
 
-  async scanFtpLibrary(ftpConfig: FtpSettings): Promise<ScanResult> {
-      const res = await this.request<ScanResult>('index.php?action=scan_ftp_library', 'POST', { ftp: ftpConfig });
+  async processScanBatch(): Promise<ScanBatchResult> {
+      return this.request<ScanBatchResult>('index.php?action=scan_local_process_batch', 'POST', {});
+  }
+
+  async getScanStatus(): Promise<{active: boolean, remaining?: number}> {
+      return this.request<{active: boolean, remaining?: number}>('index.php?action=get_scan_status', 'POST', {});
+  }
+
+  async scanFtpLibrary(ftpConfig: FtpSettings): Promise<any> {
+      const res = await this.request<any>('index.php?action=scan_ftp_library', 'POST', { ftp: ftpConfig });
       if (res.imported > 0) {
           this.invalidateCache('index.php?action=get_videos');
           this.setHomeDirty();
