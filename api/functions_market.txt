@@ -8,7 +8,10 @@ function market_get_items($pdo) {
         ORDER BY m.createdAt DESC
     ");
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($items as &$i) $i['images'] = json_decode($i['images'], true);
+    foreach ($items as &$i) {
+        $i['images'] = json_decode($i['images'], true);
+        if (isset($i['sellerAvatarUrl'])) $i['sellerAvatarUrl'] = fix_url($i['sellerAvatarUrl']);
+    }
     respond(true, $items);
 }
 
@@ -20,7 +23,10 @@ function market_admin_get_items($pdo) {
         ORDER BY m.createdAt DESC
     ");
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($items as &$i) $i['images'] = json_decode($i['images'], true);
+    foreach ($items as &$i) {
+        $i['images'] = json_decode($i['images'], true);
+        if (isset($i['sellerAvatarUrl'])) $i['sellerAvatarUrl'] = fix_url($i['sellerAvatarUrl']);
+    }
     respond(true, $items);
 }
 
@@ -40,6 +46,7 @@ function market_get_item($pdo, $id) {
     $item = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($item) {
         $item['images'] = json_decode($item['images'], true);
+        if (isset($item['sellerAvatarUrl'])) $item['sellerAvatarUrl'] = fix_url($item['sellerAvatarUrl']);
         respond(true, $item);
     }
     respond(false, null, 'Item not found');

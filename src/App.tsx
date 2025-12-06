@@ -47,7 +47,7 @@ const OfflineBanner = () => {
 
 // --- Guards ---
 
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+const ProtectedRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   
   if (isLoading) {
@@ -58,14 +58,14 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-const AdminRoute = ({ children }: { children: React.ReactNode }) => {
+const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   if (isLoading) return null;
   if (!user || user.role !== 'ADMIN') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
-const SetupGuard = ({ children }: { children: React.ReactNode }) => {
+const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
   const [checkDone, setCheckDone] = useState(false);
   const [needs, setNeeds] = useState(false);
 

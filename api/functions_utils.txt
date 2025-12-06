@@ -6,6 +6,13 @@ function respond($success, $data = null, $error = null) {
     exit();
 }
 
+function fix_url($url) {
+    if (!empty($url) && strpos($url, 'uploads/') === 0) {
+        return 'api/' . $url;
+    }
+    return $url;
+}
+
 function get_youtube_video($query, $config) {
     if (empty($config['enableYoutube']) || empty($config['ytDlpPath'])) return [];
     

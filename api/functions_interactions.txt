@@ -148,7 +148,11 @@ function interact_get_comments($pdo, $videoId) {
         ORDER BY c.timestamp DESC
     ");
     $stmt->execute([$videoId]);
-    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    $comments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($comments as &$c) {
+        $c['userAvatarUrl'] = fix_url($c['userAvatarUrl']);
+    }
+    respond(true, $comments);
 }
 
 function interact_add_comment($pdo, $input) {
@@ -159,7 +163,10 @@ function interact_add_comment($pdo, $input) {
     // Return complete object for UI
     $stmt = $pdo->prepare("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.id = ?");
     $stmt->execute([$cid]);
-    respond(true, $stmt->fetch(PDO::FETCH_ASSOC));
+    $comment = $stmt->fetch(PDO::FETCH_ASSOC);
+    if($comment) $comment['userAvatarUrl'] = fix_url($comment['userAvatarUrl']);
+    
+    respond(true, $comment);
 }
 
 function interact_toggle_subscribe($pdo, $input) {

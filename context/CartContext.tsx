@@ -17,7 +17,7 @@ export const useCart = () => {
     return context;
 };
 
-export const CartProvider = ({ children }: { children: React.ReactNode }) => {
+export const CartProvider = ({ children }: { children?: React.ReactNode }) => {
     const [cart, setCart] = useState<CartItem[]>([]);
 
     useEffect(() => {

@@ -16,6 +16,9 @@ function auth_login($pdo, $input) {
         $user['defaultPrices'] = json_decode($user['defaultPrices'] ?? '{}', true);
         $user['shippingDetails'] = json_decode($user['shippingDetails'] ?? '{}', true);
         
+        // Fix avatar URL
+        $user['avatarUrl'] = fix_url($user['avatarUrl']);
+
         respond(true, $user);
     }
     respond(false, null, 'Invalid credentials');
@@ -75,7 +78,7 @@ function auth_register($pdo, $input) {
         'username' => $username, 
         'role' => 'USER', 
         'balance' => 0.00, 
-        'avatarUrl' => $avatarUrl, 
+        'avatarUrl' => fix_url($avatarUrl), 
         'sessionToken' => $token,
         'watchLater' => []
     ];
@@ -91,6 +94,9 @@ function auth_get_user($pdo, $id) {
         $user['watchLater'] = json_decode($user['watchLater'] ?? '[]', true);
         $user['defaultPrices'] = json_decode($user['defaultPrices'] ?? '{}', true);
         $user['shippingDetails'] = json_decode($user['shippingDetails'] ?? '{}', true);
+        
+        $user['avatarUrl'] = fix_url($user['avatarUrl']);
+        
         respond(true, $user);
     }
     respond(false, null, 'User not found');
@@ -142,7 +148,7 @@ function auth_update_avatar($pdo, $input) {
 
     if (move_uploaded_file($_FILES['avatar']['tmp_name'], $target)) {
         $pdo->prepare("UPDATE users SET avatarUrl = ? WHERE id = ?")->execute([$target, $userId]);
-        respond(true, ['avatarUrl' => $target]);
+        respond(true, ['avatarUrl' => fix_url($target)]);
     }
     respond(false, null, "Upload failed");
 }
@@ -166,6 +172,10 @@ function auth_change_password($pdo, $input) {
 
 function auth_get_all_users($pdo) {
     $stmt = $pdo->query("SELECT id, username, role, balance, avatarUrl, lastActive FROM users ORDER BY lastActive DESC");
-    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($users as &$u) {
+        $u['avatarUrl'] = fix_url($u['avatarUrl']);
+    }
+    respond(true, $users);
 }
 ?>

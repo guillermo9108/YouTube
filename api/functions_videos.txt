@@ -7,6 +7,8 @@ function video_process_rows(&$rows) {
             // Transform absolute filesystem path to Stream API Endpoint
             $v['videoUrl'] = "api/index.php?action=stream&id=" . $v['id'];
         }
+        if (isset($v['thumbnailUrl'])) $v['thumbnailUrl'] = fix_url($v['thumbnailUrl']);
+        if (isset($v['creatorAvatarUrl'])) $v['creatorAvatarUrl'] = fix_url($v['creatorAvatarUrl']);
     }
 }
 
@@ -35,6 +37,8 @@ function video_get_one($pdo, $id) {
         if (!empty($video['isLocal'])) {
             $video['videoUrl'] = "api/index.php?action=stream&id=" . $video['id'];
         }
+        $video['thumbnailUrl'] = fix_url($video['thumbnailUrl']);
+        $video['creatorAvatarUrl'] = fix_url($video['creatorAvatarUrl']);
         
         // Increment views (simple)
         $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$id]);
