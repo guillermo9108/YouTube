@@ -389,7 +389,7 @@ export default function Admin() {
                                   <td className="p-3 text-amber-400 font-bold">{item.price} $</td>
                                   <td className="p-3 text-slate-400">{item.sellerName}</td>
                                   <td className="p-3">
-                                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${item.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${item.status === 'ACTIVO' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
                                           {item.status}
                                       </span>
                                   </td>
