@@ -219,16 +219,14 @@ export default function Layout() {
                     <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
                 </div>
                 
-                {/* Admin Access Link - Fixed at top for visibility */}
-                {isAdmin && (
-                    <div className="px-2 mb-4">
-                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-950/40 hover:bg-amber-900/30 rounded-xl font-bold border border-amber-500/30 shadow-sm transition-all">
+                <div className="space-y-2 flex-1 overflow-y-auto px-2">
+                    {/* Admin Access Link - Inside scrollable area for guaranteed visibility */}
+                    {isAdmin && (
+                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-950/40 hover:bg-amber-900/30 rounded-xl font-bold border border-amber-500/30 shadow-sm transition-all mb-4">
                             <ShieldCheck size={22}/> Administración
                         </Link>
-                    </div>
-                )}
+                    )}
 
-                <div className="space-y-2 flex-1 overflow-y-auto px-2">
                     <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800/50 hover:bg-slate-800 rounded-xl font-medium transition-colors">
                         <Home size={22}/> Inicio
                     </Link>

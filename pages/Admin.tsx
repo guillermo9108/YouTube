@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
-import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest } from '../types';
+import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest, SmartCleanerResult } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck, Wrench } from 'lucide-react';
 import { generateThumbnail } from '../utils/videoGenerator';
 import { useToast } from '../context/ToastContext';
 
@@ -11,7 +11,7 @@ export default function Admin() {
   const { user: currentUser } = useAuth();
   const toast = useToast();
   
-  const [activeTab, setActiveTab] = useState<'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'MAINTENANCE'>('USERS');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   
   // Data States
@@ -31,6 +31,13 @@ export default function Admin() {
   // Forms
   const [addBalanceAmount, setAddBalanceAmount] = useState('');
   const [addBalanceTarget, setAddBalanceTarget] = useState('');
+
+  // Maintenance State
+  const [cleanerPreview, setCleanerPreview] = useState<SmartCleanerResult | null>(null);
+  const [cleanerPercent, setCleanerPercent] = useState(10);
+  const [cleanerCategory, setCleanerCategory] = useState('ALL');
+  const [cleanerDays, setCleanerDays] = useState(30);
+  const [cleaning, setCleaning] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -164,16 +171,59 @@ export default function Admin() {
       }
   };
 
+  const handleCleanupBroken = async () => {
+      if (!confirm("Esto eliminará de la base de datos todos los videos cuyos archivos físicos ya no existan en la carpeta de uploads. ¿Continuar?")) return;
+      setCleaning(true);
+      try {
+          const res = await db.adminCleanupVideos();
+          toast.success(`Limpieza completada. ${res.deleted} videos eliminados.`);
+      } catch (e: any) {
+          toast.error("Error: " + e.message);
+      } finally {
+          setCleaning(false);
+      }
+  };
+
+  const handlePreviewCleaner = async () => {
+      setCleaning(true);
+      try {
+          const res = await db.getSmartCleanerPreview(cleanerCategory, cleanerPercent, cleanerDays);
+          setCleanerPreview(res);
+      } catch (e: any) {
+          toast.error("Error: " + e.message);
+      } finally {
+          setCleaning(false);
+      }
+  };
+
+  const handleExecuteCleaner = async () => {
+      if (!cleanerPreview || cleanerPreview.preview.length === 0) return;
+      if (!confirm(`PELIGRO: Vas a eliminar permanentemente ${cleanerPreview.preview.length} videos. ¿Estás absolutamente seguro?`)) return;
+      
+      setCleaning(true);
+      try {
+          const ids = cleanerPreview.preview.map(v => v.id);
+          const res = await db.executeSmartCleaner(ids);
+          toast.success(`Eliminados ${res.deleted} videos. Espacio recuperado.`);
+          setCleanerPreview(null);
+      } catch (e: any) {
+          toast.error("Error: " + e.message);
+      } finally {
+          setCleaning(false);
+      }
+  };
+
   return (
     <div className="space-y-6 pb-24 px-2 md:px-0">
       <div className="flex gap-2 overflow-x-auto bg-slate-900 p-2 rounded-xl scrollbar-hide">
-           {['USERS', 'FINANCE', 'MARKET', 'CONFIG', 'LIBRARY'].map(t => (
+           {['USERS', 'FINANCE', 'MARKET', 'CONFIG', 'LIBRARY', 'MAINTENANCE'].map(t => (
                <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 ${activeTab === t ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
                    {t === 'USERS' && <UserIcon size={16}/>}
                    {t === 'FINANCE' && <Wallet size={16}/>}
                    {t === 'MARKET' && <Store size={16}/>}
                    {t === 'CONFIG' && <Settings size={16}/>}
                    {t === 'LIBRARY' && <Database size={16}/>}
+                   {t === 'MAINTENANCE' && <Wrench size={16}/>}
                    {t}
                </button>
            ))}
@@ -198,7 +248,6 @@ export default function Admin() {
                                   <tr key={u.id} className="hover:bg-slate-800/50">
                                       <td className="px-4 py-3 font-medium text-white">{u.username}</td>
                                       <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>{u.role}</span></td>
-                                      {/* FIXED: Convert balance to Number before toFixed to prevent crash */}
                                       <td className="px-4 py-3 font-mono text-emerald-400">{Number(u.balance).toFixed(2)}</td>
                                       <td className="px-4 py-3 text-slate-500">{(u.lastActive || 0) > 0 ? new Date((u.lastActive || 0) * 1000).toLocaleDateString() : 'N/A'}</td>
                                   </tr>
@@ -391,6 +440,94 @@ export default function Admin() {
 
               <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 h-[500px] overflow-y-auto shadow-inner">
                   {scanLog.map((line, i) => <div key={i} className="mb-1 border-b border-slate-800/50 pb-1">{line}</div>)}
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'MAINTENANCE' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Broken Video Cleaner */}
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-red-400"><AlertTriangle size={20}/> Limpieza de Videos Rotos</h3>
+                  <p className="text-sm text-slate-400 mb-6">
+                      Esta herramienta escanea la base de datos y elimina los videos que apuntan a archivos que ya no existen en la carpeta de uploads. Útil si borraste archivos manualmente por FTP.
+                  </p>
+                  <button 
+                      onClick={handleCleanupBroken} 
+                      disabled={cleaning}
+                      className="w-full bg-red-900/30 hover:bg-red-900/50 border border-red-500/50 text-red-200 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+                  >
+                      {cleaning ? <Loader2 className="animate-spin"/> : <Trash2 size={20}/>}
+                      Escanear y Eliminar
+                  </button>
+              </div>
+
+              {/* Smart Storage Cleaner */}
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-emerald-400"><Brush size={20}/> Limpieza Inteligente</h3>
+                  <p className="text-sm text-slate-400 mb-4">
+                      Elimina automáticamente videos antiguos con bajo rendimiento (pocos likes/views) para liberar espacio.
+                  </p>
+                  
+                  <div className="space-y-4 mb-6">
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">Categoría</label>
+                              <select value={cleanerCategory} onChange={e => setCleanerCategory(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-white text-sm">
+                                  <option value="ALL">Todas</option>
+                                  {Object.values(VideoCategory).map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-1">Días de Seguridad</label>
+                              <input type="number" value={cleanerDays} onChange={e => setCleanerDays(parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-white text-sm" />
+                          </div>
+                      </div>
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-1">Eliminar el {cleanerPercent}% con peor rendimiento</label>
+                          <input type="range" min="1" max="50" step="1" value={cleanerPercent} onChange={e => setCleanerPercent(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                      </div>
+                  </div>
+
+                  <button 
+                      onClick={handlePreviewCleaner} 
+                      disabled={cleaning}
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 mb-4"
+                  >
+                      {cleaning ? <Loader2 className="animate-spin"/> : <Search size={20}/>}
+                      Analizar Candidatos
+                  </button>
+
+                  {cleanerPreview && (
+                      <div className="bg-black/50 p-4 rounded-xl border border-slate-700 animate-in fade-in">
+                          <div className="flex justify-between items-end mb-4 border-b border-slate-700 pb-2">
+                              <div className="text-xs text-slate-400">
+                                  <div>Total Videos: <span className="text-white font-bold">{cleanerPreview.stats.totalVideos}</span></div>
+                                  <div>A Eliminar: <span className="text-red-400 font-bold">{cleanerPreview.stats.videosToDelete}</span></div>
+                              </div>
+                              <div className="text-right">
+                                  <div className="text-[10px] text-slate-500 uppercase">Espacio Estimado</div>
+                                  <div className="text-emerald-400 font-mono font-bold">{cleanerPreview.stats.spaceReclaimed}</div>
+                              </div>
+                          </div>
+                          
+                          <div className="max-h-40 overflow-y-auto mb-4 text-xs space-y-1">
+                              {cleanerPreview.preview.map(v => (
+                                  <div key={v.id} className="flex justify-between text-slate-300">
+                                      <span className="truncate w-3/4">{v.title}</span>
+                                      <span className="text-slate-500">{new Date(v.createdAt * 1000).toLocaleDateString()}</span>
+                                  </div>
+                              ))}
+                          </div>
+
+                          <button 
+                              onClick={handleExecuteCleaner}
+                              className="w-full bg-red-600 hover:bg-red-500 text-white text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-2"
+                          >
+                              <Trash2 size={14}/> CONFIRMAR ELIMINACIÓN
+                          </button>
+                      </div>
+                  )}
               </div>
           </div>
       )}
