@@ -1,4 +1,15 @@
 <?php
+// Helper to transform video URLs for local content
+function video_process_rows(&$rows) {
+    if (!$rows) return;
+    foreach ($rows as &$v) {
+        if (!empty($v['isLocal'])) {
+            // Transform absolute filesystem path to Stream API Endpoint
+            $v['videoUrl'] = "api/index.php?action=stream&id=" . $v['id'];
+        }
+    }
+}
+
 function video_get_all($pdo) {
     $stmt = $pdo->query("
         SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
@@ -6,7 +17,9 @@ function video_get_all($pdo) {
         LEFT JOIN users u ON v.creatorId = u.id 
         ORDER BY v.createdAt DESC
     ");
-    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
 }
 
 function video_get_one($pdo, $id) {
@@ -19,6 +32,10 @@ function video_get_one($pdo, $id) {
     $stmt->execute([$id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($video) {
+        if (!empty($video['isLocal'])) {
+            $video['videoUrl'] = "api/index.php?action=stream&id=" . $video['id'];
+        }
+        
         // Increment views (simple)
         $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$id]);
         respond(true, $video);
@@ -35,7 +52,9 @@ function video_get_by_creator($pdo, $creatorId) {
         ORDER BY v.createdAt DESC
     ");
     $stmt->execute([$creatorId]);
-    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
 }
 
 function video_get_related($pdo, $id) {
@@ -54,7 +73,9 @@ function video_get_related($pdo, $id) {
             
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$id, $source['category'], $source['creatorId']]);
-    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
 }
 
 function video_upload($pdo, $post, $files) {

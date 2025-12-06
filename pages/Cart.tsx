@@ -80,7 +80,7 @@ export default function Cart() {
                             <span className="text-white">Total</span>
                             <span className="text-amber-400">{total} $</span>
                         </div>
-                        {user && user.balance < total && (
+                        {user && Number(user.balance) < total && (
                             <div className="mt-2 text-xs text-red-400 flex items-center gap-1">
                                 <AlertCircle size={12}/> Insufficient Balance ({user.balance} $)
                             </div>
@@ -118,7 +118,7 @@ export default function Cart() {
 
                     <button 
                         onClick={handleCheckout}
-                        disabled={loading || (user ? user.balance < total : true)}
+                        disabled={loading || (user ? Number(user.balance) < total : true)}
                         className="w-full mt-6 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
                     >
                         {loading ? <Loader2 className="animate-spin"/> : <CheckCircle size={20}/>}

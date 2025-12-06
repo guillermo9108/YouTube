@@ -7,6 +7,22 @@ import { Video, Comment, UserInteraction, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { Link, useParams, useNavigate } from '../components/Router';
 
+// Helper for relative time
+const formatTimeAgo = (timestamp: number) => {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  let interval = seconds / 31536000;
+  if (interval > 1) return Math.floor(interval) + " years ago";
+  interval = seconds / 2592000;
+  if (interval > 1) return Math.floor(interval) + " months ago";
+  interval = seconds / 86400;
+  if (interval > 1) return Math.floor(interval) + " days ago";
+  interval = seconds / 3600;
+  if (interval > 1) return Math.floor(interval) + " hours ago";
+  interval = seconds / 60;
+  if (interval > 1) return Math.floor(interval) + " min ago";
+  return "Just now";
+};
+
 const RelatedVideoItem: React.FC<{rv: Video, userId?: string}> = ({rv, userId}) => {
    const [watched, setWatched] = useState(false);
    const [purchased, setPurchased] = useState(false);
@@ -60,6 +76,7 @@ export default function Watch() {
   const [isWatchLater, setIsWatchLater] = useState(false);
   const [purchasing, setPurchasing] = useState(false);
   const [newComment, setNewComment] = useState('');
+  const [isPostingComment, setIsPostingComment] = useState(false);
 
   // Playback Control State
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -232,10 +249,18 @@ export default function Watch() {
 
   const postComment = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!user || !video || !newComment.trim()) return;
-      const c = await db.addComment(user.id, video.id, newComment);
-      setComments([c, ...comments]);
-      setNewComment('');
+      if (!user || !video || !newComment.trim() || isPostingComment) return;
+      
+      setIsPostingComment(true);
+      try {
+          const c = await db.addComment(user.id, video.id, newComment);
+          setComments([c, ...comments]);
+          setNewComment('');
+      } catch(e) {
+          console.error(e);
+      } finally {
+          setIsPostingComment(false);
+      }
   };
 
   const handleRate = async (rating: 'like' | 'dislike') => {
@@ -350,23 +375,59 @@ export default function Watch() {
              </div>
              )}
 
-             <div className="mt-4">
-                 <h3 className="font-bold text-sm text-slate-300 mb-3 flex items-center gap-2"><MessageSquare size={14}/> Comments</h3>
-                 <form onSubmit={postComment} className="flex gap-2 mb-4"><input type="text" value={newComment} onChange={e=>setNewComment(e.target.value)} placeholder="Add a comment..." className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"/><button disabled={!newComment.trim()} type="submit" className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-500 disabled:opacity-50"><Send size={16}/></button></form>
-                 <div className="space-y-3">
+             <div className="mt-6 border-t border-slate-800 pt-6">
+                 <h3 className="font-bold text-sm text-slate-300 mb-4 flex items-center gap-2">
+                    <MessageSquare size={16}/> Comments <span className="text-slate-500 text-xs font-normal">({comments.length})</span>
+                 </h3>
+                 
+                 {user ? (
+                     <form onSubmit={postComment} className="flex gap-3 mb-6">
+                        <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-xs font-bold text-white shrink-0">
+                            {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full rounded-full object-cover"/> : user.username[0]}
+                        </div>
+                        <div className="flex-1 relative">
+                            <input 
+                                type="text" 
+                                value={newComment} 
+                                onChange={e=>setNewComment(e.target.value)} 
+                                placeholder="Add a comment..." 
+                                className="w-full bg-slate-900 border-b border-slate-700 px-0 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors placeholder:text-slate-500"
+                            />
+                            {newComment.trim() && (
+                                <div className="flex justify-end mt-2 animate-in fade-in slide-in-from-top-1">
+                                    <button 
+                                        disabled={isPostingComment} 
+                                        type="submit" 
+                                        className="bg-slate-800 text-white px-4 py-1.5 rounded-full text-xs font-bold hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                                    >
+                                        {isPostingComment ? 'Posting...' : 'Comment'}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                     </form>
+                 ) : (
+                     <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4 mb-6 text-center">
+                         <p className="text-sm text-slate-400 mb-2">Sign in to join the conversation</p>
+                         <Link to="/login" className="inline-block px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-full transition-colors">Log In</Link>
+                     </div>
+                 )}
+
+                 <div className="space-y-4">
+                    {comments.length === 0 && <div className="text-center text-slate-600 text-sm py-4 italic">No comments yet. Be the first to share your thoughts!</div>}
                     {comments.map(c => (
-                        <div key={c.id} className="flex gap-3">
-                            <Link to={`/channel/${c.userId}`} className="shrink-0">
-                                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 overflow-hidden border border-slate-700">
+                        <div key={c.id} className="flex gap-3 group">
+                            <Link to={`/channel/${c.userId}`} className="shrink-0 mt-0.5">
+                                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-500 overflow-hidden border border-transparent group-hover:border-slate-600 transition-colors">
                                     {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : c.username[0]}
                                 </div>
                             </Link>
-                            <div>
-                                <div className="flex gap-2 items-baseline">
-                                    <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-300 hover:underline">{c.username}</Link>
-                                    <span className="text-[10px] text-slate-600">{new Date(c.timestamp).toLocaleDateString()}</span>
+                            <div className="flex-1">
+                                <div className="flex gap-2 items-baseline mb-0.5">
+                                    <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-slate-200 hover:text-white transition-colors">{c.username}</Link>
+                                    <span className="text-[10px] text-slate-500">{formatTimeAgo(c.timestamp)}</span>
                                 </div>
-                                <p className="text-xs text-slate-400">{c.text}</p>
+                                <p className="text-sm text-slate-400 leading-relaxed">{c.text}</p>
                             </div>
                         </div>
                     ))}
@@ -381,4 +442,3 @@ export default function Watch() {
     </div>
   );
 }
-

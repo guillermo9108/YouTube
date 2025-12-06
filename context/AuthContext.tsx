@@ -1,5 +1,3 @@
-
-
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User } from '../types';
 import { db } from '../services/db';
@@ -35,7 +33,9 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         .then(u => {
             if(u) {
                 // Attach the local token to the user object for validation
+                // And ensure balance is a number
                 u.sessionToken = savedToken;
+                u.balance = Number(u.balance);
                 setUser(u);
             }
             else {
@@ -81,8 +81,22 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   }, [user]);
 
   const refreshUser = () => {
-     if (user) {
-        db.getUser(user.id).then(u => { if(u) setUser({...u, sessionToken: user.sessionToken}); });
+     // CRITICAL: Only refresh if user is still logged in locally (has token)
+     // This prevents a race condition where a refresh completes AFTER a logout, 
+     // creating a "zombie" logged-in state without a valid token.
+     const currentToken = localStorage.getItem('sp_session_token');
+     
+     if (user && currentToken) {
+        db.getUser(user.id).then(u => { 
+            // Double check strict equality and token existence
+            if(u && u.id === user.id && localStorage.getItem('sp_session_token')) {
+                setUser({
+                    ...u, 
+                    sessionToken: currentToken,
+                    balance: Number(u.balance)
+                }); 
+            }
+        });
      }
   };
 
@@ -90,6 +104,8 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     setIsLoading(true);
     try {
         const u = await db.login(username, password);
+        // Ensure balance is number
+        u.balance = Number(u.balance);
         setUser(u);
         localStorage.setItem('sp_current_user_id', u.id);
         if (u.sessionToken) localStorage.setItem('sp_session_token', u.sessionToken);
@@ -102,6 +118,8 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     setIsLoading(true);
     try {
         const u = await db.register(username, password, avatar);
+        // Ensure balance is number
+        u.balance = Number(u.balance);
         setUser(u);
         localStorage.setItem('sp_current_user_id', u.id);
         if (u.sessionToken) localStorage.setItem('sp_session_token', u.sessionToken);

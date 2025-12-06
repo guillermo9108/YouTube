@@ -18,6 +18,9 @@ function interact_purchase($pdo, $input) {
 
         if (!$video) throw new Exception("Video not found");
 
+        // Prevent self-purchase
+        if ($buyerId === $video['creatorId']) throw new Exception("Cannot purchase your own video");
+
         // Check Balance
         $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
         $stmt->execute([$buyerId]);

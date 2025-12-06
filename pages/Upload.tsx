@@ -1,11 +1,21 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign } from 'lucide-react';
+import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useNavigate } from '../components/Router';
 import { VideoCategory } from '../types';
 import { db } from '../services/db';
+
+// Helper component to manage object URL lifecycle and prevent memory leaks
+const ThumbnailPreview = ({ file }: { file: File }) => {
+    const [src, setSrc] = useState<string>('');
+    useEffect(() => {
+        const url = URL.createObjectURL(file);
+        setSrc(url);
+        return () => URL.revokeObjectURL(url);
+    }, [file]);
+    return <img src={src} alt="Thumb" className="w-full h-full object-cover" />;
+};
 
 // Helper to calculate image brightness
 const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -119,7 +129,7 @@ export const generateThumbnail = async (file: File): Promise<{ thumbnail: File |
 };
 
 export default function Upload() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { addToQueue, isUploading } = useUpload();
   const navigate = useNavigate();
   
@@ -141,26 +151,54 @@ export default function Upload() {
   const [queueProgress, setQueueProgress] = useState({ current: 0, total: 0 });
   const processingRef = useRef(false); 
   const queueRef = useRef<{file: File, index: number}[]>([]);
+  const isMounted = useRef(true);
 
   // Global Settings
   const [desc, setDesc] = useState('');
+  
+  // Default Prices Modal
+  const [showPriceConfig, setShowPriceConfig] = useState(false);
+  const [localDefaultPrices, setLocalDefaultPrices] = useState<Record<string, number>>({});
 
   useEffect(() => {
+      isMounted.current = true;
       // Load Custom Categories and Default Prices
       const loadConfig = async () => {
           try {
               const settings = await db.getSystemSettings();
               
-              // Merge standard categories with custom ones
-              const standard = Object.values(VideoCategory) as string[];
-              const custom = settings.customCategories || [];
-              setAvailableCategories([...standard, ...custom]);
+              if (isMounted.current) {
+                // Merge standard categories with custom ones
+                const standard = Object.values(VideoCategory) as string[];
+                const custom = settings.customCategories || [];
+                setAvailableCategories([...standard, ...custom]);
 
-              setSystemCategoryPrices(settings.categoryPrices || {});
+                setSystemCategoryPrices(settings.categoryPrices || {});
+              }
           } catch(e) { console.error(e); }
       };
       loadConfig();
+      return () => { isMounted.current = false; };
   }, []);
+
+  // Sync local default prices with user profile when user loads
+  useEffect(() => {
+    if (user?.defaultPrices) {
+        setLocalDefaultPrices(user.defaultPrices);
+    }
+  }, [user]);
+
+  const handleSaveDefaults = async () => {
+      if (!user) return;
+      try {
+          await db.updateUserProfile(user.id, { defaultPrices: localDefaultPrices });
+          await refreshUser();
+          setShowPriceConfig(false);
+      } catch (e) {
+          console.error(e);
+          alert("Failed to save settings");
+      }
+  };
 
   const getPriceForCategory = (cat: string) => {
       // 1. Check User Preference Override
@@ -220,6 +258,8 @@ export default function Upload() {
 
   // The Queue Processor - Recursive with Delays
   const processQueue = async () => {
+      if (!isMounted.current) return;
+
       if (queueRef.current.length === 0) {
           processingRef.current = false;
           setIsProcessingQueue(false);
@@ -238,6 +278,8 @@ export default function Upload() {
               // Generate Thumbnail
               const { thumbnail, duration } = await generateThumbnail(task.file);
               
+              if (!isMounted.current) return;
+
               // Smart Category Detection
               const cat = detectCategory(duration);
               const price = getPriceForCategory(cat);
@@ -387,6 +429,17 @@ export default function Upload() {
             </div>
             <p className="text-[10px] text-slate-500 mt-2 italic">Note: Prices are auto-set based on category. You can adjust them individually.</p>
           </div>
+
+          {/* Default Prices */}
+          <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 mt-4">
+             <div className="flex justify-between items-center mb-2">
+                <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2"><DollarSign size={14}/> Default Prices</h3>
+                <button type="button" onClick={() => setShowPriceConfig(true)} className="text-xs text-indigo-400 hover:text-white flex items-center gap-1 transition-colors">
+                    <Settings size={12}/> Configure
+                </button>
+             </div>
+             <p className="text-[10px] text-slate-500">Auto-fill prices by category.</p>
+          </div>
         </div>
 
         <div className="md:col-span-2">
@@ -406,7 +459,7 @@ export default function Upload() {
                     <div key={`${file.name}-${idx}`} className="flex gap-3 bg-slate-950 p-3 rounded-lg border border-slate-800 items-start">
                        <div className="w-20 h-14 rounded bg-slate-800 shrink-0 overflow-hidden relative border border-slate-700 group">
                          {thumbnails[idx] ? (
-                           <img src={URL.createObjectURL(thumbnails[idx]!)} alt="Thumb" className="w-full h-full object-cover" />
+                           <ThumbnailPreview file={thumbnails[idx]!} />
                          ) : (
                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900">
                                <Loader2 className="w-4 h-4 text-indigo-500 animate-spin mb-1" />
@@ -440,7 +493,7 @@ export default function Upload() {
                                     min="0"
                                     value={prices[idx]}
                                     onChange={(e) => updatePrice(idx, parseInt(e.target.value))}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded text-xs text-amber-400 font-bold py-1 pl-5 pr-1 outline-none focus:border-indigo-500"
+                                    className="w-full bg-slate-950 border border-slate-700 rounded text-xs text-amber-400 font-bold py-1 pl-5 pr-1 outline-none focus:border-indigo-500"
                                 />
                              </div>
 
@@ -464,6 +517,42 @@ export default function Upload() {
            </form>
         </div>
       </div>
+
+      {/* Default Prices Modal */}
+      {showPriceConfig && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 w-full max-w-md rounded-xl border border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
+                <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                    <h3 className="font-bold text-white flex items-center gap-2"><Tag size={18}/> Category Price Defaults</h3>
+                    <button onClick={() => setShowPriceConfig(false)} className="text-slate-500 hover:text-white"><X size={20}/></button>
+                </div>
+                <div className="p-4 max-h-[60vh] overflow-y-auto space-y-3">
+                    <p className="text-xs text-slate-400 mb-4">Set your preferred price for each category. These values will be automatically applied when you select a category during upload.</p>
+                    {availableCategories.map(cat => (
+                        <div key={cat} className="flex justify-between items-center bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                             <span className="text-sm font-bold text-slate-300 uppercase">{cat.replace('_', ' ')}</span>
+                             <div className="flex items-center gap-2">
+                                 <span className="text-xs text-slate-500">$</span>
+                                 <input 
+                                    type="number" 
+                                    min="0"
+                                    value={localDefaultPrices[cat] !== undefined ? localDefaultPrices[cat] : (systemCategoryPrices[cat] ?? '')}
+                                    onChange={(e) => setLocalDefaultPrices(prev => ({...prev, [cat]: parseInt(e.target.value) || 0}))}
+                                    className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-right text-white font-mono focus:border-indigo-500 outline-none"
+                                    placeholder={systemCategoryPrices[cat]?.toString()}
+                                 />
+                             </div>
+                        </div>
+                    ))}
+                </div>
+                <div className="p-4 border-t border-slate-800 bg-slate-950 flex justify-end">
+                    <button onClick={handleSaveDefaults} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2">
+                        <Save size={16}/> Save Defaults
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 }

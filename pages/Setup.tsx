@@ -17,8 +17,7 @@ export default function Setup() {
     port: '3306',
     username: 'root',
     password: '',
-    database: 'streampay_db',
-    prefix: 'sp_'
+    database: 'streampay_db'
   });
 
   const [adminConfig, setAdminConfig] = useState({
@@ -80,10 +79,10 @@ export default function Setup() {
       'Connection established successfully.',
       'Checking database ' + dbConfig.database + '...',
       'Database created.',
-      'Creating table: ' + dbConfig.prefix + 'users...',
-      'Creating table: ' + dbConfig.prefix + 'videos...',
-      'Creating table: ' + dbConfig.prefix + 'transactions...',
-      'Creating table: ' + dbConfig.prefix + 'interactions...',
+      'Creating table: users...',
+      'Creating table: videos...',
+      'Creating table: transactions...',
+      'Creating table: interactions...',
       'Tables created successfully.',
       'Seeding initial content data...',
       'Creating Administrator account (' + adminConfig.username + ')...',
