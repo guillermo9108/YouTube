@@ -19,7 +19,7 @@ export default function MarketplaceCreate() {
 
     const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
-            const newFiles = Array.from(e.target.files);
+            const newFiles = Array.from(e.target.files) as File[];
             setImages([...images, ...newFiles]);
             
             const newPreviews = newFiles.map(file => URL.createObjectURL(file));

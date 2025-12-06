@@ -348,14 +348,14 @@ export default function Shorts() {
         try {
             const parsed = JSON.parse(cached);
             if (parsed.data) {
-                 const shorts = (parsed.data as Video[]).filter(v => v.duration < 180).sort(() => Math.random() - 0.5);
+                 const shorts = (parsed.data as Video[]).filter((v: Video) => v.duration < 180).sort(() => Math.random() - 0.5);
                  setVideos(shorts);
             }
         } catch(e) {}
     }
 
-    db.getAllVideos().then(all => {
-        const shorts = all.filter(v => v.duration < 180).sort(() => Math.random() - 0.5);
+    db.getAllVideos().then((all: Video[]) => {
+        const shorts = all.filter((v: Video) => v.duration < 180).sort(() => Math.random() - 0.5);
         // Only update if significantly different to prevent reset
         setVideos(prev => (prev.length === 0 ? shorts : prev));
     });
@@ -382,7 +382,7 @@ export default function Shorts() {
     });
 
     // Observe children
-    Array.from(container.children).forEach((child) => observer.observe(child));
+    Array.from(container.children).forEach((child) => observer.observe(child as Element));
 
     return () => observer.disconnect();
   }, [videos]);

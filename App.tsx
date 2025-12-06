@@ -1,4 +1,4 @@
-import React, { Suspense, PropsWithChildren, useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import Watch from './pages/Watch';
@@ -47,7 +47,7 @@ const OfflineBanner = () => {
 
 // --- Guards ---
 
-const ProtectedRoute = ({ children }: PropsWithChildren) => {
+const ProtectedRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   
   if (isLoading) {
@@ -58,14 +58,14 @@ const ProtectedRoute = ({ children }: PropsWithChildren) => {
   return <>{children}</>;
 };
 
-const AdminRoute = ({ children }: PropsWithChildren) => {
+const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   if (isLoading) return null;
   if (!user || user.role !== 'ADMIN') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
-const SetupGuard = ({ children }: PropsWithChildren) => {
+const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
   const [checkDone, setCheckDone] = useState(false);
   const [needs, setNeeds] = useState(false);
 
