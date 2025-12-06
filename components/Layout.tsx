@@ -26,8 +26,8 @@ const UploadIndicator = () => {
           <span className="absolute text-[10px] font-bold text-white">{Math.round(progress)}%</span>
        </div>
        <div className="flex flex-col min-w-[100px]">
-          <span className="text-xs font-bold text-white">Uploading...</span>
-          <span className="text-[10px] text-slate-400">File {currentFileIndex} of {totalFiles}</span>
+          <span className="text-xs font-bold text-white">Subiendo...</span>
+          <span className="text-[10px] text-slate-400">Archivo {currentFileIndex} de {totalFiles}</span>
           <span className="text-[10px] text-indigo-400 font-mono">{uploadSpeed}</span>
        </div>
     </div>
@@ -54,7 +54,6 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                 const list = await db.getNotifications(user.id);
                 setNotifs(list);
                 
-                // System Notification Trigger
                 if (list.length > 0) {
                     const latest = list[0];
                     if (latest.id !== lastNotifIdRef.current && !latest.isRead) {
@@ -108,10 +107,8 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
 
             {isOpen && (
                 <>
-                    {/* Backdrop - Z-Index 90 to cover almost everything */}
                     <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
                     
-                    {/* Responsive Container - Z-Index 100 to appear ABOVE the bottom nav bar (which is z-50) */}
                     <div className={`
                         fixed z-[100] bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col
                         ${isMobile 
@@ -120,7 +117,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                         }
                     `}>
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/90 backdrop-blur-md sticky top-0 z-10">
-                            <h3 className="font-bold text-white flex items-center gap-2"><Bell size={18} className="text-indigo-400"/> Notifications</h3>
+                            <h3 className="font-bold text-white flex items-center gap-2"><Bell size={18} className="text-indigo-400"/> Notificaciones</h3>
                             <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-slate-800 rounded-full bg-slate-900 border border-slate-800"><X size={18} className="text-slate-400 hover:text-white"/></button>
                         </div>
                         
@@ -130,7 +127,7 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                                     <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center opacity-50">
                                         <Bell size={32}/>
                                     </div>
-                                    <p>No new notifications</p>
+                                    <p>Sin notificaciones</p>
                                 </div>
                             ) : (
                                 <div className="divide-y divide-slate-800/50 pb-8">
@@ -155,7 +152,6 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                                 </div>
                             )}
                         </div>
-                        {/* Safe area spacer for mobile navigation/gestures */}
                         {isMobile && <div className="h-safe-area-bottom bg-slate-900 h-6"></div>}
                     </div>
                 </>
@@ -184,7 +180,6 @@ export default function Layout() {
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       
-      {/* Global Sidebar Drawer */}
       {showSidebar && (
         <div className="fixed inset-0 z-[110] flex">
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
@@ -202,32 +197,32 @@ export default function Layout() {
                     )}
 
                     <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
-                        <Home size={20}/> Home
+                        <Home size={20}/> Inicio
                     </Link>
                     <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
                         <Smartphone size={20}/> Shorts
                     </Link>
                     <div className="h-px bg-slate-800 my-2"></div>
                     <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <DownloadCloud size={20}/> Requests
+                        <DownloadCloud size={20}/> Peticiones
                     </Link>
                     <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <ShoppingBag size={20}/> Marketplace
+                        <ShoppingBag size={20}/> Tienda
                     </Link>
                     <Link to="/cart" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <ShoppingCart size={20}/> Cart ({cart.length})
+                        <ShoppingCart size={20}/> Carrito ({cart.length})
                     </Link>
                     <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <Upload size={20}/> Upload
+                        <Upload size={20}/> Subir
                     </Link>
                     <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <User size={20}/> Profile
+                        <User size={20}/> Perfil
                     </Link>
                 </div>
 
                 <div className="border-t border-slate-800 pt-4">
                     <button onClick={() => { logout(); setShowSidebar(false); }} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-lg font-medium w-full text-left">
-                        <LogOut size={20}/> Logout
+                        <LogOut size={20}/> Salir
                     </button>
                 </div>
             </div>
@@ -249,16 +244,16 @@ export default function Layout() {
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">
              {user?.balance} Saldo
           </span>
-          <Link to="/" className={isActive('/')}>Browse</Link>
+          <Link to="/" className={isActive('/')}>Inicio</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
-          <Link to="/marketplace" className={isActive('/marketplace')}>Market</Link>
+          <Link to="/marketplace" className={isActive('/marketplace')}>Tienda</Link>
           
           <Link to="/cart" className="relative text-slate-400 hover:text-white">
               <ShoppingCart size={22} />
               {cart.length > 0 && <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-indigo-600 rounded-full flex items-center justify-center text-[9px] font-bold text-white">{cart.length}</span>}
           </Link>
 
-          <Link to="/upload" className={isActive('/upload')}>Upload</Link>
+          <Link to="/upload" className={isActive('/upload')}>Subir</Link>
           <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>
             <Avatar size={24} />
           </Link>
@@ -277,7 +272,7 @@ export default function Layout() {
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex justify-around items-center py-3 z-50 safe-area-bottom">
           <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/')}`}>
             <Home size={22} />
-            <span className="text-[10px]">Home</span>
+            <span className="text-[10px]">Inicio</span>
           </Link>
 
           <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}>
@@ -293,18 +288,18 @@ export default function Layout() {
 
           <Link to="/marketplace" className={`flex flex-col items-center gap-1 ${isActive('/marketplace')}`}>
              <ShoppingBag size={22} />
-             <span className="text-[10px]">Shop</span>
+             <span className="text-[10px]">Tienda</span>
           </Link>
 
           <Link to="/cart" className={`flex flex-col items-center gap-1 ${isActive('/cart')} relative`}>
              <ShoppingCart size={22} />
              {cart.length > 0 && <span className="absolute top-0 right-3 w-3 h-3 bg-indigo-600 rounded-full border border-black"></span>}
-             <span className="text-[10px]">Cart</span>
+             <span className="text-[10px]">Carro</span>
           </Link>
 
           <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>
             <Avatar size={22} />
-            <span className="text-[10px]">Profile</span>
+            <span className="text-[10px]">Perfil</span>
           </Link>
         </nav>
       )}

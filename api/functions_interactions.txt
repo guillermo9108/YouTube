@@ -19,6 +19,7 @@ function interact_has_purchased($pdo, $userId, $videoId) {
 function interact_purchase($pdo, $input) {
     $buyerId = $input['userId'];
     $videoId = $input['videoId'];
+    $COMMISSION_RATE = 0.20; // 20% para el admin
 
     $pdo->beginTransaction();
     try {
@@ -27,32 +28,46 @@ function interact_purchase($pdo, $input) {
         $stmt->execute([$videoId]);
         $video = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$video) throw new Exception("Video not found");
+        if (!$video) throw new Exception("Video no encontrado");
 
         // Prevent self-purchase
-        if ($buyerId === $video['creatorId']) throw new Exception("Cannot purchase your own video");
+        if ($buyerId === $video['creatorId']) throw new Exception("No puedes comprar tu propio video");
 
         // Check Balance
         $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
         $stmt->execute([$buyerId]);
         $balance = $stmt->fetchColumn();
 
-        if ($balance < $video['price']) throw new Exception("Insufficient funds");
+        if ($balance < $video['price']) throw new Exception("Fondos insuficientes");
+
+        // Calculate Splits
+        $price = floatval($video['price']);
+        $adminFee = $price * $COMMISSION_RATE;
+        $creatorShare = $price - $adminFee;
+
+        // Find Admin ID to deposit fee
+        $stmt = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' ORDER BY id ASC LIMIT 1");
+        $adminId = $stmt->fetchColumn();
 
         // Deduct from Buyer
-        $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$video['price'], $buyerId]);
+        $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$price, $buyerId]);
 
         // Add to Creator
-        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$video['price'], $video['creatorId']]);
+        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$creatorShare, $video['creatorId']]);
+        
+        // Add Fee to Admin (if exists)
+        if ($adminId) {
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$adminFee, $adminId]);
+        }
 
         // Record Transaction
         $tid = uniqid('tx_');
-        $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'PURCHASE')")
-            ->execute([$tid, $buyerId, $video['creatorId'], $videoId, $video['price'], time()]);
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, ?, 'PURCHASE')")
+            ->execute([$tid, $buyerId, $video['creatorId'], $videoId, $price, $adminFee, time()]);
             
         // Notify Creator
         $nid = uniqid('n_');
-        $notifText = "Sold video '{$video['title']}' for {$video['price']} Saldo";
+        $notifText = "Vendiste el video '{$video['title']}' por {$creatorShare} Saldo (Comisión: {$adminFee})";
         $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SALE', ?, '/profile', 0, ?)")
             ->execute([$nid, $video['creatorId'], $notifText, time()]);
 

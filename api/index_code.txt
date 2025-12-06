@@ -135,7 +135,10 @@ try {
         case 'admin_delete_listing': market_delete_listing($pdo, $input); break;
         case 'get_marketplace_item': market_get_item($pdo, $_GET['id']); break;
         case 'create_listing': market_create_listing($pdo, $_POST, $_FILES); break;
+        case 'edit_listing': market_edit_listing($pdo, $input); break;
         case 'checkout_cart': market_checkout($pdo, $input); break;
+        case 'add_review': market_add_review($pdo, $input); break;
+        case 'get_reviews': market_get_reviews($pdo, $_GET['itemId']); break;
 
         default:
             respond(false, null, 'Invalid action');

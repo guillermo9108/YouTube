@@ -12,6 +12,7 @@ import Channel from './pages/Channel';
 import Marketplace from './pages/Marketplace';
 import MarketplaceItem from './pages/MarketplaceItem';
 import MarketplaceCreate from './pages/MarketplaceCreate';
+import MarketplaceEdit from './pages/MarketplaceEdit';
 import Cart from './pages/Cart';
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -40,7 +41,7 @@ const OfflineBanner = () => {
 
     return (
         <div className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-red-600/90 text-white text-center py-2 z-[100] text-xs font-bold flex items-center justify-center gap-2 backdrop-blur-sm">
-            <WifiOff size={14} /> You are offline. Showing cached content.
+            <WifiOff size={14} /> Estás desconectado. Mostrando contenido caché.
         </div>
     );
 };
@@ -76,7 +77,7 @@ const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
     });
   }, []);
 
-  if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Connecting...</div>;
+  if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Conectando...</div>;
 
   if (needs) {
     return <Navigate to="/setup" replace />;
@@ -93,7 +94,7 @@ export default function App() {
         <CartProvider>
             <HashRouter>
             <OfflineBanner />
-            <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>
+            <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>}>
                 <Routes>
                 <Route path="/setup" element={<Setup />} />
                 
@@ -115,6 +116,7 @@ export default function App() {
                     {/* Marketplace Routes */}
                     <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
                     <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
+                    <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
                     <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
                     <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
                     

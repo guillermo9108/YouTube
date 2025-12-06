@@ -25,7 +25,7 @@ export default function Cart() {
         if (!user) return;
         if (cart.length === 0) return;
         if (!shipping.address || !shipping.fullName) {
-             alert("Please fill in shipping details");
+             alert("Por favor completa los datos de envío");
              return;
         }
 
@@ -34,10 +34,10 @@ export default function Cart() {
             await db.checkoutCart(user.id, cart, shipping);
             clearCart();
             refreshUser();
-            alert("Order placed successfully!");
+            alert("¡Pedido realizado con éxito!");
             navigate('/profile');
         } catch (e: any) {
-            alert("Checkout Failed: " + e.message);
+            alert("Error en la compra: " + e.message);
         } finally {
             setLoading(false);
         }
@@ -47,20 +47,20 @@ export default function Cart() {
         return (
             <div className="min-h-[60vh] flex flex-col items-center justify-center text-slate-500">
                 <ShoppingBag size={48} className="mb-4 opacity-50"/>
-                <h2 className="text-xl font-bold text-white mb-2">Your cart is empty</h2>
-                <button onClick={() => navigate('/marketplace')} className="text-indigo-400 hover:underline">Browse Marketplace</button>
+                <h2 className="text-xl font-bold text-white mb-2">Tu carrito está vacío</h2>
+                <button onClick={() => navigate('/marketplace')} className="text-indigo-400 hover:underline">Ir a la Tienda</button>
             </div>
         );
     }
 
     return (
         <div className="max-w-4xl mx-auto px-4 pt-6 pb-20">
-            <h1 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><ShoppingBag className="text-indigo-400"/> Checkout</h1>
+            <h1 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><ShoppingBag className="text-indigo-400"/> Finalizar Compra</h1>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Items List */}
                 <div className="space-y-4">
-                    <h3 className="font-bold text-slate-300 border-b border-slate-800 pb-2">Items ({cart.length})</h3>
+                    <h3 className="font-bold text-slate-300 border-b border-slate-800 pb-2">Artículos ({cart.length})</h3>
                     {cart.map((item) => (
                         <div key={item.cartId} className="flex gap-4 bg-slate-900 p-3 rounded-xl border border-slate-800">
                             <div className="w-20 h-20 bg-black rounded-lg overflow-hidden shrink-0">
@@ -82,7 +82,7 @@ export default function Cart() {
                         </div>
                         {user && Number(user.balance) < total && (
                             <div className="mt-2 text-xs text-red-400 flex items-center gap-1">
-                                <AlertCircle size={12}/> Insufficient Balance ({user.balance} $)
+                                <AlertCircle size={12}/> Saldo Insuficiente ({user.balance} $)
                             </div>
                         )}
                     </div>
@@ -90,28 +90,28 @@ export default function Cart() {
 
                 {/* Shipping Details */}
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 h-fit">
-                    <h3 className="font-bold text-slate-300 border-b border-slate-800 pb-2 mb-4 flex items-center gap-2"><Truck size={18}/> Shipping Details</h3>
+                    <h3 className="font-bold text-slate-300 border-b border-slate-800 pb-2 mb-4 flex items-center gap-2"><Truck size={18}/> Datos de Envío</h3>
                     <div className="space-y-3">
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Full Name</label>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nombre Completo</label>
                             <input type="text" value={shipping.fullName} onChange={e => setShipping({...shipping, fullName: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Address</label>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Dirección</label>
                             <input type="text" value={shipping.address} onChange={e => setShipping({...shipping, address: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">City</label>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ciudad</label>
                                 <input type="text" value={shipping.city} onChange={e => setShipping({...shipping, city: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
                             </div>
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Zip Code</label>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Código Postal</label>
                                 <input type="text" value={shipping.zipCode} onChange={e => setShipping({...shipping, zipCode: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
                             </div>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Phone</label>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Teléfono</label>
                             <input type="text" value={shipping.phoneNumber} onChange={e => setShipping({...shipping, phoneNumber: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
                         </div>
                     </div>
@@ -122,7 +122,7 @@ export default function Cart() {
                         className="w-full mt-6 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2"
                     >
                         {loading ? <Loader2 className="animate-spin"/> : <CheckCircle size={20}/>}
-                        Confirm Order
+                        Confirmar Pedido
                     </button>
                 </div>
             </div>

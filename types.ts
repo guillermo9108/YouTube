@@ -7,13 +7,13 @@ export enum UserRole {
 
 export enum VideoCategory {
   SHORTS = 'SHORTS',
-  MUSIC = 'MUSIC',
-  SHORT_FILM = 'SHORT_FILM',
+  MUSIC = 'MUSICA',
+  SHORT_FILM = 'CORTOMETRAJE',
   SERIES = 'SERIES',
   NOVELAS = 'NOVELAS',
-  MOVIE = 'MOVIE',
-  EDUCATION = 'EDUCATION',
-  OTHER = 'OTHER'
+  MOVIE = 'PELICULA',
+  EDUCATION = 'EDUCACION',
+  OTHER = 'OTRO'
 }
 
 export interface MarketplaceItem {
@@ -21,14 +21,30 @@ export interface MarketplaceItem {
   title: string;
   description: string;
   price: number;
+  originalPrice?: number; // Para mostrar tachado
+  discountPercent?: number; // % de descuento
+  stock: number; // Cantidad disponible
   images: string[];
   sellerId: string;
   sellerName: string;
   sellerAvatarUrl?: string;
   category: string;
-  condition: 'NEW' | 'USED' | 'REFURBISHED';
+  condition: 'NUEVO' | 'USADO' | 'REACONDICIONADO';
   createdAt: number;
-  status: 'ACTIVE' | 'SOLD' | 'DELETED';
+  status: 'ACTIVO' | 'VENDIDO' | 'ELIMINADO' | 'AGOTADO';
+  rating?: number; // Promedio de estrellas
+  reviewCount?: number;
+}
+
+export interface MarketplaceReview {
+  id: string;
+  itemId: string;
+  userId: string;
+  username: string;
+  userAvatarUrl?: string;
+  rating: number; // 1-5
+  comment: string;
+  timestamp: number;
 }
 
 export interface CartItem extends MarketplaceItem {
@@ -41,11 +57,11 @@ export interface User {
   password?: string;
   role: UserRole;
   balance: number;
-  autoPurchaseLimit: number; // Default 1
-  watchLater: string[]; // Video IDs
-  sessionToken?: string; // New: For single session enforcement
-  avatarUrl?: string; // New: Profile Picture
-  defaultPrices?: Record<string, number>; // New: User specific price overrides
+  autoPurchaseLimit: number; 
+  watchLater: string[]; 
+  sessionToken?: string; 
+  avatarUrl?: string; 
+  defaultPrices?: Record<string, number>; 
   shippingDetails?: {
       fullName: string;
       address: string;
@@ -69,20 +85,21 @@ export interface Video {
   createdAt: number;
   likes: number;
   dislikes: number;
-  category: string; // Changed from VideoCategory to string to support custom ones
-  duration: number; // Seconds
-  fileHash?: string; // New: MD5 Hash for deduplication
+  category: string; 
+  duration: number; 
+  fileHash?: string; 
   creatorAvatarUrl?: string;
-  isLocal?: boolean; // New: Flag for local NAS files
+  isLocal?: boolean; 
 }
 
 export interface Transaction {
   id: string;
   buyerId: string;
   creatorId: string | null;
-  videoId: string | null; // Can be null for Marketplace items
-  marketplaceItemId?: string; // New: For marketplace
+  videoId: string | null; 
+  marketplaceItemId?: string; 
   amount: number;
+  adminFee?: number; // Nueva: Comisión cobrada
   timestamp: number;
   type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE';
 }
@@ -126,7 +143,7 @@ export interface ContentRequest {
 export interface BalanceRequest {
     id: string;
     userId: string;
-    username: string; // Joined field
+    username: string; 
     amount: number;
     status: 'PENDING' | 'APPROVED' | 'REJECTED';
     createdAt: number;
@@ -149,12 +166,12 @@ export interface SystemSettings {
   maxResolution: number;     
   pexelsKey: string;
   pixabayKey: string;
-  ytDlpPath: string;    // New: Path to yt-dlp binary
-  enableYoutube: boolean; // New: Toggle for YouTube features
-  categoryPrices: Record<string, number>; // New: Global default prices
-  customCategories: string[]; // New: List of admin added categories
-  localLibraryPath: string; // New: Path to local NAS video folder
-  ftpSettings?: FtpSettings; // New: FTP Configuration
+  ytDlpPath: string;    
+  enableYoutube: boolean; 
+  categoryPrices: Record<string, number>; 
+  customCategories: string[]; 
+  localLibraryPath: string; 
+  ftpSettings?: FtpSettings; 
 }
 
 export interface SmartCleanerResult {
@@ -162,17 +179,17 @@ export interface SmartCleanerResult {
   stats: {
     totalVideos: number;
     videosToDelete: number;
-    spaceReclaimed: string; // Estimate
+    spaceReclaimed: string; 
   }
 }
 
 export interface Notification {
   id: string;
-  userId: string; // The recipient
+  userId: string; 
   type: 'UPLOAD' | 'SYSTEM' | 'SALE';
   text: string;
-  link: string; // URL to go to
+  link: string; 
   isRead: boolean;
   timestamp: number;
-  avatarUrl?: string; // Optional image for the notif
+  avatarUrl?: string; 
 }

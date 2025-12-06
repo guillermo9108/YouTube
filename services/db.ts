@@ -1,7 +1,6 @@
-import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest, MarketplaceReview } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
-// This ensures it works in subfolders (e.g., 192.168.x.x/streampay/) on Synology/XAMPP
 const API_BASE = 'api';
 
 // --- MOCK DATA FOR DEMO MODE ---
@@ -44,11 +43,10 @@ export interface ScanResult {
 }
 
 class DatabaseService {
-  private isInstalled: boolean = true; // Optimistic default
+  private isInstalled: boolean = true; 
   private isDemoMode: boolean = false;
   private isOffline: boolean = !navigator.onLine;
   
-  // DEDUPLICATION: Map to store in-flight requests
   private pendingRequests = new Map<string, Promise<any>>();
 
   constructor() {
@@ -56,7 +54,6 @@ class DatabaseService {
         this.isDemoMode = true;
         this.isInstalled = true;
     }
-    
     window.addEventListener('online', () => { this.isOffline = false; });
     window.addEventListener('offline', () => { this.isOffline = true; });
   }
@@ -69,16 +66,12 @@ class DatabaseService {
       });
 
       try {
-          // Cache GET requests
           if (key.includes('action=')) {
               localStorage.setItem(`sp_cache_${key}`, cacheItem);
           }
       } catch (e: any) {
-          // Check for QuotaExceededError
           if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-              console.warn("Cache quota exceeded. Running smart eviction...");
               this.evictCache();
-              // Try again once
               try {
                   if (key.includes('action=')) {
                       localStorage.setItem(`sp_cache_${key}`, cacheItem);
@@ -91,7 +84,6 @@ class DatabaseService {
   }
 
   private evictCache() {
-      // 1. Gather all sp_cache items
       const items: { key: string, timestamp: number }[] = [];
       for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
@@ -103,21 +95,15 @@ class DatabaseService {
                       items.push({ key: k, timestamp: parsed.timestamp || 0 });
                   }
               } catch(e) {
-                  // Corrupt item, mark for deletion
                   items.push({ key: k, timestamp: 0 });
               }
           }
       }
-
-      // 2. Sort by oldest first
       items.sort((a, b) => a.timestamp - b.timestamp);
-
-      // 3. Delete the oldest 50%
       const toDelete = Math.ceil(items.length * 0.5);
       for (let i = 0; i < toDelete; i++) {
           localStorage.removeItem(items[i].key);
       }
-      console.log(`Evicted ${toDelete} old cache items.`);
   }
 
   private getFromCache<T>(key: string, maxAgeMs: number = 0): T | null {
@@ -125,7 +111,6 @@ class DatabaseService {
       if (!item) return null;
       try {
           const parsed = JSON.parse(item);
-          // Check expiration if maxAgeMs is provided
           if (maxAgeMs > 0 && (Date.now() - parsed.timestamp > maxAgeMs)) {
               return null;
           }
@@ -139,7 +124,6 @@ class DatabaseService {
       localStorage.removeItem(`sp_cache_${endpointKey}`);
   }
 
-  // Helper to mark Home feed as outdated so it refreshes on next visit
   public setHomeDirty() {
       localStorage.setItem('sp_home_dirty', 'true');
   }
@@ -149,40 +133,25 @@ class DatabaseService {
        return this.handleMockRequest<T>(endpoint, method, body);
     }
 
-    // Prepare URL
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
-    const cacheKey = cleanEndpoint; // Use endpoint as cache key
+    const cacheKey = cleanEndpoint; 
     
-    // --- STRATEGY: STALE-WHILE-REVALIDATE FOR HOME FEED ---
-    // If getting all videos, assume cache is good for 5 minutes to avoid spinning up NAS HDDs constantly
     if (method === 'GET' && cleanEndpoint.includes('get_videos') && !cleanEndpoint.includes('id=')) {
-        const cached = this.getFromCache<T>(cacheKey, 5 * 60 * 1000); // 5 Minutes
-        if (cached) {
-            console.log(`[Cache] Serving ${cacheKey} from persistent cache`);
-            return cached;
-        }
+        const cached = this.getFromCache<T>(cacheKey, 5 * 60 * 1000); 
+        if (cached) return cached;
     }
 
-    // --- OFFLINE FIRST STRATEGY ---
-    // If explicitly offline and it's a GET request, try cache immediately (ignore age)
     if (this.isOffline && method === 'GET') {
         const cached = this.getFromCache<T>(cacheKey);
-        if (cached) {
-            console.log(`[Offline] Serving cached: ${cacheKey}`);
-            return cached;
-        }
-        throw new Error("No internet connection and no cached data available.");
+        if (cached) return cached;
+        throw new Error("No hay conexión a internet y no hay datos en caché.");
     }
 
-    // If trying to WRITE (POST) while offline
     if (this.isOffline && method === 'POST') {
-        throw new Error("You are offline. Action cannot be completed.");
+        throw new Error("Estás desconectado. La acción no se puede completar.");
     }
 
-    // --- DEDUPLICATION START ---
-    // If a request for this key is already in flight, return that promise
     if (method === 'GET' && this.pendingRequests.has(cacheKey)) {
-        // console.log(`[Dedupe] Reusing in-flight request for: ${cacheKey}`);
         return this.pendingRequests.get(cacheKey) as Promise<T>;
     }
 
@@ -215,7 +184,6 @@ class DatabaseService {
     
             const text = await response.text();
     
-            // NETWORK SUCCESS
             if (!response.ok) {
                 try {
                     const errJson = JSON.parse(text);
@@ -226,7 +194,7 @@ class DatabaseService {
             }
             
             if (!text || text.trim().length === 0) {
-                throw new Error("Empty response from API. Check PHP logs.");
+                throw new Error("Respuesta vacía de la API.");
             }
     
             let json;
@@ -235,16 +203,15 @@ class DatabaseService {
             } catch (e) {
                 if (text.includes('Fatal error') || text.includes('Parse error')) {
                      const match = text.match(/(Fatal|Parse) error: (.*?) in/);
-                     throw new Error(`PHP Error: ${match ? match[2] : 'Unknown Syntax Error'}`);
+                     throw new Error(`Error PHP: ${match ? match[2] : 'Error de sintaxis'}`);
                 }
-                throw new Error(`Invalid JSON from API.`);
+                throw new Error(`JSON inválido de la API.`);
             }
             
             if (!json.success) {
-                throw new Error(json.error || 'Operation failed');
+                throw new Error(json.error || 'Operación fallida');
             }
     
-            // CACHE SUCCESSFUL GET RESPONSES
             if (method === 'GET') {
                 this.saveToCache(cacheKey, json.data);
             }
@@ -252,19 +219,14 @@ class DatabaseService {
             return json.data as T;
     
         } catch (error: any) {
-            // NETWORK FAIL - FALLBACK TO CACHE
             if (method === 'GET') {
-                console.warn(`Network request failed for ${cacheKey}, trying cache...`);
                 const cached = this.getFromCache<T>(cacheKey);
-                if (cached) {
-                    return cached;
-                }
+                if (cached) return cached;
             }
             
-            if (!silent) console.error("API Request Failed:", endpoint, error);
+            if (!silent) console.error("API Error:", endpoint, error);
             throw error;
         } finally {
-            // Remove from pending map when done (success or fail)
             if (method === 'GET') {
                 this.pendingRequests.delete(cacheKey);
             }
@@ -283,7 +245,7 @@ class DatabaseService {
     if (endpoint.includes('login') || endpoint.includes('register') || endpoint.includes('get_user')) {
         return {
             id: 'demo_user',
-            username: 'DemoUser',
+            username: 'UsuarioDemo',
             role: 'ADMIN',
             balance: 500,
             autoPurchaseLimit: 10,
@@ -296,12 +258,11 @@ class DatabaseService {
     if (endpoint.includes('get_video')) return MOCK_VIDEOS[0] as T;
     if (endpoint.includes('has_purchased')) return { hasPurchased: true } as T;
     if (endpoint.includes('get_interaction')) return { liked: false, disliked: false, isWatched: false, userId: 'demo', videoId: 'demo' } as T;
-    if (endpoint.includes('get_all_users')) return [{id: 'demo', username: 'DemoUser', role: 'ADMIN', balance: 500}] as T;
+    if (endpoint.includes('get_all_users')) return [{id: 'demo', username: 'UsuarioDemo', role: 'ADMIN', balance: 500}] as T;
     if (endpoint.includes('heartbeat')) return true as T;
     return {} as T;
   }
 
-  // --- INSTALLATION CHECK (SECURITY FIX) ---
   public async checkInstallation() {
     if (this.isDemoMode) {
         this.isInstalled = true;
@@ -314,17 +275,12 @@ class DatabaseService {
         if (!text) throw new Error("Empty response");
         
         const json = JSON.parse(text);
-        
-        // Only set to FALSE if the server EXPLICITLY says { installed: false }
-        // If there's a network error, DB error, or weird response, we assume TRUE (installed)
-        // to prevent redirecting users to the setup page by accident.
         if (json.success && json.data.installed === false) {
             this.isInstalled = false;
         } else {
             this.isInstalled = true;
         }
     } catch (e) {
-        // If network fails, we assume installed (Offline Mode)
         console.warn("Backend check failed, assuming installed (Offline Mode)", e);
         this.isInstalled = true;
     }
@@ -381,7 +337,6 @@ class DatabaseService {
   
   async deleteVideo(id: string, userId: string): Promise<void> {
       await this.request('index.php?action=delete_video', 'POST', { id, userId });
-      // Invalidate cache
       this.invalidateCache('index.php?action=get_videos');
       this.setHomeDirty();
   }
@@ -442,9 +397,7 @@ class DatabaseService {
                 try { 
                     const json = JSON.parse(xhr.responseText); 
                     if (json.success) {
-                        // Invalidate video list cache so new content appears
                         this.invalidateCache('index.php?action=get_videos');
-                        // MARK HOME AS DIRTY to force refresh when user goes back
                         this.setHomeDirty();
                         resolve(); 
                     } else reject(new Error(json.error || 'Upload failed')); 
@@ -461,16 +414,13 @@ class DatabaseService {
     });
   }
 
-  // CROWDSOURCED THUMBNAIL REPAIR
   async repairThumbnail(videoId: string, file: File): Promise<void> {
       const formData = new FormData();
       formData.append('videoId', videoId);
       formData.append('thumbnail', file);
-      // Silent request (true) so we don't spam the console if it fails
       await this.request('index.php?action=repair_thumbnail', 'POST', formData, true);
   }
 
-  // NAS LOCAL LIBRARY SCAN
   async scanLocalLibrary(path: string): Promise<ScanResult> {
       const res = await this.request<ScanResult>('index.php?action=scan_local_library', 'POST', { path });
       if (res.imported > 0) {
@@ -480,7 +430,6 @@ class DatabaseService {
       return res;
   }
 
-  // FTP LIBRARY SCAN
   async scanFtpLibrary(ftpConfig: FtpSettings): Promise<ScanResult> {
       const res = await this.request<ScanResult>('index.php?action=scan_ftp_library', 'POST', { ftp: ftpConfig });
       if (res.imported > 0) {
@@ -496,7 +445,6 @@ class DatabaseService {
   async getUserTransactions(userId: string): Promise<Transaction[]> { return this.request<Transaction[]>(`index.php?action=get_transactions&userId=${userId}`); }
   async getVideosByCreator(creatorId: string): Promise<Video[]> { return this.request<Video[]>(`index.php?action=get_creator_videos&creatorId=${creatorId}`); }
   
-  // ADMIN & BALANCE REQUESTS
   async adminRepairDb(): Promise<void> { await this.request('index.php?action=admin_repair_db', 'POST', {}); }
   async adminCleanupVideos(): Promise<{deleted: number}> { return this.request<{deleted: number}>('index.php?action=admin_cleanup_videos', 'POST', {}); }
   
@@ -527,7 +475,6 @@ class DatabaseService {
   
   async serverImportVideo(url: string): Promise<void> {
     await this.request('index.php?action=server_import_video', 'POST', { url });
-    // Import also adds content, so mark home dirty
     this.invalidateCache('index.php?action=get_videos');
     this.setHomeDirty();
   }
@@ -578,8 +525,16 @@ class DatabaseService {
       await this.request('index.php?action=create_listing', 'POST', formData);
   }
 
-  async editListing(id: string, data: Partial<MarketplaceItem>): Promise<void> {
-      await this.request('index.php?action=edit_listing', 'POST', { id, data });
+  async editListing(id: string, userId: string, data: Partial<MarketplaceItem>): Promise<void> {
+      await this.request('index.php?action=edit_listing', 'POST', { id, userId, data });
+  }
+
+  async addReview(itemId: string, userId: string, rating: number, comment: string): Promise<void> {
+      await this.request('index.php?action=add_review', 'POST', { itemId, userId, rating, comment });
+  }
+
+  async getReviews(itemId: string): Promise<MarketplaceReview[]> {
+      return this.request<MarketplaceReview[]>(`index.php?action=get_reviews&itemId=${itemId}`);
   }
 
   async checkoutCart(userId: string, cart: CartItem[], shippingDetails: NonNullable<User['shippingDetails']>): Promise<void> {

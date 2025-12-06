@@ -17,7 +17,8 @@ export function useNavigate() {
 export function useParams(): Record<string, string | undefined> {
   const { pathname } = useLocation();
   
-  // Fixed Regex to be more robust for URLs like /watch/ID?param=1
+  // Regex robusto para capturar IDs
+  
   const watchMatch = pathname.match(/\/watch\/([^/?&]+)/);
   if (watchMatch) {
     return { id: watchMatch[1] };
@@ -26,6 +27,12 @@ export function useParams(): Record<string, string | undefined> {
   const channelMatch = pathname.match(/\/channel\/([^/?&]+)/);
   if (channelMatch) {
     return { userId: channelMatch[1] };
+  }
+
+  // AGREGADO: Soporte para rutas de Marketplace
+  const marketMatch = pathname.match(/\/marketplace\/([^/?&]+)/);
+  if (marketMatch && !pathname.includes('/marketplace/create') && !pathname.endsWith('/marketplace')) {
+    return { id: marketMatch[1] };
   }
 
   return {};

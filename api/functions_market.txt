@@ -1,16 +1,22 @@
 <?php
 function market_get_items($pdo) {
-    $stmt = $pdo->query("
-        SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl 
+    // Calcular rating promedio en la consulta
+    $sql = "
+        SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl,
+        (SELECT AVG(rating) FROM marketplace_reviews WHERE itemId = m.id) as rating,
+        (SELECT COUNT(*) FROM marketplace_reviews WHERE itemId = m.id) as reviewCount
         FROM marketplace_items m 
         LEFT JOIN users u ON m.sellerId = u.id 
-        WHERE m.status = 'ACTIVE' 
+        WHERE m.status IN ('ACTIVO', 'AGOTADO')
         ORDER BY m.createdAt DESC
-    ");
+    ";
+    $stmt = $pdo->query($sql);
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
     foreach ($items as &$i) {
-        $i['images'] = json_decode($i['images'], true);
+        $imgs = json_decode($i['images'], true);
+        $i['images'] = is_array($imgs) ? array_map('fix_url', $imgs) : [];
         if (isset($i['sellerAvatarUrl'])) $i['sellerAvatarUrl'] = fix_url($i['sellerAvatarUrl']);
+        $i['rating'] = $i['rating'] ? round($i['rating'], 1) : 0;
     }
     respond(true, $items);
 }
@@ -24,20 +30,23 @@ function market_admin_get_items($pdo) {
     ");
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
     foreach ($items as &$i) {
-        $i['images'] = json_decode($i['images'], true);
+        $imgs = json_decode($i['images'], true);
+        $i['images'] = is_array($imgs) ? array_map('fix_url', $imgs) : [];
         if (isset($i['sellerAvatarUrl'])) $i['sellerAvatarUrl'] = fix_url($i['sellerAvatarUrl']);
     }
     respond(true, $items);
 }
 
 function market_delete_listing($pdo, $input) {
-    $pdo->prepare("UPDATE marketplace_items SET status = 'DELETED' WHERE id = ?")->execute([$input['id']]);
+    $pdo->prepare("UPDATE marketplace_items SET status = 'ELIMINADO' WHERE id = ?")->execute([$input['id']]);
     respond(true);
 }
 
 function market_get_item($pdo, $id) {
     $stmt = $pdo->prepare("
-        SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl 
+        SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl,
+        (SELECT AVG(rating) FROM marketplace_reviews WHERE itemId = m.id) as rating,
+        (SELECT COUNT(*) FROM marketplace_reviews WHERE itemId = m.id) as reviewCount
         FROM marketplace_items m 
         LEFT JOIN users u ON m.sellerId = u.id 
         WHERE m.id = ?
@@ -45,44 +54,128 @@ function market_get_item($pdo, $id) {
     $stmt->execute([$id]);
     $item = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($item) {
-        $item['images'] = json_decode($item['images'], true);
+        $imgs = json_decode($item['images'], true);
+        $item['images'] = is_array($imgs) ? array_map('fix_url', $imgs) : [];
         if (isset($item['sellerAvatarUrl'])) $item['sellerAvatarUrl'] = fix_url($item['sellerAvatarUrl']);
+        $item['rating'] = $item['rating'] ? round($item['rating'], 1) : 0;
         respond(true, $item);
     }
-    respond(false, null, 'Item not found');
+    respond(false, null, 'Artículo no encontrado');
 }
 
 function market_create_listing($pdo, $post, $files) {
     $id = 'm_' . uniqid();
     $title = $post['title'];
     $desc = $post['description'];
-    $price = $post['price'];
+    $price = floatval($post['price']);
+    $stock = intval($post['stock']);
     $cat = $post['category'];
     $cond = $post['condition'];
     $seller = $post['sellerId'];
     
+    // Set original price same as price initially
+    $originalPrice = $price;
+    $discount = 0;
+    
     $images = [];
     if (isset($files['images'])) {
-        // Normalize array structure
         $fileAry = $files['images'];
         $count = count($fileAry['name']);
-        
         for ($i = 0; $i < $count; $i++) {
             if ($fileAry['error'][$i] === UPLOAD_ERR_OK) {
                 $ext = strtolower(pathinfo($fileAry['name'][$i], PATHINFO_EXTENSION));
                 $name = "{$id}_{$i}.{$ext}";
                 $target = MARKET_DIR . $name;
                 if (move_uploaded_file($fileAry['tmp_name'][$i], $target)) {
-                    $images[] = "api/" . $target; // Public URL relative to root
+                    $images[] = "api/" . $target;
                 }
             }
         }
     }
     
-    $stmt = $pdo->prepare("INSERT INTO marketplace_items (id, title, description, price, images, sellerId, category, itemCondition, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)");
-    $stmt->execute([$id, $title, $desc, $price, json_encode($images), $seller, $cat, $cond, time()]);
+    $stmt = $pdo->prepare("INSERT INTO marketplace_items (id, title, description, price, originalPrice, stock, images, sellerId, category, itemCondition, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?)");
+    $stmt->execute([$id, $title, $desc, $price, $originalPrice, $stock, json_encode($images), $seller, $cat, $cond, time()]);
     
     respond(true);
+}
+
+// Nueva función para editar artículos
+function market_edit_listing($pdo, $input) {
+    $id = $input['id'];
+    $userId = $input['userId'];
+    $data = $input['data'];
+
+    // Verificar propiedad
+    $stmt = $pdo->prepare("SELECT sellerId FROM marketplace_items WHERE id = ?");
+    $stmt->execute([$id]);
+    $seller = $stmt->fetchColumn();
+
+    if ($seller !== $userId) respond(false, null, 'No autorizado');
+
+    $fields = [];
+    $params = [];
+
+    // Calcular precio con descuento si se aplica
+    if (isset($data['originalPrice']) && isset($data['discountPercent'])) {
+        $orig = floatval($data['originalPrice']);
+        $disc = intval($data['discountPercent']);
+        $newPrice = $orig - ($orig * ($disc / 100));
+        
+        $fields[] = "price = ?"; $params[] = $newPrice;
+        $fields[] = "originalPrice = ?"; $params[] = $orig;
+        $fields[] = "discountPercent = ?"; $params[] = $disc;
+    } else if (isset($data['price'])) {
+        // Cambio directo de precio
+        $fields[] = "price = ?"; $params[] = floatval($data['price']);
+        $fields[] = "originalPrice = ?"; $params[] = floatval($data['price']); // Reset descuento
+        $fields[] = "discountPercent = ?"; $params[] = 0;
+    }
+
+    if (isset($data['stock'])) {
+        $fields[] = "stock = ?"; $params[] = intval($data['stock']);
+        // Auto activar si stock > 0
+        if (intval($data['stock']) > 0) {
+            $fields[] = "status = 'ACTIVO'";
+        } else {
+            $fields[] = "status = 'AGOTADO'";
+        }
+    }
+
+    if (isset($data['status'])) {
+        $fields[] = "status = ?"; $params[] = $data['status'];
+    }
+    
+    if (isset($data['title'])) { $fields[] = "title = ?"; $params[] = $data['title']; }
+    if (isset($data['description'])) { $fields[] = "description = ?"; $params[] = $data['description']; }
+
+    if (empty($fields)) respond(true);
+
+    $params[] = $id;
+    $sql = "UPDATE marketplace_items SET " . implode(', ', $fields) . " WHERE id = ?";
+    $pdo->prepare($sql)->execute($params);
+
+    respond(true);
+}
+
+function market_add_review($pdo, $input) {
+    $id = uniqid('rv_');
+    $pdo->prepare("INSERT INTO marketplace_reviews (id, itemId, userId, rating, comment, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
+        ->execute([$id, $input['itemId'], $input['userId'], $input['rating'], $input['comment'], time()]);
+    respond(true);
+}
+
+function market_get_reviews($pdo, $itemId) {
+    $stmt = $pdo->prepare("
+        SELECT r.*, u.username, u.avatarUrl as userAvatarUrl 
+        FROM marketplace_reviews r 
+        LEFT JOIN users u ON r.userId = u.id 
+        WHERE r.itemId = ? 
+        ORDER BY r.timestamp DESC
+    ");
+    $stmt->execute([$itemId]);
+    $reviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach($reviews as &$r) $r['userAvatarUrl'] = fix_url($r['userAvatarUrl']);
+    respond(true, $reviews);
 }
 
 function market_checkout($pdo, $input) {
@@ -90,40 +183,59 @@ function market_checkout($pdo, $input) {
     $cart = $input['cart'];
     $shipping = $input['shippingDetails'];
     
+    $COMMISSION_RATE = 0.25; // 25% Comisión Admin
+    
     $pdo->beginTransaction();
     try {
+        // Encontrar Admin para comisión
+        $stmt = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' ORDER BY id ASC LIMIT 1");
+        $adminId = $stmt->fetchColumn();
+
         foreach ($cart as $item) {
-            // Verify item is active and price matches
-            $stmt = $pdo->prepare("SELECT price, sellerId, status, title FROM marketplace_items WHERE id = ? FOR UPDATE");
+            // Verificar stock y estado
+            $stmt = $pdo->prepare("SELECT price, sellerId, status, title, stock FROM marketplace_items WHERE id = ? FOR UPDATE");
             $stmt->execute([$item['id']]);
             $realItem = $stmt->fetch(PDO::FETCH_ASSOC);
             
-            if (!$realItem || $realItem['status'] !== 'ACTIVE') throw new Exception("Item '{$item['title']}' is no longer available.");
+            if (!$realItem) throw new Exception("Artículo '{$item['title']}' no encontrado.");
+            if ($realItem['status'] !== 'ACTIVO' || $realItem['stock'] < 1) throw new Exception("Artículo '{$realItem['title']}' está agotado o no disponible.");
             
-            // Check Buyer Balance
+            // Verificar saldo comprador
             $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
             $stmt->execute([$userId]);
             $balance = $stmt->fetchColumn();
             
-            if ($balance < $realItem['price']) throw new Exception("Insufficient balance for '{$item['title']}'");
+            if ($balance < $realItem['price']) throw new Exception("Saldo insuficiente para '{$item['title']}'");
             
-            // Transfer Funds
-            $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$realItem['price'], $userId]);
-            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$realItem['price'], $realItem['sellerId']]);
+            // Calcular split
+            $price = floatval($realItem['price']);
+            $adminFee = $price * $COMMISSION_RATE;
+            $sellerShare = $price - $adminFee;
             
-            // Mark Item Sold
-            $pdo->prepare("UPDATE marketplace_items SET status = 'SOLD' WHERE id = ?")->execute([$item['id']]);
+            // Transferir fondos
+            $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$price, $userId]);
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$sellerShare, $realItem['sellerId']]);
             
-            // Log Transaction
+            if ($adminId) {
+                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$adminFee, $adminId]);
+            }
+            
+            // Reducir stock
+            $newStock = $realItem['stock'] - 1;
+            $newStatus = $newStock > 0 ? 'ACTIVO' : 'AGOTADO';
+            $pdo->prepare("UPDATE marketplace_items SET stock = ?, status = ? WHERE id = ?")->execute([$newStock, $newStatus, $item['id']]);
+            
+            // Registrar transacción
             $tid = uniqid('tx_m_');
-            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, marketplaceItemId, amount, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'MARKETPLACE')")
-                ->execute([$tid, $userId, $realItem['sellerId'], $item['id'], $realItem['price'], time()]);
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, marketplaceItemId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, ?, 'MARKETPLACE')")
+                ->execute([$tid, $userId, $realItem['sellerId'], $item['id'], $price, $adminFee, time()]);
                 
-            // Notify Seller with Shipping Info
-            $shippingText = "Ship to: {$shipping['fullName']}, {$shipping['address']}, {$shipping['city']}";
+            // Notificar vendedor
+            $shippingText = "Enviar a: {$shipping['fullName']}, {$shipping['address']}, {$shipping['city']}";
             $nid = uniqid('n_');
+            $notifText = "Vendiste '{$realItem['title']}' por {$sellerShare} Saldo (Comisión: {$adminFee}). $shippingText";
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SALE', ?, '/profile', 0, ?)")
-                ->execute([$nid, $realItem['sellerId'], "Sold '{$realItem['title']}'. $shippingText", time()]);
+                ->execute([$nid, $realItem['sellerId'], $notifText, time()]);
         }
         
         $pdo->commit();

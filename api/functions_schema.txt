@@ -1,7 +1,5 @@
 <?php
 // DEFINICIÓN DEL ESQUEMA MAESTRO
-// Este archivo es la ÚNICA fuente de verdad para la estructura de la base de datos.
-// Se usa tanto en install.php (instalación nueva) como en functions_admin.php (reparación).
 
 $schema = [
     'users' => [
@@ -45,12 +43,25 @@ $schema = [
             'title' => 'VARCHAR(255)',
             'description' => 'TEXT',
             'price' => 'DECIMAL(10, 2)',
+            'originalPrice' => 'DECIMAL(10, 2) DEFAULT 0.00',
+            'discountPercent' => 'INT DEFAULT 0',
+            'stock' => 'INT DEFAULT 1',
             'images' => 'JSON',
             'sellerId' => 'VARCHAR(50)',
             'category' => 'VARCHAR(50)',
             'itemCondition' => 'VARCHAR(20)',
-            'status' => "VARCHAR(20) DEFAULT 'ACTIVE'",
+            'status' => "VARCHAR(20) DEFAULT 'ACTIVO'",
             'createdAt' => 'BIGINT'
+        ]
+    ],
+    'marketplace_reviews' => [
+        'cols' => [
+            'id' => 'VARCHAR(50) PRIMARY KEY',
+            'itemId' => 'VARCHAR(50)',
+            'userId' => 'VARCHAR(50)',
+            'rating' => 'INT DEFAULT 5',
+            'comment' => 'TEXT',
+            'timestamp' => 'BIGINT'
         ]
     ],
     'transactions' => [
@@ -61,6 +72,7 @@ $schema = [
             'videoId' => 'VARCHAR(50)',
             'marketplaceItemId' => 'VARCHAR(50) DEFAULT NULL',
             'amount' => 'DECIMAL(10, 2)',
+            'adminFee' => 'DECIMAL(10, 2) DEFAULT 0.00',
             'timestamp' => 'BIGINT',
             'type' => 'VARCHAR(20)'
         ]
@@ -143,13 +155,10 @@ $schema = [
     ]
 ];
 
-// Función universal para crear o actualizar tablas
 function syncTable($pdo, $tableName, $def) {
     try {
-        // 1. Verificar si la tabla existe
         $result = $pdo->query("SHOW TABLES LIKE '$tableName'");
         if ($result->rowCount() == 0) {
-            // Crear Tabla
             $sql = "CREATE TABLE $tableName (";
             $cols = [];
             foreach ($def['cols'] as $colName => $colDef) {
@@ -160,14 +169,11 @@ function syncTable($pdo, $tableName, $def) {
             $sql .= ") CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
             $pdo->exec($sql);
         } else {
-            // La tabla existe, verificar columnas
             $stmt = $pdo->query("SHOW COLUMNS FROM $tableName");
             $existingCols = $stmt->fetchAll(PDO::FETCH_COLUMN);
             
             foreach ($def['cols'] as $colName => $colDef) {
                 if (!in_array($colName, $existingCols)) {
-                    // Agregar columna faltante
-                    // Nota: Quitamos PRIMARY KEY de la definición al hacer ALTER para evitar errores
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
                 }
@@ -175,7 +181,6 @@ function syncTable($pdo, $tableName, $def) {
         }
     } catch (Exception $e) {
         error_log("Sync Table Error ($tableName): " . $e->getMessage());
-        // No lanzamos error para permitir que el proceso continúe con otras tablas
     }
 }
 ?>
