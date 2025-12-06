@@ -224,7 +224,15 @@ class DatabaseService {
   async processScanBatch(): Promise<any> { return { completed: true }; }
 
   async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> { await this.request('index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice }); }
-  async getAllUsers(): Promise<User[]> { try { return await this.request<User[]>('index.php?action=get_all_users'); } catch { return []; } }
+  
+  async getAllUsers(): Promise<User[]> { 
+      try { 
+          const users = await this.request<User[]>('index.php?action=get_all_users'); 
+          // Safety: ensure balance is number
+          return users.map(u => ({...u, balance: Number(u.balance)}));
+      } catch { return []; } 
+  }
+  
   async adminAddBalance(adminId: string, targetUserId: string, amount: number): Promise<void> { await this.request('index.php?action=admin_add_balance', 'POST', { adminId, targetUserId, amount }); }
   async getUserTransactions(userId: string): Promise<Transaction[]> { return this.request<Transaction[]>(`index.php?action=get_transactions&userId=${userId}`); }
   async getVideosByCreator(creatorId: string): Promise<Video[]> { return this.request<Video[]>(`index.php?action=get_creator_videos&creatorId=${creatorId}`); }

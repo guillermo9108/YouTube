@@ -65,8 +65,8 @@ const ProtectedRoute = ({ children }: { children?: React.ReactNode }) => {
 const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   if (isLoading) return null;
-  // Case-insensitive check for ADMIN role
-  if (!user || user.role?.toUpperCase() !== 'ADMIN') return <Navigate to="/" replace />;
+  // Case-insensitive check for ADMIN role with strict trimming
+  if (!user || user.role?.trim().toUpperCase() !== 'ADMIN') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 

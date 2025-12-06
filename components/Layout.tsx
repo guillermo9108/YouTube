@@ -204,8 +204,8 @@ export default function Layout() {
       )
   );
 
-  // Case-insensitive check
-  const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
+  // Case-insensitive check with trim
+  const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
@@ -281,7 +281,7 @@ export default function Layout() {
 
           {user && <NotificationBell />}
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">
-             {user?.balance} Saldo
+             {Number(user?.balance || 0).toFixed(2)} Saldo
           </span>
           <Link to="/" className={isActive('/')}>Inicio</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
