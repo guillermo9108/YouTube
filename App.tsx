@@ -21,6 +21,7 @@ import { UploadProvider } from './context/UploadContext';
 import { CartProvider } from './context/CartContext';
 import { ServerTaskProvider } from './context/ServerTaskContext';
 import { ToastProvider } from './context/ToastContext';
+import { GridProvider } from './context/GridContext';
 import { db } from './services/db';
 import { Loader2, WifiOff } from 'lucide-react';
 
@@ -97,42 +98,44 @@ export default function App() {
         <UploadProvider>
             <ServerTaskProvider>
                 <CartProvider>
-                    <HashRouter>
-                    <OfflineBanner />
-                    <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>}>
-                        <Routes>
-                        <Route path="/setup" element={<Setup />} />
-                        
-                        <Route path="/login" element={
-                            <SetupGuard>
-                            <Login />
-                            </SetupGuard>
-                        } />
-                        
-                        <Route element={<Layout />}>
-                            <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
+                    <GridProvider>
+                        <HashRouter>
+                        <OfflineBanner />
+                        <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>}>
+                            <Routes>
+                            <Route path="/setup" element={<Setup />} />
                             
-                            {/* Marketplace Routes - Specific routes MUST come before generic :id routes */}
-                            <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
+                            <Route path="/login" element={
+                                <SetupGuard>
+                                <Login />
+                                </SetupGuard>
+                            } />
                             
-                            <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
-                            <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
-                            
-                            <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
-                        </Route>
+                            <Route element={<Layout />}>
+                                <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
+                                
+                                {/* Marketplace Routes - Specific routes MUST come before generic :id routes */}
+                                <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
+                                
+                                <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
+                                
+                                <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                            </Route>
 
-                        <Route path="*" element={<Navigate to="/" />} />
-                        </Routes>
-                    </Suspense>
-                    </HashRouter>
+                            <Route path="*" element={<Navigate to="/" />} />
+                            </Routes>
+                        </Suspense>
+                        </HashRouter>
+                    </GridProvider>
                 </CartProvider>
             </ServerTaskProvider>
         </UploadProvider>

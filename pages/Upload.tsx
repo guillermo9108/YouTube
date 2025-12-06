@@ -7,6 +7,7 @@ import { useNavigate } from '../components/Router';
 import { VideoCategory } from '../types';
 import { db } from '../services/db';
 import { useToast } from '../context/ToastContext';
+import { generateThumbnail } from '../utils/videoGenerator';
 
 // Helper component to manage object URL lifecycle and prevent memory leaks
 const ThumbnailPreview = ({ file }: { file: File }) => {
@@ -17,117 +18,6 @@ const ThumbnailPreview = ({ file }: { file: File }) => {
         return () => URL.revokeObjectURL(url);
     }, [file]);
     return <img src={src} alt="Thumb" className="w-full h-full object-cover" />;
-};
-
-// Helper to calculate image brightness
-const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    let r, g, b, avg;
-    let colorSum = 0;
-
-    for (let x = 0, len = data.length; x < len; x += 4) {
-        r = data[x];
-        g = data[x + 1];
-        b = data[x + 2];
-        avg = Math.floor((r + g + b) / 3);
-        colorSum += avg;
-    }
-
-    return Math.floor(colorSum / (width * height));
-};
-
-export const generateThumbnail = async (file: File): Promise<{ thumbnail: File | null, duration: number }> => {
-  return new Promise((resolve) => {
-    const video = document.createElement('video');
-    const objectUrl = URL.createObjectURL(file);
-    
-    // Safety Timeout (5 seconds max per file)
-    const timeout = setTimeout(() => {
-        // CRITICAL: Clean up memory even on timeout
-        URL.revokeObjectURL(objectUrl);
-        video.remove();
-        resolve({ thumbnail: null, duration: 0 });
-    }, 5000);
-
-    video.preload = 'metadata';
-    video.src = objectUrl;
-    video.muted = true;
-    video.playsInline = true;
-
-    // Checkpoints to try if the frame is too dark (in percentage of duration)
-    const attemptPoints = [0, 0.15, 0.50]; 
-    let currentAttempt = 0;
-
-    const captureFrame = () => {
-        try {
-            const width = video.videoWidth;
-            const height = video.videoHeight;
-            const canvas = document.createElement('canvas');
-            
-            // OPTIMIZATION: Scale down to 640px max width.
-            // This saves ~75% RAM compared to 1280px, critical for mobile bulk uploads.
-            if (width > 640) { 
-                const scale = 640 / width;
-                canvas.width = 640;
-                canvas.height = height * scale;
-            } else {
-                canvas.width = width;
-                canvas.height = height;
-            }
-
-            const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error("No context");
-
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // SMART CHECK: Is the image too dark/black?
-            const brightness = getBrightness(ctx, canvas.width, canvas.height);
-            const duration = video.duration || 0;
-
-            // Threshold: 20 out of 255. If darker, try next seek point.
-            if (brightness < 20 && currentAttempt < attemptPoints.length - 1) {
-                currentAttempt++;
-                if (duration > 0) {
-                    const nextTime = Math.max(1.0, duration * attemptPoints[currentAttempt]);
-                    video.currentTime = nextTime;
-                    return; // Wait for seeked event again
-                }
-            }
-
-            canvas.toBlob((blob) => {
-                clearTimeout(timeout);
-                if (blob) {
-                    const thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
-                    resolve({ thumbnail: thumbFile, duration });
-                } else {
-                    resolve({ thumbnail: null, duration: 0 });
-                }
-                // CRITICAL: Cleanup immediately to free RAM
-                URL.revokeObjectURL(objectUrl);
-                video.remove();
-            }, 'image/jpeg', 0.70); // Lower quality for speed
-
-        } catch (e) {
-            clearTimeout(timeout);
-            URL.revokeObjectURL(objectUrl);
-            video.remove();
-            resolve({ thumbnail: null, duration: 0 });
-        }
-    };
-
-    video.onloadedmetadata = () => {
-        video.currentTime = 1.0;
-    };
-
-    video.onseeked = captureFrame;
-    video.onerror = () => {
-        clearTimeout(timeout);
-        URL.revokeObjectURL(objectUrl);
-        video.remove();
-        resolve({ thumbnail: null, duration: 0 });
-    };
-  });
 };
 
 export default function Upload() {
@@ -279,7 +169,7 @@ export default function Upload() {
           setQueueProgress(prev => ({ ...prev, current: prev.current + 1 }));
           
           try {
-              // Generate Thumbnail
+              // Generate Thumbnail using Shared Utility
               const { thumbnail, duration } = await generateThumbnail(task.file);
               
               if (!isMounted.current) return;

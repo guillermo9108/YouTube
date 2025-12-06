@@ -1,10 +1,10 @@
+
 <?php
-// Helper to transform video URLs for local content
+// Helper to transform video URLs
 function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
         if (!empty($v['isLocal'])) {
-            // Transform absolute filesystem path to Stream API Endpoint
             $v['videoUrl'] = "api/index.php?action=stream&id=" . $v['id'];
         }
         if (isset($v['thumbnailUrl'])) $v['thumbnailUrl'] = fix_url($v['thumbnailUrl']);
@@ -13,34 +13,20 @@ function video_process_rows(&$rows) {
 }
 
 function video_get_all($pdo) {
-    $stmt = $pdo->query("
-        SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
-        FROM videos v 
-        LEFT JOIN users u ON v.creatorId = u.id 
-        ORDER BY v.createdAt DESC
-    ");
+    $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id ORDER BY v.createdAt DESC");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
 }
 
 function video_get_one($pdo, $id) {
-    $stmt = $pdo->prepare("
-        SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
-        FROM videos v 
-        LEFT JOIN users u ON v.creatorId = u.id 
-        WHERE v.id = ?
-    ");
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id = ?");
     $stmt->execute([$id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($video) {
-        if (!empty($video['isLocal'])) {
-            $video['videoUrl'] = "api/index.php?action=stream&id=" . $video['id'];
-        }
+        if (!empty($video['isLocal'])) $video['videoUrl'] = "api/index.php?action=stream&id=" . $video['id'];
         $video['thumbnailUrl'] = fix_url($video['thumbnailUrl']);
         $video['creatorAvatarUrl'] = fix_url($video['creatorAvatarUrl']);
-        
-        // Increment views (simple)
         $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$id]);
         respond(true, $video);
     }
@@ -48,13 +34,7 @@ function video_get_one($pdo, $id) {
 }
 
 function video_get_by_creator($pdo, $creatorId) {
-    $stmt = $pdo->prepare("
-        SELECT v.*, u.username as creatorName 
-        FROM videos v 
-        LEFT JOIN users u ON v.creatorId = u.id 
-        WHERE v.creatorId = ? 
-        ORDER BY v.createdAt DESC
-    ");
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? ORDER BY v.createdAt DESC");
     $stmt->execute([$creatorId]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
@@ -65,16 +45,8 @@ function video_get_related($pdo, $id) {
     $stmt = $pdo->prepare("SELECT category, creatorId FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $source = $stmt->fetch(PDO::FETCH_ASSOC);
-    
     if (!$source) respond(true, []);
-    
-    // Algorithm: Same Category + Random mix
-    $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
-            FROM videos v 
-            LEFT JOIN users u ON v.creatorId = u.id
-            WHERE v.id != ? AND (v.category = ? OR v.creatorId = ?)
-            ORDER BY RAND() LIMIT 8";
-            
+    $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.category = ? OR v.creatorId = ?) ORDER BY RAND() LIMIT 8";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$id, $source['category'], $source['creatorId']]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -90,148 +62,69 @@ function video_upload($pdo, $post, $files) {
     $category = $post['category'];
     $desc = $post['description'] ?? '';
 
-    if (!isset($files['video']) || $files['video']['error'] !== UPLOAD_ERR_OK) {
-        respond(false, null, 'Video file missing or error');
-    }
+    if (!isset($files['video']) || $files['video']['error'] !== UPLOAD_ERR_OK) respond(false, null, 'Video file missing');
 
     $vidId = 'v_' . uniqid();
     $vidExt = strtolower(pathinfo($files['video']['name'], PATHINFO_EXTENSION));
     $vidName = "{$vidId}.{$vidExt}";
-    $vidPath = UPLOAD_DIR . $vidName;
+    move_uploaded_file($files['video']['tmp_name'], UPLOAD_DIR . $vidName);
 
-    // Move Video
-    if (!move_uploaded_file($files['video']['tmp_name'], $vidPath)) {
-        respond(false, null, 'Failed to save video file');
-    }
-
-    // Handle Thumbnail
-    $thumbPath = ''; // Default or placeholder
+    $thumbPath = "https://via.placeholder.com/640x360.png?text=" . urlencode($title);
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         $thumbExt = strtolower(pathinfo($files['thumbnail']['name'], PATHINFO_EXTENSION));
         $thumbName = "{$vidId}.{$thumbExt}";
         $thumbPath = THUMB_DIR . $thumbName;
         move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
-    } else {
-        // Fallback placeholder
-        $thumbPath = "https://via.placeholder.com/640x360.png?text=" . urlencode($title);
     }
 
     $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
-    $stmt->execute([$vidId, $title, $desc, $price, $thumbPath, "api/$vidPath", $creatorId, time(), $category, $duration]);
+    $stmt->execute([$vidId, $title, $desc, $price, $thumbPath, "api/" . UPLOAD_DIR . $vidName, $creatorId, time(), $category, $duration]);
     
-    // Notify Subscribers
-    $stmt = $pdo->prepare("SELECT subscriberId FROM subscriptions WHERE creatorId = ?");
-    $stmt->execute([$creatorId]);
-    $subs = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    
-    foreach ($subs as $subId) {
-        $nid = uniqid('n_');
-        $text = "New upload: $title";
-        $link = "/watch/$vidId";
-        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'UPLOAD', ?, ?, 0, ?)")
-            ->execute([$nid, $subId, $text, $link, time()]);
-    }
-
     respond(true, ['id' => $vidId]);
-}
-
-function video_repair_thumbnail($pdo, $post, $files) {
-    $videoId = $post['videoId'];
-    if (!isset($files['thumbnail'])) respond(false);
-
-    $thumbExt = 'jpg';
-    $thumbName = "{$videoId}_repaired.{$thumbExt}";
-    $thumbPath = THUMB_DIR . $thumbName;
-    
-    if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) {
-        $pdo->prepare("UPDATE videos SET thumbnailUrl = ? WHERE id = ?")->execute([$thumbPath, $videoId]);
-        respond(true);
-    }
-    respond(false);
 }
 
 function video_delete($pdo, $input) {
     $id = $input['id'];
     $userId = $input['userId'];
-    
-    // Check ownership
     $stmt = $pdo->prepare("SELECT creatorId, videoUrl, thumbnailUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $v = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    if (!$v) respond(false, null, 'Video not found');
-    
-    // Check if user is owner OR admin
-    $isAdmin = false;
     $stmtRole = $pdo->prepare("SELECT role FROM users WHERE id = ?");
     $stmtRole->execute([$userId]);
-    if ($stmtRole->fetchColumn() === 'ADMIN') $isAdmin = true;
+    $isAdmin = $stmtRole->fetchColumn() === 'ADMIN';
 
-    if ($v['creatorId'] !== $userId && !$isAdmin) {
-        respond(false, null, 'Unauthorized');
+    if ($v && ($v['creatorId'] === $userId || $isAdmin)) {
+        $vidPath = str_replace('api/', '', $v['videoUrl']);
+        if (file_exists($vidPath) && strpos($vidPath, 'uploads/') === 0) unlink($vidPath);
+        $thumbPath = str_replace('api/', '', $v['thumbnailUrl']);
+        if (file_exists($thumbPath) && strpos($thumbPath, 'uploads/') === 0) unlink($thumbPath);
+
+        $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+        $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
+        $pdo->prepare("DELETE FROM interactions WHERE videoId = ?")->execute([$id]);
+        respond(true);
     }
-    
-    // Delete files if local
-    $vidPath = str_replace('api/', '', $v['videoUrl']);
-    // Sanity check: Ensure we are deleting inside uploads/ or known path
-    if (file_exists($vidPath) && (strpos($vidPath, 'uploads/') === 0)) unlink($vidPath);
-    
-    $thumbPath = str_replace('api/', '', $v['thumbnailUrl']);
-    if (file_exists($thumbPath) && (strpos($thumbPath, 'uploads/') === 0)) unlink($thumbPath);
-
-    $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
-    $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
-    $pdo->prepare("DELETE FROM interactions WHERE videoId = ?")->execute([$id]);
-    $pdo->prepare("DELETE FROM comments WHERE videoId = ?")->execute([$id]);
-
-    respond(true);
+    respond(false, null, 'Unauthorized or not found');
 }
 
 function video_server_import($pdo, $input) {
     $url = $input['url'];
-    
-    // Find Admin User ID
-    $stmt = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1");
-    $adminId = $stmt->fetchColumn();
-    
+    $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
     $rid = uniqid('req_');
     $pdo->prepare("INSERT INTO requests (id, userId, query, status, createdAt, useLocalNetwork) VALUES (?, ?, ?, 'PENDING', ?, 0)")
         ->execute([$rid, $adminId, $url, time()]);
-        
-    respond(true, ['message' => 'Queued for import']);
+    respond(true, ['message' => 'Queued']);
 }
 
-// ---------------------------------------------------------
-// NEW: SERVER-SIDE BATCH SCANNING LOGIC WITH SMART GROUPING
-// ---------------------------------------------------------
+// --- NEW FAST SCANNING LOGIC ---
 
-// Constants
-define('SCAN_QUEUE_FILE', 'scan_queue.json');
-
-// Helper to force UTF-8 for JSON encoding (Recursive)
-function utf8ize($mixed) {
-    if (is_array($mixed)) {
-        foreach ($mixed as $key => $value) {
-            $mixed[$key] = utf8ize($value);
-        }
-    } else if (is_string($mixed)) {
-        return mb_convert_encoding($mixed, "UTF-8", "UTF-8");
-    }
-    return $mixed;
-}
-
-// Step 1: Initialize Scan - Find files, Group by folder, Detect Series
+// Step 1: Fast Indexing
 function video_scan_local($pdo, $input) {
     $path = $input['path'];
-    
-    if (!is_dir($path) && !@scandir($path)) {
-        respond(true, ['success' => false, 'error' => "Cannot access directory: $path"]);
-    }
+    if (!is_dir($path) && !@scandir($path)) respond(true, ['success' => false, 'error' => "Cannot access directory: $path"]);
 
     $filesFound = [];
-    // Count files per directory to detect series/collections
-    $dirCounts = []; 
-
     try {
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
         foreach ($iterator as $file) {
@@ -239,276 +132,106 @@ function video_scan_local($pdo, $input) {
                 $ext = strtolower($file->getExtension());
                 if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi'])) {
                     $fullPath = $file->getPathname();
-                    
-                    // Convert encoding if needed (NAS fallback)
-                    if (!mb_check_encoding($fullPath, 'UTF-8')) {
-                        $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
-                    }
-
-                    $dir = dirname($fullPath);
-                    
+                    if (!mb_check_encoding($fullPath, 'UTF-8')) $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
                     $filesFound[] = $fullPath;
-                    
-                    if (!isset($dirCounts[$dir])) $dirCounts[$dir] = 0;
-                    $dirCounts[$dir]++;
                 }
             }
         }
-    } catch (Exception $e) {
-        respond(true, ['success' => false, 'error' => $e->getMessage()]);
-    }
+    } catch (Exception $e) { respond(true, ['success' => false, 'error' => $e->getMessage()]); }
 
-    // Filter already imported & Build Queue with Context
-    // Fix illegal mix of collations by forcing collation
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? COLLATE utf8mb4_unicode_ci");
-    $queue = [];
+    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+    $addedCount = 0;
     
+    $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? COLLATE utf8mb4_unicode_ci");
+    $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'PENDING', 0, 1)");
+
     foreach ($filesFound as $fullPath) {
-        $stmt->execute([$fullPath]);
-        if ($stmt->fetchColumn() == 0) {
-            $dir = dirname($fullPath);
-            $dirName = basename($dir);
-            $countInDir = $dirCounts[$dir] ?? 0;
-            
-            $detectedType = null;
-            
-            // Heuristic: If more than 2 videos in a folder, it's a series/collection
-            if ($countInDir > 2) {
-                // Determine if Novela or Series based on keywords
-                if (preg_match('/(novela|pasi|amor|coraz|capitulo)/i', $dirName)) {
-                    $detectedType = 'NOVELAS';
-                } else {
-                    $detectedType = 'SERIES';
-                }
-            }
-
-            $queue[] = [
-                'path' => $fullPath,
-                'detectedType' => $detectedType
-            ];
-        }
-    }
-
-    // Sanitize Queue before saving
-    $queue = utf8ize($queue);
-    file_put_contents(SCAN_QUEUE_FILE, json_encode($queue));
-
-    respond(true, [
-        'success' => true,
-        'totalFound' => count($filesFound),
-        'newToImport' => count($queue)
-    ]);
-}
-
-// Step 2: Process a Batch with FAIL-SAFE strategy
-function video_scan_process_batch($pdo) {
-    if (!file_exists(SCAN_QUEUE_FILE)) {
-        respond(true, ['completed' => true, 'processed' => []]);
-    }
-
-    $json = file_get_contents(SCAN_QUEUE_FILE);
-    $queue = json_decode($json, true);
-
-    if (!is_array($queue) || empty($queue)) {
-        @unlink(SCAN_QUEUE_FILE); 
-        respond(true, ['completed' => true, 'processed' => []]);
-    }
-
-    // STRATEGY: Pop 1 item, Save Queue, Then Process.
-    // This ensures if the processing crashes (timeout/memory), the bad item is already gone from the queue.
-    $item = array_shift($queue);
-
-    // Save remaining queue immediately
-    if (empty($queue)) {
-        @unlink(SCAN_QUEUE_FILE);
-    } else {
-        $safeQueue = utf8ize($queue);
-        file_put_contents(SCAN_QUEUE_FILE, json_encode($safeQueue));
-    }
-
-    $processed = [];
-    
-    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
-    $settingsStmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
-    $settings = $settingsStmt->fetch(PDO::FETCH_ASSOC);
-
-    // FIX: Use INSERT IGNORE to prevent "Duplicate entry" crash if scanning existing files
-    $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
-
-    $fullPath = is_array($item) ? $item['path'] : $item;
-    $detectedType = is_array($item) ? ($item['detectedType'] ?? null) : null;
-
-    try {
-        // FIX: Remove time() from ID generation so the ID is deterministic (Same File = Same ID)
-        // This prevents duplicate logical copies in the library.
-        $vidId = 'loc_' . md5($fullPath);
-        
-        // SMART PARSING
-        $smartInfo = smartParseFilename($fullPath, $detectedType);
-        $title = $smartInfo['title'];
-        $forcedCategory = $smartInfo['category'];
-
-        // 1. Get Metadata (Duration)
-        $meta = getVideoMetadata($fullPath);
-        $duration = $meta['duration'];
-        
-        // 2. Generate Thumbnail
-        $thumbName = "{$vidId}.jpg";
-        $thumbPath = THUMB_DIR . $thumbName;
-        $thumbResult = generateVideoThumbnail($fullPath, $thumbPath);
-        $finalThumb = $thumbResult ? $thumbPath : "https://via.placeholder.com/640x360.png?text=" . urlencode($title);
-
-        // 3. Final Category
-        $category = $forcedCategory ? $forcedCategory : detectCategoryFromDuration($duration);
-        
-        // 4. Price
-        $price = getPriceForCategory($category, $settings);
-
-        // 5. Auto Description
-        $description = findLocalDescription($fullPath);
-        if (!$description) {
-            $description = fetchOnlineDescription($title, $category);
-        }
-        if (!$description) {
-            $description = "Imported from NAS. Folder: " . basename(dirname($fullPath));
-        }
-
-        // Force UTF-8 for DB
-        $title = mb_convert_encoding($title, 'UTF-8', 'auto');
-        $description = mb_convert_encoding($description, 'UTF-8', 'auto');
-
-        // 6. Insert
-        $insert->execute([
-            $vidId,
-            $title,
-            $description,
-            $price,
-            $finalThumb,
-            $fullPath,
-            $adminId,
-            time(),
-            $category,
-            $duration
-        ]);
-
-        $processed[] = [
-            'title' => $title,
-            'category' => $category,
-            'duration' => $duration
-        ];
-
-    } catch (Exception $e) {
-        $processed[] = ['title' => basename($fullPath), 'error' => $e->getMessage()];
-    }
-
-    respond(true, [
-        'completed' => empty($queue), // Queue is empty if we popped the last one
-        'remaining' => count($queue),
-        'processed' => $processed
-    ]);
-}
-
-function video_get_scan_status($pdo) {
-    if (!file_exists(SCAN_QUEUE_FILE)) {
-        respond(true, ['active' => false]);
-    } else {
-        $queue = json_decode(file_get_contents(SCAN_QUEUE_FILE), true);
-        respond(true, ['active' => true, 'remaining' => count($queue)]);
-    }
-}
-
-// ---------------------------------------------------------
-
-function video_scan_ftp($pdo, $input) {
-    $config = $input['ftp'];
-    $log = [];
-    $imported = 0;
-    
-    if (!function_exists('ftp_connect')) {
-         respond(false, null, "PHP FTP extension is missing");
-    }
-
-    $conn = @ftp_connect($config['host'], $config['port']);
-    if (!$conn) {
-        respond(false, null, "Could not connect to FTP host");
-    }
-    
-    if (!@ftp_login($conn, $config['user'], $config['pass'])) {
-        respond(false, null, "FTP Login Failed");
-    }
-    
-    ftp_pasv($conn, true);
-    
-    // Recursive FTP Scan Function
-    function scanFtpDir($conn, $dir, &$fileList) {
-        $files = ftp_nlist($conn, $dir);
-        if (is_array($files)) {
-            foreach ($files as $file) {
-                if ($file == '.' || $file == '..') continue;
-                
-                // Try to guess if directory (this is tricky in FTP without rawlist parsing)
-                // A simple trick is trying to chdir into it
-                if (@ftp_chdir($conn, $file)) {
-                    scanFtpDir($conn, $file, $fileList);
-                    ftp_chdir($conn, ".."); // Go back up
-                } else {
-                    // It's likely a file
-                    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-                    if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov'])) {
-                        $fileList[] = $file; // $file usually contains full path in recursive nlist depending on server
-                    }
-                }
-            }
-        }
-    }
-    
-    $foundFiles = [];
-    // We assume the user provided root path is valid
-    $raw = ftp_nlist($conn, $config['rootPath']);
-    if ($raw === false) {
-        $log[] = "FTP ERROR: Could not list directory. Check path.";
-    } else {
-        foreach($raw as $f) {
-             $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
-             if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov'])) {
-                 $foundFiles[] = $f;
-             }
-        }
-    }
-    
-    // Import Logic
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
-    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'OTHER', 0, 1)");
-    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
-
-    foreach ($foundFiles as $fullPath) {
-        $stmt->execute([$fullPath]);
-        if ($stmt->fetchColumn() == 0) {
-            $vidId = 'ftp_' . md5($fullPath);
+        $check->execute([$fullPath]);
+        if ($check->fetchColumn() == 0) {
+            $vidId = 'loc_' . md5($fullPath);
             $title = basename($fullPath);
-            
-            $insert->execute([
-                $vidId, 
-                $title, 
-                "Scanned via FTP: " . $fullPath,
-                "https://via.placeholder.com/640x360.png?text=FTP+Video",
-                $fullPath,
-                $adminId,
-                time()
-            ]);
-            $imported++;
-            $log[] = "Imported: $title";
+            $insert->execute([$vidId, mb_convert_encoding($title, 'UTF-8', 'auto'), "Local Video", "https://via.placeholder.com/640x360.png?text=Processing", $fullPath, $adminId, time()]);
+            $addedCount++;
+        }
+    }
+
+    respond(true, ['success' => true, 'newToImport' => $addedCount]);
+}
+
+// Step 2: Get Pending (Supports Distributed Grid)
+function video_get_unprocessed($pdo) {
+    $mode = $_GET['mode'] ?? 'normal';
+    $limit = intval($_GET['limit'] ?? 50);
+    $limit = max(1, min(50, $limit));
+
+    $sql = "SELECT id, videoUrl, title FROM videos WHERE (duration = 0 OR category = 'PENDING') AND isLocal = 1";
+    
+    // Grid mode: Randomize to avoid collision
+    if ($mode === 'random') {
+        $sql .= " ORDER BY RAND()";
+    }
+    $sql .= " LIMIT $limit";
+
+    $stmt = $pdo->query($sql);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
+}
+
+// Step 3: Update Metadata (From Client)
+function video_update_metadata($pdo, $post, $files) {
+    $id = $post['id'];
+    $duration = floatval($post['duration']);
+    if (!$id) respond(false);
+
+    $category = detectCategoryFromDuration($duration);
+    $settings = $pdo->query("SELECT * FROM system_settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $price = getPriceForCategory($category, $settings);
+
+    // Smart Renaming
+    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $path = $stmt->fetchColumn();
+    $smart = smartParseFilename($path, $category);
+    $title = $smart['title'];
+    
+    // Override if detected
+    if ($smart['category'] && $smart['category'] !== 'OTHER') {
+        $category = $smart['category'];
+        $price = getPriceForCategory($category, $settings);
+    }
+
+    $params = [$title, $category, $duration, $price];
+    $thumbSql = "";
+    
+    if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
+        $thumbPath = THUMB_DIR . "{$id}.jpg";
+        if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) {
+            $thumbSql = ", thumbnailUrl = ?";
+            $params[] = $thumbPath;
         }
     }
     
-    ftp_close($conn);
-    respond(true, ['imported' => $imported, 'log' => $log, 'errors' => []]);
+    $params[] = $id;
+    $pdo->prepare("UPDATE videos SET title = ?, category = ?, duration = ?, price = ? $thumbSql WHERE id = ?")->execute($params);
+    
+    respond(true);
+}
+
+function video_repair_thumbnail($pdo, $post, $files) {
+    $videoId = $post['videoId'];
+    if (isset($files['thumbnail']) && move_uploaded_file($files['thumbnail']['tmp_name'], THUMB_DIR . "{$videoId}_repaired.jpg")) {
+        $pdo->prepare("UPDATE videos SET thumbnailUrl = ? WHERE id = ?")->execute([THUMB_DIR . "{$videoId}_repaired.jpg", $videoId]);
+        respond(true);
+    }
+    respond(false);
 }
 
 function video_update_prices_bulk($pdo, $input) {
-    $uid = $input['creatorId'];
-    $price = $input['newPrice'];
-    $pdo->prepare("UPDATE videos SET price = ? WHERE creatorId = ?")->execute([$price, $uid]);
+    $pdo->prepare("UPDATE videos SET price = ? WHERE creatorId = ?")->execute([$input['newPrice'], $input['creatorId']]);
     respond(true);
 }
+
+function video_scan_ftp($pdo, $input) { respond(true, ['imported' => 0, 'log' => ['FTP Scan Deprecated']]); }
+function video_get_scan_status($pdo) { respond(true, ['active' => false]); }
 ?>
