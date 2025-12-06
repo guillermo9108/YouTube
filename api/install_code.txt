@@ -70,8 +70,8 @@ if ($action === 'install') {
         $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbConfig['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         $pdo->exec("USE `{$dbConfig['database']}`");
 
-        // Uses the global $schema and syncTable() from functions_schema.php
-        global $schema;
+        // Uses the function getAppSchema() and syncTable() from functions_schema.php
+        $schema = getAppSchema();
         foreach ($schema as $tableName => $def) {
             syncTable($pdo, $tableName, $def);
         }

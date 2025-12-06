@@ -101,9 +101,8 @@ function admin_cleanup_videos($pdo) {
 }
 
 function admin_repair_db($pdo) {
-    // Uses the shared schema definition to perform a robust repair/sync
     require_once 'functions_schema.php';
-    global $schema;
+    $schema = getAppSchema();
     
     foreach ($schema as $tableName => $def) {
         syncTable($pdo, $tableName, $def);

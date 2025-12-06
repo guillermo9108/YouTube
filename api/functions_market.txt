@@ -2,7 +2,7 @@
 // Auto-migrate schema helper
 function market_ensure_schema($pdo) {
     require_once 'functions_schema.php';
-    global $schema;
+    $schema = getAppSchema();
     syncTable($pdo, 'marketplace_items', $schema['marketplace_items']);
     syncTable($pdo, 'marketplace_reviews', $schema['marketplace_reviews']);
 }
