@@ -42,7 +42,8 @@ if (!file_exists($configFile)) {
 $db_config = json_decode(file_get_contents($configFile), true);
 
 try {
-    $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']}", $db_config['user'], $db_config['password'], [PDO::ATTR_PERSISTENT => true]);
+    // CRITICAL FIX: Add charset=utf8mb4 to connection string to match table collation
+    $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password'], [PDO::ATTR_PERSISTENT => true]);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) {
     header('Content-Type: application/json');

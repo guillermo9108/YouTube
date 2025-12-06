@@ -1,3 +1,4 @@
+
 <?php
 ob_start();
 
@@ -54,7 +55,8 @@ if ($action === 'check') {
 if ($action === 'verify_db') {
     $host = $input['host'] ?? 'localhost';
     try {
-        $pdo = new PDO("mysql:host=$host;port={$input['port']}", $input['username'], $input['password']);
+        // Fix charset
+        $pdo = new PDO("mysql:host=$host;port={$input['port']};charset=utf8mb4", $input['username'], $input['password']);
         respond(true, ['message' => 'Connection successful']);
     } catch (PDOException $e) { respond(false, null, 'Connection failed: ' . $e->getMessage()); }
 }
@@ -64,7 +66,8 @@ if ($action === 'install') {
     $adminUser = $input['adminUser'];
 
     try {
-        $pdo = new PDO("mysql:host={$dbConfig['host']};port={$dbConfig['port']}", $dbConfig['username'], $dbConfig['password']);
+        // Fix charset
+        $pdo = new PDO("mysql:host={$dbConfig['host']};port={$dbConfig['port']};charset=utf8mb4", $dbConfig['username'], $dbConfig['password']);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
         $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbConfig['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");

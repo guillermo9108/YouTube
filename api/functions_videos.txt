@@ -1,3 +1,4 @@
+
 <?php
 // Helper to transform video URLs for local content
 function video_process_rows(&$rows) {
@@ -227,6 +228,12 @@ function video_scan_local($pdo, $input) {
                 $ext = strtolower($file->getExtension());
                 if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi'])) {
                     $fullPath = $file->getPathname();
+                    
+                    // Convert encoding if needed (NAS fallback)
+                    if (!mb_check_encoding($fullPath, 'UTF-8')) {
+                        $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
+                    }
+
                     $dir = dirname($fullPath);
                     
                     $filesFound[] = $fullPath;
@@ -241,7 +248,8 @@ function video_scan_local($pdo, $input) {
     }
 
     // Filter already imported & Build Queue with Context
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
+    // Fix illegal mix of collations by forcing collation
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? COLLATE utf8mb4_unicode_ci");
     $queue = [];
     
     foreach ($filesFound as $fullPath) {
