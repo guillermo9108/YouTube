@@ -1,3 +1,4 @@
+
 <?php
 // DEFINICIÓN DEL ESQUEMA MAESTRO
 // Encapsulado en función para evitar problemas de scope global
@@ -76,7 +77,9 @@ function getAppSchema() {
                 'amount' => 'DECIMAL(10, 2)',
                 'adminFee' => 'DECIMAL(10, 2) DEFAULT 0.00',
                 'timestamp' => 'BIGINT',
-                'type' => 'VARCHAR(20)'
+                'type' => 'VARCHAR(20)',
+                'shippingData' => 'JSON DEFAULT NULL',
+                'fulfillmentStatus' => "VARCHAR(20) DEFAULT 'PENDING'"
             ]
         ],
         'balance_requests' => [
@@ -133,7 +136,9 @@ function getAppSchema() {
                 'categoryPrices' => 'JSON DEFAULT NULL',
                 'customCategories' => 'JSON DEFAULT NULL',
                 'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
-                'ftpSettings' => 'JSON DEFAULT NULL'
+                'ftpSettings' => 'JSON DEFAULT NULL',
+                'videoCommission' => 'INT DEFAULT 20',
+                'marketCommission' => 'INT DEFAULT 25'
             ]
         ],
         'subscriptions' => [

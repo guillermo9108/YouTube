@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -5,6 +6,7 @@ import { useUpload } from '../context/UploadContext';
 import { useNavigate } from '../components/Router';
 import { VideoCategory } from '../types';
 import { db } from '../services/db';
+import { useToast } from '../context/ToastContext';
 
 // Helper component to manage object URL lifecycle and prevent memory leaks
 const ThumbnailPreview = ({ file }: { file: File }) => {
@@ -132,6 +134,7 @@ export default function Upload() {
   const { user, refreshUser } = useAuth();
   const { addToQueue, isUploading } = useUpload();
   const navigate = useNavigate();
+  const toast = useToast();
   
   const [files, setFiles] = useState<File[]>([]);
   const [titles, setTitles] = useState<string[]>([]);
@@ -194,9 +197,10 @@ export default function Upload() {
           await db.updateUserProfile(user.id, { defaultPrices: localDefaultPrices });
           await refreshUser();
           setShowPriceConfig(false);
+          toast.success("Precios guardados");
       } catch (e) {
           console.error(e);
-          alert("Failed to save settings");
+          toast.error("Error al guardar");
       }
   };
 
@@ -322,7 +326,7 @@ export default function Upload() {
 
   const removeFile = (index: number) => {
     if (isProcessingQueue) {
-        alert("Please wait for analysis to finish before removing items to avoid errors.");
+        toast.error("Espera a que termine el análisis");
         return;
     }
 
@@ -364,6 +368,7 @@ export default function Upload() {
     }));
 
     addToQueue(queue, user);
+    toast.success("Añadido a cola de subida");
     
     // Reset
     setFiles([]);

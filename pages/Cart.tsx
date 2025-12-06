@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { db } from '../services/db';
 import { useNavigate } from '../components/Router';
 import { Trash2, ShoppingBag, Truck, CheckCircle, AlertCircle, Loader2, Minus, Plus } from 'lucide-react';
@@ -10,6 +11,7 @@ export default function Cart() {
     const { cart, removeFromCart, updateQuantity, clearCart, total } = useCart();
     const { user, refreshUser } = useAuth();
     const navigate = useNavigate();
+    const toast = useToast();
     const [loading, setLoading] = useState(false);
     
     // Shipping Form
@@ -26,7 +28,7 @@ export default function Cart() {
         if (!user) return;
         if (cart.length === 0) return;
         if (!shipping.address || !shipping.fullName) {
-             alert("Por favor completa los datos de envío");
+             toast.error("Por favor completa los datos de envío");
              return;
         }
 
@@ -35,10 +37,10 @@ export default function Cart() {
             await db.checkoutCart(user.id, cart, shipping);
             clearCart();
             refreshUser();
-            alert("¡Pedido realizado con éxito!");
+            toast.success("¡Pedido realizado con éxito!");
             navigate('/profile');
         } catch (e: any) {
-            alert("Error en la compra: " + e.message);
+            toast.error("Error: " + e.message);
         } finally {
             setLoading(false);
         }

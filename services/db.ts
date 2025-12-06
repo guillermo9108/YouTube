@@ -1,3 +1,4 @@
+
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest, MarketplaceReview } from '../types';
 
 // CRITICAL FIX: Use relative path 'api' instead of absolute '/api'
@@ -46,6 +47,13 @@ export interface ScanBatchResult {
     completed: boolean;
     remaining: number;
     processed: any[];
+}
+
+export interface SaleRecord extends Transaction {
+    itemTitle: string;
+    itemImage: string;
+    buyerName: string;
+    buyerAvatar: string;
 }
 
 class DatabaseService {
@@ -550,6 +558,14 @@ class DatabaseService {
 
   async checkoutCart(userId: string, cart: CartItem[], shippingDetails: NonNullable<User['shippingDetails']>): Promise<void> {
       await this.request('index.php?action=checkout_cart', 'POST', { userId, cart, shippingDetails });
+  }
+
+  async getSales(userId: string): Promise<SaleRecord[]> {
+      return this.request<SaleRecord[]>(`index.php?action=get_sales&userId=${userId}`);
+  }
+
+  async updateOrderStatus(userId: string, transactionId: string, status: 'SHIPPED' | 'PENDING'): Promise<void> {
+      await this.request('index.php?action=update_order_status', 'POST', { userId, transactionId, status });
   }
 }
 

@@ -1,3 +1,4 @@
+
 <?php
 ob_start();
 ini_set('display_errors', 0);
@@ -147,6 +148,10 @@ try {
         case 'checkout_cart': market_checkout($pdo, $input); break;
         case 'add_review': market_add_review($pdo, $input); break;
         case 'get_reviews': market_get_reviews($pdo, $_GET['itemId']); break;
+        
+        // New Sales Management
+        case 'get_sales': market_get_sales($pdo, $_GET['userId']); break;
+        case 'update_order_status': market_update_order_status($pdo, $input); break;
 
         default:
             respond(false, null, 'Invalid action');

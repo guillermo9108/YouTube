@@ -3,7 +3,7 @@ import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useServerTask } from '../context/ServerTaskContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent } from 'lucide-react';
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -706,6 +706,7 @@ export default function Admin() {
 
       {activeTab === 'CONFIG' && settings && (
          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+             {/* General Config */}
              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6">
                 <h3 className="font-bold text-white flex items-center gap-2"><Settings size={18} /> Auto-Download Configuration</h3>
                 
@@ -741,7 +742,40 @@ export default function Admin() {
                 </button>
              </div>
 
+             {/* API Keys & Commissions */}
              <div className="space-y-6">
+                
+                {/* Commissions */}
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
+                    <h3 className="font-bold text-white flex items-center gap-2"><Percent size={18} /> Admin Commissions</h3>
+                    <p className="text-xs text-slate-500">Percentage of sales revenue automatically transferred to the admin account.</p>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Video Sales (%)</label>
+                            <input 
+                                type="number" 
+                                min="0" 
+                                max="100" 
+                                value={settings.videoCommission !== undefined ? settings.videoCommission : 20} 
+                                onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value)})} 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-center font-bold"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Marketplace (%)</label>
+                            <input 
+                                type="number" 
+                                min="0" 
+                                max="100" 
+                                value={settings.marketCommission !== undefined ? settings.marketCommission : 25} 
+                                onChange={e => setSettings({...settings, marketCommission: parseInt(e.target.value)})} 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-center font-bold"
+                            />
+                        </div>
+                    </div>
+                </div>
+
                 <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
                     <div className="flex items-center justify-between">
                          <h3 className="font-bold text-white flex items-center gap-2"><Key size={18} /> Server API Keys</h3>

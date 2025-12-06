@@ -1,5 +1,3 @@
-
-
 import React, { useEffect, useState, useRef } from 'react';
 import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info, Wallet } from 'lucide-react';
 import { db } from '../services/db';
@@ -7,9 +5,9 @@ import { Video, Comment, UserInteraction, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { Link, useParams, useNavigate } from '../components/Router';
 
-// Helper for relative time
+// Helper for relative time (Fixed for Seconds timestamp)
 const formatTimeAgo = (timestamp: number) => {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  const seconds = Math.floor(Date.now() / 1000 - timestamp);
   let interval = seconds / 31536000;
   if (interval > 1) return Math.floor(interval) + " years ago";
   interval = seconds / 2592000;
@@ -391,8 +389,8 @@ export default function Watch() {
                              <button onClick={() => handleRate('like')} className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold transition-colors border-r border-slate-700 ${interaction?.liked ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-400 hover:text-white'}`}>
                                  <ThumbsUp size={14} fill={interaction?.liked ? "currentColor" : "none"}/> {video.likes}
                              </button>
-                             <button onClick={() => handleRate('dislike')} className={`px-3 py-1.5 text-xs font-bold transition-colors ${interaction?.disliked ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-white'}`}>
-                                 <ThumbsDown size={14} fill={interaction?.disliked ? "currentColor" : "none"}/>
+                             <button onClick={() => handleRate('dislike')} className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold transition-colors ${interaction?.disliked ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-white'}`}>
+                                 <ThumbsDown size={14} fill={interaction?.disliked ? "currentColor" : "none"}/> {video.dislikes}
                              </button>
                          </div>
                          <button onClick={() => user && db.toggleWatchLater(user.id, video.id).then(l => setIsWatchLater(l.includes(video.id)))} className={`px-3 py-1.5 rounded-full transition-colors ${isWatchLater ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-800 text-slate-400'}`}><Clock size={14}/></button>

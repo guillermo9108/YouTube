@@ -10,7 +10,10 @@ interface VideoCardProps {
 }
 
 const formatTimeAgo = (timestamp: number) => {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  // PHP sends seconds, JS Date.now() uses milliseconds.
+  // We calculate difference in seconds.
+  const seconds = Math.floor(Date.now() / 1000 - timestamp);
+  
   let interval = seconds / 31536000;
   if (interval > 1) return Math.floor(interval) + " years ago";
   interval = seconds / 2592000;
@@ -37,7 +40,8 @@ const formatDuration = (seconds: number) => {
 // React.memo to prevent re-renders of cards that didn't change when parent state updates
 const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched }) => {
   // Check if video is "New" (less than 24 hours old)
-  const isNew = (Date.now() - video.createdAt) < 24 * 60 * 60 * 1000;
+  // PHP timestamp is seconds, so 24h = 86400 seconds
+  const isNew = (Date.now() / 1000 - video.createdAt) < 86400;
   const [imgError, setImgError] = useState(false);
 
   return (

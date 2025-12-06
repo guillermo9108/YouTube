@@ -19,10 +19,15 @@ function interact_has_purchased($pdo, $userId, $videoId) {
 function interact_purchase($pdo, $input) {
     $buyerId = $input['userId'];
     $videoId = $input['videoId'];
-    $COMMISSION_RATE = 0.20; // 20% para el admin
-
+    
     $pdo->beginTransaction();
     try {
+        // Get Commission Rate (Dynamic)
+        $stmtSettings = $pdo->query("SELECT videoCommission FROM system_settings LIMIT 1");
+        $settings = $stmtSettings->fetch(PDO::FETCH_ASSOC);
+        // Default 20% if not set
+        $COMMISSION_RATE = ($settings && isset($settings['videoCommission'])) ? (floatval($settings['videoCommission']) / 100) : 0.20;
+
         // Get Video Price & Creator
         $stmt = $pdo->prepare("SELECT price, creatorId, title FROM videos WHERE id = ?");
         $stmt->execute([$videoId]);

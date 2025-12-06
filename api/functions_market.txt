@@ -6,11 +6,10 @@ function market_ensure_schema($pdo) {
     $schema = getAppSchema();
     syncTable($pdo, 'marketplace_items', $schema['marketplace_items']);
     syncTable($pdo, 'marketplace_reviews', $schema['marketplace_reviews']);
+    syncTable($pdo, 'transactions', $schema['transactions']);
 }
 
 function market_get_items($pdo) {
-    // Check schema on read just in case
-    
     $sql = "
         SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl,
         (SELECT AVG(rating) FROM marketplace_reviews WHERE itemId = m.id) as rating,
@@ -25,7 +24,6 @@ function market_get_items($pdo) {
         $stmt = $pdo->query($sql);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
-        // If error is missing table or column (42S02/42S22), try sync and retry
         if ($e->getCode() == '42S02' || $e->getCode() == '42S22' || $e->getCode() == '1054') {
             market_ensure_schema($pdo);
             $stmt = $pdo->query($sql);
@@ -101,7 +99,6 @@ function market_get_item($pdo, $id) {
 }
 
 function market_create_listing($pdo, $post, $files) {
-    // Ensure schema before write
     market_ensure_schema($pdo);
 
     $id = 'm_' . uniqid();
@@ -113,7 +110,6 @@ function market_create_listing($pdo, $post, $files) {
     $cond = $post['condition'];
     $seller = $post['sellerId'];
     
-    // Set original price same as price initially
     $originalPrice = $price;
     $discount = 0;
     
@@ -146,7 +142,6 @@ function market_edit_listing($pdo, $input) {
     $userId = $input['userId'];
     $data = $input['data'];
 
-    // Verificar propiedad
     $stmt = $pdo->prepare("SELECT sellerId FROM marketplace_items WHERE id = ?");
     $stmt->execute([$id]);
     $seller = $stmt->fetchColumn();
@@ -156,9 +151,7 @@ function market_edit_listing($pdo, $input) {
     $fields = [];
     $params = [];
 
-    // Calcular precio con descuento si se aplica
     if (isset($data['originalPrice']) || isset($data['discountPercent'])) {
-        // Necesitamos valores actuales si faltan en input
         $stmt = $pdo->prepare("SELECT originalPrice, discountPercent FROM marketplace_items WHERE id = ?");
         $stmt->execute([$id]);
         $curr = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -173,7 +166,6 @@ function market_edit_listing($pdo, $input) {
         
         $fields[] = "price = ?"; $params[] = $newPrice;
     } else if (isset($data['price'])) {
-        // Cambio legacy directo de precio (resetea descuento)
         $fields[] = "price = ?"; $params[] = floatval($data['price']);
         $fields[] = "originalPrice = ?"; $params[] = floatval($data['price']);
         $fields[] = "discountPercent = ?"; $params[] = 0;
@@ -181,7 +173,6 @@ function market_edit_listing($pdo, $input) {
 
     if (isset($data['stock'])) {
         $fields[] = "stock = ?"; $params[] = intval($data['stock']);
-        // Auto activar/desactivar según stock
         if (intval($data['stock']) > 0) {
             $fields[] = "status = 'ACTIVO'";
         } else {
@@ -224,7 +215,7 @@ function market_get_reviews($pdo, $itemId) {
         $stmt->execute([$itemId]);
         $reviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
-        if ($e->getCode() == '42S02') { // Table missing
+        if ($e->getCode() == '42S02') { 
             market_ensure_schema($pdo);
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$itemId]);
@@ -243,43 +234,40 @@ function market_checkout($pdo, $input) {
     $userId = $input['userId'];
     $cart = $input['cart'];
     $shipping = $input['shippingDetails'];
-    
-    $COMMISSION_RATE = 0.25; // 25% Comisión Admin
+    $shippingJson = json_encode($shipping);
     
     $pdo->beginTransaction();
     try {
-        // Encontrar Admin para comisión
+        $stmtSettings = $pdo->query("SELECT marketCommission FROM system_settings LIMIT 1");
+        $settings = $stmtSettings->fetch(PDO::FETCH_ASSOC);
+        $COMMISSION_RATE = ($settings && isset($settings['marketCommission'])) ? (floatval($settings['marketCommission']) / 100) : 0.25;
+
         $stmt = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' ORDER BY id ASC LIMIT 1");
         $adminId = $stmt->fetchColumn();
 
         foreach ($cart as $item) {
             $qty = isset($item['quantity']) ? intval($item['quantity']) : 1;
             
-            // Verificar stock y estado
             $stmt = $pdo->prepare("SELECT price, sellerId, status, title, stock FROM marketplace_items WHERE id = ? FOR UPDATE");
             $stmt->execute([$item['id']]);
             $realItem = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if (!$realItem) throw new Exception("Artículo '{$item['title']}' no encontrado.");
             if ($realItem['status'] !== 'ACTIVO') throw new Exception("Artículo '{$realItem['title']}' no está activo.");
-            if ($realItem['stock'] < $qty) throw new Exception("Stock insuficiente para '{$realItem['title']}' (Solicitado: $qty, Disponible: {$realItem['stock']})");
+            if ($realItem['stock'] < $qty) throw new Exception("Stock insuficiente para '{$realItem['title']}'");
             
-            // Calcular Total del Item
             $unitPrice = floatval($realItem['price']);
             $totalItemPrice = $unitPrice * $qty;
             
-            // Verificar saldo comprador
             $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
             $stmt->execute([$userId]);
             $balance = $stmt->fetchColumn();
             
-            if ($balance < $totalItemPrice) throw new Exception("Saldo insuficiente para pagar $totalItemPrice $ por '{$item['title']}'");
+            if ($balance < $totalItemPrice) throw new Exception("Saldo insuficiente");
             
-            // Calcular split
             $adminFee = $totalItemPrice * $COMMISSION_RATE;
             $sellerShare = $totalItemPrice - $adminFee;
             
-            // Transferir fondos
             $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$totalItemPrice, $userId]);
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$sellerShare, $realItem['sellerId']]);
             
@@ -287,20 +275,18 @@ function market_checkout($pdo, $input) {
                 $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$adminFee, $adminId]);
             }
             
-            // Reducir stock
             $newStock = $realItem['stock'] - $qty;
             $newStatus = $newStock > 0 ? 'ACTIVO' : 'AGOTADO';
             $pdo->prepare("UPDATE marketplace_items SET stock = ?, status = ? WHERE id = ?")->execute([$newStock, $newStatus, $item['id']]);
             
-            // Registrar transacción
+            // Record full transaction with shipping info
             $tid = uniqid('tx_m_');
-            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, marketplaceItemId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, ?, 'MARKETPLACE')")
-                ->execute([$tid, $userId, $realItem['sellerId'], $item['id'], $totalItemPrice, $adminFee, time()]);
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, marketplaceItemId, amount, adminFee, timestamp, type, shippingData, fulfillmentStatus) VALUES (?, ?, ?, ?, ?, ?, ?, 'MARKETPLACE', ?, 'PENDING')")
+                ->execute([$tid, $userId, $realItem['sellerId'], $item['id'], $totalItemPrice, $adminFee, time(), $shippingJson]);
                 
-            // Notificar vendedor
-            $shippingText = "Enviar a: {$shipping['fullName']}, {$shipping['address']}, {$shipping['city']}";
+            $shippingText = "Enviar a: {$shipping['fullName']}, {$shipping['city']}";
             $nid = uniqid('n_');
-            $notifText = "Vendiste $qty x '{$realItem['title']}' por $sellerShare Saldo (Comisión: $adminFee). $shippingText";
+            $notifText = "Vendiste $qty x '{$realItem['title']}' por $sellerShare Saldo. Revisa 'Mis Ventas'.";
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SALE', ?, '/profile', 0, ?)")
                 ->execute([$nid, $realItem['sellerId'], $notifText, time()]);
         }
@@ -311,5 +297,77 @@ function market_checkout($pdo, $input) {
         $pdo->rollBack();
         respond(false, null, $e->getMessage());
     }
+}
+
+// Function to fetch sales for the seller dashboard
+function market_get_sales($pdo, $userId) {
+    market_ensure_schema($pdo);
+    
+    // We join marketplace_items to get product details at the moment of viewing (image/title might change but ID is same)
+    // We join users to get buyer info
+    $sql = "
+        SELECT t.id, t.amount, t.timestamp, t.fulfillmentStatus, t.shippingData,
+               m.title as itemTitle, m.images as itemImages,
+               u.username as buyerName, u.avatarUrl as buyerAvatar
+        FROM transactions t
+        LEFT JOIN marketplace_items m ON t.marketplaceItemId = m.id
+        LEFT JOIN users u ON t.buyerId = u.id
+        WHERE t.creatorId = ? AND t.type = 'MARKETPLACE'
+        ORDER BY t.timestamp DESC
+    ";
+    
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $sales = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        market_ensure_schema($pdo);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $sales = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    foreach ($sales as &$s) {
+        // Decode shipping data
+        $s['shippingData'] = json_decode($s['shippingData'], true);
+        
+        // Handle Images
+        $imgs = json_decode($s['itemImages'] ?? '[]', true);
+        $s['itemImage'] = (is_array($imgs) && count($imgs) > 0) ? fix_url($imgs[0]) : null;
+        unset($s['itemImages']);
+        
+        $s['buyerAvatar'] = fix_url($s['buyerAvatar']);
+        $s['fulfillmentStatus'] = $s['fulfillmentStatus'] ?? 'PENDING';
+    }
+    
+    respond(true, $sales);
+}
+
+function market_update_order_status($pdo, $input) {
+    $txId = $input['transactionId'];
+    $status = $input['status'];
+    $userId = $input['userId']; // Authenticated user (seller)
+    
+    // Check ownership
+    $stmt = $pdo->prepare("SELECT buyerId, marketplaceItemId FROM transactions WHERE id = ? AND creatorId = ?");
+    $stmt->execute([$txId, $userId]);
+    $tx = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$tx) respond(false, null, "Transacción no encontrada o no autorizada");
+    
+    $pdo->prepare("UPDATE transactions SET fulfillmentStatus = ? WHERE id = ?")->execute([$status, $txId]);
+    
+    // Notify Buyer
+    if ($status === 'SHIPPED') {
+        $stmt = $pdo->prepare("SELECT title FROM marketplace_items WHERE id = ?");
+        $stmt->execute([$tx['marketplaceItemId']]);
+        $title = $stmt->fetchColumn() ?? 'Artículo';
+        
+        $nid = uniqid('n_');
+        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
+            ->execute([$nid, $tx['buyerId'], "Tu pedido '$title' ha sido enviado.", time()]);
+    }
+    
+    respond(true);
 }
 ?>

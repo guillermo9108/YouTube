@@ -211,44 +211,46 @@ export default function Layout() {
       {showSidebar && (
         <div className="fixed inset-0 z-[110] flex">
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
-            <div className="relative w-64 bg-slate-900 border-r border-slate-800 h-full p-4 flex flex-col animate-in slide-in-from-left duration-200">
-                <div className="flex items-center gap-3 mb-8 px-2">
-                    <button onClick={() => setShowSidebar(false)} className="p-1 hover:bg-slate-800 rounded-full"><Menu size={24} /></button>
+            <div className="relative w-72 bg-slate-900 border-r border-slate-800 h-full p-4 flex flex-col animate-in slide-in-from-left duration-200 shadow-2xl">
+                <div className="flex items-center gap-3 mb-8 px-2 mt-2">
+                    <button onClick={() => setShowSidebar(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-300"><Menu size={24} /></button>
                     <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
                 </div>
                 
-                <div className="space-y-1 flex-1">
-                    {(user?.role === 'ADMIN') && (
-                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-900/10 hover:bg-amber-900/20 rounded-lg font-medium mb-4 border border-amber-500/20">
-                            <ShieldCheck size={20}/> Administración
+                <div className="space-y-2 flex-1 overflow-y-auto">
+                    {/* Admin Access Link - Case Insensitive Check */}
+                    {(user?.role?.toUpperCase() === 'ADMIN') && (
+                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-4 text-amber-400 bg-amber-900/20 hover:bg-amber-900/30 rounded-xl font-bold mb-4 border border-amber-500/30 shadow-sm transition-all">
+                            <ShieldCheck size={22}/> Administración
                         </Link>
                     )}
 
-                    <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
-                        <Home size={20}/> Inicio
+                    <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800/50 hover:bg-slate-800 rounded-xl font-medium transition-colors">
+                        <Home size={22}/> Inicio
                     </Link>
-                    <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <Smartphone size={20}/> Shorts
-                    </Link>
-                    <div className="h-px bg-slate-800 my-2"></div>
-                    <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <DownloadCloud size={20}/> Peticiones
-                    </Link>
-                    <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <ShoppingBag size={20}/> Tienda
+                    <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
+                        <Smartphone size={22}/> Shorts
                     </Link>
                     
-                    <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <Upload size={20}/> Subir
+                    <div className="h-px bg-slate-800 my-2 mx-2"></div>
+                    
+                    <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
+                        <ShoppingBag size={22}/> Tienda
                     </Link>
-                    <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <User size={20}/> Perfil
+                    <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
+                        <DownloadCloud size={22}/> Peticiones
+                    </Link>
+                    <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
+                        <Upload size={22}/> Subir
+                    </Link>
+                    <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
+                        <User size={22}/> Perfil
                     </Link>
                 </div>
 
-                <div className="border-t border-slate-800 pt-4">
-                    <button onClick={() => { logout(); setShowSidebar(false); }} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-lg font-medium w-full text-left">
-                        <LogOut size={20}/> Salir
+                <div className="border-t border-slate-800 pt-4 pb- safe-area-bottom">
+                    <button onClick={() => { logout(); setShowSidebar(false); }} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-xl font-medium w-full text-left transition-colors">
+                        <LogOut size={22}/> Salir
                     </button>
                 </div>
             </div>
@@ -267,7 +269,7 @@ export default function Layout() {
         </div>
         <div className="flex items-center gap-6">
           {/* Admin Link for Desktop */}
-          {user?.role === 'ADMIN' && (
+          {user?.role?.toUpperCase() === 'ADMIN' && (
               <Link to="/admin" className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 text-sm bg-amber-900/20 px-3 py-1.5 rounded-full border border-amber-500/20">
                   <ShieldCheck size={16}/> Admin
               </Link>

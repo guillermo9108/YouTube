@@ -193,7 +193,8 @@ export default function MarketplaceItemView() {
                                         </div>
                                     </div>
                                 </div>
-                                <span className="text-[10px] text-slate-600">{new Date(r.timestamp).toLocaleDateString()}</span>
+                                {/* Corrected Date display for PHP timestamp (seconds -> ms) */}
+                                <span className="text-[10px] text-slate-600">{new Date(r.timestamp * 1000).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-slate-300 pl-10">{r.comment}</p>
                         </div>

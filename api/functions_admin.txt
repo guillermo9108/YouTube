@@ -223,7 +223,9 @@ function admin_update_settings($pdo, $input) {
             categoryPrices = ?,
             customCategories = ?,
             localLibraryPath = ?,
-            ftpSettings = ?
+            ftpSettings = ?,
+            videoCommission = ?,
+            marketCommission = ?
             WHERE id = 1";
             
     $pdo->prepare($sql)->execute([
@@ -240,7 +242,9 @@ function admin_update_settings($pdo, $input) {
         json_encode($s['categoryPrices']),
         json_encode($s['customCategories']),
         $s['localLibraryPath'] ?? '',
-        json_encode($s['ftpSettings'] ?? null)
+        json_encode($s['ftpSettings'] ?? null),
+        $s['videoCommission'] ?? 20,
+        $s['marketCommission'] ?? 25
     ]);
     respond(true);
 }

@@ -1,5 +1,6 @@
 
 
+
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -103,6 +104,15 @@ export interface Transaction {
   adminFee?: number; // Nueva: Comisión cobrada
   timestamp: number;
   type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE';
+  shippingData?: {
+      fullName: string;
+      address: string;
+      city: string;
+      zipCode: string;
+      country: string;
+      phoneNumber: string;
+  };
+  fulfillmentStatus?: 'PENDING' | 'SHIPPED';
 }
 
 export interface Comment {
@@ -172,7 +182,9 @@ export interface SystemSettings {
   categoryPrices: Record<string, number>; 
   customCategories: string[]; 
   localLibraryPath: string; 
-  ftpSettings?: FtpSettings; 
+  ftpSettings?: FtpSettings;
+  videoCommission: number; // Percentage (0-100)
+  marketCommission: number; // Percentage (0-100)
 }
 
 export interface SmartCleanerResult {
