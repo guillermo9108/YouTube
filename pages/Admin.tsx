@@ -114,7 +114,7 @@ export default function Admin() {
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
                   <h3 className="font-bold text-white flex items-center gap-2"><FolderSearch size={18}/> Local Library Scan</h3>
                   <div className="p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-lg text-sm text-indigo-200/80">
-                      <strong>Method:</strong> Server Indexes Files -> Client Extracts Metadata (No FFmpeg on Server)
+                      <strong>Method:</strong> Server Indexes Files &rarr; Client Extracts Metadata (No FFmpeg on Server)
                   </div>
 
                   <div>
