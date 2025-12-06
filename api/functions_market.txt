@@ -1,6 +1,15 @@
 <?php
+// Auto-migrate schema helper
+function market_ensure_schema($pdo) {
+    require_once 'functions_schema.php';
+    global $schema;
+    syncTable($pdo, 'marketplace_items', $schema['marketplace_items']);
+    syncTable($pdo, 'marketplace_reviews', $schema['marketplace_reviews']);
+}
+
 function market_get_items($pdo) {
-    // Calcular rating promedio en la consulta
+    // Check schema on read just in case
+    
     $sql = "
         SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl,
         (SELECT AVG(rating) FROM marketplace_reviews WHERE itemId = m.id) as rating,
@@ -10,8 +19,21 @@ function market_get_items($pdo) {
         WHERE m.status IN ('ACTIVO', 'AGOTADO')
         ORDER BY m.createdAt DESC
     ";
-    $stmt = $pdo->query($sql);
-    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    try {
+        $stmt = $pdo->query($sql);
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        // If error is missing table or column (42S02/42S22), try sync and retry
+        if ($e->getCode() == '42S02' || $e->getCode() == '42S22' || $e->getCode() == '1054') {
+            market_ensure_schema($pdo);
+            $stmt = $pdo->query($sql);
+            $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            throw $e;
+        }
+    }
+
     foreach ($items as &$i) {
         $imgs = json_decode($i['images'], true);
         $i['images'] = is_array($imgs) ? array_map('fix_url', $imgs) : [];
@@ -43,16 +65,30 @@ function market_delete_listing($pdo, $input) {
 }
 
 function market_get_item($pdo, $id) {
-    $stmt = $pdo->prepare("
+    $sql = "
         SELECT m.*, u.username as sellerName, u.avatarUrl as sellerAvatarUrl,
         (SELECT AVG(rating) FROM marketplace_reviews WHERE itemId = m.id) as rating,
         (SELECT COUNT(*) FROM marketplace_reviews WHERE itemId = m.id) as reviewCount
         FROM marketplace_items m 
         LEFT JOIN users u ON m.sellerId = u.id 
         WHERE m.id = ?
-    ");
-    $stmt->execute([$id]);
-    $item = $stmt->fetch(PDO::FETCH_ASSOC);
+    ";
+    
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$id]);
+        $item = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        if ($e->getCode() == '42S02' || $e->getCode() == '42S22' || $e->getCode() == '1054') {
+            market_ensure_schema($pdo);
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$id]);
+            $item = $stmt->fetch(PDO::FETCH_ASSOC);
+        } else {
+            throw $e;
+        }
+    }
+
     if ($item) {
         $imgs = json_decode($item['images'], true);
         $item['images'] = is_array($imgs) ? array_map('fix_url', $imgs) : [];
@@ -64,6 +100,9 @@ function market_get_item($pdo, $id) {
 }
 
 function market_create_listing($pdo, $post, $files) {
+    // Ensure schema before write
+    market_ensure_schema($pdo);
+
     $id = 'm_' . uniqid();
     $title = $post['title'];
     $desc = $post['description'];
@@ -93,14 +132,15 @@ function market_create_listing($pdo, $post, $files) {
         }
     }
     
-    $stmt = $pdo->prepare("INSERT INTO marketplace_items (id, title, description, price, originalPrice, stock, images, sellerId, category, itemCondition, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?)");
-    $stmt->execute([$id, $title, $desc, $price, $originalPrice, $stock, json_encode($images), $seller, $cat, $cond, time()]);
+    $stmt = $pdo->prepare("INSERT INTO marketplace_items (id, title, description, price, originalPrice, discountPercent, stock, images, sellerId, category, itemCondition, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?)");
+    $stmt->execute([$id, $title, $desc, $price, $originalPrice, $discount, $stock, json_encode($images), $seller, $cat, $cond, time()]);
     
     respond(true);
 }
 
-// Nueva función para editar artículos
 function market_edit_listing($pdo, $input) {
+    market_ensure_schema($pdo);
+
     $id = $input['id'];
     $userId = $input['userId'];
     $data = $input['data'];
@@ -158,6 +198,7 @@ function market_edit_listing($pdo, $input) {
 }
 
 function market_add_review($pdo, $input) {
+    market_ensure_schema($pdo);
     $id = uniqid('rv_');
     $pdo->prepare("INSERT INTO marketplace_reviews (id, itemId, userId, rating, comment, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
         ->execute([$id, $input['itemId'], $input['userId'], $input['rating'], $input['comment'], time()]);
@@ -165,20 +206,35 @@ function market_add_review($pdo, $input) {
 }
 
 function market_get_reviews($pdo, $itemId) {
-    $stmt = $pdo->prepare("
+    $sql = "
         SELECT r.*, u.username, u.avatarUrl as userAvatarUrl 
         FROM marketplace_reviews r 
         LEFT JOIN users u ON r.userId = u.id 
         WHERE r.itemId = ? 
         ORDER BY r.timestamp DESC
-    ");
-    $stmt->execute([$itemId]);
-    $reviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    ";
+    
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$itemId]);
+        $reviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        if ($e->getCode() == '42S02') { // Table missing
+            market_ensure_schema($pdo);
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$itemId]);
+            $reviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            throw $e;
+        }
+    }
+
     foreach($reviews as &$r) $r['userAvatarUrl'] = fix_url($r['userAvatarUrl']);
     respond(true, $reviews);
 }
 
 function market_checkout($pdo, $input) {
+    market_ensure_schema($pdo);
     $userId = $input['userId'];
     $cart = $input['cart'];
     $shipping = $input['shippingDetails'];
