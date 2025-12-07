@@ -24,130 +24,113 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       objectUrl = URL.createObjectURL(fileOrUrl as File);
   }
 
-  const loadVideo = (url: string, useCors: boolean): Promise<{video: HTMLVideoElement, duration: number}> => {
-      return new Promise((resolve, reject) => {
+  const src = isUrl ? (fileOrUrl as string) : objectUrl;
+
+  const cleanup = (video: HTMLVideoElement) => {
+      try {
+          video.pause();
+          video.removeAttribute('src'); // Detach media source
+          video.load(); // Force browser to release resources
+          video.remove();
+      } catch(e) {}
+  };
+
+  const loadVideo = (mode: 'cors' | 'no-cors'): Promise<{ video: HTMLVideoElement, duration: number, error?: boolean }> => {
+      return new Promise((resolve) => {
           const video = document.createElement('video');
-          if (useCors) {
-              video.crossOrigin = "anonymous";
-          }
-          video.preload = "auto"; // Force load to get metadata/frame
+          // Important: In 'cors' mode we ask for permission to screenshot.
+          // In 'no-cors', we accept we can't screenshot, but we want metadata (duration).
+          if (mode === 'cors') video.crossOrigin = "anonymous";
+          
+          video.preload = "auto"; 
           video.muted = true;
           video.playsInline = true;
 
-          // Timeout differs based on mode
-          const timeoutMs = useCors ? 20000 : 15000;
-          const timer = setTimeout(() => {
-              // RESCUE: If timeout happens but we have metadata/data (readyState >= 1), 
-              // return what we have (likely Frame 0) instead of failing.
-              if (video.readyState >= 1) { 
-                  // console.warn("Timeout reached, capturing current state (Frame 0)");
-                  resolve({ video, duration: video.duration || 0 });
-              } else {
-                  video.remove();
-                  reject(new Error(useCors ? "CORS/Load Timeout" : "Metadata Timeout"));
-              }
-          }, timeoutMs);
-
-          // Phase 1: Metadata Loaded (Duration available)
-          video.onloadedmetadata = () => {
-              if (!useCors) {
-                  // If we don't need a thumbnail (fallback mode), we are done here
-                  clearTimeout(timer);
-                  resolve({ video, duration: video.duration || 0 });
-                  return;
-              }
-              
-              // OPTIMIZATION: Seek to 0.1s instead of 10% or 1s.
-              // This ensures we get the first available frame almost immediately without buffering deep into the file.
-              // This solves "Failed to load video" on slow connections/NAS.
-              video.currentTime = 0.1; 
+          let resolved = false;
+          const done = (data: { video: HTMLVideoElement, duration: number, error?: boolean }) => {
+              if (resolved) return;
+              resolved = true;
+              clearTimeout(timer);
+              resolve(data);
           };
 
-          // Phase 2: Frame Ready (Thumbnail available)
+          // Timeout: If NAS doesn't respond in time, fail this attempt
+          const timer = setTimeout(() => {
+              // Rescue: If we at least got metadata, return success
+              if (video.readyState > 0 && video.duration) {
+                  done({ video, duration: video.duration });
+              } else {
+                  done({ video, duration: 0, error: true });
+              }
+          }, mode === 'cors' ? 10000 : 15000); 
+
+          video.onloadedmetadata = () => {
+              if (mode === 'no-cors') {
+                  // In no-cors, we can't capture, so just resolve with duration
+                  done({ video, duration: video.duration || 0 });
+              } else {
+                  // In cors mode, we seek to start to ensure we have a frame
+                  video.currentTime = 0.1;
+              }
+          };
+
           video.onseeked = () => {
-              clearTimeout(timer);
-              resolve({ video, duration: video.duration || 0 });
+              done({ video, duration: video.duration || 0 });
           };
 
           video.onerror = () => {
-              // Try to rescue even on error if we have some data
-              if (video.readyState >= 1) {
-                  clearTimeout(timer);
-                  resolve({ video, duration: video.duration || 0 });
-              } else {
-                  clearTimeout(timer);
-                  video.remove();
-                  reject(new Error("Video Load Error"));
-              }
+              done({ video, duration: 0, error: true });
           };
 
-          video.src = url;
+          video.src = src;
+          video.load();
+          const p = video.play();
+          if(p) p.catch(() => {}); // Ignore autoplay blocks
       });
   };
 
-  const src = isUrl ? (fileOrUrl as string) : objectUrl;
+  // Step 1: Try Secure Load (CORS enabled) -> Needed for Thumbnail
+  let result = await loadVideo('cors');
 
-  try {
-      // ATTEMPT 1: Secure Load (Try to get Thumbnail + Duration)
-      const { video, duration } = await loadVideo(src, true); // try with CORS
-      
-      try {
-          const width = video.videoWidth;
-          const height = video.videoHeight;
-          const canvas = document.createElement('canvas');
-          
-          if (width > 640) { 
-              const scale = 640 / width;
-              canvas.width = 640;
-              canvas.height = height * scale;
-          } else {
-              canvas.width = width;
-              canvas.height = height;
-          }
-
-          const ctx = canvas.getContext('2d');
-          if (!ctx) throw new Error("No context");
-
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          
-          return new Promise((resolve) => {
-              canvas.toBlob((blob) => {
-                  video.remove();
-                  if (objectUrl) URL.revokeObjectURL(objectUrl);
-                  
-                  if (blob) {
-                      const thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
-                      resolve({ thumbnail: thumbFile, duration });
-                  } else {
-                      // Fallback if canvas is tainted but didn't throw
-                      resolve({ thumbnail: null, duration });
-                  }
-              }, 'image/jpeg', 0.70);
-          });
-
-      } catch (drawError) {
-          // If drawing fails (e.g. tainted canvas), just return duration
-          video.remove();
-          if (objectUrl) URL.revokeObjectURL(objectUrl);
-          return { thumbnail: null, duration };
-      }
-
-  } catch (error) {
-      // ATTEMPT 2: Insecure Load (Duration Only)
-      // Only applicable for URLs (streaming from NAS), not local Files
-      if (isUrl) {
-          try {
-              // console.warn("Retrying video in fallback mode (Duration Only)...");
-              const { video, duration } = await loadVideo(src, false); // No CORS
-              video.remove();
-              // Success! We got the duration at least.
-              return { thumbnail: null, duration };
-          } catch (err2) {
-              console.error("Fallback failed:", err2);
-          }
-      }
-      
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      return { thumbnail: null, duration: 0 };
+  // Step 2: Fallback to Insecure Load (No CORS) -> Needed for Duration if CORS headers missing on NAS
+  // This allows "Failed to load" videos to at least be categorized and playable.
+  if (result.error && isUrl) {
+      // console.warn("CORS load failed, retrying no-cors for duration...");
+      cleanup(result.video);
+      result = await loadVideo('no-cors');
   }
+
+  // Step 3: Extract Data
+  let thumbFile: File | null = null;
+  const duration = result.duration;
+
+  if (duration > 0 && !result.error) {
+      // Try to capture thumbnail
+      try {
+          const video = result.video;
+          // Canvas will throw SecurityError if video loaded in no-cors mode (tainted)
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth > 480 ? 480 : video.videoWidth; // Reduce res for speed
+          const scale = canvas.width / video.videoWidth;
+          canvas.height = video.videoHeight * scale;
+          
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              // This is where it fails if no-cors. We catch it.
+              const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.6));
+              if (blob) {
+                  thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
+              }
+          }
+      } catch (e) {
+          // Expected error in no-cors mode, just ignore image generation
+      }
+  }
+
+  // Step 4: Cleanup
+  cleanup(result.video);
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+
+  return { thumbnail: thumbFile, duration };
 };

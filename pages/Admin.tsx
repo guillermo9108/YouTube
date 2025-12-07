@@ -166,22 +166,25 @@ export default function Admin() {
                       // If we got partial data (e.g. video loaded but black thumb), we still update
                       // to avoid stuck loop. 'duration || 0' prevents sending NaN.
                       await db.updateVideoMetadata(v.id, duration || 0, thumbnail);
-                      setScanLog(prev => [...prev, ` > Updated: ${Math.floor(duration || 0)}s`]);
+                      const status = thumbnail ? "Thumb+Data" : "Data Only";
+                      setScanLog(prev => [...prev, ` > Updated: ${Math.floor(duration || 0)}s (${status})`]);
                   } else {
                       // Fallback: Force update as "Processed but broken" to unblock queue
                       await db.updateVideoMetadata(v.id, 0, null);
-                      setScanLog(prev => [...prev, " > Failed to load video (Skipped)"]);
+                      setScanLog(prev => [...prev, " > Failed to load video (Marked as bad)"]);
                   }
 
               } catch (err: any) {
                   // Fallback: Force update to unblock queue
                   await db.updateVideoMetadata(v.id, 0, null);
-                  setScanLog(prev => [...prev, ` > Error: ${err.message} (Skipped)`]);
+                  setScanLog(prev => [...prev, ` > Error: ${err.message} (Marked as bad)`]);
               }
 
               setClientProgress({ current: i + 1, total: pending.length });
-              // Increased delay to 1000ms to allow connection cleanup on NAS
-              await new Promise(r => setTimeout(r, 1000)); 
+              
+              // CRITICAL DELAY: Wait 3 seconds before next video to allow NAS to close previous connection
+              // and browser to garbage collect the video buffer.
+              await new Promise(r => setTimeout(r, 3000)); 
           }
           
           setScanLog(prev => [...prev, "Batch complete."]);
