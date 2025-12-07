@@ -1,10 +1,27 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
-import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest, SmartCleanerResult } from '../types';
+import { User, ContentRequest, SystemSettings, VideoCategory, Video, MarketplaceItem, BalanceRequest, SmartCleanerResult } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck, Wrench, TrendingUp, BarChart3, PieChart, Maximize, X, RefreshCw } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, Settings, Save, Play, ExternalLink, Key, Loader2, Trash2, Brush, FolderSearch, AlertTriangle, ShoppingBag, CheckCircle, XCircle, Percent, Wallet, Store, Wrench, TrendingUp, BarChart3, Maximize, X, HelpCircle, Server, HardDrive, Calculator, Info } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+
+// Helper Component for Tooltips
+const InfoTooltip = ({ text, example }: { text: string, example?: string }) => (
+    <div className="group relative inline-flex items-center ml-1.5 align-middle cursor-help">
+        <HelpCircle size={12} className="text-slate-500 hover:text-indigo-400 transition-colors" />
+        <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-950 border border-slate-700 text-xs text-slate-300 rounded-xl shadow-2xl z-50 pointer-events-none animate-in fade-in zoom-in-95">
+            <p className="font-medium mb-1 text-white">{text}</p>
+            {example && (
+                <div className="bg-slate-900 rounded p-1.5 font-mono text-[10px] text-indigo-300 border border-slate-800">
+                    Ej: <span className="select-all">{example}</span>
+                </div>
+            )}
+            {/* Arrow */}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-700"></div>
+        </div>
+    </div>
+);
 
 export default function Admin() {
   const [users, setUsers] = useState<User[]>([]);
@@ -50,6 +67,9 @@ export default function Admin() {
   const [simMktFreq, setSimMktFreq] = useState(0.5); // Items bought per user/month
   const [simAvgVidPrice, setSimAvgVidPrice] = useState(5);
   const [simAvgMktPrice, setSimAvgMktPrice] = useState(25);
+  const [simServerCost, setSimServerCost] = useState(10); // Monthly fixed cost
+  const [simStorageCost, setSimStorageCost] = useState(0.02); // Cost per GB/User
+  const [simGrowthRate, setSimGrowthRate] = useState(5); // % Monthly growth
 
   useEffect(() => {
     loadData();
@@ -340,30 +360,60 @@ export default function Admin() {
       }
   };
 
-  // --- SIMULATION CALCULATIONS ---
+  // --- SIMULATION CALCULATIONS (Dynamic 12 Month Projection) ---
   const calculateProjection = () => {
-      const vidComm = settings?.videoCommission || 20;
-      const mktComm = settings?.marketCommission || 25;
+      const vidComm = (settings?.videoCommission || 20) / 100;
+      const mktComm = (settings?.marketCommission || 25) / 100;
 
-      const monthlyVidRevenue = simUsers * simVidFreq * simAvgVidPrice;
-      const monthlyMktRevenue = simUsers * simMktFreq * simAvgMktPrice;
-      
-      const adminVidProfit = monthlyVidRevenue * (vidComm / 100);
-      const adminMktProfit = monthlyMktRevenue * (mktComm / 100);
-      
-      const creatorVidPayout = monthlyVidRevenue - adminVidProfit;
-      const creatorMktPayout = monthlyMktRevenue - adminMktProfit;
+      let currentUsers = simUsers;
+      const monthlyData = [];
+      let totalAnnualProfit = 0;
+      let totalAnnualGross = 0;
 
-      return {
-          gross: monthlyVidRevenue + monthlyMktRevenue,
-          adminTotal: adminVidProfit + adminMktProfit,
-          creatorTotal: creatorVidPayout + creatorMktPayout,
-          vidBreakdown: { gross: monthlyVidRevenue, admin: adminVidProfit },
-          mktBreakdown: { gross: monthlyMktRevenue, admin: adminMktProfit }
-      };
+      for (let i = 0; i < 12; i++) {
+          // Revenue
+          const vidRevenue = currentUsers * simVidFreq * simAvgVidPrice;
+          const mktRevenue = currentUsers * simMktFreq * simAvgMktPrice;
+          const grossRevenue = vidRevenue + mktRevenue;
+
+          // Admin Income
+          const adminVid = vidRevenue * vidComm;
+          const adminMkt = mktRevenue * mktComm;
+          const totalAdminIncome = adminVid + adminMkt;
+
+          // Creator Payouts
+          const creatorPayout = grossRevenue - totalAdminIncome;
+
+          // Costs
+          const storage = currentUsers * simStorageCost; 
+          const costs = simServerCost + storage;
+
+          // Net Profit
+          const netProfit = totalAdminIncome - costs;
+
+          monthlyData.push({
+              month: `M${i+1}`,
+              users: Math.round(currentUsers),
+              gross: grossRevenue,
+              adminIncome: totalAdminIncome,
+              creatorPayout: creatorPayout,
+              costs: costs,
+              netProfit: netProfit
+          });
+
+          totalAnnualProfit += netProfit;
+          totalAnnualGross += grossRevenue;
+
+          // Apply Growth for next month
+          currentUsers = currentUsers * (1 + (simGrowthRate / 100));
+      }
+
+      return { monthlyData, totalAnnualProfit, totalAnnualGross };
   };
 
   const projection = calculateProjection();
+  // Find max value for chart scaling
+  const maxChartValue = Math.max(...projection.monthlyData.map(d => d.gross));
 
   return (
     <div className="space-y-6 pb-24 px-2 md:px-0">
@@ -400,7 +450,7 @@ export default function Admin() {
                               {users.map(u => (
                                   <tr key={u.id} className="hover:bg-slate-800/50">
                                       <td className="px-4 py-3 font-medium text-white">{u.username}</td>
-                                      <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>{u.role.trim()}</span></td>
+                                      <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>{u.role ? u.role.trim() : 'USER'}</span></td>
                                       <td className="px-4 py-3 font-mono text-emerald-400">{Number(u.balance).toFixed(2)}</td>
                                       <td className="px-4 py-3 text-slate-500">{(u.lastActive || 0) > 0 ? new Date((u.lastActive || 0) * 1000).toLocaleDateString() : 'N/A'}</td>
                                   </tr>
@@ -417,7 +467,7 @@ export default function Admin() {
                           <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Usuario (ID o Username)</label>
                           <select className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" value={addBalanceTarget} onChange={e => setAddBalanceTarget(e.target.value)}>
                               <option value="">Seleccionar...</option>
-                              {users.map(u => <option key={u.id} value={u.id}>{u.username} ({u.balance})</option>)}
+                              {users.map(u => <option key={u.id} value={u.id}>{u.username} ({Number(u.balance).toFixed(2)})</option>)}
                           </select>
                       </div>
                       <div>
@@ -492,7 +542,10 @@ export default function Admin() {
               <div className="space-y-6">
                   {/* Commissions */}
                   <div className="p-4 bg-slate-950 rounded-lg border border-slate-800">
-                      <h4 className="text-sm font-bold text-indigo-400 mb-3 flex items-center gap-2"><Percent size={14}/> Comisiones de Plataforma</h4>
+                      <h4 className="text-sm font-bold text-indigo-400 mb-3 flex items-center gap-2">
+                          <Percent size={14}/> Comisiones de Plataforma
+                          <InfoTooltip text="Porcentaje que el administrador retiene de cada transacción. El resto va al usuario creador." example="20% significa que de $10, el admin recibe $2" />
+                      </h4>
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                               <label className="block text-xs font-bold text-slate-500 mb-1">Comisión Videos (%)</label>
@@ -513,12 +566,14 @@ export default function Admin() {
                               />
                           </div>
                       </div>
-                      <p className="text-[10px] text-slate-500 mt-2">Este porcentaje se descontará automáticamente de cada venta y se depositará al Admin.</p>
                   </div>
 
                   {/* Paths */}
                   <div className="p-4 bg-slate-950 rounded-lg border border-slate-800">
-                      <h4 className="text-sm font-bold text-emerald-400 mb-3 flex items-center gap-2"><FolderSearch size={14}/> Rutas del Servidor</h4>
+                      <h4 className="text-sm font-bold text-emerald-400 mb-3 flex items-center gap-2">
+                          <FolderSearch size={14}/> Rutas del Servidor
+                          <InfoTooltip text="Ubicación física en el disco duro del servidor donde están tus videos. Debe tener permisos de lectura." example="/volume1/public/videos" />
+                      </h4>
                       <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">Ruta Librería Local (NAS)</label>
                           <input 
@@ -533,7 +588,10 @@ export default function Admin() {
 
                   {/* API Keys */}
                   <div className="p-4 bg-slate-950 rounded-lg border border-slate-800">
-                      <h4 className="text-sm font-bold text-amber-400 mb-3 flex items-center gap-2"><Key size={14}/> API Keys Externas</h4>
+                      <h4 className="text-sm font-bold text-amber-400 mb-3 flex items-center gap-2">
+                          <Key size={14}/> API Keys Externas
+                          <InfoTooltip text="Claves para servicios de terceros. Pixabay permite buscar videos de stock gratuitos para importar." example="4323423-abcdef123456" />
+                      </h4>
                       <div className="space-y-3">
                           <div>
                               <label className="block text-xs font-bold text-slate-500 mb-1">Pixabay Key (Stock Video)</label>
@@ -551,7 +609,7 @@ export default function Admin() {
                                 onChange={e => setSettings({...settings, enableYoutube: e.target.checked})}
                                 className="w-4 h-4 accent-indigo-600"
                               />
-                              <span className="text-sm text-slate-300">Habilitar Descargas YouTube (Requiere yt-dlp en servidor)</span>
+                              <span className="text-sm text-slate-300">Habilitar Descargas YouTube (Requiere yt-dlp)</span>
                           </div>
                       </div>
                   </div>
@@ -711,15 +769,46 @@ export default function Admin() {
       {activeTab === 'ANALYTICS' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in slide-in-from-bottom-4">
               {/* Simulator Controls */}
-              <div className="lg:col-span-1 bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6 h-fit">
-                  <h3 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-4"><Settings size={20} className="text-indigo-400"/> Simulador de Mercado</h3>
+              <div className="lg:col-span-1 bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6 h-fit sticky top-20">
+                  <h3 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-4"><Calculator size={20} className="text-indigo-400"/> Simulador Rentabilidad</h3>
                   
-                  <div>
-                      <div className="flex justify-between mb-1">
-                          <label className="text-xs font-bold text-slate-500 uppercase">Usuarios Activos</label>
-                          <span className="text-xs text-white font-bold">{simUsers}</span>
+                  <div className="space-y-4">
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center">
+                                  Usuarios Iniciales
+                                  <InfoTooltip text="Usuarios activos hoy" />
+                              </label>
+                              <span className="text-xs text-white font-bold">{simUsers}</span>
+                          </div>
+                          <input type="range" min="10" max="5000" step="10" value={simUsers} onChange={e=>setSimUsers(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
                       </div>
-                      <input type="range" min="10" max="5000" step="10" value={simUsers} onChange={e=>setSimUsers(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center">
+                                  Crecimiento Mensual
+                                  <InfoTooltip text="Proyección de nuevos usuarios" example="5% mensual" />
+                              </label>
+                              <span className="text-xs text-emerald-400 font-bold">+{simGrowthRate}%</span>
+                          </div>
+                          <input type="range" min="0" max="20" step="1" value={simGrowthRate} onChange={e=>setSimGrowthRate(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                      </div>
+                  </div>
+
+                  {/* Operational Costs */}
+                  <div className="space-y-3 pt-4 border-t border-slate-800">
+                      <h4 className="text-xs font-bold text-white uppercase flex items-center gap-2"><Server size={12}/> Costos Operativos</h4>
+                      <div className="grid grid-cols-2 gap-3">
+                          <div>
+                              <label className="text-[10px] text-slate-400 block mb-1">Hosting (Mes)</label>
+                              <input type="number" value={simServerCost} onChange={e=>setSimServerCost(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                          </div>
+                          <div>
+                              <label className="text-[10px] text-slate-400 block mb-1">Storage ($/User)</label>
+                              <input type="number" step="0.01" value={simStorageCost} onChange={e=>setSimStorageCost(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                          </div>
+                      </div>
                   </div>
 
                   <div className="space-y-4 pt-4 border-t border-slate-800">
@@ -762,63 +851,106 @@ export default function Admin() {
               {/* Results */}
               <div className="lg:col-span-2 space-y-6">
                   {/* Cards */}
-                  <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-gradient-to-br from-indigo-900/50 to-slate-900 p-6 rounded-xl border border-indigo-500/30">
-                          <div className="flex items-center gap-3 mb-2 text-indigo-300">
-                              <Wallet size={20}/>
-                              <span className="text-xs font-bold uppercase tracking-wider">Ingreso Neto Admin (Mensual)</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="bg-gradient-to-br from-indigo-900/80 to-slate-900 p-6 rounded-xl border border-indigo-500/30 relative overflow-hidden">
+                          <div className="relative z-10">
+                              <div className="flex items-center gap-3 mb-2 text-indigo-200">
+                                  <Wallet size={20}/>
+                                  <span className="text-xs font-bold uppercase tracking-wider">Tu Beneficio Neto (Año 1)</span>
+                              </div>
+                              <div className="text-4xl font-mono font-bold text-white tracking-tight">
+                                  {projection.totalAnnualProfit.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                              </div>
+                              <div className="text-xs text-indigo-200/70 mt-2 font-medium">
+                                  Después de pagar a creadores y costos.
+                              </div>
                           </div>
-                          <div className="text-3xl font-mono font-bold text-white">
-                              {projection.adminTotal.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
-                          </div>
-                          <div className="text-xs text-slate-400 mt-2">
-                              Videos: <span className="text-indigo-400">{projection.vidBreakdown.admin.toFixed(2)}</span> • Market: <span className="text-emerald-400">{projection.mktBreakdown.admin.toFixed(2)}</span>
+                          <div className="absolute -bottom-4 -right-4 text-indigo-500/10 transform rotate-12">
+                              <TrendingUp size={120} />
                           </div>
                       </div>
-                      <div className="bg-gradient-to-br from-emerald-900/50 to-slate-900 p-6 rounded-xl border border-emerald-500/30">
-                          <div className="flex items-center gap-3 mb-2 text-emerald-300">
-                              <BarChart3 size={20}/>
-                              <span className="text-xs font-bold uppercase tracking-wider">Volumen Bruto (GMV)</span>
+                      
+                      <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 flex flex-col justify-center">
+                          <div className="flex justify-between items-center mb-4">
+                              <span className="text-xs text-slate-500 font-bold uppercase">Volumen de Ventas (GMV)</span>
+                              <span className="text-sm font-mono text-white">{projection.totalAnnualGross.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}</span>
                           </div>
-                          <div className="text-3xl font-mono font-bold text-white">
-                              {projection.gross.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                          <div className="flex justify-between items-center mb-4">
+                              <span className="text-xs text-slate-500 font-bold uppercase">Pago a Creadores</span>
+                              <span className="text-sm font-mono text-white">
+                                  {(projection.monthlyData.reduce((acc, curr) => acc + curr.creatorPayout, 0)).toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                              </span>
                           </div>
-                          <div className="text-xs text-slate-400 mt-2">
-                              Pagado a Creadores: {projection.creatorTotal.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                          <div className="flex justify-between items-center pt-4 border-t border-slate-800">
+                              <span className="text-xs text-slate-500 font-bold uppercase">Margen Neto Estimado</span>
+                              <span className={`text-xl font-bold ${projection.totalAnnualProfit > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {((projection.totalAnnualProfit / projection.totalAnnualGross) * 100).toFixed(1)}%
+                              </span>
                           </div>
                       </div>
                   </div>
 
-                  {/* Profit Graph (SVG) */}
-                  <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-                      <h4 className="font-bold text-white mb-6 flex items-center gap-2"><TrendingUp size={20}/> Proyección Anual</h4>
-                      <div className="w-full h-64 flex items-end justify-between gap-1">
-                          {Array.from({length: 12}).map((_, i) => {
-                              // Simulate slight growth per month
-                              const growthFactor = 1 + (i * 0.05); 
-                              const val = projection.adminTotal * growthFactor;
-                              const heightPercent = Math.min(100, (val / (projection.adminTotal * 2)) * 100);
+                  {/* Advanced Profit Graph (Stacked Area) */}
+                  <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 relative">
+                      <h4 className="font-bold text-white mb-6 flex items-center gap-2"><BarChart3 size={20}/> Proyección de Flujo de Caja (12 Meses)</h4>
+                      
+                      <div className="w-full h-64 flex items-end justify-between gap-1 relative z-10">
+                          {projection.monthlyData.map((d, i) => {
+                              const totalH = Math.min(100, (d.gross / maxChartValue) * 100);
+                              // Calculate segments based on total height of the bar
+                              const adminH = (d.adminIncome / d.gross) * 100;
+                              const creatorH = (d.creatorPayout / d.gross) * 100;
                               
                               return (
-                                  <div key={i} className="flex-1 flex flex-col justify-end group relative">
-                                      <div 
-                                        className="w-full bg-indigo-600 rounded-t-sm opacity-80 group-hover:opacity-100 transition-all"
-                                        style={{ height: `${heightPercent}%` }}
-                                      ></div>
-                                      {/* Tooltip */}
-                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-10 font-mono">
-                                          {val.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                                  <div key={i} className="flex-1 flex flex-col justify-end h-full group relative px-0.5">
+                                      <div className="w-full flex flex-col justify-end h-full relative">
+                                          {/* Creator Share (Bottom) */}
+                                          <div 
+                                            className="w-full bg-slate-700 opacity-50 group-hover:opacity-80 transition-all rounded-b-sm"
+                                            style={{ height: `${totalH * (creatorH/100)}%` }}
+                                          ></div>
+                                          
+                                          {/* Admin Share (Top) */}
+                                          <div 
+                                            className="w-full bg-indigo-500 group-hover:bg-indigo-400 transition-all rounded-t-sm relative"
+                                            style={{ height: `${totalH * (adminH/100)}%` }}
+                                          >
+                                              {/* Cost Line Indicator */}
+                                              <div 
+                                                className="absolute bottom-0 left-0 right-0 h-[2px] bg-red-500 z-20" 
+                                                style={{ bottom: `${(d.costs / d.adminIncome) * 100}%` }}
+                                                title="Costo Operativo"
+                                              ></div>
+                                          </div>
                                       </div>
-                                      <div className="h-px bg-slate-800 w-full mt-1"></div>
-                                      <span className="text-[9px] text-slate-500 text-center mt-1">M{i+1}</span>
+
+                                      {/* Tooltip */}
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-950 border border-slate-700 text-white text-[10px] p-2 rounded-lg opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-30 shadow-xl">
+                                          <div className="font-bold mb-1 border-b border-slate-800 pb-1">Mes {i+1} ({d.users} Usuarios)</div>
+                                          <div className="flex justify-between gap-3 text-indigo-300"><span>Tu Ganancia:</span> <span>{d.netProfit.toFixed(0)}$</span></div>
+                                          <div className="flex justify-between gap-3 text-slate-400"><span>Creadores:</span> <span>{d.creatorPayout.toFixed(0)}$</span></div>
+                                          <div className="flex justify-between gap-3 text-red-400"><span>Costos:</span> <span>{d.costs.toFixed(0)}$</span></div>
+                                      </div>
+                                      
+                                      <span className="text-[9px] text-slate-500 text-center mt-2">M{i+1}</span>
                                   </div>
                               );
                           })}
                       </div>
-                      <div className="flex justify-center gap-6 mt-4 text-xs text-slate-400">
-                          <div className="flex items-center gap-2">
-                              <div className="w-3 h-3 bg-indigo-600 rounded-sm"></div>
-                              <span>Ganancia Neta Proyectada</span>
+
+                      {/* Legend */}
+                      <div className="flex justify-center flex-wrap gap-4 mt-6 text-xs border-t border-slate-800 pt-4">
+                          <div className="flex items-center gap-2 text-slate-300">
+                              <div className="w-3 h-3 bg-indigo-500 rounded-sm"></div>
+                              <span>Tu Ingreso</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-slate-300">
+                              <div className="w-3 h-3 bg-slate-700 rounded-sm"></div>
+                              <span>Pago a Creadores</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-slate-300">
+                              <div className="w-4 h-[2px] bg-red-500"></div>
+                              <span>Punto de Equilibrio (Costos)</span>
                           </div>
                       </div>
                   </div>
