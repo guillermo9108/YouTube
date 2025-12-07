@@ -62,7 +62,16 @@ class DatabaseService {
     window.addEventListener('offline', () => { this.isOffline = true; });
   }
 
+  // OPTIMIZATION: Non-blocking cache write to prevent UI freeze on large datasets
   private saveToCache(key: string, data: any) {
+      if (typeof window.requestIdleCallback === 'function') {
+          window.requestIdleCallback(() => this.performSave(key, data));
+      } else {
+          setTimeout(() => this.performSave(key, data), 0);
+      }
+  }
+
+  private performSave(key: string, data: any) {
       const cacheItem = JSON.stringify({ timestamp: Date.now(), data: data });
       try {
           if (key.includes('action=')) localStorage.setItem(`sp_cache_${key}`, cacheItem);

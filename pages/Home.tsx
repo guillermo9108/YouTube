@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
+import React, { useEffect, useState, useRef, useLayoutEffect, useMemo } from 'react';
 import { Compass, RefreshCw, Search, X, Filter, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
@@ -22,11 +22,9 @@ const INITIAL_CATEGORIES = [
 const ITEMS_PER_PAGE = 12;
 
 // --- GLOBAL STATE SNAPSHOT (Lives outside component lifecycle) ---
-// This acts as a "Keep-Alive" cache for the Home view
 interface HomeSnapshot {
     videos: Video[];
     shuffledList: Video[];
-    processedList: Video[];
     activeCategory: string;
     searchQuery: string;
     visibleCount: number;
@@ -54,24 +52,10 @@ export default function Home() {
   // Dynamic Category List
   const [categoryList, setCategoryList] = useState(INITIAL_CATEGORIES);
 
-  // Full Processed List (Filtered)
-  const [processedList, setProcessedList] = useState<Video[]>([]);
   // Visible Chunk
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // State Ref to hold latest values for unmount saving (Prevents stale closures)
-  const stateRef = useRef({
-      videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList
-  });
-
-  // Always keep ref updated
-  useEffect(() => {
-      stateRef.current = {
-          videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList
-      };
-  }, [videos, shuffledMasterList, processedList, activeCategory, searchQuery, visibleCount, purchases, categoryList]);
 
   // --- INIT & SNAPSHOT RESTORATION ---
   useEffect(() => {
@@ -81,11 +65,8 @@ export default function Home() {
             const settings = await db.getSystemSettings();
             if (settings.customCategories) {
                 const custom = settings.customCategories.map(c => ({ id: c, label: c.replace('_', ' ') }));
-                // Merge with initial, avoiding duplicates if any
                 setCategoryList(prev => {
-                    // Start with initial
                     const base = [...INITIAL_CATEGORIES];
-                    // Append custom
                     custom.forEach(c => {
                         if (!base.find(b => b.id === c.id)) base.push(c);
                     });
@@ -94,35 +75,30 @@ export default function Home() {
             }
         } catch (e) {}
 
-        // Check for "Dirty" flag (New upload happened?)
         const isDirty = localStorage.getItem('sp_home_dirty') === 'true';
 
         // 1. Try to restore from Snapshot if clean
         if (!isDirty && homeSnapshot) {
-            // console.log("Restoring Home from Snapshot");
             setVideos(homeSnapshot.videos);
             setShuffledMasterList(homeSnapshot.shuffledList);
             setActiveCategory(homeSnapshot.activeCategory);
             setSearchQuery(homeSnapshot.searchQuery);
-            setProcessedList(homeSnapshot.processedList);
             setVisibleCount(homeSnapshot.visibleCount);
             setPurchases(homeSnapshot.purchases);
             if(homeSnapshot.categories.length > INITIAL_CATEGORIES.length) setCategoryList(homeSnapshot.categories);
             setLoading(false);
             
-            // Background update for watched status (cheap)
             if (user) {
                 db.getUserActivity(user.id).then(act => setWatchedIds(act.watched || []));
             }
             return;
         }
 
-        // 2. Fresh Load (If dirty or no snapshot)
+        // 2. Fresh Load
         setLoading(true);
-        if (isDirty) localStorage.removeItem('sp_home_dirty'); // Clear flag
+        if (isDirty) localStorage.removeItem('sp_home_dirty');
         
         try {
-            // Use aggressive caching here handled by db.ts
             const allVideos = await db.getAllVideos();
             setVideos(allVideos);
             
@@ -141,25 +117,34 @@ export default function Home() {
         }
     };
     init();
-
-    // SNAPSHOT SAVE on Unmount ONLY
-    return () => {
-        const s = stateRef.current;
-        if (s.videos.length > 0) {
-            homeSnapshot = {
-                videos: s.videos,
-                shuffledList: s.shuffledMasterList,
-                processedList: s.processedList,
-                activeCategory: s.activeCategory,
-                searchQuery: s.searchQuery,
-                visibleCount: s.visibleCount,
-                scrollPosition: window.scrollY,
-                purchases: s.purchases,
-                categories: s.categoryList
-            };
-        }
-    };
   }, [user]);
+
+  // SNAPSHOT SAVE on Unmount
+  // Use a ref to access latest state inside cleanup function
+  const stateRef = useRef({
+      videos, shuffledMasterList, activeCategory, searchQuery, visibleCount, purchases, categoryList
+  });
+  useEffect(() => {
+      stateRef.current = { videos, shuffledMasterList, activeCategory, searchQuery, visibleCount, purchases, categoryList };
+  }, [videos, shuffledMasterList, activeCategory, searchQuery, visibleCount, purchases, categoryList]);
+
+  useEffect(() => {
+      return () => {
+          const s = stateRef.current;
+          if (s.videos.length > 0) {
+              homeSnapshot = {
+                  videos: s.videos,
+                  shuffledList: s.shuffledMasterList,
+                  activeCategory: s.activeCategory,
+                  searchQuery: s.searchQuery,
+                  visibleCount: s.visibleCount,
+                  scrollPosition: window.scrollY,
+                  purchases: s.purchases,
+                  categories: s.categoryList
+              };
+          }
+      };
+  }, []);
 
   // RESTORE SCROLL POSITION
   useLayoutEffect(() => {
@@ -168,21 +153,20 @@ export default function Home() {
       }
   }, [loading]);
 
-  // Fetch subscriptions
+  // Fetch subscriptions when category changes
   useEffect(() => {
       if (user && activeCategory === 'SUBSCRIPTIONS') {
           db.getSubscriptions(user.id).then(setSubscribedCreators);
       }
   }, [user, activeCategory]);
 
-  // Logic to Process List (Filter Only - No Shuffle)
-  useEffect(() => {
-      if (shuffledMasterList.length === 0) return;
+  // --- OPTIMIZED FILTERING (useMemo) ---
+  const processedList = useMemo(() => {
+      if (shuffledMasterList.length === 0) return [];
       
-      // Use the pre-shuffled list
       let filtered = shuffledMasterList;
       
-      // Filter out PENDING videos
+      // Filter out PENDING
       filtered = filtered.filter(v => v.category !== 'PENDING');
       
       if (activeCategory === 'SUBSCRIPTIONS') {
@@ -191,7 +175,7 @@ export default function Home() {
           filtered = filtered.filter(v => v.category === activeCategory);
       }
 
-      // B. Search
+      // Search
       if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
           filtered = filtered.filter(v => 
@@ -201,31 +185,24 @@ export default function Home() {
           );
       }
       
-      setProcessedList(filtered);
-      
-      // Reset count when filters change (unless it's the initial load/restore)
-      if (!loading) {
-         if (homeSnapshot && activeCategory === homeSnapshot.activeCategory && searchQuery === homeSnapshot.searchQuery) {
-             // If matches snapshot (restore), keep snapshot count (handled by init)
-         } else {
-             setVisibleCount(ITEMS_PER_PAGE);
-         }
-      }
+      return filtered;
+  }, [shuffledMasterList, activeCategory, searchQuery, subscribedCreators]);
 
-  }, [shuffledMasterList, activeCategory, searchQuery, subscribedCreators, loading]);
-
-  // Infinite Scroll Observer - OPTIMIZED FOR NAS
+  // Reset visible count when filters change (unless it's a restore)
   useEffect(() => {
-      if (loading) return; // Don't attach observer while loading
+      if (!loading && (!homeSnapshot || activeCategory !== homeSnapshot.activeCategory || searchQuery !== homeSnapshot.searchQuery)) {
+          setVisibleCount(ITEMS_PER_PAGE);
+      }
+  }, [activeCategory, searchQuery, loading]);
+
+  // Infinite Scroll Observer
+  useEffect(() => {
+      if (loading) return;
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
-              // Increase by chunk size
               setVisibleCount(prev => prev + ITEMS_PER_PAGE);
           }
-      }, { 
-          // CRITICAL OPTIMIZATION: Look 1500px ahead
-          rootMargin: '1500px' 
-      });
+      }, { rootMargin: '1500px' });
 
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
@@ -233,12 +210,11 @@ export default function Home() {
 
   const displayList = processedList.slice(0, visibleCount);
 
-  // Lazy Load Purchases for Visible Items (NAS OPTIMIZATION)
+  // Lazy Load Purchases
   useEffect(() => {
       if (!user || displayList.length === 0) return;
 
       const fetchVisiblePurchases = async () => {
-          // Only check videos we haven't checked yet
           const toCheck = displayList.filter(v => 
               Number(v.price) > 0 && 
               v.creatorId !== user.id && 
@@ -247,9 +223,7 @@ export default function Home() {
 
           if (toCheck.length === 0) return;
 
-          // Limit concurrency to avoid choking the NAS
           const BATCH_SIZE = 6; 
-          
           for (let i = 0; i < toCheck.length; i += BATCH_SIZE) {
                const batch = toCheck.slice(i, i + BATCH_SIZE);
                const newIds: string[] = [];
@@ -261,7 +235,6 @@ export default function Home() {
                    } catch (e) { console.warn("Purchase check failed", e); }
                }));
 
-               // Update state once per batch to reduce renders
                if (newIds.length > 0) {
                    setPurchases(prev => {
                        const next = new Set(prev);
@@ -276,7 +249,7 @@ export default function Home() {
   }, [displayList, user]); 
 
   const isUnlocked = (videoId: string, creatorId: string) => {
-    return purchases.has(videoId) || (user?.id === creatorId);
+    return purchases.has(videoId) || (user?.id === creatorId) || (user?.role === 'ADMIN');
   };
 
   const handleManualRefresh = () => {
@@ -286,12 +259,9 @@ export default function Home() {
 
   return (
     <div className="min-h-screen" ref={containerRef}>
-      {/* Sticky Header: Search & Categories */}
+      {/* Sticky Header */}
       <div className="sticky top-0 z-40 bg-black/95 backdrop-blur-md border-b border-slate-800/50 pb-2 pt-2 transition-all">
-         
-         {/* Search Bar */}
          <div className="px-4 md:px-6 mb-2 flex items-center gap-4">
-            {/* Replaced Menu with Avatar Link for Mobile */}
             <Link to="/profile" className="md:hidden shrink-0">
                 {user?.avatarUrl ? (
                     <img src={user.avatarUrl} className="w-8 h-8 rounded-full object-cover border border-slate-700 bg-slate-800" alt="Profile" />
@@ -312,29 +282,16 @@ export default function Home() {
                     className="w-full bg-slate-900 border border-slate-800 rounded-full py-2 pl-10 pr-10 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-slate-800 transition-all text-sm"
                 />
                 {searchQuery ? (
-                    <button 
-                        onClick={() => setSearchQuery('')}
-                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white"
-                    >
-                        <X size={18} />
-                    </button>
+                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-2.5 text-slate-500 hover:text-white"><X size={18} /></button>
                 ) : (
-                    <button 
-                        onClick={handleManualRefresh}
-                        className="absolute right-3 top-2.5 text-slate-500 hover:text-white"
-                        title="Force Refresh"
-                    >
-                        <RefreshCw size={14} />
-                    </button>
+                    <button onClick={handleManualRefresh} className="absolute right-3 top-2.5 text-slate-500 hover:text-white" title="Force Refresh"><RefreshCw size={14} /></button>
                 )}
             </div>
          </div>
 
-         {/* Categories Pills */}
+         {/* Categories */}
          <div className="flex items-center gap-2 overflow-x-auto px-4 md:px-6 scrollbar-hide pb-2">
-            <div className="hidden md:flex bg-slate-800/50 p-1.5 rounded-lg text-slate-400 shrink-0">
-                <Compass size={18} />
-            </div>
+            <div className="hidden md:flex bg-slate-800/50 p-1.5 rounded-lg text-slate-400 shrink-0"><Compass size={18} /></div>
             <div className="hidden md:block h-6 w-px bg-slate-800 mx-1 shrink-0"></div>
             {categoryList.map(cat => (
                 <button
@@ -348,7 +305,7 @@ export default function Home() {
          </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Grid */}
       <div className="px-0 md:px-6 pb-20 pt-2">
          {loading ? (
              <div className="flex flex-col items-center justify-center py-20 text-slate-500">
@@ -382,8 +339,6 @@ export default function Home() {
                   />
                 ))}
              </div>
-             
-             {/* Invisible Trigger for Infinite Scroll */}
              {visibleCount < processedList.length && (
                 <div ref={loadMoreRef} className="py-24 flex justify-center">
                     <RefreshCw className="animate-spin text-slate-600" />

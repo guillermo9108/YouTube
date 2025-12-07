@@ -37,8 +37,17 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
   // Load Interaction Data only when item is close to viewport
   useEffect(() => {
     if (user && shouldLoad) {
+      const isOwner = user.id === video.creatorId;
+      const isAdmin = user.role === 'ADMIN';
+
+      if (isOwner || isAdmin) {
+          setIsUnlocked(true);
+      } else {
+          db.hasPurchased(user.id, video.id).then(setIsUnlocked);
+      }
+
       db.getInteraction(user.id, video.id).then(setInteraction);
-      db.hasPurchased(user.id, video.id).then(setIsUnlocked);
+      
       // Lazy load comments and sub status
       if (isActive) {
           db.getComments(video.id).then(setComments);
@@ -47,13 +56,44 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
     }
   }, [user, video.id, video.creatorId, shouldLoad, isActive]);
 
+  // Actions
+  const handlePurchase = async () => {
+    if (!user || purchasing) return;
+    setPurchasing(true);
+    try {
+      await db.purchaseVideo(user.id, video.id);
+      await refreshUser();
+      setIsUnlocked(true);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setPurchasing(false);
+    }
+  };
+
+  // Auto Purchase
+  useEffect(() => {
+      if (isActive && user && !isUnlocked && !purchasing && shouldLoad) {
+          const isOwner = user.id === video.creatorId;
+          const isAdmin = user.role === 'ADMIN';
+          if (isOwner || isAdmin) return;
+
+          const price = Number(video.price);
+          const limit = Number(user.autoPurchaseLimit);
+          const balance = Number(user.balance);
+
+          if (price > 0 && price <= limit && balance >= price) {
+              handlePurchase();
+          }
+      }
+  }, [isActive, isUnlocked, purchasing, user, video, shouldLoad]);
+
   // Handle Play/Pause & Cleanup
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
     if (isActive) {
-        // Active Slide
         if (isUnlocked) {
             const playPromise = el.play();
             if (playPromise !== undefined) {
@@ -63,7 +103,6 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
                     setIsBuffering(false);
                 })
                 .catch(() => {
-                    // Autoplay blocked, mute and retry
                     el.muted = true;
                     setIsMuted(true);
                     el.play().catch(() => {});
@@ -71,36 +110,19 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
             }
         }
     } else {
-        // Inactive Slide
         el.pause();
-        el.currentTime = 0; // Reset to start
+        el.currentTime = 0;
     }
     
-    // Strict Cleanup for MEMORY, but loosely for DOM
-    // Only remove src if we are REALLY far away
+    // Strict Cleanup for MEMORY
     return () => {
         if (!shouldLoad && el) {
             el.pause();
             el.removeAttribute('src'); // Force drop buffer
-            el.load();
+            el.load(); // Reset element
         }
     };
   }, [isActive, isUnlocked, shouldLoad]);
-
-  // Actions
-  const handlePurchase = async () => {
-    if (!user) return;
-    setPurchasing(true);
-    try {
-      await db.purchaseVideo(user.id, video.id);
-      refreshUser();
-      setIsUnlocked(true);
-    } catch (e) {
-      alert("Insufficient funds or error.");
-    } finally {
-      setPurchasing(false);
-    }
-  };
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
@@ -156,6 +178,8 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
       );
   }
 
+  const canAfford = user ? Number(user.balance) >= Number(video.price) : false;
+
   return (
     <div className="relative w-full h-[100dvh] md:h-full snap-start snap-always shrink-0 flex items-center justify-center bg-black overflow-hidden video-container">
       
@@ -205,13 +229,16 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
                     )}
                     
                     {!purchasing && (
-                        <button 
-                        onClick={handlePurchase}
-                        disabled={purchasing}
-                        className="w-full bg-white text-black font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-xl"
-                        >
-                            Unlock Now
-                        </button>
+                        <>
+                            <button 
+                            onClick={handlePurchase}
+                            disabled={purchasing || !canAfford}
+                            className={`w-full font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-xl ${canAfford ? 'bg-white text-black' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}
+                            >
+                                {canAfford ? 'Unlock Now' : 'Insufficient Funds'}
+                            </button>
+                            {user && !canAfford && <div className="mt-2 text-[10px] text-red-300 font-bold">Balance: {Number(user.balance).toFixed(2)}</div>}
+                        </>
                     )}
                  </div>
               </div>
@@ -348,15 +375,14 @@ export default function Shorts() {
         try {
             const parsed = JSON.parse(cached);
             if (parsed.data) {
-                 const shorts = (parsed.data as Video[]).filter((v: Video) => v.duration < 180).sort(() => Math.random() - 0.5);
+                 const shorts = (parsed.data as Video[]).filter(v => v.duration < 180).sort(() => Math.random() - 0.5);
                  setVideos(shorts);
             }
         } catch(e) {}
     }
 
-    db.getAllVideos().then((all: Video[]) => {
-        const shorts = all.filter((v: Video) => v.duration < 180).sort(() => Math.random() - 0.5);
-        // Only update if significantly different to prevent reset
+    db.getAllVideos().then(all => {
+        const shorts = all.filter(v => v.duration < 180).sort(() => Math.random() - 0.5);
         setVideos(prev => (prev.length === 0 ? shorts : prev));
     });
   }, []);
@@ -369,7 +395,6 @@ export default function Shorts() {
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
-                // Get index from dataset to be 100% accurate
                 const index = Number((entry.target as HTMLElement).dataset.index);
                 if (!isNaN(index)) {
                      setActiveIndex(index);
@@ -378,18 +403,14 @@ export default function Shorts() {
         });
     }, {
         root: container,
-        threshold: 0.55 // Slightly higher threshold to avoid flipping too early
+        threshold: 0.55
     });
 
-    // Observe children
     Array.from(container.children).forEach((child) => observer.observe(child as Element));
 
     return () => observer.disconnect();
   }, [videos]);
 
-  // Virtualization Window Optimizations for NAS: 
-  // 1. Widen the window (Active +/- 2) to keep DOM elements around longer.
-  // 2. Control PRELOAD carefully. Only Active gets 'auto'. Next gets 'metadata' (to not kill bandwidth).
   return (
     <div 
       ref={containerRef}
@@ -405,9 +426,6 @@ export default function Shorts() {
           const isNext = idx === activeIndex + 1;
 
           // NAS Bandwidth protection: 
-          // Only fully buffer the ACTIVE video.
-          // Fetch metadata for NEXT video (so cover displays).
-          // Do NOT fetch PREVIOUS or far videos.
           const preloadStrategy = isActive ? "auto" : (isNext ? "metadata" : "none");
 
           return (
