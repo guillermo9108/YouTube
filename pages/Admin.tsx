@@ -198,6 +198,18 @@ export default function Admin() {
       }
   };
 
+  const handleRepairDb = async () => {
+      setCleaning(true);
+      try {
+          await db.adminRepairDb();
+          toast.success("Base de datos reparada y sincronizada.");
+      } catch (e: any) {
+          toast.error("Error: " + e.message);
+      } finally {
+          setCleaning(false);
+      }
+  };
+
   const handlePreviewCleaner = async () => {
       setCleaning(true);
       try {
@@ -486,6 +498,22 @@ export default function Admin() {
 
       {activeTab === 'MAINTENANCE' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Database Repair - Priority */}
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-amber-400"><Database size={20}/> Reparación de Base de Datos</h3>
+                  <p className="text-sm text-slate-400 mb-6">
+                      Sincroniza la estructura de las tablas, corrige columnas faltantes y asegura la integridad del esquema. Útil tras actualizaciones.
+                  </p>
+                  <button 
+                      onClick={handleRepairDb} 
+                      disabled={cleaning}
+                      className="w-full bg-amber-900/30 hover:bg-amber-900/50 border border-amber-500/50 text-amber-200 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+                  >
+                      {cleaning ? <Loader2 className="animate-spin"/> : <Wrench size={20}/>}
+                      Reparar Esquema BD
+                  </button>
+              </div>
+
               {/* Orphaned File Cleaner */}
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
                   <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-red-400"><AlertTriangle size={20}/> Limpieza Profunda (Archivos Huérfanos)</h3>
@@ -505,7 +533,7 @@ export default function Admin() {
               </div>
 
               {/* Smart Storage Cleaner */}
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 lg:col-span-2">
                   <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-emerald-400"><Brush size={20}/> Limpieza Inteligente</h3>
                   <p className="text-sm text-slate-400 mb-4">
                       Elimina automáticamente videos antiguos con bajo rendimiento (pocos likes/views) para liberar espacio.
