@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest, SmartCleanerResult } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck, Wrench } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck, Wrench, TrendingUp, BarChart3, PieChart } from 'lucide-react';
 import { generateThumbnail } from '../utils/videoGenerator';
 import { useToast } from '../context/ToastContext';
 
@@ -11,7 +11,7 @@ export default function Admin() {
   const { user: currentUser } = useAuth();
   const toast = useToast();
   
-  const [activeTab, setActiveTab] = useState<'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'MAINTENANCE'>('USERS');
+  const [activeTab, setActiveTab] = useState<'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'MAINTENANCE' | 'ANALYTICS'>('USERS');
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   
   // Data States
@@ -39,9 +39,23 @@ export default function Admin() {
   const [cleanerDays, setCleanerDays] = useState(30);
   const [cleaning, setCleaning] = useState(false);
 
+  // Simulator State
+  const [simUsers, setSimUsers] = useState(100);
+  const [simVidFreq, setSimVidFreq] = useState(2); // Videos bought per user/month
+  const [simMktFreq, setSimMktFreq] = useState(0.5); // Items bought per user/month
+  const [simAvgVidPrice, setSimAvgVidPrice] = useState(5);
+  const [simAvgMktPrice, setSimAvgMktPrice] = useState(25);
+
   useEffect(() => {
     loadData();
   }, [activeTab]);
+
+  useEffect(() => {
+      // Set default sim users to actual count when loaded
+      if (users.length > 0 && simUsers === 100) {
+          setSimUsers(users.length);
+      }
+  }, [users]);
 
   const loadData = () => {
       if (activeTab === 'USERS') {
@@ -50,7 +64,7 @@ export default function Admin() {
           db.getBalanceRequests().then(setBalanceRequests);
       } else if (activeTab === 'MARKET') {
           db.adminGetMarketplaceItems().then(setMarketItems);
-      } else if (activeTab === 'CONFIG' || activeTab === 'LIBRARY') {
+      } else if (activeTab === 'CONFIG' || activeTab === 'LIBRARY' || activeTab === 'ANALYTICS') {
           db.getSystemSettings().then(s => {
               setSettings(s);
               if (s.localLibraryPath) setLocalPath(s.localLibraryPath);
@@ -213,10 +227,35 @@ export default function Admin() {
       }
   };
 
+  // --- SIMULATION CALCULATIONS ---
+  const calculateProjection = () => {
+      const vidComm = settings?.videoCommission || 20;
+      const mktComm = settings?.marketCommission || 25;
+
+      const monthlyVidRevenue = simUsers * simVidFreq * simAvgVidPrice;
+      const monthlyMktRevenue = simUsers * simMktFreq * simAvgMktPrice;
+      
+      const adminVidProfit = monthlyVidRevenue * (vidComm / 100);
+      const adminMktProfit = monthlyMktRevenue * (mktComm / 100);
+      
+      const creatorVidPayout = monthlyVidRevenue - adminVidProfit;
+      const creatorMktPayout = monthlyMktRevenue - adminMktProfit;
+
+      return {
+          gross: monthlyVidRevenue + monthlyMktRevenue,
+          adminTotal: adminVidProfit + adminMktProfit,
+          creatorTotal: creatorVidPayout + creatorMktPayout,
+          vidBreakdown: { gross: monthlyVidRevenue, admin: adminVidProfit },
+          mktBreakdown: { gross: monthlyMktRevenue, admin: adminMktProfit }
+      };
+  };
+
+  const projection = calculateProjection();
+
   return (
     <div className="space-y-6 pb-24 px-2 md:px-0">
       <div className="flex gap-2 overflow-x-auto bg-slate-900 p-2 rounded-xl scrollbar-hide">
-           {['USERS', 'FINANCE', 'MARKET', 'CONFIG', 'LIBRARY', 'MAINTENANCE'].map(t => (
+           {['USERS', 'FINANCE', 'MARKET', 'CONFIG', 'LIBRARY', 'MAINTENANCE', 'ANALYTICS'].map(t => (
                <button key={t} onClick={() => setActiveTab(t as any)} className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 ${activeTab === t ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
                    {t === 'USERS' && <UserIcon size={16}/>}
                    {t === 'FINANCE' && <Wallet size={16}/>}
@@ -224,6 +263,7 @@ export default function Admin() {
                    {t === 'CONFIG' && <Settings size={16}/>}
                    {t === 'LIBRARY' && <Database size={16}/>}
                    {t === 'MAINTENANCE' && <Wrench size={16}/>}
+                   {t === 'ANALYTICS' && <TrendingUp size={16}/>}
                    {t}
                </button>
            ))}
@@ -530,6 +570,124 @@ export default function Admin() {
                           </button>
                       </div>
                   )}
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'ANALYTICS' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in slide-in-from-bottom-4">
+              {/* Simulator Controls */}
+              <div className="lg:col-span-1 bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6 h-fit">
+                  <h3 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-4"><Settings size={20} className="text-indigo-400"/> Simulador de Mercado</h3>
+                  
+                  <div>
+                      <div className="flex justify-between mb-1">
+                          <label className="text-xs font-bold text-slate-500 uppercase">Usuarios Activos</label>
+                          <span className="text-xs text-white font-bold">{simUsers}</span>
+                      </div>
+                      <input type="range" min="10" max="5000" step="10" value={simUsers} onChange={e=>setSimUsers(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                  </div>
+
+                  <div className="space-y-4 pt-4 border-t border-slate-800">
+                      <h4 className="text-xs font-bold text-white uppercase flex items-center gap-2"><Play size={12}/> Video Streaming</h4>
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-[10px] text-slate-400">Compras / Usuario / Mes</label>
+                              <span className="text-[10px] text-indigo-400 font-bold">{simVidFreq}</span>
+                          </div>
+                          <input type="range" min="0" max="30" step="1" value={simVidFreq} onChange={e=>setSimVidFreq(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                      </div>
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-[10px] text-slate-400">Precio Promedio ($)</label>
+                              <span className="text-[10px] text-indigo-400 font-bold">{simAvgVidPrice}</span>
+                          </div>
+                          <input type="range" min="1" max="50" step="1" value={simAvgVidPrice} onChange={e=>setSimAvgVidPrice(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                      </div>
+                  </div>
+
+                  <div className="space-y-4 pt-4 border-t border-slate-800">
+                      <h4 className="text-xs font-bold text-white uppercase flex items-center gap-2"><ShoppingBag size={12}/> Marketplace</h4>
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-[10px] text-slate-400">Ventas / Usuario / Mes</label>
+                              <span className="text-[10px] text-emerald-400 font-bold">{simMktFreq}</span>
+                          </div>
+                          <input type="range" min="0" max="10" step="0.1" value={simMktFreq} onChange={e=>setSimMktFreq(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                      </div>
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-[10px] text-slate-400">Precio Promedio ($)</label>
+                              <span className="text-[10px] text-emerald-400 font-bold">{simAvgMktPrice}</span>
+                          </div>
+                          <input type="range" min="5" max="500" step="5" value={simAvgMktPrice} onChange={e=>setSimAvgMktPrice(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                      </div>
+                  </div>
+              </div>
+
+              {/* Results */}
+              <div className="lg:col-span-2 space-y-6">
+                  {/* Cards */}
+                  <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-gradient-to-br from-indigo-900/50 to-slate-900 p-6 rounded-xl border border-indigo-500/30">
+                          <div className="flex items-center gap-3 mb-2 text-indigo-300">
+                              <Wallet size={20}/>
+                              <span className="text-xs font-bold uppercase tracking-wider">Ingreso Neto Admin (Mensual)</span>
+                          </div>
+                          <div className="text-3xl font-mono font-bold text-white">
+                              {projection.adminTotal.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                          </div>
+                          <div className="text-xs text-slate-400 mt-2">
+                              Videos: <span className="text-indigo-400">{projection.vidBreakdown.admin.toFixed(2)}</span> • Market: <span className="text-emerald-400">{projection.mktBreakdown.admin.toFixed(2)}</span>
+                          </div>
+                      </div>
+                      <div className="bg-gradient-to-br from-emerald-900/50 to-slate-900 p-6 rounded-xl border border-emerald-500/30">
+                          <div className="flex items-center gap-3 mb-2 text-emerald-300">
+                              <BarChart3 size={20}/>
+                              <span className="text-xs font-bold uppercase tracking-wider">Volumen Bruto (GMV)</span>
+                          </div>
+                          <div className="text-3xl font-mono font-bold text-white">
+                              {projection.gross.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                          </div>
+                          <div className="text-xs text-slate-400 mt-2">
+                              Pagado a Creadores: {projection.creatorTotal.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* Profit Graph (SVG) */}
+                  <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                      <h4 className="font-bold text-white mb-6 flex items-center gap-2"><TrendingUp size={20}/> Proyección Anual</h4>
+                      <div className="w-full h-64 flex items-end justify-between gap-1">
+                          {Array.from({length: 12}).map((_, i) => {
+                              // Simulate slight growth per month
+                              const growthFactor = 1 + (i * 0.05); 
+                              const val = projection.adminTotal * growthFactor;
+                              const heightPercent = Math.min(100, (val / (projection.adminTotal * 2)) * 100);
+                              
+                              return (
+                                  <div key={i} className="flex-1 flex flex-col justify-end group relative">
+                                      <div 
+                                        className="w-full bg-indigo-600 rounded-t-sm opacity-80 group-hover:opacity-100 transition-all"
+                                        style={{ height: `${heightPercent}%` }}
+                                      ></div>
+                                      {/* Tooltip */}
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-10 font-mono">
+                                          {val.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                                      </div>
+                                      <div className="h-px bg-slate-800 w-full mt-1"></div>
+                                      <span className="text-[9px] text-slate-500 text-center mt-1">M{i+1}</span>
+                                  </div>
+                              );
+                          })}
+                      </div>
+                      <div className="flex justify-center gap-6 mt-4 text-xs text-slate-400">
+                          <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 bg-indigo-600 rounded-sm"></div>
+                              <span>Ganancia Neta Proyectada</span>
+                          </div>
+                      </div>
+                  </div>
               </div>
           </div>
       )}
