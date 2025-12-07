@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video, MarketplaceItem, BalanceRequest, SmartCleanerResult } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, Settings, Save, Play, ExternalLink, Key, Loader2, Trash2, Brush, FolderSearch, AlertTriangle, ShoppingBag, CheckCircle, XCircle, Percent, Wallet, Store, Wrench, TrendingUp, BarChart3, Maximize, X, HelpCircle, Server, HardDrive, Calculator, Info } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, Settings, Save, Play, ExternalLink, Key, Loader2, Trash2, Brush, FolderSearch, AlertTriangle, ShoppingBag, CheckCircle, XCircle, Percent, Wallet, Store, Wrench, TrendingUp, BarChart3, Maximize, X, HelpCircle, Server, HardDrive, Calculator, Info, Zap } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 // Helper Component for Tooltips
@@ -61,24 +61,26 @@ export default function Admin() {
   const [cleanerDays, setCleanerDays] = useState(30);
   const [cleaning, setCleaning] = useState(false);
 
-  // Simulator State
-  const [simUsers, setSimUsers] = useState(100);
-  const [simVidFreq, setSimVidFreq] = useState(2); // Videos bought per user/month
-  const [simMktFreq, setSimMktFreq] = useState(0.5); // Items bought per user/month
-  const [simAvgVidPrice, setSimAvgVidPrice] = useState(5);
-  const [simAvgMktPrice, setSimAvgMktPrice] = useState(25);
-  const [simServerCost, setSimServerCost] = useState(10); // Monthly fixed cost
-  const [simStorageCost, setSimStorageCost] = useState(0.02); // Cost per GB/User
-  const [simGrowthRate, setSimGrowthRate] = useState(5); // % Monthly growth
+  // Simulator State (Updated for Real Cash Flow Model)
+  const [simTotalUsers, setSimTotalUsers] = useState(12);
+  const [simBuyers, setSimBuyers] = useState(8); // Users who buy balance
+  const [simBuyAmount, setSimBuyAmount] = useState(100); // Average balance bought
+  const [simFixedCost, setSimFixedCost] = useState(700); // Electricity etc.
+  
+  // Internal Activity Sim
+  const [simVidFreq, setSimVidFreq] = useState(15); // Videos watched per user/month
+  const [simVidPrice, setSimVidPrice] = useState(5);
+  const [simMarketSales, setSimMarketSales] = useState(3); // Total items sold per month
 
   useEffect(() => {
     loadData();
   }, [activeTab]);
 
   useEffect(() => {
-      // Set default sim users to actual count when loaded
-      if (users.length > 0 && simUsers === 100) {
-          setSimUsers(users.length);
+      // Initialize with realistic defaults if empty
+      if (users.length > 0 && simTotalUsers === 12) {
+          setSimTotalUsers(users.length);
+          setSimBuyers(Math.floor(users.length * 0.7)); // Assume 70% buy balance
       }
   }, [users]);
 
@@ -360,60 +362,40 @@ export default function Admin() {
       }
   };
 
-  // --- SIMULATION CALCULATIONS (Dynamic 12 Month Projection) ---
+  // --- SIMULATION CALCULATIONS (Profitability v3.0) ---
   const calculateProjection = () => {
       const vidComm = (settings?.videoCommission || 20) / 100;
-      const mktComm = (settings?.marketCommission || 25) / 100;
+      
+      // 1. CASH FLOW (Real Money)
+      const cashRevenue = simBuyers * simBuyAmount;
+      const cashProfit = cashRevenue - simFixedCost;
 
-      let currentUsers = simUsers;
-      const monthlyData = [];
-      let totalAnnualProfit = 0;
-      let totalAnnualGross = 0;
+      // 2. INTERNAL ECONOMY (Saldo Circulation)
+      // Estimate internal video volume
+      const activeUsers = Math.max(simTotalUsers, simBuyers);
+      const internalVideoVol = activeUsers * simVidFreq * simVidPrice;
+      
+      // Estimate internal market volume (Assuming avg item 100$)
+      const internalMarketVol = simMarketSales * 100; 
+      
+      // Total Saldo Moving
+      const totalVolume = internalVideoVol + internalMarketVol;
+      
+      // Saldo Reclaimed by Admin (Burning Liability)
+      // Approx combined commission rate
+      const reclaimedSaldo = totalVolume * vidComm;
 
-      for (let i = 0; i < 12; i++) {
-          // Revenue
-          const vidRevenue = currentUsers * simVidFreq * simAvgVidPrice;
-          const mktRevenue = currentUsers * simMktFreq * simAvgMktPrice;
-          const grossRevenue = vidRevenue + mktRevenue;
-
-          // Admin Income
-          const adminVid = vidRevenue * vidComm;
-          const adminMkt = mktRevenue * mktComm;
-          const totalAdminIncome = adminVid + adminMkt;
-
-          // Creator Payouts
-          const creatorPayout = grossRevenue - totalAdminIncome;
-
-          // Costs
-          const storage = currentUsers * simStorageCost; 
-          const costs = simServerCost + storage;
-
-          // Net Profit
-          const netProfit = totalAdminIncome - costs;
-
-          monthlyData.push({
-              month: `M${i+1}`,
-              users: Math.round(currentUsers),
-              gross: grossRevenue,
-              adminIncome: totalAdminIncome,
-              creatorPayout: creatorPayout,
-              costs: costs,
-              netProfit: netProfit
-          });
-
-          totalAnnualProfit += netProfit;
-          totalAnnualGross += grossRevenue;
-
-          // Apply Growth for next month
-          currentUsers = currentUsers * (1 + (simGrowthRate / 100));
-      }
-
-      return { monthlyData, totalAnnualProfit, totalAnnualGross };
+      return {
+          cashRevenue,
+          fixedCosts: simFixedCost,
+          cashProfit,
+          internalVideoVol,
+          reclaimedSaldo,
+          activeUsers
+      };
   };
 
-  const projection = calculateProjection();
-  // Find max value for chart scaling
-  const maxChartValue = Math.max(...projection.monthlyData.map(d => d.gross));
+  const sim = calculateProjection();
 
   return (
     <div className="space-y-6 pb-24 px-2 md:px-0">
@@ -450,7 +432,7 @@ export default function Admin() {
                               {users.map(u => (
                                   <tr key={u.id} className="hover:bg-slate-800/50">
                                       <td className="px-4 py-3 font-medium text-white">{u.username}</td>
-                                      <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>{u.role ? u.role.trim() : 'USER'}</span></td>
+                                      <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role?.trim().toUpperCase() === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>{u.role ? u.role.trim() : 'USER'}</span></td>
                                       <td className="px-4 py-3 font-mono text-emerald-400">{Number(u.balance).toFixed(2)}</td>
                                       <td className="px-4 py-3 text-slate-500">{(u.lastActive || 0) > 0 ? new Date((u.lastActive || 0) * 1000).toLocaleDateString() : 'N/A'}</td>
                                   </tr>
@@ -772,187 +754,133 @@ export default function Admin() {
               <div className="lg:col-span-1 bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6 h-fit sticky top-20">
                   <h3 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-4"><Calculator size={20} className="text-indigo-400"/> Simulador Rentabilidad</h3>
                   
+                  {/* CASH INFLOW SECTION */}
                   <div className="space-y-4">
+                      <h4 className="text-xs font-bold text-emerald-400 uppercase flex items-center gap-2"><Wallet size={12}/> Venta de Saldo (Cash)</h4>
                       <div>
                           <div className="flex justify-between mb-1">
-                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center">
-                                  Usuarios Iniciales
-                                  <InfoTooltip text="Usuarios activos hoy" />
+                              <label className="text-[10px] text-slate-400 flex items-center">
+                                  Usuarios que recargan
+                                  <InfoTooltip text="Usuarios que pagan en efectivo." example="Ej: 8 usuarios" />
                               </label>
-                              <span className="text-xs text-white font-bold">{simUsers}</span>
+                              <span className="text-[10px] text-white font-bold">{simBuyers} / {simTotalUsers}</span>
                           </div>
-                          <input type="range" min="10" max="5000" step="10" value={simUsers} onChange={e=>setSimUsers(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                          <input type="range" min="0" max={simTotalUsers} step="1" value={simBuyers} onChange={e=>setSimBuyers(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
                       </div>
-
                       <div>
                           <div className="flex justify-between mb-1">
-                              <label className="text-xs font-bold text-slate-500 uppercase flex items-center">
-                                  Crecimiento Mensual
-                                  <InfoTooltip text="Proyección de nuevos usuarios" example="5% mensual" />
+                              <label className="text-[10px] text-slate-400 flex items-center">
+                                  Monto Promedio
+                                  <InfoTooltip text="Cuanto compra cada usuario" example="Ej: 100 de Saldo" />
                               </label>
-                              <span className="text-xs text-emerald-400 font-bold">+{simGrowthRate}%</span>
+                              <span className="text-[10px] text-white font-bold">${simBuyAmount}</span>
                           </div>
-                          <input type="range" min="0" max="20" step="1" value={simGrowthRate} onChange={e=>setSimGrowthRate(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                          <input type="range" min="10" max="1000" step="10" value={simBuyAmount} onChange={e=>setSimBuyAmount(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
                       </div>
                   </div>
 
-                  {/* Operational Costs */}
+                  {/* EXPENSES SECTION */}
                   <div className="space-y-3 pt-4 border-t border-slate-800">
-                      <h4 className="text-xs font-bold text-white uppercase flex items-center gap-2"><Server size={12}/> Costos Operativos</h4>
+                      <h4 className="text-xs font-bold text-red-400 uppercase flex items-center gap-2"><Zap size={12}/> Gastos Fijos (Efectivo)</h4>
+                      <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">Electricidad / Internet</label>
+                          <input 
+                            type="number" 
+                            value={simFixedCost} 
+                            onChange={e=>setSimFixedCost(Number(e.target.value))} 
+                            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" 
+                            placeholder="Ej: 700 CUP"
+                          />
+                      </div>
+                  </div>
+
+                  {/* INTERNAL ACTIVITY SECTION (VIRTUAL) */}
+                  <div className="space-y-4 pt-4 border-t border-slate-800 opacity-80 hover:opacity-100 transition-opacity">
+                      <h4 className="text-xs font-bold text-indigo-400 uppercase flex items-center gap-2"><Play size={12}/> Economía Interna (Videos)</h4>
+                      <p className="text-[9px] text-slate-500 leading-tight">Define cuánto circula el saldo. Las comisiones "queman" el saldo, recuperándolo para el sistema.</p>
+                      
                       <div className="grid grid-cols-2 gap-3">
                           <div>
-                              <label className="text-[10px] text-slate-400 block mb-1">Hosting (Mes)</label>
-                              <input type="number" value={simServerCost} onChange={e=>setSimServerCost(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                              <label className="text-[9px] text-slate-400 block">Videos/User/Mes</label>
+                              <input type="number" value={simVidFreq} onChange={e=>setSimVidFreq(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-xs text-white" />
                           </div>
                           <div>
-                              <label className="text-[10px] text-slate-400 block mb-1">Storage ($/User)</label>
-                              <input type="number" step="0.01" value={simStorageCost} onChange={e=>setSimStorageCost(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+                              <label className="text-[9px] text-slate-400 block">Ventas Tienda/Mes</label>
+                              <input type="number" value={simMarketSales} onChange={e=>setSimMarketSales(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-xs text-white" />
                           </div>
-                      </div>
-                  </div>
-
-                  <div className="space-y-4 pt-4 border-t border-slate-800">
-                      <h4 className="text-xs font-bold text-white uppercase flex items-center gap-2"><Play size={12}/> Video Streaming</h4>
-                      <div>
-                          <div className="flex justify-between mb-1">
-                              <label className="text-[10px] text-slate-400">Compras / Usuario / Mes</label>
-                              <span className="text-[10px] text-indigo-400 font-bold">{simVidFreq}</span>
-                          </div>
-                          <input type="range" min="0" max="30" step="1" value={simVidFreq} onChange={e=>setSimVidFreq(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
-                      </div>
-                      <div>
-                          <div className="flex justify-between mb-1">
-                              <label className="text-[10px] text-slate-400">Precio Promedio ($)</label>
-                              <span className="text-[10px] text-indigo-400 font-bold">{simAvgVidPrice}</span>
-                          </div>
-                          <input type="range" min="1" max="50" step="1" value={simAvgVidPrice} onChange={e=>setSimAvgVidPrice(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
-                      </div>
-                  </div>
-
-                  <div className="space-y-4 pt-4 border-t border-slate-800">
-                      <h4 className="text-xs font-bold text-white uppercase flex items-center gap-2"><ShoppingBag size={12}/> Marketplace</h4>
-                      <div>
-                          <div className="flex justify-between mb-1">
-                              <label className="text-[10px] text-slate-400">Ventas / Usuario / Mes</label>
-                              <span className="text-[10px] text-emerald-400 font-bold">{simMktFreq}</span>
-                          </div>
-                          <input type="range" min="0" max="10" step="0.1" value={simMktFreq} onChange={e=>setSimMktFreq(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
-                      </div>
-                      <div>
-                          <div className="flex justify-between mb-1">
-                              <label className="text-[10px] text-slate-400">Precio Promedio ($)</label>
-                              <span className="text-[10px] text-emerald-400 font-bold">{simAvgMktPrice}</span>
-                          </div>
-                          <input type="range" min="5" max="500" step="5" value={simAvgMktPrice} onChange={e=>setSimAvgMktPrice(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
                       </div>
                   </div>
               </div>
 
               {/* Results */}
               <div className="lg:col-span-2 space-y-6">
-                  {/* Cards */}
+                  {/* KPI Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="bg-gradient-to-br from-indigo-900/80 to-slate-900 p-6 rounded-xl border border-indigo-500/30 relative overflow-hidden">
+                      {/* Real Profit Card */}
+                      <div className="bg-gradient-to-br from-emerald-900/80 to-slate-900 p-6 rounded-xl border border-emerald-500/30 relative overflow-hidden shadow-lg">
                           <div className="relative z-10">
-                              <div className="flex items-center gap-3 mb-2 text-indigo-200">
+                              <div className="flex items-center gap-3 mb-2 text-emerald-200">
                                   <Wallet size={20}/>
-                                  <span className="text-xs font-bold uppercase tracking-wider">Tu Beneficio Neto (Año 1)</span>
+                                  <span className="text-xs font-bold uppercase tracking-wider">Flujo de Caja (Beneficio)</span>
                               </div>
                               <div className="text-4xl font-mono font-bold text-white tracking-tight">
-                                  {projection.totalAnnualProfit.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                                  {sim.cashProfit.toLocaleString()} <span className="text-lg opacity-50">$</span>
                               </div>
-                              <div className="text-xs text-indigo-200/70 mt-2 font-medium">
-                                  Después de pagar a creadores y costos.
+                              <div className="text-xs text-emerald-200/70 mt-2 font-medium">
+                                  Ingreso Real: {sim.cashRevenue} - Gastos: {sim.fixedCosts}
                               </div>
                           </div>
-                          <div className="absolute -bottom-4 -right-4 text-indigo-500/10 transform rotate-12">
+                          <div className="absolute -bottom-4 -right-4 text-emerald-500/10 transform rotate-12">
                               <TrendingUp size={120} />
                           </div>
                       </div>
                       
+                      {/* Virtual Economy Card */}
                       <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 flex flex-col justify-center">
                           <div className="flex justify-between items-center mb-4">
-                              <span className="text-xs text-slate-500 font-bold uppercase">Volumen de Ventas (GMV)</span>
-                              <span className="text-sm font-mono text-white">{projection.totalAnnualGross.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}</span>
+                              <span className="text-xs text-slate-500 font-bold uppercase flex items-center gap-1"><Server size={12}/> Circulación Interna</span>
+                              <span className="text-sm font-mono text-white">{sim.internalVideoVol.toLocaleString()} Saldo</span>
                           </div>
                           <div className="flex justify-between items-center mb-4">
-                              <span className="text-xs text-slate-500 font-bold uppercase">Pago a Creadores</span>
-                              <span className="text-sm font-mono text-white">
-                                  {(projection.monthlyData.reduce((acc, curr) => acc + curr.creatorPayout, 0)).toLocaleString('en-US', {style: 'currency', currency: 'USD'})}
+                              <span className="text-xs text-slate-500 font-bold uppercase flex items-center gap-1"><Shield size={12}/> Saldo Recuperado (Comisión)</span>
+                              <span className="text-sm font-mono text-indigo-400">
+                                  {sim.reclaimedSaldo.toLocaleString()} Saldo
                               </span>
                           </div>
-                          <div className="flex justify-between items-center pt-4 border-t border-slate-800">
-                              <span className="text-xs text-slate-500 font-bold uppercase">Margen Neto Estimado</span>
-                              <span className={`text-xl font-bold ${projection.totalAnnualProfit > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                  {((projection.totalAnnualProfit / projection.totalAnnualGross) * 100).toFixed(1)}%
-                              </span>
+                          <div className="text-[10px] text-slate-500 border-t border-slate-800 pt-3 italic">
+                              * El saldo recuperado reduce la deuda técnica del sistema.
                           </div>
                       </div>
                   </div>
 
-                  {/* Advanced Profit Graph (Stacked Area) */}
+                  {/* Profit Graph (Comparison) */}
                   <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 relative">
-                      <h4 className="font-bold text-white mb-6 flex items-center gap-2"><BarChart3 size={20}/> Proyección de Flujo de Caja (12 Meses)</h4>
+                      <h4 className="font-bold text-white mb-6 flex items-center gap-2"><BarChart3 size={20}/> Resumen Mensual Estimado</h4>
                       
-                      <div className="w-full h-64 flex items-end justify-between gap-1 relative z-10">
-                          {projection.monthlyData.map((d, i) => {
-                              const totalH = Math.min(100, (d.gross / maxChartValue) * 100);
-                              // Calculate segments based on total height of the bar
-                              const adminH = (d.adminIncome / d.gross) * 100;
-                              const creatorH = (d.creatorPayout / d.gross) * 100;
-                              
-                              return (
-                                  <div key={i} className="flex-1 flex flex-col justify-end h-full group relative px-0.5">
-                                      <div className="w-full flex flex-col justify-end h-full relative">
-                                          {/* Creator Share (Bottom) */}
-                                          <div 
-                                            className="w-full bg-slate-700 opacity-50 group-hover:opacity-80 transition-all rounded-b-sm"
-                                            style={{ height: `${totalH * (creatorH/100)}%` }}
-                                          ></div>
-                                          
-                                          {/* Admin Share (Top) */}
-                                          <div 
-                                            className="w-full bg-indigo-500 group-hover:bg-indigo-400 transition-all rounded-t-sm relative"
-                                            style={{ height: `${totalH * (adminH/100)}%` }}
-                                          >
-                                              {/* Cost Line Indicator */}
-                                              <div 
-                                                className="absolute bottom-0 left-0 right-0 h-[2px] bg-red-500 z-20" 
-                                                style={{ bottom: `${(d.costs / d.adminIncome) * 100}%` }}
-                                                title="Costo Operativo"
-                                              ></div>
-                                          </div>
-                                      </div>
+                      <div className="w-full h-40 flex items-end justify-center gap-16 relative z-10 px-8">
+                          
+                          {/* Cost Bar */}
+                          <div className="flex flex-col items-center gap-2 group">
+                              <span className="text-xs font-bold text-red-400">{sim.fixedCosts}</span>
+                              <div className="w-16 bg-red-900/50 border border-red-500 rounded-t-lg relative overflow-hidden" style={{ height: '100px' }}>
+                                  <div className="absolute bottom-0 w-full bg-red-500 opacity-20 h-full animate-pulse"></div>
+                              </div>
+                              <span className="text-[10px] text-slate-500 uppercase font-bold">Gastos</span>
+                          </div>
 
-                                      {/* Tooltip */}
-                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-950 border border-slate-700 text-white text-[10px] p-2 rounded-lg opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-30 shadow-xl">
-                                          <div className="font-bold mb-1 border-b border-slate-800 pb-1">Mes {i+1} ({d.users} Usuarios)</div>
-                                          <div className="flex justify-between gap-3 text-indigo-300"><span>Tu Ganancia:</span> <span>{d.netProfit.toFixed(0)}$</span></div>
-                                          <div className="flex justify-between gap-3 text-slate-400"><span>Creadores:</span> <span>{d.creatorPayout.toFixed(0)}$</span></div>
-                                          <div className="flex justify-between gap-3 text-red-400"><span>Costos:</span> <span>{d.costs.toFixed(0)}$</span></div>
-                                      </div>
-                                      
-                                      <span className="text-[9px] text-slate-500 text-center mt-2">M{i+1}</span>
-                                  </div>
-                              );
-                          })}
-                      </div>
+                          {/* Revenue Bar */}
+                          <div className="flex flex-col items-center gap-2 group">
+                              <span className="text-xs font-bold text-emerald-400">+{sim.cashRevenue}</span>
+                              <div className="w-16 bg-emerald-900/50 border border-emerald-500 rounded-t-lg relative overflow-hidden" style={{ height: `${Math.min(150, (sim.cashRevenue / Math.max(1, sim.fixedCosts)) * 100)}px` }}>
+                                  <div className="absolute bottom-0 w-full bg-emerald-500 opacity-20 h-full"></div>
+                              </div>
+                              <span className="text-[10px] text-slate-500 uppercase font-bold">Venta Saldo</span>
+                          </div>
 
-                      {/* Legend */}
-                      <div className="flex justify-center flex-wrap gap-4 mt-6 text-xs border-t border-slate-800 pt-4">
-                          <div className="flex items-center gap-2 text-slate-300">
-                              <div className="w-3 h-3 bg-indigo-500 rounded-sm"></div>
-                              <span>Tu Ingreso</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-slate-300">
-                              <div className="w-3 h-3 bg-slate-700 rounded-sm"></div>
-                              <span>Pago a Creadores</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-slate-300">
-                              <div className="w-4 h-[2px] bg-red-500"></div>
-                              <span>Punto de Equilibrio (Costos)</span>
-                          </div>
                       </div>
+                      
+                      {/* Profit Indicator Line */}
+                      <div className="absolute top-1/2 left-0 right-0 h-px bg-slate-800 border-t border-dashed border-slate-600 z-0"></div>
                   </div>
               </div>
           </div>
