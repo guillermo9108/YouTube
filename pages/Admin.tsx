@@ -3,8 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest, SmartCleanerResult } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck, Wrench, TrendingUp, BarChart3, PieChart } from 'lucide-react';
-import { generateThumbnail } from '../utils/videoGenerator';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck, Wrench, TrendingUp, BarChart3, PieChart, Maximize, X } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 export default function Admin() {
@@ -24,10 +23,13 @@ export default function Admin() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanLog, setScanLog] = useState<string[]>([]);
   
-  // Client Processor
-  const [processingClient, setProcessingClient] = useState(false);
-  const [clientProgress, setClientProgress] = useState({ current: 0, total: 0 });
-  const stopClientRef = useRef(false);
+  // ACTIVE SCANNER STATE
+  const [activeScan, setActiveScan] = useState(false);
+  const [scanQueue, setScanQueue] = useState<Video[]>([]);
+  const [scanIndex, setScanIndex] = useState(0);
+  const [scanRetrying, setScanRetrying] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const wakeLock = useRef<any>(null);
 
   // Forms
   const [addBalanceAmount, setAddBalanceAmount] = useState('');
@@ -57,6 +59,13 @@ export default function Admin() {
           setSimUsers(users.length);
       }
   }, [users]);
+
+  // Clean up wake lock on unmount
+  useEffect(() => {
+      return () => {
+          if (wakeLock.current) wakeLock.current.release();
+      };
+  }, []);
 
   const loadData = () => {
       if (activeTab === 'USERS') {
@@ -126,7 +135,7 @@ export default function Admin() {
           const res = await db.scanLocalLibrary(localPath);
           if (res.success) {
               setScanLog(prev => [...prev, `Found ${res.totalFound} files.`, `New imported: ${res.newToImport}`]);
-              if (res.newToImport > 0) setScanLog(prev => [...prev, "Use 'Process Metadata' to analyze them."]);
+              if (res.newToImport > 0) setScanLog(prev => [...prev, "Use 'Active Processor' to analyze them."]);
           } else {
               setScanLog(prev => [...prev, `Error: ${res.errors || 'Unknown'}`]);
           }
@@ -137,62 +146,117 @@ export default function Admin() {
       }
   };
 
-  const startClientProcessor = async () => {
-      setProcessingClient(true);
-      stopClientRef.current = false;
+  // --- ACTIVE SCANNER LOGIC ---
+
+  const startActiveScan = async () => {
       setScanLog(prev => [...prev, "Fetching unprocessed videos..."]);
+      const pending = await db.getUnprocessedVideos();
+      if (pending.length === 0) {
+          setScanLog(prev => [...prev, "No pending videos found."]);
+          toast.info("No pending videos found");
+          return;
+      }
+
+      setScanQueue(pending);
+      setScanIndex(0);
+      setScanRetrying(false);
+      setActiveScan(true);
       
+      // Request Wake Lock to keep screen on
       try {
-          const pending = await db.getUnprocessedVideos();
-          
-          if (pending.length === 0) {
-              setScanLog(prev => [...prev, "No pending videos found."]);
-              setProcessingClient(false);
-              return;
+          if ('wakeLock' in navigator) {
+              wakeLock.current = await (navigator as any).wakeLock.request('screen');
+              toast.success("Active Scan Started - Screen will stay on");
           }
+      } catch(e) { console.warn("Wake Lock failed", e); }
+  };
 
-          setClientProgress({ current: 0, total: pending.length });
+  const stopActiveScan = () => {
+      setActiveScan(false);
+      setScanQueue([]);
+      if (wakeLock.current) {
+          wakeLock.current.release();
+          wakeLock.current = null;
+      }
+  };
+
+  // Called when video loads successfully
+  const processCurrentVideo = async () => {
+      const video = videoRef.current;
+      const item = scanQueue[scanIndex];
+      if (!video || !item) return;
+
+      try {
+          // Wait 1.5s for playback to stabilize and buffer a frame
+          await new Promise(r => setTimeout(r, 1500));
           
-          for (let i = 0; i < pending.length; i++) {
-              if (stopClientRef.current) break;
-              
-              const v = pending[i];
-              setScanLog(prev => [...prev, `Processing (${i+1}/${pending.length}): ${v.title}`]);
-              
+          let thumbnail: File | null = null;
+          
+          // Only attempt thumbnail capture if we are in Secure Mode (CORS allowed)
+          // If we are retrying (no-cors), canvas will be tainted so skip image.
+          if (!scanRetrying) {
               try {
-                  const { thumbnail, duration } = await generateThumbnail(v.videoUrl);
-
-                  if (duration > 0 || thumbnail) {
-                      // If we got partial data (e.g. video loaded but black thumb), we still update
-                      // to avoid stuck loop. 'duration || 0' prevents sending NaN.
-                      await db.updateVideoMetadata(v.id, duration || 0, thumbnail);
-                      const status = thumbnail ? "Thumb+Data" : "Data Only";
-                      setScanLog(prev => [...prev, ` > Updated: ${Math.floor(duration || 0)}s (${status})`]);
-                  } else {
-                      // Fallback: Force update as "Processed but broken" to unblock queue
-                      await db.updateVideoMetadata(v.id, 0, null);
-                      setScanLog(prev => [...prev, " > Failed to load video (Marked as bad)"]);
+                  const canvas = document.createElement('canvas');
+                  canvas.width = video.videoWidth;
+                  canvas.height = video.videoHeight;
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                      ctx.drawImage(video, 0, 0);
+                      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.6));
+                      if (blob) thumbnail = new File([blob], "thumb.jpg", { type: "image/jpeg" });
                   }
-
-              } catch (err: any) {
-                  // Fallback: Force update to unblock queue
-                  await db.updateVideoMetadata(v.id, 0, null);
-                  setScanLog(prev => [...prev, ` > Error: ${err.message} (Marked as bad)`]);
+              } catch(e) {
+                  console.warn("Canvas capture failed (CORS?)", e);
               }
-
-              setClientProgress({ current: i + 1, total: pending.length });
-              
-              // CRITICAL DELAY: Wait 3 seconds before next video to allow NAS to close previous connection
-              // and browser to garbage collect the video buffer.
-              await new Promise(r => setTimeout(r, 3000)); 
           }
+
+          const duration = video.duration || 0;
           
-          setScanLog(prev => [...prev, "Batch complete."]);
+          // Update Server
+          if (duration > 0 || thumbnail) {
+              await db.updateVideoMetadata(item.id, duration, thumbnail);
+              setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s)`]);
+          } else {
+              // Force update as processed (duration 0) to avoid infinite loop
+              await db.updateVideoMetadata(item.id, 0, null);
+              setScanLog(prev => [...prev, `Skipped (No Data): ${item.title}`]);
+          }
+
+          nextVideo();
 
       } catch (e: any) {
-          setScanLog(prev => [...prev, `Fatal: ${e.message}`]);
-      } finally {
-          setProcessingClient(false);
+          setScanLog(prev => [...prev, `Error processing ${item.title}: ${e.message}`]);
+          nextVideo();
+      }
+  };
+
+  const nextVideo = () => {
+      if (scanIndex < scanQueue.length - 1) {
+          setScanRetrying(false); // Reset retry mode for next video
+          setScanIndex(prev => prev + 1);
+      } else {
+          toast.success("Scan Complete!");
+          setScanLog(prev => [...prev, "Batch Complete."]);
+          stopActiveScan();
+          loadData(); // Refresh lists
+      }
+  };
+
+  const handleVideoError = () => {
+      const item = scanQueue[scanIndex];
+      if (!scanRetrying) {
+          // First failure: Try switching to NO-CORS mode (maybe just get duration)
+          console.warn(`Video ${item?.title} failed secure load. Retrying no-cors...`);
+          setScanRetrying(true);
+      } else {
+          // Second failure: Give up and move on
+          console.error(`Video ${item?.title} failed completely.`);
+          setScanLog(prev => [...prev, `Failed to load: ${item?.title}`]);
+          
+          // Mark bad in DB so we don't try again forever
+          if(item) db.updateVideoMetadata(item.id, 0, null);
+          
+          nextVideo();
       }
   };
 
@@ -478,7 +542,7 @@ export default function Admin() {
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
                   <h3 className="font-bold text-white flex items-center gap-2"><FolderSearch size={18}/> Escaneo de Librería Local</h3>
                   <div className="p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-lg text-sm text-indigo-200/80">
-                      <strong>Método Híbrido:</strong> Servidor Indexa &rarr; Cliente Procesa Metadatos (Evita colgar el NAS).
+                      <strong>Método Híbrido:</strong> Servidor Indexa &rarr; Cliente (Tu móvil) Procesa.
                   </div>
 
                   <div>
@@ -486,25 +550,19 @@ export default function Admin() {
                       <input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 text-white font-mono text-sm" placeholder="/volume1/video" />
                   </div>
 
-                  <button onClick={handleScanLibrary} disabled={isScanning || processingClient} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                  <button onClick={handleScanLibrary} disabled={isScanning || activeScan} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
                       {isScanning ? <Loader2 className="animate-spin"/> : <FolderSearch size={20}/>} Paso 1: Indexar Archivos
                   </button>
                   
-                  <button onClick={startClientProcessor} disabled={isScanning || processingClient} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                      {processingClient ? <Loader2 className="animate-spin"/> : <Monitor size={20}/>} Paso 2: Procesar Metadatos (Cliente)
+                  <button onClick={startActiveScan} disabled={isScanning || activeScan} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                      {activeScan ? <Loader2 className="animate-spin"/> : <Play size={20}/>} Paso 2: Procesar (Modo Reproductor)
                   </button>
                   
-                  {processingClient && (
-                      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mt-2">
-                          <div className="h-full bg-indigo-500 transition-all" style={{ width: `${(clientProgress.current / (clientProgress.total || 1)) * 100}%` }}></div>
-                      </div>
-                  )}
-
                   <hr className="border-slate-800 my-4" />
                   
                   <button 
                       onClick={handleRepairDb} 
-                      disabled={cleaning || isScanning || processingClient}
+                      disabled={cleaning || isScanning || activeScan}
                       className="w-full bg-amber-900/20 hover:bg-amber-900/30 border border-amber-500/30 text-amber-300 font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm"
                   >
                       {cleaning ? <Loader2 className="animate-spin" size={16}/> : <Wrench size={16}/>}
@@ -736,6 +794,51 @@ export default function Admin() {
                               <div className="w-3 h-3 bg-indigo-600 rounded-sm"></div>
                               <span>Ganancia Neta Proyectada</span>
                           </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* ACTIVE PROCESSOR OVERLAY */}
+      {activeScan && scanQueue.length > 0 && (
+          <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center animate-in fade-in">
+              {/* Header Info */}
+              <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/90 to-transparent z-10 flex justify-between items-start">
+                  <div>
+                      <h2 className="text-xl font-bold text-white flex items-center gap-2"><Maximize className="text-emerald-400 animate-pulse"/> Active Scanner</h2>
+                      <p className="text-slate-300 text-sm">Processing {scanIndex + 1} of {scanQueue.length}</p>
+                  </div>
+                  <button onClick={stopActiveScan} className="bg-red-600/80 hover:bg-red-600 text-white p-2 rounded-full backdrop-blur-sm"><X/></button>
+              </div>
+
+              {/* Active Player */}
+              <div className="relative w-full h-full flex items-center justify-center bg-black">
+                  {scanQueue[scanIndex] && (
+                      <video 
+                        ref={videoRef}
+                        key={scanQueue[scanIndex].id + (scanRetrying ? '_retry' : '')} // Force remount on change or retry
+                        src={scanQueue[scanIndex].videoUrl}
+                        className="max-w-full max-h-full"
+                        controls={false}
+                        autoPlay
+                        muted
+                        playsInline
+                        preload="auto"
+                        // Try CORS first for thumbnail. If failing, we remove it in retry mode.
+                        crossOrigin={!scanRetrying ? "anonymous" : undefined}
+                        onLoadedData={processCurrentVideo}
+                        onError={handleVideoError}
+                      />
+                  )}
+                  {/* Status Overlay */}
+                  <div className="absolute bottom-10 left-0 right-0 text-center">
+                      <p className="text-white font-mono text-sm bg-black/50 inline-block px-4 py-1 rounded-full backdrop-blur-md">
+                          {scanQueue[scanIndex]?.title} {scanRetrying ? '(Retry Mode)' : ''}
+                      </p>
+                      <div className="flex justify-center gap-2 mt-4">
+                          <Loader2 className="animate-spin text-emerald-500" />
+                          <span className="text-emerald-500 font-bold">Analyzing Metadata...</span>
                       </div>
                   </div>
               </div>
