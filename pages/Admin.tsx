@@ -488,6 +488,17 @@ export default function Admin() {
                           <div className="h-full bg-indigo-500 transition-all" style={{ width: `${(clientProgress.current / (clientProgress.total || 1)) * 100}%` }}></div>
                       </div>
                   )}
+
+                  <hr className="border-slate-800 my-4" />
+                  
+                  <button 
+                      onClick={handleRepairDb} 
+                      disabled={cleaning || isScanning || processingClient}
+                      className="w-full bg-amber-900/20 hover:bg-amber-900/30 border border-amber-500/30 text-amber-300 font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm"
+                  >
+                      {cleaning ? <Loader2 className="animate-spin" size={16}/> : <Wrench size={16}/>}
+                      Reparar Base de Datos (Si hay errores)
+                  </button>
               </div>
 
               <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 h-[500px] overflow-y-auto shadow-inner">

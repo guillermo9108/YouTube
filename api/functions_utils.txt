@@ -140,7 +140,15 @@ function streamVideo($path, $pdo) {
     $start = 0;
     $end = $size - 1;
 
-    header("Content-Type: video/mp4");
+    // Detect MIME type
+    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    $mime = 'video/mp4'; // default
+    if ($ext === 'mkv') $mime = 'video/x-matroska';
+    if ($ext === 'webm') $mime = 'video/webm';
+    if ($ext === 'avi') $mime = 'video/x-msvideo';
+    if ($ext === 'mov') $mime = 'video/quicktime';
+
+    header("Content-Type: $mime");
     header("Accept-Ranges: bytes");
 
     if (isset($_SERVER['HTTP_RANGE'])) {

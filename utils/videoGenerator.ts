@@ -32,12 +32,13 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
         video.src = objectUrl;
     }
     
-    // Safety Timeout (15 seconds - increased for network streams)
+    // Safety Timeout (60 seconds - increased for slow NAS streams)
     const timeout = setTimeout(() => {
         if(objectUrl) URL.revokeObjectURL(objectUrl);
         video.remove();
+        console.warn("Thumbnail generation timed out for:", fileOrUrl);
         resolve({ thumbnail: null, duration: 0 });
-    }, 15000);
+    }, 60000);
 
     video.preload = 'metadata';
     video.muted = true;
@@ -115,7 +116,8 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
 
     video.onseeked = captureFrame;
     
-    video.onerror = () => {
+    video.onerror = (e) => {
+        console.error("Video load error during thumbnail generation:", e);
         clearTimeout(timeout);
         if(objectUrl) URL.revokeObjectURL(objectUrl);
         video.remove();
