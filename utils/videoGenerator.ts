@@ -129,6 +129,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
   }
 
   // Step 4: Cleanup
+  // Ensure we fully detach to help the Garbage Collector
   cleanup(result.video);
   if (objectUrl) URL.revokeObjectURL(objectUrl);
 

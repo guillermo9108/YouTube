@@ -164,7 +164,9 @@ function video_get_unprocessed($pdo) {
     $limit = intval($_GET['limit'] ?? 50);
     $limit = max(1, min(50, $limit));
 
-    $sql = "SELECT id, videoUrl, title FROM videos WHERE (duration = 0 OR category = 'PENDING') AND isLocal = 1";
+    // CRITICAL: Removed "duration = 0" check. We only rely on 'PENDING' status.
+    // This prevents infinite loops if a video is valid but has 0 duration (rare, but possible with failures).
+    $sql = "SELECT id, videoUrl, title FROM videos WHERE category = 'PENDING' AND isLocal = 1";
     
     // Grid mode: Randomize to avoid collision
     if ($mode === 'random') {
@@ -183,31 +185,41 @@ function video_update_metadata($pdo, $post, $files) {
     $id = $post['id'];
     $duration = floatval($post['duration']);
     
-    // Even if duration is 0 (failure), we should clear the PENDING state if we can,
-    // but usually client sends at least duration > 0 if fallback works.
-    
     if (!$id) respond(false);
 
-    $category = detectCategoryFromDuration($duration);
-    $settings = $pdo->query("SELECT * FROM system_settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-    $price = getPriceForCategory($category, $settings);
-
-    // Smart Renaming - Always attempt this if we have the path
-    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
-    $stmt->execute([$id]);
-    $path = $stmt->fetchColumn();
-    
-    $smart = smartParseFilename($path, $category);
-    $title = $smart['title'];
-    
-    // Override if detected
-    if ($smart['category'] && $smart['category'] !== 'OTHER') {
-        $category = $smart['category'];
+    // If duration is 0, it means processing failed.
+    // We mark it as 'UNKNOWN' so it's no longer 'PENDING' and won't be picked up again by the loop.
+    if ($duration <= 0) {
+        $category = 'UNKNOWN';
+        $price = 0;
+        $title = null; // Don't rename if failed
+    } else {
+        $category = detectCategoryFromDuration($duration);
+        $settings = $pdo->query("SELECT * FROM system_settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
         $price = getPriceForCategory($category, $settings);
+
+        // Smart Renaming - Always attempt this if we have the path
+        $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+        $stmt->execute([$id]);
+        $path = $stmt->fetchColumn();
+        
+        $smart = smartParseFilename($path, $category);
+        $title = $smart['title'];
+        
+        // Override if detected
+        if ($smart['category'] && $smart['category'] !== 'OTHER') {
+            $category = $smart['category'];
+            $price = getPriceForCategory($category, $settings);
+        }
     }
 
-    $params = [$title, $category, $duration, $price];
-    $sql = "UPDATE videos SET title = ?, category = ?, duration = ?, price = ?";
+    $params = [$category, $duration, $price];
+    $sql = "UPDATE videos SET category = ?, duration = ?, price = ?";
+    
+    if ($title) {
+        $sql .= ", title = ?";
+        $params[] = $title;
+    }
     
     // Only update thumbnail if a file was actually uploaded
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {

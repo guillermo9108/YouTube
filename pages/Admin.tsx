@@ -194,7 +194,7 @@ export default function Admin() {
       }
   };
 
-  // Triggered via onTimeUpdate when video has played > 1 second
+  // Triggered via onTimeUpdate when video has played > 2 second
   const captureAndAdvance = async () => {
       if (processingRef.current) return;
       processingRef.current = true; // Lock
@@ -203,7 +203,7 @@ export default function Admin() {
       const item = scanQueue[scanIndex];
       
       if (!video || !item) {
-          moveToNext(2000);
+          moveToNext(3000);
           return;
       }
 
@@ -237,7 +237,7 @@ export default function Admin() {
               await db.updateVideoMetadata(item.id, duration, thumbnail);
               setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s)`]);
           } else {
-              // Mark as bad but processed
+              // Mark as bad but processed to stop loop
               await db.updateVideoMetadata(item.id, 0, null);
               setScanLog(prev => [...prev, `Marked Bad: ${item.title}`]);
           }
@@ -246,10 +246,17 @@ export default function Admin() {
           setScanLog(prev => [...prev, `Error processing ${item.title}: ${e.message}`]);
       }
 
-      moveToNext(2000); // 2s pause between videos to clear buffers
+      moveToNext(3000); // 3s pause between videos to clear buffers
   };
 
   const moveToNext = (delay: number) => {
+      // FORCE CLEANUP OF VIDEO ELEMENT
+      if (videoRef.current) {
+          videoRef.current.pause();
+          videoRef.current.removeAttribute('src'); // Detach media
+          videoRef.current.load(); // Reset element
+      }
+
       setTimeout(() => {
           if (scanIndex < scanQueue.length - 1) {
               setScanMode('SECURE'); // Reset to secure for next video
@@ -276,10 +283,7 @@ export default function Admin() {
           setScanLog(prev => [...prev, `Retrying ${item?.title} (Insecure Mode)...`]);
           setScanMode('INSECURE');
           
-          // Force reload of video element
-          if (videoRef.current) {
-              videoRef.current.load();
-          }
+          // Force reload of video element handled by React key prop
       } else {
           // Second failure: Give up
           console.error(`Video ${item?.title} failed completely.`);
@@ -289,10 +293,10 @@ export default function Admin() {
           if(item) {
               processingRef.current = true;
               db.updateVideoMetadata(item.id, 0, null).finally(() => {
-                  moveToNext(1000);
+                  moveToNext(3000);
               });
           } else {
-              moveToNext(1000);
+              moveToNext(3000);
           }
       }
   };
@@ -986,8 +990,8 @@ export default function Admin() {
                         crossOrigin={scanMode === 'SECURE' ? "anonymous" : undefined}
                         
                         onTimeUpdate={(e) => {
-                            // Only capture if we played more than 1 second to ensure buffer is real
-                            if (e.currentTarget.currentTime > 1.5) {
+                            // Only capture if we played more than 2 second to ensure buffer is real
+                            if (e.currentTarget.currentTime > 2.0) {
                                 captureAndAdvance();
                             }
                         }}
