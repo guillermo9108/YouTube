@@ -200,7 +200,9 @@ export default function Layout() {
       user?.avatarUrl ? (
           <img src={user.avatarUrl} alt={user.username} className={`rounded-full object-cover ${className}`} style={{width: size, height: size}} />
       ) : (
-          <User size={size} className={className} />
+          <div className={`rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold ${className}`} style={{width: size, height: size, fontSize: size*0.4}}>
+              {user?.username?.[0]}
+          </div>
       )
   );
 
@@ -299,9 +301,9 @@ export default function Layout() {
       {/* HEADER (Desktop) */}
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
-            <button onClick={() => setShowSidebar(true)} className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
-                <Menu size={24} />
-            </button>
+            <Link to="/profile" className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
+                <Avatar size={32} />
+            </Link>
             <Link to="/" className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
             StreamPay
             </Link>
@@ -323,9 +325,6 @@ export default function Layout() {
           <Link to="/marketplace" className={isActive('/marketplace')}>Tienda</Link>
           
           <Link to="/upload" className={isActive('/upload')}>Subir</Link>
-          <Link to="/profile" className={`flex items-center gap-2 ${isActive('/profile')}`}>
-            <Avatar size={24} />
-          </Link>
         </div>
       </header>
 

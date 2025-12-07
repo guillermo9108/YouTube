@@ -1,6 +1,5 @@
-
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
-import { Compass, RefreshCw, Search, X, Filter, Menu, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
+import { Compass, RefreshCw, Search, X, Filter, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -50,8 +49,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [subscribedCreators, setSubscribedCreators] = useState<string[]>([]);
-  const [showSidebar, setShowSidebar] = useState(false);
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   
   // Dynamic Category List
   const [categoryList, setCategoryList] = useState(INITIAL_CATEGORIES);
@@ -184,10 +182,13 @@ export default function Home() {
       // Use the pre-shuffled list
       let filtered = shuffledMasterList;
       
+      // Filter out PENDING videos
+      filtered = filtered.filter(v => v.category !== 'PENDING');
+      
       if (activeCategory === 'SUBSCRIPTIONS') {
-          filtered = shuffledMasterList.filter(v => subscribedCreators.includes(v.creatorId));
+          filtered = filtered.filter(v => subscribedCreators.includes(v.creatorId));
       } else if (activeCategory !== 'ALL') {
-          filtered = shuffledMasterList.filter(v => v.category === activeCategory);
+          filtered = filtered.filter(v => v.category === activeCategory);
       }
 
       // B. Search
@@ -285,55 +286,22 @@ export default function Home() {
 
   return (
     <div className="min-h-screen" ref={containerRef}>
-      {/* Sidebar Overlay */}
-      {showSidebar && (
-        <div className="fixed inset-0 z-50 flex">
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
-            <div className="relative w-64 bg-slate-900 border-r border-slate-800 h-full p-4 flex flex-col animate-in slide-in-from-left duration-200">
-                <div className="flex items-center gap-3 mb-8 px-2">
-                    <button onClick={() => setShowSidebar(false)} className="p-1 hover:bg-slate-800 rounded-full"><Menu size={24} /></button>
-                    <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
-                </div>
-                
-                <div className="space-y-1 flex-1">
-                    <Link to="/" className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800 rounded-lg font-medium">
-                        <HomeIcon size={20}/> Home
-                    </Link>
-                    <Link to="/shorts" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <Smartphone size={20}/> Shorts
-                    </Link>
-                    <button onClick={() => { setActiveCategory('SUBSCRIPTIONS'); setShowSidebar(false); }} className="w-full flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium text-left">
-                        <Compass size={20}/> Subscriptions
-                    </button>
-                    <div className="h-px bg-slate-800 my-2"></div>
-                    <Link to="/requests" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <DownloadCloud size={20}/> Requests
-                    </Link>
-                    <Link to="/upload" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <Upload size={20}/> Upload
-                    </Link>
-                    <Link to="/profile" className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg font-medium">
-                        <User size={20}/> Profile
-                    </Link>
-                </div>
-
-                <div className="border-t border-slate-800 pt-4">
-                    <button onClick={logout} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-lg font-medium w-full text-left">
-                        <LogOut size={20}/> Logout
-                    </button>
-                </div>
-            </div>
-        </div>
-      )}
-
       {/* Sticky Header: Search & Categories */}
       <div className="sticky top-0 z-40 bg-black/95 backdrop-blur-md border-b border-slate-800/50 pb-2 pt-2 transition-all">
          
          {/* Search Bar */}
          <div className="px-4 md:px-6 mb-2 flex items-center gap-4">
-            <button onClick={() => setShowSidebar(true)} className="md:hidden text-white p-2 hover:bg-slate-800 rounded-full">
-                <Menu size={24} />
-            </button>
+            {/* Replaced Menu with Avatar Link for Mobile */}
+            <Link to="/profile" className="md:hidden shrink-0">
+                {user?.avatarUrl ? (
+                    <img src={user.avatarUrl} className="w-8 h-8 rounded-full object-cover border border-slate-700 bg-slate-800" alt="Profile" />
+                ) : (
+                    <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-xs font-bold text-white border border-slate-700">
+                        {user?.username?.[0]}
+                    </div>
+                )}
+            </Link>
+
             <div className="relative group flex-1 max-w-2xl mx-auto">
                 <Search className="absolute left-3 top-2.5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={18} />
                 <input 

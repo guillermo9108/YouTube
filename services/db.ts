@@ -238,6 +238,7 @@ class DatabaseService {
   async getVideosByCreator(creatorId: string): Promise<Video[]> { return this.request<Video[]>(`index.php?action=get_creator_videos&creatorId=${creatorId}`); }
   async adminRepairDb(): Promise<void> { await this.request('index.php?action=admin_repair_db', 'POST', {}); }
   async adminCleanupVideos(): Promise<{deleted: number}> { return this.request<{deleted: number}>('index.php?action=admin_cleanup_videos', 'POST', {}); }
+  async adminCleanupSystemFiles(): Promise<any> { return this.request<any>('index.php?action=admin_cleanup_system_files', 'POST', {}); }
   async requestBalance(userId: string, amount: number): Promise<void> { await this.request('index.php?action=request_balance', 'POST', { userId, amount }); }
   async getBalanceRequests(): Promise<BalanceRequest[]> { return this.request<BalanceRequest[]>('index.php?action=admin_get_balance_requests', 'POST', {}); }
   async handleBalanceRequest(adminId: string, requestId: string, action: 'APPROVED' | 'REJECTED'): Promise<void> { await this.request('index.php?action=admin_handle_balance_request', 'POST', { adminId, requestId, action }); }

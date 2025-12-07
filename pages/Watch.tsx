@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info, Wallet } from 'lucide-react';
+import { Lock, Play, AlertCircle, ShoppingCart, ThumbsUp, ThumbsDown, Clock, MessageSquare, Send, SkipForward, Volume2, VolumeX, RefreshCw, Info, Wallet, Trash2 } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -118,11 +118,14 @@ export default function Watch() {
             
             setVideo(v);
             
-            // Auto-unlock for Admins
-            if (user?.role === 'ADMIN') {
-                 setIsUnlocked(true);
-            } else if (user) {
-                db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Purchase check failed", e));
+            // Unlock Check
+            if (user) {
+                if (user.role === 'ADMIN' || user.id === v.creatorId) {
+                     setIsUnlocked(true);
+                } else {
+                    db.hasPurchased(user.id, v.id).then(res => isMounted && setIsUnlocked(res)).catch(e => console.warn("Purchase check failed", e));
+                }
+                
                 db.getInteraction(user.id, v.id).then(res => isMounted && setInteraction(res)).catch(e => console.warn("Interaction fetch failed", e));
                 if (user.watchLater) setIsWatchLater(user.watchLater.includes(v.id));
             }
@@ -297,6 +300,18 @@ export default function Watch() {
       }
   };
 
+  const handleDelete = async () => {
+      if (!video || !user) return;
+      if (!confirm("Are you sure you want to delete this video? This action cannot be undone.")) return;
+      
+      try {
+          await db.deleteVideo(video.id, user.id);
+          navigate('/');
+      } catch (e: any) {
+          alert("Error deleting video: " + e.message);
+      }
+  };
+
   if (loading && !video) return <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 text-slate-500"><RefreshCw className="animate-spin text-indigo-500" size={32} /><p>Loading video...</p></div>;
   
   if ((!video && !loading) || errorMsg) return (
@@ -316,6 +331,8 @@ export default function Watch() {
   );
 
   const canAfford = Number(user?.balance || 0) >= Number(video?.price || 0) || user?.role === 'ADMIN';
+  const isOwner = user?.id === video?.creatorId;
+  const isAdmin = user?.role === 'ADMIN';
 
   return (
     <div className="max-w-5xl mx-auto pb-6" key={video?.id || 'loading'}>
@@ -369,7 +386,14 @@ export default function Watch() {
              
              {video && (
              <div className="px-1">
-                 <h1 className="text-lg md:text-xl font-bold text-white leading-tight break-words line-clamp-3 md:line-clamp-none">{video.title}</h1>
+                 <div className="flex justify-between items-start gap-4">
+                    <h1 className="text-lg md:text-xl font-bold text-white leading-tight break-words line-clamp-3 md:line-clamp-none flex-1">{video.title}</h1>
+                    {(isOwner || isAdmin) && (
+                        <button onClick={handleDelete} className="text-slate-500 hover:text-red-500 transition-colors p-1" title="Delete Video">
+                            <Trash2 size={20} />
+                        </button>
+                    )}
+                 </div>
                  <div className="flex items-center justify-between mt-2">
                      <div className="flex items-center gap-3 text-xs text-slate-400">
                          <Link to={`/channel/${video.creatorId}`} className="flex items-center gap-2 hover:text-white transition-colors group">

@@ -81,6 +81,7 @@ function admin_handle_balance_request($pdo, $input) {
     }
 }
 
+// Database Cleanup: Removes DB rows if file is missing (Safe logic)
 function admin_cleanup_videos($pdo) {
     $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE isLocal = 0");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -98,6 +99,86 @@ function admin_cleanup_videos($pdo) {
         }
     }
     respond(true, ['deleted' => $deleted]);
+}
+
+// Filesystem Cleanup: Removes physical files if not in DB (Orphaned files)
+function admin_cleanup_system_files($pdo) {
+    $stats = ['videos' => 0, 'thumbnails' => 0, 'avatars' => 0, 'market' => 0];
+    
+    // --- 1. CLEAN VIDEOS ---
+    $validVideos = [];
+    $stmt = $pdo->query("SELECT videoUrl FROM videos");
+    while ($path = $stmt->fetchColumn()) {
+        $validVideos[] = basename($path);
+    }
+    
+    if (is_dir(UPLOAD_DIR)) {
+        $files = scandir(UPLOAD_DIR);
+        foreach ($files as $f) {
+            if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
+            if (!in_array($f, $validVideos)) {
+                if (unlink(UPLOAD_DIR . $f)) $stats['videos']++;
+            }
+        }
+    }
+
+    // --- 2. CLEAN THUMBNAILS ---
+    $validThumbs = [];
+    $stmt = $pdo->query("SELECT thumbnailUrl FROM videos");
+    while ($path = $stmt->fetchColumn()) {
+        $validThumbs[] = basename($path);
+    }
+    
+    if (is_dir(THUMB_DIR)) {
+        $files = scandir(THUMB_DIR);
+        foreach ($files as $f) {
+            if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
+            if (!in_array($f, $validThumbs)) {
+                if (unlink(THUMB_DIR . $f)) $stats['thumbnails']++;
+            }
+        }
+    }
+
+    // --- 3. CLEAN AVATARS (Users + Marketplace History) ---
+    $validAvatars = [];
+    $stmt = $pdo->query("SELECT avatarUrl FROM users WHERE avatarUrl IS NOT NULL");
+    while ($path = $stmt->fetchColumn()) {
+        $validAvatars[] = basename($path);
+    }
+    
+    if (is_dir(AVATAR_DIR)) {
+        $files = scandir(AVATAR_DIR);
+        foreach ($files as $f) {
+            if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
+            if (!in_array($f, $validAvatars)) {
+                if (unlink(AVATAR_DIR . $f)) $stats['avatars']++;
+            }
+        }
+    }
+
+    // --- 4. CLEAN MARKETPLACE IMAGES ---
+    $validMarket = [];
+    $stmt = $pdo->query("SELECT images FROM marketplace_items");
+    while ($json = $stmt->fetchColumn()) {
+        $imgs = json_decode($json, true);
+        if (is_array($imgs)) {
+            foreach ($imgs as $img) {
+                $validMarket[] = basename($img);
+            }
+        }
+    }
+    
+    if (is_dir(MARKET_DIR)) {
+        $files = scandir(MARKET_DIR);
+        foreach ($files as $f) {
+            if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
+            if (!in_array($f, $validMarket)) {
+                if (unlink(MARKET_DIR . $f)) $stats['market']++;
+            }
+        }
+    }
+
+    respond(true, $stats);
 }
 
 function admin_repair_db($pdo) {

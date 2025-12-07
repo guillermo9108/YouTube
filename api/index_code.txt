@@ -110,6 +110,7 @@ try {
         case 'admin_get_balance_requests': admin_get_balance_requests($pdo); break;
         case 'admin_handle_balance_request': admin_handle_balance_request($pdo, $input); break;
         case 'admin_cleanup_videos': admin_cleanup_videos($pdo); break;
+        case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
         case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
         case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;

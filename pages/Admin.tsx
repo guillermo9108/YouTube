@@ -171,12 +171,12 @@ export default function Admin() {
       }
   };
 
-  const handleCleanupBroken = async () => {
-      if (!confirm("Esto eliminará de la base de datos todos los videos cuyos archivos físicos ya no existan en la carpeta de uploads. ¿Continuar?")) return;
+  const handleCleanupOrphans = async () => {
+      if (!confirm("Esta acción eliminará FÍSICAMENTE los archivos (videos, fotos, avatares) que no estén registrados en la base de datos. ¿Continuar?")) return;
       setCleaning(true);
       try {
-          const res = await db.adminCleanupVideos();
-          toast.success(`Limpieza completada. ${res.deleted} videos eliminados.`);
+          const res = await db.adminCleanupSystemFiles();
+          toast.success(`Eliminados: ${res.videos} videos, ${res.thumbnails} miniaturas, ${res.avatars} avatares, ${res.market} fotos tienda.`);
       } catch (e: any) {
           toast.error("Error: " + e.message);
       } finally {
@@ -247,7 +247,7 @@ export default function Admin() {
                               {users.map(u => (
                                   <tr key={u.id} className="hover:bg-slate-800/50">
                                       <td className="px-4 py-3 font-medium text-white">{u.username}</td>
-                                      <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>{u.role}</span></td>
+                                      <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>{u.role.trim()}</span></td>
                                       <td className="px-4 py-3 font-mono text-emerald-400">{Number(u.balance).toFixed(2)}</td>
                                       <td className="px-4 py-3 text-slate-500">{(u.lastActive || 0) > 0 ? new Date((u.lastActive || 0) * 1000).toLocaleDateString() : 'N/A'}</td>
                                   </tr>
@@ -446,19 +446,21 @@ export default function Admin() {
 
       {activeTab === 'MAINTENANCE' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Broken Video Cleaner */}
+              {/* Orphaned File Cleaner */}
               <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-                  <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-red-400"><AlertTriangle size={20}/> Limpieza de Videos Rotos</h3>
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-red-400"><AlertTriangle size={20}/> Limpieza Profunda (Archivos Huérfanos)</h3>
                   <p className="text-sm text-slate-400 mb-6">
-                      Esta herramienta escanea la base de datos y elimina los videos que apuntan a archivos que ya no existen en la carpeta de uploads. Útil si borraste archivos manualmente por FTP.
+                      Escanea todas las carpetas de subida (Videos, Miniaturas, Avatars, Tienda) y <strong>ELIMINA FÍSICAMENTE</strong> cualquier archivo que no esté referenciado en la base de datos.
+                      <br/><br/>
+                      <span className="text-amber-500 font-bold">¡Cuidado! Esto es irreversible.</span>
                   </p>
                   <button 
-                      onClick={handleCleanupBroken} 
+                      onClick={handleCleanupOrphans} 
                       disabled={cleaning}
                       className="w-full bg-red-900/30 hover:bg-red-900/50 border border-red-500/50 text-red-200 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
                   >
                       {cleaning ? <Loader2 className="animate-spin"/> : <Trash2 size={20}/>}
-                      Escanear y Eliminar
+                      Eliminar Archivos Huérfanos
                   </button>
               </div>
 
