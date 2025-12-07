@@ -61,28 +61,17 @@ export default function Admin() {
   const [cleanerDays, setCleanerDays] = useState(30);
   const [cleaning, setCleaning] = useState(false);
 
-  // Simulator State (Updated for Real Cash Flow Model)
-  const [simTotalUsers, setSimTotalUsers] = useState(12);
-  const [simBuyers, setSimBuyers] = useState(8); // Users who buy balance
-  const [simBuyAmount, setSimBuyAmount] = useState(100); // Average balance bought
-  const [simFixedCost, setSimFixedCost] = useState(700); // Electricity etc.
-  
-  // Internal Activity Sim
-  const [simVidFreq, setSimVidFreq] = useState(15); // Videos watched per user/month
-  const [simVidPrice, setSimVidPrice] = useState(5);
-  const [simMarketSales, setSimMarketSales] = useState(3); // Total items sold per month
+  // Advanced Simulator State
+  const [simGrowthRate, setSimGrowthRate] = useState(10);
+  const [simConversionRate, setSimConversionRate] = useState(25);
+  const [simAvgDeposit, setSimAvgDeposit] = useState(50);
+  const [simStorageCostPerUser, setSimStorageCostPerUser] = useState(0.5);
+  const [simFixedCost, setSimFixedCost] = useState(200);
+  const [simVelocity, setSimVelocity] = useState(50);
 
   useEffect(() => {
     loadData();
   }, [activeTab]);
-
-  useEffect(() => {
-      // Initialize with realistic defaults if empty
-      if (users.length > 0 && simTotalUsers === 12) {
-          setSimTotalUsers(users.length);
-          setSimBuyers(Math.floor(users.length * 0.7)); // Assume 70% buy balance
-      }
-  }, [users]);
 
   // Clean up wake lock on unmount
   useEffect(() => {
@@ -362,40 +351,70 @@ export default function Admin() {
       }
   };
 
-  // --- SIMULATION CALCULATIONS (Profitability v3.0) ---
+  // --- ADVANCED PROJECTION ALGORITHM ---
   const calculateProjection = () => {
+      const months = 12;
+      const data = [];
+      
+      let currentUsers = users.length > 0 ? users.length : 20; 
+      
       const vidComm = (settings?.videoCommission || 20) / 100;
-      
-      // 1. CASH FLOW (Real Money)
-      const cashRevenue = simBuyers * simBuyAmount;
-      const cashProfit = cashRevenue - simFixedCost;
+      const marketComm = (settings?.marketCommission || 25) / 100;
+      const avgComm = (vidComm + marketComm) / 2;
 
-      // 2. INTERNAL ECONOMY (Saldo Circulation)
-      // Estimate internal video volume
-      const activeUsers = Math.max(simTotalUsers, simBuyers);
-      const internalVideoVol = activeUsers * simVidFreq * simVidPrice;
-      
-      // Estimate internal market volume (Assuming avg item 100$)
-      const internalMarketVol = simMarketSales * 100; 
-      
-      // Total Saldo Moving
-      const totalVolume = internalVideoVol + internalMarketVol;
-      
-      // Saldo Reclaimed by Admin (Burning Liability)
-      // Approx combined commission rate
-      const reclaimedSaldo = totalVolume * vidComm;
+      let cumulativeCashProfit = 0;
 
-      return {
-          cashRevenue,
-          fixedCosts: simFixedCost,
-          cashProfit,
-          internalVideoVol,
-          reclaimedSaldo,
-          activeUsers
-      };
+      for (let i = 0; i < months; i++) {
+          // 1. User Growth (Compound)
+          currentUsers = currentUsers * (1 + (simGrowthRate / 100));
+          
+          // 2. Variable Costs (Storage/Bandwidth scales with users)
+          const variableCost = currentUsers * simStorageCostPerUser;
+          const totalCost = simFixedCost + variableCost;
+
+          // 3. Cash Inflow (Deposits)
+          const payingUsers = currentUsers * (simConversionRate / 100);
+          const monthlyRevenue = payingUsers * simAvgDeposit;
+
+          // 4. Internal Economy (The "Engine")
+          // How much Saldo is moving?
+          const totalUserBalanceEstimate = currentUsers * 50; // Assume avg float
+          const transactionVolume = totalUserBalanceEstimate * (simVelocity / 100);
+          
+          // 5. Admin "Burn" (Revenue in Saldo) - liability reduction
+          const saldoReclaimed = transactionVolume * avgComm;
+
+          // 6. Net Profit (Cash)
+          const monthlyProfit = monthlyRevenue - totalCost;
+          cumulativeCashProfit += monthlyProfit;
+
+          data.push({
+              month: i + 1,
+              users: Math.round(currentUsers),
+              revenue: Math.round(monthlyRevenue),
+              cost: Math.round(totalCost),
+              profit: Math.round(monthlyProfit),
+              reclaimed: Math.round(saldoReclaimed)
+          });
+      }
+
+      return { data, totalProfit: cumulativeCashProfit };
   };
 
-  const sim = calculateProjection();
+  const projection = calculateProjection();
+  const finalMonth = projection.data[11];
+
+  // Helper for SVG Chart
+  const getPoints = (key: 'revenue' | 'cost') => {
+      // Find max value across both metrics for scale
+      const maxVal = Math.max(...projection.data.map(d => Math.max(d.revenue, d.cost) * 1.1));
+      if (maxVal === 0) return "0,100 100,100";
+      return projection.data.map((d, i) => {
+          const x = (i / 11) * 100;
+          const y = 100 - ((d[key] / maxVal) * 100);
+          return `${x},${y}`;
+      }).join(' ');
+  };
 
   return (
     <div className="space-y-6 pb-24 px-2 md:px-0">
@@ -749,139 +768,191 @@ export default function Admin() {
       )}
 
       {activeTab === 'ANALYTICS' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in slide-in-from-bottom-4">
-              {/* Simulator Controls */}
-              <div className="lg:col-span-1 bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-6 h-fit sticky top-20">
-                  <h3 className="font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-4"><Calculator size={20} className="text-indigo-400"/> Simulador Rentabilidad</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in slide-in-from-bottom-4">
+              
+              {/* CONFIGURATION PANEL */}
+              <div className="lg:col-span-4 bg-slate-900 p-5 rounded-xl border border-slate-800 space-y-6 h-fit sticky top-20">
+                  <div className="border-b border-slate-800 pb-4">
+                      <h3 className="font-bold text-white flex items-center gap-2"><Calculator size={20} className="text-indigo-400"/> Proyección Financiera</h3>
+                      <p className="text-xs text-slate-500 mt-1">Simulación basada en crecimiento compuesto.</p>
+                  </div>
                   
-                  {/* CASH INFLOW SECTION */}
+                  {/* Growth Factors */}
                   <div className="space-y-4">
-                      <h4 className="text-xs font-bold text-emerald-400 uppercase flex items-center gap-2"><Wallet size={12}/> Venta de Saldo (Cash)</h4>
-                      <div>
-                          <div className="flex justify-between mb-1">
-                              <label className="text-[10px] text-slate-400 flex items-center">
-                                  Usuarios que recargan
-                                  <InfoTooltip text="Usuarios que pagan en efectivo." example="Ej: 8 usuarios" />
-                              </label>
-                              <span className="text-[10px] text-white font-bold">{simBuyers} / {simTotalUsers}</span>
-                          </div>
-                          <input type="range" min="0" max={simTotalUsers} step="1" value={simBuyers} onChange={e=>setSimBuyers(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
-                      </div>
-                      <div>
-                          <div className="flex justify-between mb-1">
-                              <label className="text-[10px] text-slate-400 flex items-center">
-                                  Monto Promedio
-                                  <InfoTooltip text="Cuanto compra cada usuario" example="Ej: 100 de Saldo" />
-                              </label>
-                              <span className="text-[10px] text-white font-bold">${simBuyAmount}</span>
-                          </div>
-                          <input type="range" min="10" max="1000" step="10" value={simBuyAmount} onChange={e=>setSimBuyAmount(parseInt(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
-                      </div>
-                  </div>
-
-                  {/* EXPENSES SECTION */}
-                  <div className="space-y-3 pt-4 border-t border-slate-800">
-                      <h4 className="text-xs font-bold text-red-400 uppercase flex items-center gap-2"><Zap size={12}/> Gastos Fijos (Efectivo)</h4>
-                      <div>
-                          <label className="text-[10px] text-slate-400 block mb-1">Electricidad / Internet</label>
-                          <input 
-                            type="number" 
-                            value={simFixedCost} 
-                            onChange={e=>setSimFixedCost(Number(e.target.value))} 
-                            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" 
-                            placeholder="Ej: 700 CUP"
-                          />
-                      </div>
-                  </div>
-
-                  {/* INTERNAL ACTIVITY SECTION (VIRTUAL) */}
-                  <div className="space-y-4 pt-4 border-t border-slate-800 opacity-80 hover:opacity-100 transition-opacity">
-                      <h4 className="text-xs font-bold text-indigo-400 uppercase flex items-center gap-2"><Play size={12}/> Economía Interna (Videos)</h4>
-                      <p className="text-[9px] text-slate-500 leading-tight">Define cuánto circula el saldo. Las comisiones "queman" el saldo, recuperándolo para el sistema.</p>
+                      <h4 className="text-xs font-bold text-emerald-400 uppercase flex items-center gap-2">
+                          <TrendingUp size={12}/> Crecimiento & Ingresos
+                      </h4>
                       
-                      <div className="grid grid-cols-2 gap-3">
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-[10px] text-slate-400">Crecimiento Mensual Usuarios</label>
+                              <span className="text-[10px] text-white font-bold">{simGrowthRate}%</span>
+                          </div>
+                          <input type="range" min="0" max="50" value={simGrowthRate} onChange={e=>setSimGrowthRate(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                      </div>
+
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-[10px] text-slate-400 flex items-center">
+                                  Tasa de Conversión (Pagos)
+                                  <InfoTooltip text="% de usuarios que realizan depósitos de saldo real." example="25% = 1 de cada 4 paga" />
+                              </label>
+                              <span className="text-[10px] text-white font-bold">{simConversionRate}%</span>
+                          </div>
+                          <input type="range" min="1" max="100" value={simConversionRate} onChange={e=>setSimConversionRate(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                      </div>
+
+                      <div>
+                          <div className="flex justify-between mb-1">
+                              <label className="text-[10px] text-slate-400">Depósito Promedio ($)</label>
+                              <span className="text-[10px] text-white font-bold">${simAvgDeposit}</span>
+                          </div>
+                          <input type="range" min="10" max="500" step="10" value={simAvgDeposit} onChange={e=>setSimAvgDeposit(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                      </div>
+                  </div>
+
+                  {/* Cost Factors */}
+                  <div className="space-y-4 pt-4 border-t border-slate-800">
+                      <h4 className="text-xs font-bold text-red-400 uppercase flex items-center gap-2">
+                          <Zap size={12}/> Estructura de Costos
+                      </h4>
+                      
+                      <div className="grid grid-cols-2 gap-4">
                           <div>
-                              <label className="text-[9px] text-slate-400 block">Videos/User/Mes</label>
-                              <input type="number" value={simVidFreq} onChange={e=>setSimVidFreq(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-xs text-white" />
+                              <label className="text-[10px] text-slate-400 block mb-1">Costo Fijo (Base)</label>
+                              <input type="number" value={simFixedCost} onChange={e=>setSimFixedCost(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
                           </div>
                           <div>
-                              <label className="text-[9px] text-slate-400 block">Ventas Tienda/Mes</label>
-                              <input type="number" value={simMarketSales} onChange={e=>setSimMarketSales(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-xs text-white" />
+                              <label className="text-[10px] text-slate-400 block mb-1">
+                                  Costo Var. (Usuario)
+                                  <InfoTooltip text="Costo incremental por usuario (Almacenamiento, CDN, BD)." />
+                              </label>
+                              <input type="number" step="0.1" value={simStorageCostPerUser} onChange={e=>setSimStorageCostPerUser(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
                           </div>
                       </div>
+                  </div>
+
+                  {/* Economy Velocity */}
+                  <div className="pt-4 border-t border-slate-800">
+                      <div className="flex justify-between mb-1">
+                          <label className="text-[10px] text-slate-400 flex items-center text-indigo-300">
+                              Velocidad de la Economía
+                              <InfoTooltip text="Qué tan rápido gastan el saldo los usuarios. Mayor velocidad = Más comisiones recuperadas." />
+                          </label>
+                          <span className="text-[10px] text-indigo-400 font-bold">{simVelocity}% / mes</span>
+                      </div>
+                      <input type="range" min="10" max="100" value={simVelocity} onChange={e=>setSimVelocity(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
                   </div>
               </div>
 
-              {/* Results */}
-              <div className="lg:col-span-2 space-y-6">
-                  {/* KPI Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Real Profit Card */}
-                      <div className="bg-gradient-to-br from-emerald-900/80 to-slate-900 p-6 rounded-xl border border-emerald-500/30 relative overflow-hidden shadow-lg">
-                          <div className="relative z-10">
-                              <div className="flex items-center gap-3 mb-2 text-emerald-200">
-                                  <Wallet size={20}/>
-                                  <span className="text-xs font-bold uppercase tracking-wider">Flujo de Caja (Beneficio)</span>
-                              </div>
-                              <div className="text-4xl font-mono font-bold text-white tracking-tight">
-                                  {sim.cashProfit.toLocaleString()} <span className="text-lg opacity-50">$</span>
-                              </div>
-                              <div className="text-xs text-emerald-200/70 mt-2 font-medium">
-                                  Ingreso Real: {sim.cashRevenue} - Gastos: {sim.fixedCosts}
-                              </div>
-                          </div>
-                          <div className="absolute -bottom-4 -right-4 text-emerald-500/10 transform rotate-12">
-                              <TrendingUp size={120} />
-                          </div>
+              {/* VISUALIZATION PANEL */}
+              <div className="lg:col-span-8 space-y-6">
+                  
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                          <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">Ingreso Mensual (Mes 12)</div>
+                          <div className="text-2xl font-mono font-bold text-emerald-400">${finalMonth.revenue.toLocaleString()}</div>
+                          <div className="text-[10px] text-emerald-600 flex items-center gap-1"><TrendingUp size={10}/> Proyectado</div>
                       </div>
-                      
-                      {/* Virtual Economy Card */}
-                      <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 flex flex-col justify-center">
-                          <div className="flex justify-between items-center mb-4">
-                              <span className="text-xs text-slate-500 font-bold uppercase flex items-center gap-1"><Server size={12}/> Circulación Interna</span>
-                              <span className="text-sm font-mono text-white">{sim.internalVideoVol.toLocaleString()} Saldo</span>
-                          </div>
-                          <div className="flex justify-between items-center mb-4">
-                              <span className="text-xs text-slate-500 font-bold uppercase flex items-center gap-1"><Shield size={12}/> Saldo Recuperado (Comisión)</span>
-                              <span className="text-sm font-mono text-indigo-400">
-                                  {sim.reclaimedSaldo.toLocaleString()} Saldo
-                              </span>
-                          </div>
-                          <div className="text-[10px] text-slate-500 border-t border-slate-800 pt-3 italic">
-                              * El saldo recuperado reduce la deuda técnica del sistema.
-                          </div>
+                      <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                          <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">Usuarios Activos (Mes 12)</div>
+                          <div className="text-2xl font-mono font-bold text-white">{finalMonth.users.toLocaleString()}</div>
+                          <div className="text-[10px] text-blue-400">Base Creciente</div>
+                      </div>
+                      <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                          <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">Margen Neto</div>
+                          <div className="text-2xl font-mono font-bold text-indigo-400">{Math.round((finalMonth.profit / Math.max(1, finalMonth.revenue)) * 100)}%</div>
+                          <div className="text-[10px] text-indigo-600">Rentabilidad</div>
                       </div>
                   </div>
 
-                  {/* Profit Graph (Comparison) */}
-                  <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 relative">
-                      <h4 className="font-bold text-white mb-6 flex items-center gap-2"><BarChart3 size={20}/> Resumen Mensual Estimado</h4>
+                  {/* MAIN CHART */}
+                  <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 h-80 relative flex flex-col">
+                      <h4 className="text-white font-bold text-sm mb-6">Proyección a 1 Año (Ingresos vs Costos)</h4>
                       
-                      <div className="w-full h-40 flex items-end justify-center gap-16 relative z-10 px-8">
-                          
-                          {/* Cost Bar */}
-                          <div className="flex flex-col items-center gap-2 group">
-                              <span className="text-xs font-bold text-red-400">{sim.fixedCosts}</span>
-                              <div className="w-16 bg-red-900/50 border border-red-500 rounded-t-lg relative overflow-hidden" style={{ height: '100px' }}>
-                                  <div className="absolute bottom-0 w-full bg-red-500 opacity-20 h-full animate-pulse"></div>
-                              </div>
-                              <span className="text-[10px] text-slate-500 uppercase font-bold">Gastos</span>
-                          </div>
+                      <div className="flex-1 w-full relative">
+                          {/* SVG Chart */}
+                          <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100">
+                              {/* Grid Lines */}
+                              <line x1="0" y1="0" x2="100" y2="0" stroke="#334155" strokeWidth="0.5" strokeDasharray="2" />
+                              <line x1="0" y1="50" x2="100" y2="50" stroke="#334155" strokeWidth="0.5" strokeDasharray="2" />
+                              <line x1="0" y1="100" x2="100" y2="100" stroke="#334155" strokeWidth="0.5" />
 
-                          {/* Revenue Bar */}
-                          <div className="flex flex-col items-center gap-2 group">
-                              <span className="text-xs font-bold text-emerald-400">+{sim.cashRevenue}</span>
-                              <div className="w-16 bg-emerald-900/50 border border-emerald-500 rounded-t-lg relative overflow-hidden" style={{ height: `${Math.min(150, (sim.cashRevenue / Math.max(1, sim.fixedCosts)) * 100)}px` }}>
-                                  <div className="absolute bottom-0 w-full bg-emerald-500 opacity-20 h-full"></div>
-                              </div>
-                              <span className="text-[10px] text-slate-500 uppercase font-bold">Venta Saldo</span>
-                          </div>
+                              {/* Revenue Area (Green) */}
+                              <polygon 
+                                points={`0,100 ${getPoints('revenue')} 100,100`} 
+                                fill="url(#gradRevenue)" 
+                                opacity="0.5"
+                              />
+                              <polyline 
+                                points={getPoints('revenue')} 
+                                fill="none" 
+                                stroke="#10b981" 
+                                strokeWidth="2" 
+                                vectorEffect="non-scaling-stroke"
+                              />
 
+                              {/* Cost Line (Red) */}
+                              <polyline 
+                                points={getPoints('cost')} 
+                                fill="none" 
+                                stroke="#ef4444" 
+                                strokeWidth="2" 
+                                strokeDasharray="4"
+                                vectorEffect="non-scaling-stroke"
+                              />
+
+                              {/* Defs for Gradient */}
+                              <defs>
+                                <linearGradient id="gradRevenue" x1="0%" y1="0%" x2="0%" y2="100%">
+                                  <stop offset="0%" stopColor="#10b981" stopOpacity="0.4" />
+                                  <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+                                </linearGradient>
+                              </defs>
+                          </svg>
+
+                          {/* Hover Tooltip Overlay (Simplified) */}
+                          <div className="absolute inset-0 flex justify-between items-end px-2 opacity-0 hover:opacity-100 transition-opacity">
+                              {projection.data.map((d, i) => (
+                                  <div key={i} className="relative group h-full flex flex-col justify-end pb-2 cursor-pointer w-full items-center">
+                                      <div className="w-px h-full bg-white/10 absolute top-0"></div>
+                                      <div className="bg-slate-800 border border-slate-700 p-2 rounded text-[9px] text-white absolute bottom-10 opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none shadow-xl">
+                                          <div className="font-bold mb-1">Mes {d.month}</div>
+                                          <div className="text-emerald-400">Ing: ${d.revenue}</div>
+                                          <div className="text-red-400">Gas: ${d.cost}</div>
+                                          <div className="text-indigo-400 border-t border-slate-600 mt-1 pt-1">Neto: ${d.profit}</div>
+                                      </div>
+                                      <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                                  </div>
+                              ))}
+                          </div>
                       </div>
-                      
-                      {/* Profit Indicator Line */}
-                      <div className="absolute top-1/2 left-0 right-0 h-px bg-slate-800 border-t border-dashed border-slate-600 z-0"></div>
+
+                      {/* X-Axis Labels */}
+                      <div className="flex justify-between mt-2 text-[9px] text-slate-500 uppercase font-bold px-2">
+                          <span>Mes 1</span>
+                          <span>Mes 6</span>
+                          <span>Mes 12</span>
+                      </div>
                   </div>
+
+                  {/* Analysis Text */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="bg-indigo-900/10 border border-indigo-500/20 p-4 rounded-xl text-sm text-indigo-200">
+                          <strong className="block mb-2 flex items-center gap-2"><Shield size={14}/> Impacto de Comisiones</strong>
+                          <p className="opacity-80 text-xs leading-relaxed">
+                              Con una velocidad económica del <strong>{simVelocity}%</strong>, el sistema "quema" (recupera) aproximadamente <strong>{finalMonth.reclaimed.toLocaleString()}</strong> en Saldo mensualmente. Esto reduce tu pasivo total y valida la moneda digital.
+                          </p>
+                      </div>
+                      <div className="bg-emerald-900/10 border border-emerald-500/20 p-4 rounded-xl text-sm text-emerald-200">
+                          <strong className="block mb-2 flex items-center gap-2"><Wallet size={14}/> Punto de Equilibrio</strong>
+                          <p className="opacity-80 text-xs leading-relaxed">
+                              Con estos parámetros, generas una ganancia total acumulada de <strong>${projection.totalProfit.toLocaleString()}</strong> en el primer año. Asegúrate de reinvertir el 30% en marketing para mantener la tasa de crecimiento del {simGrowthRate}%.
+                          </p>
+                      </div>
+                  </div>
+
               </div>
           </div>
       )}
