@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest, SmartCleanerResult } from '../types';
@@ -161,19 +162,26 @@ export default function Admin() {
               try {
                   const { thumbnail, duration } = await generateThumbnail(v.videoUrl);
 
-                  if (duration > 0) {
-                      await db.updateVideoMetadata(v.id, duration, thumbnail);
-                      setScanLog(prev => [...prev, ` > Updated: ${Math.floor(duration)}s`]);
+                  if (duration > 0 || thumbnail) {
+                      // If we got partial data (e.g. video loaded but black thumb), we still update
+                      // to avoid stuck loop. 'duration || 0' prevents sending NaN.
+                      await db.updateVideoMetadata(v.id, duration || 0, thumbnail);
+                      setScanLog(prev => [...prev, ` > Updated: ${Math.floor(duration || 0)}s`]);
                   } else {
-                      setScanLog(prev => [...prev, " > Failed to load video"]);
+                      // Fallback: Force update as "Processed but broken" to unblock queue
+                      await db.updateVideoMetadata(v.id, 0, null);
+                      setScanLog(prev => [...prev, " > Failed to load video (Skipped)"]);
                   }
 
               } catch (err: any) {
-                  setScanLog(prev => [...prev, ` > Error: ${err.message}`]);
+                  // Fallback: Force update to unblock queue
+                  await db.updateVideoMetadata(v.id, 0, null);
+                  setScanLog(prev => [...prev, ` > Error: ${err.message} (Skipped)`]);
               }
 
               setClientProgress({ current: i + 1, total: pending.length });
-              await new Promise(r => setTimeout(r, 200)); 
+              // Increased delay to 1000ms to allow connection cleanup on NAS
+              await new Promise(r => setTimeout(r, 1000)); 
           }
           
           setScanLog(prev => [...prev, "Batch complete."]);

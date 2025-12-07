@@ -23,6 +23,8 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
     
     // Critical for processing videos served from the API
     video.crossOrigin = "anonymous"; 
+    // Force browser to negotiate stream immediately
+    video.preload = "auto"; 
     
     let objectUrl = '';
     if (typeof fileOrUrl === 'string') {
@@ -40,7 +42,6 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
         resolve({ thumbnail: null, duration: 0 });
     }, 60000);
 
-    video.preload = 'metadata';
     video.muted = true;
     video.playsInline = true;
 
@@ -117,11 +118,9 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
     video.onseeked = captureFrame;
     
     video.onerror = (e) => {
-        console.error("Video load error during thumbnail generation:", e);
-        clearTimeout(timeout);
-        if(objectUrl) URL.revokeObjectURL(objectUrl);
-        video.remove();
-        resolve({ thumbnail: null, duration: 0 });
+        // Do not immediately resolve null. 
+        // Allow the browser to retry network errors internally until the main timeout hits.
+        console.warn("Video load warning (retrying internally):", e);
     };
   });
 };
