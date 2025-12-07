@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { User, ContentRequest, SystemSettings, VideoCategory, Video, FtpSettings, MarketplaceItem, BalanceRequest, SmartCleanerResult } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck, Wrench, TrendingUp, BarChart3, PieChart, Maximize, X } from 'lucide-react';
+import { Search, PlusCircle, User as UserIcon, Shield, Database, DownloadCloud, Clock, Settings, Save, Play, Pause, ExternalLink, Key, Loader2, Youtube, Trash2, Brush, Tag, FolderSearch, Terminal, AlertTriangle, Network, ShoppingBag, CheckCircle, XCircle, Percent, Monitor, DollarSign, Wallet, Store, Truck, Wrench, TrendingUp, BarChart3, PieChart, Maximize, X, RefreshCw } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 export default function Admin() {
@@ -27,9 +27,11 @@ export default function Admin() {
   const [activeScan, setActiveScan] = useState(false);
   const [scanQueue, setScanQueue] = useState<Video[]>([]);
   const [scanIndex, setScanIndex] = useState(0);
-  const [scanRetrying, setScanRetrying] = useState(false);
+  const [scanMode, setScanMode] = useState<'SECURE' | 'INSECURE'>('SECURE'); // SECURE = CORS (Thumb+Duration), INSECURE = NO-CORS (Duration Only)
+  const [scanStatus, setScanStatus] = useState('Initializing...');
   const videoRef = useRef<HTMLVideoElement>(null);
   const wakeLock = useRef<any>(null);
+  const processingRef = useRef(false);
 
   // Forms
   const [addBalanceAmount, setAddBalanceAmount] = useState('');
@@ -159,7 +161,8 @@ export default function Admin() {
 
       setScanQueue(pending);
       setScanIndex(0);
-      setScanRetrying(false);
+      setScanMode('SECURE'); // Always try secure first
+      processingRef.current = false;
       setActiveScan(true);
       
       // Request Wake Lock to keep screen on
@@ -180,21 +183,27 @@ export default function Admin() {
       }
   };
 
-  // Called when video loads successfully
-  const processCurrentVideo = async () => {
+  // Triggered via onTimeUpdate when video has played > 1 second
+  const captureAndAdvance = async () => {
+      if (processingRef.current) return;
+      processingRef.current = true; // Lock
+
       const video = videoRef.current;
       const item = scanQueue[scanIndex];
-      if (!video || !item) return;
+      
+      if (!video || !item) {
+          moveToNext(2000);
+          return;
+      }
+
+      video.pause();
+      setScanStatus('Analyzing Metadata...');
 
       try {
-          // Wait 1.5s for playback to stabilize and buffer a frame
-          await new Promise(r => setTimeout(r, 1500));
-          
           let thumbnail: File | null = null;
           
           // Only attempt thumbnail capture if we are in Secure Mode (CORS allowed)
-          // If we are retrying (no-cors), canvas will be tainted so skip image.
-          if (!scanRetrying) {
+          if (scanMode === 'SECURE') {
               try {
                   const canvas = document.createElement('canvas');
                   canvas.width = video.videoWidth;
@@ -207,56 +216,73 @@ export default function Admin() {
                   }
               } catch(e) {
                   console.warn("Canvas capture failed (CORS?)", e);
+                  // If this fails, we just send duration/metadata without thumbnail
               }
           }
 
           const duration = video.duration || 0;
           
-          // Update Server
-          if (duration > 0 || thumbnail) {
+          if (duration > 0) {
               await db.updateVideoMetadata(item.id, duration, thumbnail);
               setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s)`]);
           } else {
-              // Force update as processed (duration 0) to avoid infinite loop
+              // Mark as bad but processed
               await db.updateVideoMetadata(item.id, 0, null);
-              setScanLog(prev => [...prev, `Skipped (No Data): ${item.title}`]);
+              setScanLog(prev => [...prev, `Marked Bad: ${item.title}`]);
           }
-
-          nextVideo();
 
       } catch (e: any) {
           setScanLog(prev => [...prev, `Error processing ${item.title}: ${e.message}`]);
-          nextVideo();
       }
+
+      moveToNext(2000); // 2s pause between videos to clear buffers
   };
 
-  const nextVideo = () => {
-      if (scanIndex < scanQueue.length - 1) {
-          setScanRetrying(false); // Reset retry mode for next video
-          setScanIndex(prev => prev + 1);
-      } else {
-          toast.success("Scan Complete!");
-          setScanLog(prev => [...prev, "Batch Complete."]);
-          stopActiveScan();
-          loadData(); // Refresh lists
-      }
+  const moveToNext = (delay: number) => {
+      setTimeout(() => {
+          if (scanIndex < scanQueue.length - 1) {
+              setScanMode('SECURE'); // Reset to secure for next video
+              processingRef.current = false;
+              setScanIndex(prev => prev + 1);
+          } else {
+              toast.success("Scan Complete!");
+              setScanLog(prev => [...prev, "Batch Complete."]);
+              stopActiveScan();
+              loadData(); // Refresh lists
+          }
+      }, delay);
   };
 
   const handleVideoError = () => {
+      // If error occurs immediately
+      if (processingRef.current) return;
+
       const item = scanQueue[scanIndex];
-      if (!scanRetrying) {
-          // First failure: Try switching to NO-CORS mode (maybe just get duration)
-          console.warn(`Video ${item?.title} failed secure load. Retrying no-cors...`);
-          setScanRetrying(true);
+      if (scanMode === 'SECURE') {
+          // First failure: Try switching to INSECURE mode (remove crossOrigin)
+          // This fixes "Failed to load" caused by strict CORS on some NAS configs
+          console.warn(`Video ${item?.title} failed secure load. Retrying insecurely...`);
+          setScanLog(prev => [...prev, `Retrying ${item?.title} (Insecure Mode)...`]);
+          setScanMode('INSECURE');
+          
+          // Force reload of video element
+          if (videoRef.current) {
+              videoRef.current.load();
+          }
       } else {
-          // Second failure: Give up and move on
+          // Second failure: Give up
           console.error(`Video ${item?.title} failed completely.`);
           setScanLog(prev => [...prev, `Failed to load: ${item?.title}`]);
           
-          // Mark bad in DB so we don't try again forever
-          if(item) db.updateVideoMetadata(item.id, 0, null);
-          
-          nextVideo();
+          // Mark bad in DB to prevent infinite loop
+          if(item) {
+              processingRef.current = true;
+              db.updateVideoMetadata(item.id, 0, null).finally(() => {
+                  moveToNext(1000);
+              });
+          } else {
+              moveToNext(1000);
+          }
       }
   };
 
@@ -817,28 +843,43 @@ export default function Admin() {
                   {scanQueue[scanIndex] && (
                       <video 
                         ref={videoRef}
-                        key={scanQueue[scanIndex].id + (scanRetrying ? '_retry' : '')} // Force remount on change or retry
+                        // KEY CHANGE: Force remount if mode changes to handle crossOrigin attribute correctly
+                        key={scanQueue[scanIndex].id + scanMode} 
                         src={scanQueue[scanIndex].videoUrl}
                         className="max-w-full max-h-full"
-                        controls={false}
+                        controls={true} // Show controls for user confidence
                         autoPlay
                         muted
                         playsInline
-                        preload="auto"
-                        // Try CORS first for thumbnail. If failing, we remove it in retry mode.
-                        crossOrigin={!scanRetrying ? "anonymous" : undefined}
-                        onLoadedData={processCurrentVideo}
+                        // CRITICAL: Mode switching for CORS
+                        crossOrigin={scanMode === 'SECURE' ? "anonymous" : undefined}
+                        
+                        onTimeUpdate={(e) => {
+                            // Only capture if we played more than 1 second to ensure buffer is real
+                            if (e.currentTarget.currentTime > 1.5) {
+                                captureAndAdvance();
+                            }
+                        }}
                         onError={handleVideoError}
                       />
                   )}
                   {/* Status Overlay */}
-                  <div className="absolute bottom-10 left-0 right-0 text-center">
-                      <p className="text-white font-mono text-sm bg-black/50 inline-block px-4 py-1 rounded-full backdrop-blur-md">
-                          {scanQueue[scanIndex]?.title} {scanRetrying ? '(Retry Mode)' : ''}
-                      </p>
-                      <div className="flex justify-center gap-2 mt-4">
-                          <Loader2 className="animate-spin text-emerald-500" />
-                          <span className="text-emerald-500 font-bold">Analyzing Metadata...</span>
+                  <div className="absolute bottom-10 left-0 right-0 text-center pointer-events-none">
+                      <div className="inline-block bg-black/70 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10">
+                          <p className="text-white font-mono text-sm font-bold mb-2">
+                              {scanQueue[scanIndex]?.title}
+                          </p>
+                          <div className="flex items-center justify-center gap-2">
+                              <Loader2 className="animate-spin text-emerald-500" />
+                              <span className="text-emerald-400 font-bold uppercase tracking-wider text-xs">
+                                  {scanStatus}
+                              </span>
+                          </div>
+                          {scanMode === 'INSECURE' && (
+                              <p className="text-amber-400 text-[10px] mt-2 font-bold">
+                                  ⚠ Mode: Rescue (Duration Only)
+                              </p>
+                          )}
                       </div>
                   </div>
               </div>
