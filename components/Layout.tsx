@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useCart } from '../context/CartContext';
@@ -204,55 +204,92 @@ export default function Layout() {
       )
   );
 
-  // Case-insensitive check with trim
-  const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
+  // Robust check for Admin Role
+  const isAdmin = user && user.role && user.role.trim().toUpperCase() === 'ADMIN';
 
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       
+      {/* 
+        ========================================
+        NUEVO SIDEBAR (MENÚ LATERAL) RECONSTRUIDO
+        ========================================
+      */}
       {showSidebar && (
-        <div className="fixed inset-0 z-[110] flex">
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSidebar(false)}></div>
-            <div className="relative w-72 bg-slate-900 border-r border-slate-800 h-full p-4 flex flex-col animate-in slide-in-from-left duration-200 shadow-2xl">
-                <div className="flex items-center gap-3 mb-4 px-2 mt-2">
-                    <button onClick={() => setShowSidebar(false)} className="p-2 hover:bg-slate-800 rounded-full text-slate-300"><Menu size={24} /></button>
+        <div className="fixed inset-0 z-[150] flex font-sans">
+            {/* Backdrop */}
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setShowSidebar(false)}></div>
+            
+            {/* Drawer Content */}
+            <div className="relative w-72 bg-slate-900 h-full shadow-2xl flex flex-col border-r border-slate-800 animate-in slide-in-from-left duration-300">
+                
+                {/* Drawer Header */}
+                <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
                     <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
+                    <button onClick={() => setShowSidebar(false)} className="p-2 bg-slate-800 text-slate-300 rounded-full hover:text-white hover:bg-slate-700 transition-colors">
+                        <X size={20} />
+                    </button>
                 </div>
                 
-                <div className="space-y-2 flex-1 overflow-y-auto px-2">
-                    {/* Admin Access Link - Inside scrollable area for guaranteed visibility */}
+                {/* Scrollable Links */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                    
+                    {/* ACCESO ADMINISTRACIÓN (Prioridad Alta) */}
                     {isAdmin && (
-                        <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-amber-400 bg-amber-950/40 hover:bg-amber-900/30 rounded-xl font-bold border border-amber-500/30 shadow-sm transition-all mb-4">
-                            <ShieldCheck size={22}/> Administración
-                        </Link>
+                        <div className="mb-4 pb-4 border-b border-slate-800">
+                            <p className="px-3 text-[10px] uppercase font-bold text-amber-500 mb-2">Sistema</p>
+                            <Link 
+                                to="/admin" 
+                                onClick={() => setShowSidebar(false)} 
+                                className="flex items-center gap-3 px-4 py-3 bg-amber-950/30 text-amber-400 border border-amber-500/20 rounded-xl hover:bg-amber-900/40 transition-colors group"
+                            >
+                                <ShieldCheck size={20} className="group-hover:scale-110 transition-transform" />
+                                <span className="font-bold">Administración</span>
+                                <ChevronRight size={16} className="ml-auto opacity-50"/>
+                            </Link>
+                        </div>
                     )}
 
-                    <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-white bg-slate-800/50 hover:bg-slate-800 rounded-xl font-medium transition-colors">
-                        <Home size={22}/> Inicio
-                    </Link>
-                    <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
-                        <Smartphone size={22}/> Shorts
+                    {/* Navegación Principal */}
+                    <p className="px-3 text-[10px] uppercase font-bold text-slate-500 mt-2 mb-1">Navegación</p>
+                    
+                    <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
+                        <Home size={20} className="text-indigo-400"/> Inicio
                     </Link>
                     
+                    <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
+                        <Smartphone size={20} className="text-pink-400"/> Shorts
+                    </Link>
+                    
+                    <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
+                        <ShoppingBag size={20} className="text-emerald-400"/> Tienda
+                    </Link>
+
                     <div className="h-px bg-slate-800 my-2 mx-2"></div>
-                    
-                    <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
-                        <ShoppingBag size={22}/> Tienda
+
+                    {/* Acciones de Usuario */}
+                    <p className="px-3 text-[10px] uppercase font-bold text-slate-500 mt-2 mb-1">Tu Cuenta</p>
+
+                    <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
+                        <Upload size={20} className="text-blue-400"/> Subir Video
                     </Link>
-                    <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
-                        <DownloadCloud size={22}/> Peticiones
+
+                    <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
+                        <DownloadCloud size={20} className="text-purple-400"/> Peticiones
                     </Link>
-                    <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
-                        <Upload size={22}/> Subir
-                    </Link>
-                    <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-4 px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-xl font-medium transition-colors">
-                        <User size={22}/> Perfil
+
+                    <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
+                        <User size={20} className="text-slate-400"/> Mi Perfil
                     </Link>
                 </div>
 
-                <div className="border-t border-slate-800 pt-4 pb- safe-area-bottom">
-                    <button onClick={() => { logout(); setShowSidebar(false); }} className="flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-900/10 rounded-xl font-medium w-full text-left transition-colors">
-                        <LogOut size={22}/> Salir
+                {/* Footer / Logout */}
+                <div className="p-4 border-t border-slate-800 bg-slate-950 pb-safe-area-bottom">
+                    <button 
+                        onClick={() => { logout(); setShowSidebar(false); }} 
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 text-red-400 bg-red-950/20 hover:bg-red-900/30 rounded-xl font-bold transition-colors border border-red-900/30"
+                    >
+                        <LogOut size={20}/> Cerrar Sesión
                     </button>
                 </div>
             </div>
@@ -324,10 +361,10 @@ export default function Layout() {
              <span className="text-[10px]">Tienda</span>
           </Link>
 
-          <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}>
-            <Avatar size={22} />
-            <span className="text-[10px]">Perfil</span>
-          </Link>
+          <div className="flex flex-col items-center gap-1 cursor-pointer" onClick={() => setShowSidebar(true)}>
+             <Menu size={22} className="text-slate-400"/>
+             <span className="text-[10px] text-slate-400">Menú</span>
+          </div>
         </nav>
       )}
     </div>
