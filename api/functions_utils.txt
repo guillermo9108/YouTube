@@ -1,3 +1,4 @@
+
 <?php
 function respond($success, $data = null, $error = null) {
     ob_clean();
@@ -131,6 +132,12 @@ function streamVideo($path, $pdo) {
     
     while (ob_get_level()) ob_end_clean();
 
+    // Headers - Always Send CORS first
+    header("Access-Control-Allow-Origin: *"); 
+    header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
+    header("Access-Control-Allow-Headers: Range");
+    header("Access-Control-Expose-Headers: Content-Range, Content-Length");
+
     // 2. Check direct file access
     if (!file_exists($path)) {
         http_response_code(404);
@@ -151,9 +158,8 @@ function streamVideo($path, $pdo) {
     if ($ext === 'avi') $mime = 'video/x-msvideo';
     if ($ext === 'mov') $mime = 'video/quicktime';
 
-    // 3. Headers
+    // 3. Content Headers
     header("Content-Type: $mime");
-    header("Access-Control-Allow-Origin: *"); // Critical for Canvas/Thumbnail generation
     header("Accept-Ranges: bytes");
     
     // Prevent caching for live processing to avoid partial corrupt cache
