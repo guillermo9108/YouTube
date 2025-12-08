@@ -125,6 +125,8 @@ function smartParseFilename($fullPath, $detectedType = null) {
 
 // Advanced Streaming with Fix for Broken Videos
 function streamVideo($path, $pdo) {
+    set_time_limit(0); // Prevent PHP timeout during streaming
+    
     // 1. Force Clean Buffers - Critical for Binary Data
     while (ob_get_level()) ob_end_clean();
 
@@ -141,8 +143,12 @@ function streamVideo($path, $pdo) {
     }
 
     if (!file_exists($path)) {
-        http_response_code(404);
-        die("File not found");
+        // Try simple urldecode if file not found
+        $path = urldecode($path);
+        if (!file_exists($path)) {
+            http_response_code(404);
+            die("File not found");
+        }
     }
 
     $size = filesize($path);
@@ -180,10 +186,19 @@ function streamVideo($path, $pdo) {
         }
         
         $c_end = ($c_end > $end) ? $end : $c_end;
+        
+        // Fix for open ended ranges "bytes=0-"
         if ($c_start > $c_end || $c_start > $size - 1 || $c_end >= $size) {
-            header('HTTP/1.1 416 Requested Range Not Satisfiable');
-            header("Content-Range: bytes $start-$end/$size");
-            exit;
+             // If range is invalid, default to full content? 
+             // Better to send 416 if strictly invalid, but browsers are forgiving.
+             // If c_start is 0, we can just stream whole file.
+             if ($c_start == 0) {
+                 $c_end = $size - 1;
+             } else {
+                header('HTTP/1.1 416 Requested Range Not Satisfiable');
+                header("Content-Range: bytes $start-$end/$size");
+                exit;
+             }
         }
         
         $start = $c_start;

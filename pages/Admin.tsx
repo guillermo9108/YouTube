@@ -203,31 +203,29 @@ export default function Admin() {
 
       processingRef.current = true;
       const item = scanQueue[scanIndex];
-      setScanStatus(`Loading Metadata: ${item.title}`);
+      setScanStatus(`Analyzing: ${item.title}`);
 
       try {
-          // Use the shared utility that works for Uploads
-          // Detects same-origin automatically
           const { thumbnail, duration } = await generateThumbnail(item.videoUrl);
           
-          if (duration > 0 || thumbnail) {
+          if (duration > 0) {
               setScanStatus(`Saving: ${item.title}`);
               await db.updateVideoMetadata(item.id, duration, thumbnail);
-              setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s)`]);
+              setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s) ${thumbnail ? '[Thumb]' : '[NoThumb]'}`]);
           } else {
-              // Mark as bad but processed (0 duration) so it's not pending anymore
+              // Mark as unknown but processed (0 duration)
               await db.updateVideoMetadata(item.id, 0, null);
-              setScanLog(prev => [...prev, `Failed (No Metadata): ${item.title}`]);
+              setScanLog(prev => [...prev, `Failed (0s): ${item.title}`]);
           }
       } catch (e: any) {
           setScanLog(prev => [...prev, `Error on ${item.title}: ${e.message}`]);
       }
 
-      // Wait a bit to let UI breathe and prevent browser choking
+      // 1.5s delay to ensure NAS/Browser resources are freed
       setTimeout(() => {
           processingRef.current = false;
           setScanIndex(prev => prev + 1);
-      }, 1000); // 1 second delay between items
+      }, 1500); 
   };
 
   // Trigger processing when index changes or scan starts
