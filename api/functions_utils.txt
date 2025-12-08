@@ -125,10 +125,10 @@ function smartParseFilename($fullPath, $detectedType = null) {
 
 // Advanced Streaming with Fix for Broken Videos
 function streamVideo($path, $pdo) {
-    // 1. Clean buffers completely to avoid corruption
+    // 1. Force Clean Buffers - Critical for Binary Data
     while (ob_get_level()) ob_end_clean();
 
-    // 2. CORS Headers (Strict & Early)
+    // 2. CORS Headers - Allow Everything
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
     header("Access-Control-Allow-Headers: Range, Content-Type, Origin");
@@ -164,6 +164,7 @@ function streamVideo($path, $pdo) {
     if (isset($_SERVER['HTTP_RANGE'])) {
         list(, $range) = explode('=', $_SERVER['HTTP_RANGE'], 2);
         
+        // Handling multiple ranges is complex, simple range support is usually enough
         if (strpos($range, ',') !== false) {
             header('HTTP/1.1 416 Requested Range Not Satisfiable');
             header("Content-Range: bytes $start-$end/$size");
@@ -198,7 +199,7 @@ function streamVideo($path, $pdo) {
 
     $fp = fopen($path, 'rb');
     fseek($fp, $start);
-    $buffer = 1024 * 8;
+    $buffer = 1024 * 8; // 8KB Buffer
     
     while (!feof($fp) && ($p = ftell($fp)) <= $end) {
         if ($p + $buffer > $end) {

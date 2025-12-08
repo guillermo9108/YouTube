@@ -17,58 +17,52 @@ const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: num
 };
 
 export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thumbnail: File | null, duration: number }> => {
-  let blob: Blob | null = null;
   let finalUrl = '';
   let isLocalBlob = false;
+  let forceDirect = false;
 
-  // STRATEGY: Mimic "Upload" behavior by making remote files local via Fetch (Partial Download)
+  // STRATEGY: 
+  // 1. Try to fetch the first 5MB (Header + First Frame) to create a local clean Blob.
+  //    This bypasses CORS issues entirely for the canvas.
+  // 2. If that fails, fall back to direct URL streaming.
+  
   if (typeof fileOrUrl === 'string') {
-      // It's a URL (NAS or Remote)
       const url = fileOrUrl;
       
-      // Check if it's already a blob URL
       if (url.startsWith('blob:')) {
           finalUrl = url;
           isLocalBlob = true;
       } else {
-          // Attempt to download the first 50MB to get header + first frame
-          // This bypasses CORS canvas tainting because we create a local object URL from the response
           try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+              const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
+              // Only fetch 5MB. This is enough for metadata and the first few keyframes.
               const response = await fetch(url, {
-                  headers: { 'Range': 'bytes=0-52428800' }, // Request first 50MB
+                  headers: { 'Range': 'bytes=0-5242880' }, 
                   signal: controller.signal
               });
               clearTimeout(timeoutId);
 
               if (response.ok || response.status === 206) {
-                  const contentType = response.headers.get('content-type') || 'video/mp4';
-                  blob = await response.blob();
-                  // Force correct MIME if generic
-                  if (blob.type === 'application/octet-stream' || !blob.type) {
-                      blob = new Blob([blob], { type: 'video/mp4' });
-                  } else {
-                      // Re-wrap to ensure type is preserved
-                      blob = new Blob([blob], { type: contentType });
-                  }
-                  
-                  finalUrl = URL.createObjectURL(blob);
+                  const blob = await response.blob();
+                  // Ensure MIME type is video
+                  const cleanBlob = new Blob([blob], { type: 'video/mp4' });
+                  finalUrl = URL.createObjectURL(cleanBlob);
                   isLocalBlob = true;
               } else {
-                  // Fallback to direct streaming if range request fails
+                  console.warn("Smart fetch rejected by server, falling back to direct URL");
+                  forceDirect = true;
                   finalUrl = url; 
               }
           } catch (e) {
-              console.warn("Smart fetch failed, falling back to direct URL", e);
+              console.warn("Smart fetch failed (Network/Timeout), falling back to direct URL", e);
+              forceDirect = true;
               finalUrl = url;
           }
       }
   } else {
-      // It's a File object (Upload page)
-      blob = fileOrUrl;
-      finalUrl = URL.createObjectURL(blob);
+      finalUrl = URL.createObjectURL(fileOrUrl);
       isLocalBlob = true;
   }
 
@@ -78,7 +72,6 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           video.removeAttribute('src'); 
           video.load(); 
           video.remove();
-          // Only revoke if we created it here (remote fetch case)
           if (isLocalBlob && typeof fileOrUrl === 'string') {
               URL.revokeObjectURL(finalUrl);
           }
@@ -88,18 +81,21 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
   return new Promise((resolve) => {
       const video = document.createElement('video');
       
-      // IMPORTANT: If it is a local blob (from File or Fetch), we DO NOT need crossOrigin.
-      // If it is a remote URL (fallback), we DO need it.
+      // CRITICAL: 
+      // If we made a local blob, NO crossOrigin needed (it's same-origin by definition).
+      // If we are forcing direct URL because fetch failed, we TRY 'anonymous' first to get the image.
+      // If 'anonymous' fails to load (error event), we might need to retry without it just to get duration.
       if (!isLocalBlob) {
           video.crossOrigin = "anonymous";
       }
       
-      video.preload = "metadata"; // We only need start
+      video.preload = "metadata";
       video.muted = true;
       video.playsInline = true;
-      // Force hardware acceleration constraints to avoid black frames on some GPUs
       video.style.position = 'fixed';
       video.style.top = '-9999px';
+      // Mute/Volume 0 helps some browsers autoplay/load background video
+      video.volume = 0; 
       document.body.appendChild(video);
 
       let resolved = false;
@@ -110,19 +106,32 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           resolve(data);
       };
 
-      // Timeout for processing
+      // Safety Timeout
       const timer = setTimeout(() => {
-          // If we have duration but no image, return that
+          // If we timed out but managed to get duration, return that at least.
           if (video.duration && !isNaN(video.duration) && video.duration > 0) {
+              console.log("Timeout but got duration:", video.duration);
               done({ thumbnail: null, duration: video.duration });
           } else {
+              console.log("Hard Timeout on video processing");
               done({ thumbnail: null, duration: 0 });
           }
-      }, 15000);
+      }, 25000); // 25s max total processing time
+
+      video.onloadedmetadata = () => {
+          // As soon as metadata loads, if we are in fallback mode and only care about duration, 
+          // we could potentially stop here if image extraction is deemed impossible. 
+          // But we try to seek to get the image.
+          if (video.duration === Infinity) {
+              video.currentTime = 1e101; // Fake seek to find end for duration
+              video.currentTime = 0;
+          }
+      };
 
       video.onloadeddata = () => {
-          // Seek to 1 second or 25% if very short
-          const targetTime = video.duration > 5 ? 1.0 : (video.duration * 0.25);
+          // Seek to a safe spot. 
+          // For very short videos (e.g. 1s), seeking to 1s might hit end.
+          const targetTime = video.duration > 3 ? 1.0 : (video.duration * 0.1);
           video.currentTime = targetTime;
       };
 
@@ -131,7 +140,6 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
 
           try {
               const canvas = document.createElement('canvas');
-              // Use reasonable resolution for thumbnail
               canvas.width = 640; 
               canvas.height = 360; 
               
@@ -139,12 +147,12 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               if (ctx) {
                   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                   
-                  // Check if black frame
+                  // Check brightness to avoid black frames (common in first second)
                   const brightness = getBrightness(ctx, canvas.width, canvas.height);
-                  if (brightness < 5 && video.currentTime < (video.duration / 2)) {
-                      // If frame is too dark, try seeking further
-                      video.currentTime += 5;
-                      return; // Wait for next seeked event
+                  if (brightness < 5 && video.currentTime < (Math.min(10, video.duration / 2))) {
+                      console.log("Frame too dark, seeking forward...");
+                      video.currentTime += 2; // Jump forward
+                      return; // Wait for next seeked
                   }
 
                   canvas.toBlob((b) => {
@@ -153,7 +161,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
                           clearTimeout(timer);
                           done({ thumbnail: file, duration: video.duration });
                       } else {
-                          // Canvas tainted or error
+                          // Tainted canvas or generic error
                           clearTimeout(timer);
                           done({ thumbnail: null, duration: video.duration });
                       }
@@ -163,18 +171,24 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
                   done({ thumbnail: null, duration: video.duration });
               }
           } catch (e) {
-              console.error("Canvas capture error", e);
+              // SecurityError (Tainted Canvas) happens here if crossOrigin failed but video loaded.
+              // We return the duration at least!
+              console.warn("Canvas capture failed (likely CORS), returning duration only.", e);
               clearTimeout(timer);
               done({ thumbnail: null, duration: video.duration });
           }
       };
 
-      video.onerror = () => {
+      video.onerror = (e) => {
+          console.error("Video element error:", video.error);
+          
+          // Retry logic: If we failed with crossOrigin, try without it just to get duration?
+          // Not easy to hot-swap attribute. We just fail here.
+          // Usually means format unsupported or network 404.
           clearTimeout(timer);
           done({ thumbnail: null, duration: 0 });
       };
 
       video.src = finalUrl;
-      video.load();
   });
 };
