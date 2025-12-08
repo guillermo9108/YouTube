@@ -17,131 +17,164 @@ const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: num
 };
 
 export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thumbnail: File | null, duration: number }> => {
-  const isUrl = typeof fileOrUrl === 'string';
-  let objectUrl = '';
-  
-  if (!isUrl) {
-      objectUrl = URL.createObjectURL(fileOrUrl as File);
+  let blob: Blob | null = null;
+  let finalUrl = '';
+  let isLocalBlob = false;
+
+  // STRATEGY: Mimic "Upload" behavior by making remote files local via Fetch (Partial Download)
+  if (typeof fileOrUrl === 'string') {
+      // It's a URL (NAS or Remote)
+      const url = fileOrUrl;
+      
+      // Check if it's already a blob URL
+      if (url.startsWith('blob:')) {
+          finalUrl = url;
+          isLocalBlob = true;
+      } else {
+          // Attempt to download the first 50MB to get header + first frame
+          // This bypasses CORS canvas tainting because we create a local object URL from the response
+          try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+              const response = await fetch(url, {
+                  headers: { 'Range': 'bytes=0-52428800' }, // Request first 50MB
+                  signal: controller.signal
+              });
+              clearTimeout(timeoutId);
+
+              if (response.ok || response.status === 206) {
+                  const contentType = response.headers.get('content-type') || 'video/mp4';
+                  blob = await response.blob();
+                  // Force correct MIME if generic
+                  if (blob.type === 'application/octet-stream' || !blob.type) {
+                      blob = new Blob([blob], { type: 'video/mp4' });
+                  } else {
+                      // Re-wrap to ensure type is preserved
+                      blob = new Blob([blob], { type: contentType });
+                  }
+                  
+                  finalUrl = URL.createObjectURL(blob);
+                  isLocalBlob = true;
+              } else {
+                  // Fallback to direct streaming if range request fails
+                  finalUrl = url; 
+              }
+          } catch (e) {
+              console.warn("Smart fetch failed, falling back to direct URL", e);
+              finalUrl = url;
+          }
+      }
+  } else {
+      // It's a File object (Upload page)
+      blob = fileOrUrl;
+      finalUrl = URL.createObjectURL(blob);
+      isLocalBlob = true;
   }
-
-  const src = isUrl ? (fileOrUrl as string) : objectUrl;
-
-  // Determine if this is a same-origin request (local NAS file)
-  // If so, we SHOULD NOT set crossOrigin="anonymous" to avoid unneeded preflight failures
-  // More robust check: relative paths, same host, or api/ calls
-  const isSameOrigin = isUrl && (
-      src.startsWith('/') || 
-      src.startsWith('api/') || 
-      src.includes(window.location.host) ||
-      !src.startsWith('http') 
-  );
 
   const cleanup = (video: HTMLVideoElement) => {
       try {
           video.pause();
-          video.removeAttribute('src'); // Detach media source
-          video.load(); // Force browser to release resources
+          video.removeAttribute('src'); 
+          video.load(); 
           video.remove();
+          // Only revoke if we created it here (remote fetch case)
+          if (isLocalBlob && typeof fileOrUrl === 'string') {
+              URL.revokeObjectURL(finalUrl);
+          }
       } catch(e) {}
   };
 
-  const loadVideo = (mode: 'cors' | 'no-cors' | 'same-origin'): Promise<{ video: HTMLVideoElement, duration: number, error?: boolean }> => {
-      return new Promise((resolve) => {
-          const video = document.createElement('video');
-          
-          // CRITICAL FIX: Only set crossOrigin if NOT same-origin and NOT no-cors mode
-          if (mode === 'cors') {
-              video.crossOrigin = "anonymous";
-          }
-          
-          video.preload = "auto"; 
-          video.muted = true;
-          video.playsInline = true;
-
-          let resolved = false;
-          const done = (data: { video: HTMLVideoElement, duration: number, error?: boolean }) => {
-              if (resolved) return;
-              resolved = true;
-              clearTimeout(timer);
-              resolve(data);
-          };
-
-          // Timeout: Increased for slow NAS response times
-          const timer = setTimeout(() => {
-              // Rescue: If we at least got metadata, return success
-              if (video.readyState > 0 && video.duration && !isNaN(video.duration)) {
-                  done({ video, duration: video.duration });
-              } else {
-                  done({ video, duration: 0, error: true });
-              }
-          }, 45000); 
-
-          video.onloadedmetadata = () => {
-              if (mode === 'no-cors') {
-                  // In no-cors, we can't capture, so just resolve with duration
-                  done({ video, duration: video.duration || 0 });
-              } else {
-                  // Seek to ensure we have a frame
-                  video.currentTime = 1.0;
-              }
-          };
-
-          video.onseeked = () => {
-              done({ video, duration: video.duration || 0 });
-          };
-
-          video.onerror = () => {
-              done({ video, duration: 0, error: true });
-          };
-
-          video.src = src;
-          video.load();
-          const p = video.play();
-          if(p) p.catch(() => {}); // Ignore autoplay blocks
-      });
-  };
-
-  // Step 1: Intelligent Load Strategy
-  // If same-origin (NAS), try 'same-origin' (no attribute). 
-  // If external URL, try 'cors'.
-  let result = await loadVideo(isSameOrigin ? 'same-origin' : 'cors');
-
-  // Step 2: Fallback to Insecure Load (No CORS) -> Needed for Duration if CORS headers missing on NAS
-  if (result.error && isUrl) {
-      cleanup(result.video);
-      result = await loadVideo('no-cors');
-  }
-
-  // Step 3: Extract Data
-  let thumbFile: File | null = null;
-  const duration = result.duration;
-
-  if (duration > 0 && !result.error) {
-      // Try to capture thumbnail
-      try {
-          const video = result.video;
-          const canvas = document.createElement('canvas');
-          canvas.width = video.videoWidth > 480 ? 480 : video.videoWidth; // Reduce res for speed
-          const scale = canvas.width / video.videoWidth;
-          canvas.height = video.videoHeight * scale;
-          
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              // This is where it fails if tainted. We catch it.
-              const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.6));
-              if (blob) {
-                  thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
-              }
-          }
-      } catch (e) {
-          // Expected error in no-cors mode, just ignore image generation
+  return new Promise((resolve) => {
+      const video = document.createElement('video');
+      
+      // IMPORTANT: If it is a local blob (from File or Fetch), we DO NOT need crossOrigin.
+      // If it is a remote URL (fallback), we DO need it.
+      if (!isLocalBlob) {
+          video.crossOrigin = "anonymous";
       }
-  }
+      
+      video.preload = "metadata"; // We only need start
+      video.muted = true;
+      video.playsInline = true;
+      // Force hardware acceleration constraints to avoid black frames on some GPUs
+      video.style.position = 'fixed';
+      video.style.top = '-9999px';
+      document.body.appendChild(video);
 
-  // Step 4: Cleanup
-  cleanup(result.video);
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
+      let resolved = false;
+      const done = (data: { thumbnail: File | null, duration: number }) => {
+          if (resolved) return;
+          resolved = true;
+          cleanup(video);
+          resolve(data);
+      };
 
-  return { thumbnail: thumbFile, duration };
+      // Timeout for processing
+      const timer = setTimeout(() => {
+          // If we have duration but no image, return that
+          if (video.duration && !isNaN(video.duration) && video.duration > 0) {
+              done({ thumbnail: null, duration: video.duration });
+          } else {
+              done({ thumbnail: null, duration: 0 });
+          }
+      }, 15000);
+
+      video.onloadeddata = () => {
+          // Seek to 1 second or 25% if very short
+          const targetTime = video.duration > 5 ? 1.0 : (video.duration * 0.25);
+          video.currentTime = targetTime;
+      };
+
+      video.onseeked = async () => {
+          if (!video.duration) return;
+
+          try {
+              const canvas = document.createElement('canvas');
+              // Use reasonable resolution for thumbnail
+              canvas.width = 640; 
+              canvas.height = 360; 
+              
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                  
+                  // Check if black frame
+                  const brightness = getBrightness(ctx, canvas.width, canvas.height);
+                  if (brightness < 5 && video.currentTime < (video.duration / 2)) {
+                      // If frame is too dark, try seeking further
+                      video.currentTime += 5;
+                      return; // Wait for next seeked event
+                  }
+
+                  canvas.toBlob((b) => {
+                      if (b) {
+                          const file = new File([b], "thumbnail.jpg", { type: "image/jpeg" });
+                          clearTimeout(timer);
+                          done({ thumbnail: file, duration: video.duration });
+                      } else {
+                          // Canvas tainted or error
+                          clearTimeout(timer);
+                          done({ thumbnail: null, duration: video.duration });
+                      }
+                  }, 'image/jpeg', 0.7);
+              } else {
+                  clearTimeout(timer);
+                  done({ thumbnail: null, duration: video.duration });
+              }
+          } catch (e) {
+              console.error("Canvas capture error", e);
+              clearTimeout(timer);
+              done({ thumbnail: null, duration: video.duration });
+          }
+      };
+
+      video.onerror = () => {
+          clearTimeout(timer);
+          done({ thumbnail: null, duration: 0 });
+      };
+
+      video.src = finalUrl;
+      video.load();
+  });
 };

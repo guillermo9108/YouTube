@@ -203,14 +203,15 @@ export default function Admin() {
 
       processingRef.current = true;
       const item = scanQueue[scanIndex];
-      setScanStatus(`Processing: ${item.title}`);
+      setScanStatus(`Downloading chunk: ${item.title}`);
 
       try {
           // Use the shared utility that works for Uploads
-          // This handles creating a detached video element, loading it, and capturing the frame
+          // This now internally downloads the file (partial fetch) to mimic local file access
           const { thumbnail, duration } = await generateThumbnail(item.videoUrl);
           
           if (duration > 0 || thumbnail) {
+              setScanStatus(`Saving: ${item.title}`);
               await db.updateVideoMetadata(item.id, duration, thumbnail);
               setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s)`]);
           } else {
