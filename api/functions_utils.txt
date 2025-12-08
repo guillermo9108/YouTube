@@ -155,9 +155,11 @@ function streamVideo($filePath, $pdo) {
     ];
     $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'application/octet-stream';
 
-    // Headers
+    // Headers - CRITICAL: Always send Access-Control-Allow-Origin
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
+    header('Access-Control-Allow-Headers: Range');
+    header('Access-Control-Expose-Headers: Content-Range, Content-Length');
     header('Content-Type: ' . $contentType);
     header('Accept-Ranges: bytes');
     

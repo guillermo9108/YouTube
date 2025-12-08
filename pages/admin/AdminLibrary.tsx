@@ -6,32 +6,31 @@ import { useToast } from '../../context/ToastContext';
 import { FolderSearch, Loader2, Play, Maximize, X, Info } from 'lucide-react';
 
 // --- VISIBLE SCANNER PLAYER COMPONENT ---
-// Ensures metadata is loaded by loading the video in the DOM and seeking (more reliable than playing)
 const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete: (dur: number, thumb: File | null) => void, onSkip: () => void }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState('Initializing...');
+    const [status, setStatus] = useState('Connecting...');
+    const [corsMode, setCorsMode] = useState<'anonymous' | undefined>('anonymous');
+    const [attempts, setAttempts] = useState(0);
 
     useEffect(() => {
-        // Safety timeout - skip if stuck for 15 seconds
+        // Safety timeout
         const timer = setTimeout(() => {
             console.warn("Scanner timeout for", video.title);
-            // If we at least got the duration, salvage it
-            if (videoRef.current && videoRef.current.duration > 0 && !isNaN(videoRef.current.duration)) {
+            if (videoRef.current && videoRef.current.duration > 0) {
                 onComplete(videoRef.current.duration, null);
             } else {
                 onSkip();
             }
         }, 15000);
         return () => clearTimeout(timer);
-    }, [video]);
+    }, [video, corsMode]);
 
-    const handleLoadedMetadata = () => {
+    const handleLoadedData = () => {
         const vid = videoRef.current;
         if (!vid) return;
-        setStatus('Metadata OK. Seeking...');
-        // Seek to 5 seconds or 20% of duration (whichever is smaller) to get a good frame
-        // Avoiding 0s (black frame)
-        const target = Math.min(5, vid.duration > 0 ? vid.duration * 0.2 : 0);
+        setStatus('Loaded. Seeking...');
+        // Seek to 10% or 5s to get a good frame, avoid 0s
+        const target = Math.min(5, vid.duration * 0.1);
         vid.currentTime = target;
     };
 
@@ -39,7 +38,7 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
         const vid = videoRef.current;
         if (!vid) return;
 
-        setStatus('Extracting frame...');
+        setStatus('Capturing...');
         let thumbnail: File | null = null;
 
         try {
@@ -55,7 +54,7 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
                 }
             }
         } catch (e) {
-            console.warn("Thumbnail capture failed (CORS/Taint or Codec):", e);
+            console.warn("Thumbnail capture failed (CORS/Taint):", e);
         }
 
         onComplete(vid.duration, thumbnail);
@@ -63,13 +62,19 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
 
     const handleError = () => {
         const err = videoRef.current?.error;
-        setStatus(`Error: ${err?.message || err?.code || 'Unknown'}`);
         console.error("Scanner Video Error:", err);
-        // Wait a moment so user sees the error before skipping
-        setTimeout(onSkip, 1500);
+        
+        if (corsMode === 'anonymous') {
+            setStatus('CORS Error. Retrying without CORS...');
+            setCorsMode(undefined); // Retry without CORS headers (Thumb extraction will fail, but duration might work)
+            setAttempts(prev => prev + 1);
+        } else {
+            setStatus(`Playback Error: ${err?.code || 'Unknown'}`);
+            setTimeout(onSkip, 1500);
+        }
     };
 
-    // Cache buster to prevent browser from using a cached failed response (404) from previous attempts
+    // Use a timestamp to prevent caching of failed requests
     const videoSrc = `${video.videoUrl}${video.videoUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
     return (
@@ -77,13 +82,15 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
             <h3 className="text-lg font-bold text-white mb-2 truncate w-full text-center">{video.title}</h3>
             <div className="relative aspect-video w-full bg-black rounded-lg overflow-hidden border border-slate-800 mb-4">
                 <video
+                    key={`${video.id}-${attempts}`}
                     ref={videoRef}
                     src={videoSrc} 
-                    crossOrigin="anonymous" // Critical for canvas.toBlob()
+                    crossOrigin={corsMode}
                     className="w-full h-full object-contain"
                     muted
+                    autoPlay={false}
                     preload="auto"
-                    onLoadedMetadata={handleLoadedMetadata}
+                    onLoadedData={handleLoadedData}
                     onSeeked={handleSeeked}
                     onError={handleError}
                     onLoadStart={() => setStatus('Connecting...')}
