@@ -5,6 +5,7 @@ import { User, ContentRequest, SystemSettings, VideoCategory, Video, Marketplace
 import { useAuth } from '../context/AuthContext';
 import { Search, PlusCircle, User as UserIcon, Shield, Database, Settings, Save, Play, ExternalLink, Key, Loader2, Trash2, Brush, FolderSearch, AlertTriangle, ShoppingBag, CheckCircle, XCircle, Percent, Wallet, Store, Wrench, TrendingUp, BarChart3, Maximize, X, HelpCircle, Server, HardDrive, Calculator, Info, Zap } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { generateThumbnail } from '../utils/videoGenerator';
 
 // Helper Component for Tooltips
 const InfoTooltip = ({ text, example }: { text: string, example?: string }) => (
@@ -45,7 +46,6 @@ export default function Admin() {
   const [scanQueue, setScanQueue] = useState<Video[]>([]);
   const [scanIndex, setScanIndex] = useState(0);
   const [scanStatus, setScanStatus] = useState('Initializing...');
-  const videoRef = useRef<HTMLVideoElement>(null);
   const wakeLock = useRef<any>(null);
   const processingRef = useRef(false);
 
@@ -158,7 +158,7 @@ export default function Admin() {
       }
   };
 
-  // --- ACTIVE SCANNER LOGIC (Simpler, Same-Origin Friendly) ---
+  // --- ACTIVE SCANNER LOGIC ---
 
   const startActiveScan = async () => {
       setScanLog(prev => [...prev, "Fetching unprocessed videos..."]);
@@ -191,92 +191,51 @@ export default function Admin() {
       }
   };
 
-  const captureAndAdvance = async () => {
+  const processNextItem = async () => {
       if (processingRef.current) return;
-      processingRef.current = true; // Lock
-
-      const video = videoRef.current;
-      const item = scanQueue[scanIndex];
-      
-      if (!video || !item) {
-          moveToNext(500);
+      if (scanIndex >= scanQueue.length) {
+          stopActiveScan();
+          toast.success("Batch Complete!");
+          setScanLog(prev => [...prev, "Batch Complete."]);
+          loadData();
           return;
       }
 
-      video.pause();
-      setScanStatus('Generating Thumb...');
+      processingRef.current = true;
+      const item = scanQueue[scanIndex];
+      setScanStatus(`Processing: ${item.title}`);
 
       try {
-          let thumbnail: File | null = null;
+          // Use the shared utility that works for Uploads
+          // This handles creating a detached video element, loading it, and capturing the frame
+          const { thumbnail, duration } = await generateThumbnail(item.videoUrl);
           
-          // Canvas capture (Works without CORS if same-origin)
-          try {
-              const canvas = document.createElement('canvas');
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                  ctx.drawImage(video, 0, 0);
-                  const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.6));
-                  if (blob) thumbnail = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-              }
-          } catch(e) {
-              console.warn("Canvas capture failed", e);
-              // Likely CORS issue or format issue. We proceed without thumbnail to save the video.
-          }
-
-          const duration = video.duration || 0;
-          
-          if (!isNaN(duration) && duration > 0) {
+          if (duration > 0 || thumbnail) {
               await db.updateVideoMetadata(item.id, duration, thumbnail);
               setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s)`]);
           } else {
-              // Mark as bad but processed
+              // Mark as bad but processed (0 duration) so it's not pending anymore
               await db.updateVideoMetadata(item.id, 0, null);
-              setScanLog(prev => [...prev, `Marked Bad (No Metadata): ${item.title}`]);
+              setScanLog(prev => [...prev, `Failed (No Metadata): ${item.title}`]);
           }
-
       } catch (e: any) {
-          setScanLog(prev => [...prev, `Error processing ${item.title}: ${e.message}`]);
+          setScanLog(prev => [...prev, `Error on ${item.title}: ${e.message}`]);
       }
 
-      moveToNext(500);
-  };
-
-  const moveToNext = (delay: number) => {
+      // Wait a bit to let UI breathe and prevent browser choking
       setTimeout(() => {
-          if (scanIndex < scanQueue.length - 1) {
-              processingRef.current = false;
-              setScanIndex(prev => prev + 1);
-          } else {
-              toast.success("Scan Complete!");
-              setScanLog(prev => [...prev, "Batch Complete."]);
-              stopActiveScan();
-              loadData(); 
-          }
-      }, delay);
+          processingRef.current = false;
+          setScanIndex(prev => prev + 1);
+      }, 500);
   };
 
-  const handleVideoError = () => {
-      if (processingRef.current) return;
-      const item = scanQueue[scanIndex];
-      console.error(`Video ${item?.title} failed to load.`);
-      setScanLog(prev => [...prev, `Failed to load: ${item?.title}`]);
-      
-      // Force skip if video is corrupt
-      processingRef.current = true;
-      if(item) {
-          db.updateVideoMetadata(item.id, 0, null).finally(() => moveToNext(500));
-      } else {
-          moveToNext(500);
+  // Trigger processing when index changes or scan starts
+  useEffect(() => {
+      if (activeScan && scanQueue.length > 0) {
+          processNextItem();
       }
-  };
+  }, [activeScan, scanIndex]);
 
-  // Determine if we need CORS. For local Synology (api/...), it's same-origin so we DON'T want attribute.
-  const currentVideoUrl = scanQueue[scanIndex]?.videoUrl || '';
-  const isSameOrigin = currentVideoUrl.startsWith('api/') || currentVideoUrl.startsWith('/') || currentVideoUrl.includes(window.location.host);
-  // Only add crossOrigin="anonymous" if it's truly external (e.g. S3, YouTube proxy). Local files break if forced.
-  const crossOriginAttr = isSameOrigin ? undefined : "anonymous";
 
   const handleCleanupOrphans = async () => {
       if (!confirm("Esta acción eliminará FÍSICAMENTE los archivos (videos, fotos, avatares) que no estén registrados en la base de datos. ¿Continuar?")) return;
@@ -621,7 +580,7 @@ export default function Admin() {
                   </button>
                   
                   <button onClick={startActiveScan} disabled={isScanning || activeScan} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                      {activeScan ? <Loader2 className="animate-spin"/> : <Play size={20}/>} Paso 2: Procesar (Modo Reproductor)
+                      {activeScan ? <Loader2 className="animate-spin"/> : <Play size={20}/>} Paso 2: Procesar (Escáner Activo)
                   </button>
                   
                   <hr className="border-slate-800 my-4" />
@@ -950,49 +909,29 @@ export default function Admin() {
                   <button onClick={stopActiveScan} className="bg-red-600/80 hover:bg-red-600 text-white p-2 rounded-full backdrop-blur-sm"><X/></button>
               </div>
 
-              {/* Active Player */}
-              <div className="relative w-full h-full flex items-center justify-center bg-black">
-                  {scanQueue[scanIndex] && (
-                      <video 
-                        ref={videoRef}
-                        src={scanQueue[scanIndex].videoUrl}
-                        className="max-w-full max-h-full"
-                        controls={true}
-                        autoPlay
-                        muted
-                        playsInline
-                        // CRITICAL: Only set crossOrigin if it is NOT same-origin (local)
-                        crossOrigin={crossOriginAttr}
-                        
-                        onLoadedMetadata={(e) => {
-                            // Fast-forward to ensure we have a frame
-                            e.currentTarget.currentTime = 1.0;
-                        }}
-                        onSeeked={() => {
-                            // Capture immediately after seek
-                            captureAndAdvance();
-                        }}
-                        onTimeUpdate={(e) => {
-                            // Fallback if seek event missed but time progressed
-                            if (e.currentTarget.currentTime > 0.5) {
-                                captureAndAdvance();
-                            }
-                        }}
-                        onError={handleVideoError}
-                      />
-                  )}
-                  {/* Status Overlay */}
-                  <div className="absolute bottom-10 left-0 right-0 text-center pointer-events-none">
-                      <div className="inline-block bg-black/70 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10">
-                          <p className="text-white font-mono text-sm font-bold mb-2">
-                              {scanQueue[scanIndex]?.title}
-                          </p>
-                          <div className="flex items-center justify-center gap-2">
-                              <Loader2 className="animate-spin text-emerald-500" />
-                              <span className="text-emerald-400 font-bold uppercase tracking-wider text-xs">
-                                  {scanStatus}
-                              </span>
-                          </div>
+              {/* Status Overlay */}
+              <div className="relative w-full h-full flex items-center justify-center bg-black/90">
+                  <div className="inline-block bg-slate-900/70 backdrop-blur-md px-10 py-8 rounded-2xl border border-white/10 text-center shadow-2xl">
+                      <div className="relative w-20 h-20 mx-auto mb-6 flex items-center justify-center">
+                          <div className="absolute inset-0 border-4 border-indigo-500/30 rounded-full animate-ping"></div>
+                          <div className="absolute inset-0 border-4 border-t-indigo-500 border-r-indigo-500 border-b-transparent border-l-transparent rounded-full animate-spin"></div>
+                          <Server className="text-indigo-400 relative z-10" size={32} />
+                      </div>
+                      
+                      <p className="text-white font-mono text-sm font-bold mb-2 break-all max-w-sm">
+                          {scanQueue[scanIndex]?.title}
+                      </p>
+                      <div className="flex items-center justify-center gap-2">
+                          <span className="text-emerald-400 font-bold uppercase tracking-wider text-xs">
+                              {scanStatus}
+                          </span>
+                      </div>
+                      
+                      <div className="mt-6 w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-indigo-500 transition-all duration-300"
+                            style={{ width: `${((scanIndex) / scanQueue.length) * 100}%` }}
+                          ></div>
                       </div>
                   </div>
               </div>

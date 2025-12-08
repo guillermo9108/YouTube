@@ -133,6 +133,8 @@ function streamVideo($path, $pdo) {
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
     header("Access-Control-Allow-Headers: Range, Content-Type, Origin");
     header("Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges");
+    // Ensure browser treats as media playback, not download
+    header("Content-Disposition: inline");
 
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         http_response_code(200);

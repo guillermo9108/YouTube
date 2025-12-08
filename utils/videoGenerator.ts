@@ -28,7 +28,13 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
 
   // Determine if this is a same-origin request (local NAS file)
   // If so, we SHOULD NOT set crossOrigin="anonymous" to avoid unneeded preflight failures
-  const isSameOrigin = isUrl && (src.startsWith('/') || src.startsWith('api/') || src.includes(window.location.host));
+  // More robust check: relative paths, same host, or api/ calls
+  const isSameOrigin = isUrl && (
+      src.startsWith('/') || 
+      src.startsWith('api/') || 
+      src.includes(window.location.host) ||
+      !src.startsWith('http') 
+  );
 
   const cleanup = (video: HTMLVideoElement) => {
       try {
@@ -63,7 +69,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           // Timeout: Increased for slow NAS response times
           const timer = setTimeout(() => {
               // Rescue: If we at least got metadata, return success
-              if (video.readyState > 0 && video.duration) {
+              if (video.readyState > 0 && video.duration && !isNaN(video.duration)) {
                   done({ video, duration: video.duration });
               } else {
                   done({ video, duration: 0, error: true });
