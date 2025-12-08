@@ -145,7 +145,7 @@ function streamVideo($filePath, $pdo) {
     $mimeTypes = [
         'mp4' => 'video/mp4',
         'webm' => 'video/webm',
-        'mkv' => 'video/x-matroska',
+        'mkv' => 'video/mp4', // Trick for some browsers to try playing MKV container
         'mov' => 'video/quicktime',
         'avi' => 'video/x-msvideo',
         'mp3' => 'audio/mpeg'
