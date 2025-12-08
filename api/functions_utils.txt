@@ -128,7 +128,7 @@ function streamVideo($filePath, $pdo) {
     // Disable output compression which messes with Range headers
     if(ini_get('zlib.output_compression')) ini_set('zlib.output_compression', 'Off');
 
-    // Clean all buffers to prevent corruption (whitespace, notices)
+    // Clean all buffers aggressively to prevent corruption
     while (ob_get_level()) ob_end_clean();
     
     // Disable time limit for long streams
@@ -159,7 +159,7 @@ function streamVideo($filePath, $pdo) {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
     header('Access-Control-Allow-Headers: Range');
-    header('Access-Control-Expose-Headers: Content-Range, Content-Length');
+    header('Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges');
     header('Content-Type: ' . $contentType);
     header('Accept-Ranges: bytes');
     

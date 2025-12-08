@@ -3,75 +3,76 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Play, Maximize, X, Info } from 'lucide-react';
+import { FolderSearch, Loader2, Play, Maximize, X, Info, VolumeX, Volume2 } from 'lucide-react';
 
 // --- VISIBLE SCANNER PLAYER COMPONENT ---
 const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete: (dur: number, thumb: File | null) => void, onSkip: () => void }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState('Connecting...');
-    const [corsMode, setCorsMode] = useState<'anonymous' | undefined>('anonymous');
-    const [attempts, setAttempts] = useState(0);
+    const [status, setStatus] = useState('Loading...');
+    const [isMuted, setIsMuted] = useState(true);
 
     useEffect(() => {
-        // Safety timeout
+        // Safety timeout - Give it 30s to load and play 1.5s
         const timer = setTimeout(() => {
             console.warn("Scanner timeout for", video.title);
             if (videoRef.current && videoRef.current.duration > 0) {
+                // If we at least got duration, save it without thumb
                 onComplete(videoRef.current.duration, null);
             } else {
                 onSkip();
             }
-        }, 15000);
+        }, 30000);
         return () => clearTimeout(timer);
-    }, [video, corsMode]);
+    }, [video]);
 
-    const handleLoadedData = () => {
-        const vid = videoRef.current;
-        if (!vid) return;
-        setStatus('Loaded. Seeking...');
-        // Seek to 10% or 5s to get a good frame, avoid 0s
-        const target = Math.min(5, vid.duration * 0.1);
-        vid.currentTime = target;
-    };
-
-    const handleSeeked = async () => {
+    const handleTimeUpdate = async () => {
         const vid = videoRef.current;
         if (!vid) return;
 
-        setStatus('Capturing...');
-        let thumbnail: File | null = null;
+        // Wait until we have played at least 1.5 seconds to ensure we have a valid frame
+        if (vid.currentTime > 1.5) {
+            setStatus('Capturing...');
+            vid.pause();
+            
+            let thumbnail: File | null = null;
 
-        try {
-            const canvas = document.createElement('canvas');
-            canvas.width = 640;
-            canvas.height = 360; 
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-                ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-                const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.7));
-                if (blob) {
-                    thumbnail = new File([blob], "thumb.jpg", { type: 'image/jpeg' });
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 640;
+                canvas.height = 360; 
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    // Draw current frame
+                    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+                    
+                    const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.7));
+                    if (blob) {
+                        thumbnail = new File([blob], "thumb.jpg", { type: 'image/jpeg' });
+                    }
                 }
+            } catch (e) {
+                console.warn("Thumbnail capture failed (CORS/Taint):", e);
             }
-        } catch (e) {
-            console.warn("Thumbnail capture failed (CORS/Taint):", e);
-        }
 
-        onComplete(vid.duration, thumbnail);
+            setStatus('Saving...');
+            onComplete(vid.duration, thumbnail);
+        }
     };
 
     const handleError = () => {
         const err = videoRef.current?.error;
-        console.error("Scanner Video Error:", err);
-        
-        if (corsMode === 'anonymous') {
-            setStatus('CORS Error. Retrying without CORS...');
-            setCorsMode(undefined); // Retry without CORS headers (Thumb extraction will fail, but duration might work)
-            setAttempts(prev => prev + 1);
-        } else {
-            setStatus(`Playback Error: ${err?.code || 'Unknown'}`);
-            setTimeout(onSkip, 1500);
-        }
+        console.error("Scanner Video Error:", err, video.videoUrl);
+        setStatus(`Playback Error: ${err?.code || 'Unknown'}`);
+        // Wait a sec to show error then skip
+        setTimeout(onSkip, 1500);
+    };
+
+    const handlePlaying = () => {
+        setStatus('Playing...');
+    };
+
+    const handleWaiting = () => {
+        setStatus('Buffering...');
     };
 
     // Use a timestamp to prevent caching of failed requests
@@ -80,31 +81,47 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
     return (
         <div className="flex flex-col items-center justify-center p-6 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl max-w-2xl w-full mx-4">
             <h3 className="text-lg font-bold text-white mb-2 truncate w-full text-center">{video.title}</h3>
+            
             <div className="relative aspect-video w-full bg-black rounded-lg overflow-hidden border border-slate-800 mb-4">
                 <video
-                    key={`${video.id}-${attempts}`}
+                    key={video.id}
                     ref={videoRef}
                     src={videoSrc} 
-                    crossOrigin={corsMode}
+                    crossOrigin="anonymous"
                     className="w-full h-full object-contain"
-                    muted
-                    autoPlay={false}
-                    preload="auto"
-                    onLoadedData={handleLoadedData}
-                    onSeeked={handleSeeked}
+                    muted={isMuted}
+                    autoPlay
+                    playsInline
+                    onTimeUpdate={handleTimeUpdate}
+                    onPlaying={handlePlaying}
+                    onWaiting={handleWaiting}
                     onError={handleError}
-                    onLoadStart={() => setStatus('Connecting...')}
-                    onWaiting={() => setStatus('Buffering...')}
                 />
-                <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-md font-mono border border-white/10">
+                
+                {/* Status Overlay */}
+                <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-3 py-1.5 rounded backdrop-blur-md font-mono border border-white/10 flex items-center gap-2">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
                     {status}
                 </div>
+
+                {/* Mute Toggle */}
+                <button 
+                    onClick={() => setIsMuted(!isMuted)}
+                    className="absolute bottom-2 right-2 bg-black/60 p-2 rounded-full text-white hover:bg-black/80 transition-colors"
+                >
+                    {isMuted ? <VolumeX size={16}/> : <Volume2 size={16}/>}
+                </button>
             </div>
+
             <div className="flex gap-4 w-full">
                 <button onClick={onSkip} className="flex-1 bg-red-900/20 hover:bg-red-900/40 text-red-200 py-3 rounded-lg font-bold transition-colors text-xs uppercase tracking-wider border border-red-900/30">
                     Force Skip Video
                 </button>
             </div>
+            
+            <p className="text-xs text-slate-500 mt-4 text-center max-w-sm">
+                The video will play automatically. Once it reaches 1.5 seconds, a snapshot will be taken and it will proceed to the next video.
+            </p>
         </div>
     );
 };
