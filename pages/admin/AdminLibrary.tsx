@@ -10,14 +10,16 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
     const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState('Loading...');
     const [isMuted, setIsMuted] = useState(true);
+    const attemptRef = useRef(0);
 
     useEffect(() => {
         // Safety timeout - Give it 30s to load and play 1.5s
         const timer = setTimeout(() => {
             console.warn("Scanner timeout for", video.title);
-            if (videoRef.current && videoRef.current.duration > 0) {
+            const vid = videoRef.current;
+            if (vid && vid.duration > 0 && !isNaN(vid.duration)) {
                 // If we at least got duration, save it without thumb
-                onComplete(videoRef.current.duration, null);
+                onComplete(vid.duration, null);
             } else {
                 onSkip();
             }
@@ -55,16 +57,19 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
             }
 
             setStatus('Saving...');
-            onComplete(vid.duration, thumbnail);
+            // Ensure duration is valid
+            const duration = (!isNaN(vid.duration) && vid.duration > 0) ? vid.duration : 0;
+            onComplete(duration, thumbnail);
         }
     };
 
-    const handleError = () => {
+    const handleError = (e: any) => {
         const err = videoRef.current?.error;
         console.error("Scanner Video Error:", err, video.videoUrl);
         setStatus(`Playback Error: ${err?.code || 'Unknown'}`);
-        // Wait a sec to show error then skip
-        setTimeout(onSkip, 1500);
+        
+        // Retry once logic could go here, but for now we skip to keep queue moving
+        setTimeout(onSkip, 1000);
     };
 
     const handlePlaying = () => {
@@ -76,6 +81,7 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
     };
 
     // Use a timestamp to prevent caching of failed requests
+    // Force absolute path handling if needed, though 'api/...' usually works
     const videoSrc = `${video.videoUrl}${video.videoUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
     return (
@@ -100,7 +106,7 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
                 
                 {/* Status Overlay */}
                 <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-3 py-1.5 rounded backdrop-blur-md font-mono border border-white/10 flex items-center gap-2">
-                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <div className={`w-2 h-2 rounded-full ${status.includes('Error') ? 'bg-red-500' : 'bg-emerald-500 animate-pulse'}`}></div>
                     {status}
                 </div>
 
