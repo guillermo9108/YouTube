@@ -120,6 +120,10 @@ function video_server_import($pdo, $input) {
 // --- FTP FUNCTIONS ---
 
 function getFtpConnection($pdo) {
+    if (!function_exists('ftp_connect')) {
+        throw new Exception("PHP FTP extension not enabled. Please enable 'ftp' in PHP settings.");
+    }
+
     $stmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
     $json = $stmt->fetchColumn();
     $s = json_decode($json, true);
@@ -391,3 +395,4 @@ function video_update_prices_bulk($pdo, $input) {
 function video_get_scan_status($pdo) { respond(true, ['active' => false]); }
 function video_scan_ftp($pdo, $input) { respond(true, ['completed' => true]); } // Stub
 ?>
+    
