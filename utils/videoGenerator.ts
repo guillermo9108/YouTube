@@ -54,7 +54,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               resolve(data);
           };
 
-          // Timeout: If NAS doesn't respond in time, fail this attempt
+          // Timeout: Increased to 30s/45s for slow NAS response times
           const timer = setTimeout(() => {
               // Rescue: If we at least got metadata, return success
               if (video.readyState > 0 && video.duration) {
@@ -62,7 +62,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               } else {
                   done({ video, duration: 0, error: true });
               }
-          }, mode === 'cors' ? 10000 : 15000); 
+          }, mode === 'cors' ? 30000 : 45000); 
 
           video.onloadedmetadata = () => {
               if (mode === 'no-cors') {

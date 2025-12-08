@@ -132,11 +132,16 @@ function streamVideo($path, $pdo) {
     
     while (ob_get_level()) ob_end_clean();
 
-    // Headers - Always Send CORS first
+    // Headers - Always Send CORS first (CRITICAL FOR CANVAS EXTRACTION)
     header("Access-Control-Allow-Origin: *"); 
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
     header("Access-Control-Allow-Headers: Range");
     header("Access-Control-Expose-Headers: Content-Range, Content-Length");
+
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        http_response_code(200);
+        exit;
+    }
 
     // 2. Check direct file access
     if (!file_exists($path)) {
@@ -157,6 +162,8 @@ function streamVideo($path, $pdo) {
     if ($ext === 'webm') $mime = 'video/webm';
     if ($ext === 'avi') $mime = 'video/x-msvideo';
     if ($ext === 'mov') $mime = 'video/quicktime';
+    if ($ext === 'm4v') $mime = 'video/x-m4v';
+    if ($ext === 'ts') $mime = 'video/mp2t';
 
     // 3. Content Headers
     header("Content-Type: $mime");

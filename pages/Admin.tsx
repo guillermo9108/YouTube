@@ -194,7 +194,7 @@ export default function Admin() {
       }
   };
 
-  // Triggered via onTimeUpdate when video has played > 2 second
+  // Triggered via onTimeUpdate when video has played > 0.5 second (Reduced from 2.0 to be faster)
   const captureAndAdvance = async () => {
       if (processingRef.current) return;
       processingRef.current = true; // Lock
@@ -203,7 +203,7 @@ export default function Admin() {
       const item = scanQueue[scanIndex];
       
       if (!video || !item) {
-          moveToNext(3000);
+          moveToNext(1000);
           return;
       }
 
@@ -233,20 +233,20 @@ export default function Admin() {
 
           const duration = video.duration || 0;
           
-          if (duration > 0) {
+          if (!isNaN(duration) && duration > 0) {
               await db.updateVideoMetadata(item.id, duration, thumbnail);
               setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s)`]);
           } else {
               // Mark as bad but processed to stop loop
               await db.updateVideoMetadata(item.id, 0, null);
-              setScanLog(prev => [...prev, `Marked Bad: ${item.title}`]);
+              setScanLog(prev => [...prev, `Marked Bad (No Duration): ${item.title}`]);
           }
 
       } catch (e: any) {
           setScanLog(prev => [...prev, `Error processing ${item.title}: ${e.message}`]);
       }
 
-      moveToNext(3000); // 3s pause between videos to clear buffers
+      moveToNext(1500); // 1.5s pause between videos to clear buffers
   };
 
   const moveToNext = (delay: number) => {
@@ -280,10 +280,9 @@ export default function Admin() {
           // First failure: Try switching to INSECURE mode (remove crossOrigin)
           // This fixes "Failed to load" caused by strict CORS on some NAS configs
           console.warn(`Video ${item?.title} failed secure load. Retrying insecurely...`);
-          setScanLog(prev => [...prev, `Retrying ${item?.title} (Insecure Mode)...`]);
+          setScanLog(prev => [...prev, `Retrying ${item?.title} (Insecure Mode - Duration Only)...`]);
           setScanMode('INSECURE');
-          
-          // Force reload of video element handled by React key prop
+          // React key change will force reload
       } else {
           // Second failure: Give up
           console.error(`Video ${item?.title} failed completely.`);
@@ -293,10 +292,10 @@ export default function Admin() {
           if(item) {
               processingRef.current = true;
               db.updateVideoMetadata(item.id, 0, null).finally(() => {
-                  moveToNext(3000);
+                  moveToNext(1000);
               });
           } else {
-              moveToNext(3000);
+              moveToNext(1000);
           }
       }
   };
@@ -990,8 +989,8 @@ export default function Admin() {
                         crossOrigin={scanMode === 'SECURE' ? "anonymous" : undefined}
                         
                         onTimeUpdate={(e) => {
-                            // Only capture if we played more than 2 second to ensure buffer is real
-                            if (e.currentTarget.currentTime > 2.0) {
+                            // FAST TRIGGER: Only need > 0.5s to validate stream works
+                            if (e.currentTarget.currentTime > 0.5) {
                                 captureAndAdvance();
                             }
                         }}
