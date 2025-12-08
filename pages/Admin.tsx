@@ -203,11 +203,11 @@ export default function Admin() {
 
       processingRef.current = true;
       const item = scanQueue[scanIndex];
-      setScanStatus(`Downloading chunk: ${item.title}`);
+      setScanStatus(`Loading Metadata: ${item.title}`);
 
       try {
           // Use the shared utility that works for Uploads
-          // This now internally downloads the file (partial fetch) to mimic local file access
+          // Detects same-origin automatically
           const { thumbnail, duration } = await generateThumbnail(item.videoUrl);
           
           if (duration > 0 || thumbnail) {
@@ -227,7 +227,7 @@ export default function Admin() {
       setTimeout(() => {
           processingRef.current = false;
           setScanIndex(prev => prev + 1);
-      }, 500);
+      }, 1000); // 1 second delay between items
   };
 
   // Trigger processing when index changes or scan starts

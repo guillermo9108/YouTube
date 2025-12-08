@@ -18,52 +18,54 @@ const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: num
 
 export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thumbnail: File | null, duration: number }> => {
   let finalUrl = '';
-  let isLocalBlob = false;
-  let forceDirect = false;
+  let useCrossOrigin = false;
+  let isBlob = false;
 
-  // STRATEGY: 
-  // 1. Try to fetch the first 5MB (Header + First Frame) to create a local clean Blob.
-  //    This bypasses CORS issues entirely for the canvas.
-  // 2. If that fails, fall back to direct URL streaming.
-  
-  if (typeof fileOrUrl === 'string') {
+  // 1. Determine Source Type
+  if (typeof fileOrUrl !== 'string') {
+      // It's a File object (Upload)
+      finalUrl = URL.createObjectURL(fileOrUrl);
+      isBlob = true;
+  } else {
+      // It's a URL
       const url = fileOrUrl;
       
+      // Check if Same Origin (Local NAS/Server)
+      // If the URL is relative (starts with api/ or /) or matches current origin, treat as Safe.
+      const isSameOrigin = url.startsWith('/') || url.startsWith('api/') || url.indexOf(window.location.origin) > -1;
+
       if (url.startsWith('blob:')) {
           finalUrl = url;
-          isLocalBlob = true;
+          isBlob = true;
+      } else if (isSameOrigin) {
+          // SAME ORIGIN OPTIMIZATION:
+          // Do NOT fetch. Do NOT use crossOrigin attribute.
+          // Browser treats this as local trusted content.
+          finalUrl = url;
+          useCrossOrigin = false; 
       } else {
+          // EXTERNAL URL (Pexels, YouTube proxy, etc.)
+          // Try to fetch as blob to avoid CORS tainting, fallback to crossOrigin anonymous
           try {
               const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-
-              // Only fetch 5MB. This is enough for metadata and the first few keyframes.
-              const response = await fetch(url, {
-                  headers: { 'Range': 'bytes=0-5242880' }, 
-                  signal: controller.signal
-              });
-              clearTimeout(timeoutId);
-
+              const id = setTimeout(() => controller.abort(), 5000);
+              const response = await fetch(url, { headers: { 'Range': 'bytes=0-5242880' }, signal: controller.signal }); // 5MB limit
+              clearTimeout(id);
+              
               if (response.ok || response.status === 206) {
                   const blob = await response.blob();
-                  // Ensure MIME type is video
-                  const cleanBlob = new Blob([blob], { type: 'video/mp4' });
-                  finalUrl = URL.createObjectURL(cleanBlob);
-                  isLocalBlob = true;
+                  finalUrl = URL.createObjectURL(new Blob([blob], { type: 'video/mp4' }));
+                  isBlob = true;
               } else {
-                  console.warn("Smart fetch rejected by server, falling back to direct URL");
-                  forceDirect = true;
-                  finalUrl = url; 
+                  throw new Error("Fetch failed");
               }
           } catch (e) {
-              console.warn("Smart fetch failed (Network/Timeout), falling back to direct URL", e);
-              forceDirect = true;
+              // Fallback to direct URL with Anonymous CORS
+              console.warn("External fetch failed, using direct URL with CORS");
               finalUrl = url;
+              useCrossOrigin = true;
           }
       }
-  } else {
-      finalUrl = URL.createObjectURL(fileOrUrl);
-      isLocalBlob = true;
   }
 
   const cleanup = (video: HTMLVideoElement) => {
@@ -72,30 +74,31 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           video.removeAttribute('src'); 
           video.load(); 
           video.remove();
-          if (isLocalBlob && typeof fileOrUrl === 'string') {
-              URL.revokeObjectURL(finalUrl);
-          }
+          if (isBlob) URL.revokeObjectURL(finalUrl);
       } catch(e) {}
   };
 
   return new Promise((resolve) => {
       const video = document.createElement('video');
       
-      // CRITICAL: 
-      // If we made a local blob, NO crossOrigin needed (it's same-origin by definition).
-      // If we are forcing direct URL because fetch failed, we TRY 'anonymous' first to get the image.
-      // If 'anonymous' fails to load (error event), we might need to retry without it just to get duration.
-      if (!isLocalBlob) {
+      // CRITICAL: Only set crossOrigin if strictly necessary (External).
+      // Setting it on Same-Origin without proper server headers can CAUSE errors.
+      if (useCrossOrigin) {
           video.crossOrigin = "anonymous";
       }
       
       video.preload = "metadata";
       video.muted = true;
       video.playsInline = true;
+      // Position off-screen but visible to DOM (fixes some WebKit bugs)
       video.style.position = 'fixed';
-      video.style.top = '-9999px';
-      // Mute/Volume 0 helps some browsers autoplay/load background video
-      video.volume = 0; 
+      video.style.top = '0';
+      video.style.left = '0';
+      video.style.width = '1px';
+      video.style.height = '1px';
+      video.style.opacity = '0.01';
+      video.style.pointerEvents = 'none';
+      
       document.body.appendChild(video);
 
       let resolved = false;
@@ -106,36 +109,38 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           resolve(data);
       };
 
-      // Safety Timeout
+      // Safety Timeout - 30s for NAS wake-up
       const timer = setTimeout(() => {
-          // If we timed out but managed to get duration, return that at least.
+          console.warn("Thumbnail Gen Timeout", finalUrl);
+          // If we have duration at least, return it
           if (video.duration && !isNaN(video.duration) && video.duration > 0) {
-              console.log("Timeout but got duration:", video.duration);
               done({ thumbnail: null, duration: video.duration });
           } else {
-              console.log("Hard Timeout on video processing");
               done({ thumbnail: null, duration: 0 });
           }
-      }, 25000); // 25s max total processing time
+      }, 30000);
 
       video.onloadedmetadata = () => {
-          // As soon as metadata loads, if we are in fallback mode and only care about duration, 
-          // we could potentially stop here if image extraction is deemed impossible. 
-          // But we try to seek to get the image.
           if (video.duration === Infinity) {
-              video.currentTime = 1e101; // Fake seek to find end for duration
+              video.currentTime = 1e101;
               video.currentTime = 0;
           }
       };
 
       video.onloadeddata = () => {
-          // Seek to a safe spot. 
-          // For very short videos (e.g. 1s), seeking to 1s might hit end.
-          const targetTime = video.duration > 3 ? 1.0 : (video.duration * 0.1);
-          video.currentTime = targetTime;
+          // Seek to 10% or 2s, whichever is safer
+          let target = 2.0;
+          if (video.duration > 0) {
+              if (video.duration < 5) target = video.duration * 0.2;
+              else if (video.duration < 60) target = 5.0;
+              else target = 15.0; // Deep seek for movies
+          }
+          video.currentTime = target;
       };
 
-      video.onseeked = async () => {
+      let seekAttempts = 0;
+
+      video.onseeked = () => {
           if (!video.duration) return;
 
           try {
@@ -147,12 +152,15 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               if (ctx) {
                   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                   
-                  // Check brightness to avoid black frames (common in first second)
+                  // Check brightness to avoid black frames
                   const brightness = getBrightness(ctx, canvas.width, canvas.height);
-                  if (brightness < 5 && video.currentTime < (Math.min(10, video.duration / 2))) {
+                  
+                  // If too dark and we haven't tried seeking yet, try once more
+                  if (brightness < 10 && seekAttempts < 1 && video.duration > 10) {
                       console.log("Frame too dark, seeking forward...");
-                      video.currentTime += 2; // Jump forward
-                      return; // Wait for next seeked
+                      seekAttempts++;
+                      video.currentTime += 10;
+                      return;
                   }
 
                   canvas.toBlob((b) => {
@@ -161,30 +169,24 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
                           clearTimeout(timer);
                           done({ thumbnail: file, duration: video.duration });
                       } else {
-                          // Tainted canvas or generic error
                           clearTimeout(timer);
                           done({ thumbnail: null, duration: video.duration });
                       }
-                  }, 'image/jpeg', 0.7);
+                  }, 'image/jpeg', 0.75);
               } else {
                   clearTimeout(timer);
                   done({ thumbnail: null, duration: video.duration });
               }
           } catch (e) {
-              // SecurityError (Tainted Canvas) happens here if crossOrigin failed but video loaded.
-              // We return the duration at least!
-              console.warn("Canvas capture failed (likely CORS), returning duration only.", e);
+              // Tainted canvas error (CORS)
+              console.warn("Canvas Tainted (CORS), returning duration only.", e);
               clearTimeout(timer);
               done({ thumbnail: null, duration: video.duration });
           }
       };
 
       video.onerror = (e) => {
-          console.error("Video element error:", video.error);
-          
-          // Retry logic: If we failed with crossOrigin, try without it just to get duration?
-          // Not easy to hot-swap attribute. We just fail here.
-          // Usually means format unsupported or network 404.
+          console.error("Video Error Event", video.error);
           clearTimeout(timer);
           done({ thumbnail: null, duration: 0 });
       };
