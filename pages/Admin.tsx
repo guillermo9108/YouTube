@@ -513,8 +513,122 @@ export default function Admin() {
           </div>
       )}
 
-      {/* OTHER TABS HIDDEN FOR BREVITY - Same as original */}
-      {/* ... (Finance, Market, Config, Maintenance, Analytics tabs) ... */}
+      {activeTab === 'FINANCE' && (
+          <div className="space-y-6">
+              <h3 className="text-xl font-bold text-white">Solicitudes de Saldo ({balanceRequests.length})</h3>
+              {balanceRequests.length === 0 ? (
+                  <div className="text-slate-500 italic">No hay solicitudes pendientes.</div>
+              ) : (
+                  <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+                      <table className="w-full text-sm text-left">
+                          <thead className="text-xs text-slate-500 uppercase bg-slate-950">
+                              <tr>
+                                  <th className="px-4 py-3">Usuario</th>
+                                  <th className="px-4 py-3">Monto</th>
+                                  <th className="px-4 py-3">Fecha</th>
+                                  <th className="px-4 py-3">Acciones</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800">
+                              {balanceRequests.map(req => (
+                                  <tr key={req.id}>
+                                      <td className="px-4 py-3 text-white font-bold">{req.username}</td>
+                                      <td className="px-4 py-3 font-mono text-emerald-400">{req.amount} $</td>
+                                      <td className="px-4 py-3 text-slate-500">{new Date(req.createdAt * 1000).toLocaleDateString()}</td>
+                                      <td className="px-4 py-3 flex gap-2">
+                                          <button onClick={() => handleHandleRequest(req.id, 'APPROVED')} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs hover:bg-emerald-500">Aprobar</button>
+                                          <button onClick={() => handleHandleRequest(req.id, 'REJECTED')} className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-500">Rechazar</button>
+                                      </td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
+              )}
+          </div>
+      )}
+
+      {activeTab === 'MARKET' && (
+          <div className="space-y-6">
+              <h3 className="text-xl font-bold text-white">Gestión Marketplace</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {marketItems.map(item => (
+                      <div key={item.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex items-start gap-4">
+                          <div className="w-16 h-16 bg-black rounded-lg overflow-hidden shrink-0">
+                              {item.images && item.images[0] && <img src={item.images[0]} className="w-full h-full object-cover"/>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                              <h4 className="font-bold text-white truncate">{item.title}</h4>
+                              <div className="text-xs text-slate-400">Vendedor: {item.sellerName}</div>
+                              <div className="font-mono text-emerald-400 font-bold mt-1">{item.price} $</div>
+                          </div>
+                          <button onClick={() => handleDeleteListing(item.id)} className="text-slate-500 hover:text-red-500 p-1" title="Eliminar Publicación"><Trash2 size={18}/></button>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'CONFIG' && settings && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
+                  <h3 className="font-bold text-white flex items-center gap-2"><Settings size={18}/> Sistema</h3>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Inicio Descarga</label>
+                          <input type="time" value={settings.downloadStartTime} onChange={e => setSettings({...settings, downloadStartTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                      </div>
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Fin Descarga</label>
+                          <input type="time" value={settings.downloadEndTime} onChange={e => setSettings({...settings, downloadEndTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                      </div>
+                  </div>
+
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pexels API Key <InfoTooltip text="Para búsqueda de stock videos" /></label>
+                      <input type="password" value={settings.pexelsKey || ''} onChange={e => setSettings({...settings, pexelsKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                  </div>
+                  
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pixabay API Key <InfoTooltip text="Alternativa stock gratuita" /></label>
+                      <input type="password" value={settings.pixabayKey || ''} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                  </div>
+
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Ruta yt-dlp <InfoTooltip text="Ruta absoluta al binario en servidor" example="/usr/local/bin/yt-dlp" /></label>
+                      <input type="text" value={settings.ytDlpPath || ''} onChange={e => setSettings({...settings, ytDlpPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white font-mono text-xs"/>
+                  </div>
+
+                  <div className="flex items-center gap-3 py-2">
+                      <input type="checkbox" checked={settings.enableYoutube} onChange={e => setSettings({...settings, enableYoutube: e.target.checked})} className="accent-indigo-500 w-4 h-4"/>
+                      <span className="text-sm text-slate-300 font-bold">Habilitar YouTube Download</span>
+                  </div>
+              </div>
+
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
+                  <h3 className="font-bold text-white flex items-center gap-2"><Percent size={18}/> Economía</h3>
+                  
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Videos (%)</label>
+                      <input type="number" value={settings.videoCommission} onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                      <p className="text-[10px] text-slate-500 mt-1">Porcentaje que se queda el sistema por cada venta de video.</p>
+                  </div>
+
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Marketplace (%)</label>
+                      <input type="number" value={settings.marketCommission} onChange={e => setSettings({...settings, marketCommission: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white"/>
+                      <p className="text-[10px] text-slate-500 mt-1">Porcentaje retenido en ventas de productos físicos.</p>
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-800">
+                      <button onClick={handleSaveConfig} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
+                          <Save size={18}/> Guardar Configuración
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
       
       {activeTab === 'LIBRARY' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -540,6 +654,162 @@ export default function Admin() {
 
               <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 h-[500px] overflow-y-auto shadow-inner">
                   {scanLog.map((line, i) => <div key={i} className="mb-1 border-b border-slate-800/50 pb-1">{line}</div>)}
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'MAINTENANCE' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Wrench size={18}/> Herramientas de Sistema</h3>
+                  <div className="space-y-4">
+                      <button onClick={handleCleanupOrphans} disabled={cleaning} className="w-full p-4 bg-slate-950 border border-slate-800 hover:border-red-500/50 rounded-xl text-left group transition-all">
+                          <div className="flex items-center gap-3 mb-1">
+                              <div className="w-10 h-10 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"><Trash2 size={20}/></div>
+                              <span className="font-bold text-slate-200">Limpieza Profunda (Archivos Huérfanos)</span>
+                          </div>
+                          <p className="text-xs text-slate-500 pl-13">Elimina archivos físicos que no tienen registro en la base de datos.</p>
+                      </button>
+
+                      <button onClick={handleRepairDb} disabled={cleaning} className="w-full p-4 bg-slate-950 border border-slate-800 hover:border-indigo-500/50 rounded-xl text-left group transition-all">
+                          <div className="flex items-center gap-3 mb-1">
+                              <div className="w-10 h-10 bg-indigo-900/20 text-indigo-500 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"><Database size={20}/></div>
+                              <span className="font-bold text-slate-200">Reparación de Base de Datos</span>
+                          </div>
+                          <p className="text-xs text-slate-500 pl-13">Sincroniza esquemas y corrige índices corruptos.</p>
+                      </button>
+                  </div>
+              </div>
+
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Brush size={18}/> Smart Cleaner</h3>
+                  <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-2">
+                          <select value={cleanerCategory} onChange={e=>setCleanerCategory(e.target.value)} className="bg-slate-950 border border-slate-700 text-white text-xs rounded p-2">
+                              <option value="ALL">Todas las Categorías</option>
+                              {Object.values(VideoCategory).map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          <select value={cleanerPercent} onChange={e=>setCleanerPercent(parseInt(e.target.value))} className="bg-slate-950 border border-slate-700 text-white text-xs rounded p-2">
+                              <option value="5">Eliminar 5%</option>
+                              <option value="10">Eliminar 10%</option>
+                              <option value="20">Eliminar 20%</option>
+                          </select>
+                          <select value={cleanerDays} onChange={e=>setCleanerDays(parseInt(e.target.value))} className="bg-slate-950 border border-slate-700 text-white text-xs rounded p-2">
+                              <option value="7">Más de 7 días</option>
+                              <option value="30">Más de 30 días</option>
+                              <option value="90">Más de 90 días</option>
+                          </select>
+                      </div>
+                      
+                      {!cleanerPreview ? (
+                          <button onClick={handlePreviewCleaner} disabled={cleaning} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 rounded-lg">Analizar Candidatos</button>
+                      ) : (
+                          <div className="bg-slate-950 p-4 rounded-lg border border-red-500/30 animate-in fade-in">
+                              <div className="text-xs text-slate-400 mb-2">
+                                  Se encontraron <strong>{cleanerPreview.preview.length}</strong> videos de bajo rendimiento.
+                                  <br/>Espacio estimado a recuperar: <span className="text-emerald-400 font-bold">{cleanerPreview.stats.spaceReclaimed}</span>
+                              </div>
+                              <div className="max-h-32 overflow-y-auto mb-3 border border-slate-800 rounded">
+                                  {cleanerPreview.preview.map(v => (
+                                      <div key={v.id} className="text-[10px] text-slate-500 p-1 border-b border-slate-900 truncate">{v.title}</div>
+                                  ))}
+                              </div>
+                              <div className="flex gap-2">
+                                  <button onClick={() => setCleanerPreview(null)} className="flex-1 bg-slate-800 text-slate-300 text-xs font-bold py-2 rounded">Cancelar</button>
+                                  <button onClick={handleExecuteCleaner} className="flex-1 bg-red-600 hover:bg-red-500 text-white text-xs font-bold py-2 rounded">Confirmar Eliminación</button>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'ANALYTICS' && (
+          <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Controls */}
+                  <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
+                      <h3 className="font-bold text-white flex items-center gap-2"><Calculator size={18}/> Simulador de Negocio</h3>
+                      
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Crecimiento Mensual (%)</label>
+                          <input type="range" min="1" max="50" value={simGrowthRate} onChange={e => setSimGrowthRate(parseInt(e.target.value))} className="w-full accent-indigo-500"/>
+                          <div className="text-right text-xs text-indigo-400 font-bold">{simGrowthRate}%</div>
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tasa Conversión (%)</label>
+                          <input type="range" min="1" max="100" value={simConversionRate} onChange={e => setSimConversionRate(parseInt(e.target.value))} className="w-full accent-emerald-500"/>
+                          <div className="text-right text-xs text-emerald-400 font-bold">{simConversionRate}%</div>
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Depósito Promedio ($)</label>
+                          <input type="number" value={simAvgDeposit} onChange={e => setSimAvgDeposit(parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded p-1 text-white text-sm"/>
+                      </div>
+                  </div>
+
+                  {/* Results */}
+                  <div className="lg:col-span-2 bg-slate-900 p-6 rounded-xl border border-slate-800 flex flex-col justify-between">
+                      <div className="flex justify-between items-start mb-6">
+                          <div>
+                              <h3 className="font-bold text-white text-lg">Proyección a 12 Meses</h3>
+                              <p className="text-sm text-slate-400">Basado en los parámetros actuales.</p>
+                          </div>
+                          <div className="text-right">
+                              <div className="text-3xl font-black text-emerald-400">+{projection.totalProfit.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}</div>
+                              <div className="text-xs text-emerald-600 font-bold uppercase">Profit Neto Estimado</div>
+                          </div>
+                      </div>
+
+                      {/* Simple SVG Chart */}
+                      <div className="relative h-48 w-full border-b border-l border-slate-700 bg-slate-950/50 rounded-tr-lg overflow-hidden">
+                          <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                              {/* Grid */}
+                              <line x1="0" y1="25" x2="100" y2="25" stroke="#334155" strokeWidth="0.5" strokeDasharray="2"/>
+                              <line x1="0" y1="50" x2="100" y2="50" stroke="#334155" strokeWidth="0.5" strokeDasharray="2"/>
+                              <line x1="0" y1="75" x2="100" y2="75" stroke="#334155" strokeWidth="0.5" strokeDasharray="2"/>
+                              
+                              {/* Revenue Line */}
+                              <polyline 
+                                  points={getPoints('revenue')} 
+                                  fill="none" 
+                                  stroke="#10b981" 
+                                  strokeWidth="2"
+                                  vectorEffect="non-scaling-stroke"
+                              />
+                              {/* Cost Line */}
+                              <polyline 
+                                  points={getPoints('cost')} 
+                                  fill="none" 
+                                  stroke="#ef4444" 
+                                  strokeWidth="2"
+                                  strokeDasharray="4"
+                                  vectorEffect="non-scaling-stroke"
+                              />
+                          </svg>
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-500 mt-2 uppercase font-bold">
+                          <span>Mes 1</span>
+                          <span>Mes 12</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-slate-800">
+                          <div>
+                              <div className="text-xs text-slate-500 uppercase">Usuarios Finales</div>
+                              <div className="text-lg font-bold text-white">{finalMonth.users.toLocaleString()}</div>
+                          </div>
+                          <div>
+                              <div className="text-xs text-slate-500 uppercase">Ingresos Mes 12</div>
+                              <div className="text-lg font-bold text-emerald-400">${finalMonth.revenue.toLocaleString()}</div>
+                          </div>
+                          <div>
+                              <div className="text-xs text-slate-500 uppercase">Costos Mes 12</div>
+                              <div className="text-lg font-bold text-red-400">${finalMonth.cost.toLocaleString()}</div>
+                          </div>
+                      </div>
+                  </div>
               </div>
           </div>
       )}
