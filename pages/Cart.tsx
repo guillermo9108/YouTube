@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { db } from '../services/db';
 import { useNavigate } from '../components/Router';
-import { Trash2, ShoppingBag, Truck, CheckCircle, AlertCircle, Loader2, Minus, Plus, Tag, ArrowRight, Wallet } from 'lucide-react';
+import { Trash2, ShoppingBag, Truck, CheckCircle, AlertCircle, Loader2, Minus, Plus, Tag, ArrowRight, Wallet, MapPin } from 'lucide-react';
 
 export default function Cart() {
     const { cart, removeFromCart, updateQuantity, clearCart } = useCart();
@@ -45,8 +45,11 @@ export default function Cart() {
     const handleCheckout = async () => {
         if (!user) return;
         if (cart.length === 0) return;
-        if (!shipping.address || !shipping.fullName) {
-             toast.error("Por favor completa los datos de envío");
+        
+        if (!shipping.address || !shipping.fullName || !shipping.phoneNumber) {
+             toast.error("Por favor completa los datos de envío obligatorios");
+             // Smooth scroll to shipping form on mobile
+             document.getElementById('shipping-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
              return;
         }
 
@@ -80,13 +83,13 @@ export default function Cart() {
     }
 
     return (
-        <div className="max-w-6xl mx-auto px-4 pt-6 pb-32 md:pb-20 animate-in fade-in">
-            <h1 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+        <div className="max-w-6xl mx-auto px-3 md:px-4 pt-4 md:pt-6 pb-36 md:pb-20 animate-in fade-in">
+            <h1 className="text-xl md:text-2xl font-bold text-white mb-4 md:mb-6 flex items-center gap-2">
                 <ShoppingBag className="text-indigo-400"/> Tu Carrito 
                 <span className="text-sm font-normal text-slate-500 ml-2">({totals.itemCount} artículos)</span>
             </h1>
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                 {/* Left Column: Items */}
                 <div className="lg:col-span-2 space-y-4">
                     <div className="bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
@@ -95,9 +98,9 @@ export default function Cart() {
                             const hasDiscount = original > item.price;
 
                             return (
-                                <div key={item.id} className={`flex gap-4 p-4 ${index !== cart.length - 1 ? 'border-b border-slate-800' : ''}`}>
-                                    {/* Image */}
-                                    <div className="w-24 h-28 bg-black rounded-xl overflow-hidden shrink-0 border border-slate-800 relative group">
+                                <div key={item.id} className={`flex gap-3 md:gap-4 p-3 md:p-4 ${index !== cart.length - 1 ? 'border-b border-slate-800' : ''}`}>
+                                    {/* Image (Smaller on mobile) */}
+                                    <div className="w-20 h-20 md:w-24 md:h-28 bg-black rounded-lg md:rounded-xl overflow-hidden shrink-0 border border-slate-800 relative group">
                                         {item.images && item.images[0] && <img src={item.images[0]} className="w-full h-full object-cover transition-transform group-hover:scale-105"/>}
                                         {hasDiscount && (
                                             <div className="absolute top-0 left-0 bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-br shadow-sm">
@@ -107,33 +110,34 @@ export default function Cart() {
                                     </div>
 
                                     {/* Details */}
-                                    <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
-                                        <div className="flex justify-between items-start gap-4">
+                                    <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5 md:py-1">
+                                        <div className="flex justify-between items-start gap-2 md:gap-4">
                                             <div>
-                                                <h4 className="font-bold text-white text-base leading-tight line-clamp-2">{item.title}</h4>
-                                                <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
-                                                    <span className="bg-slate-800 px-1.5 rounded">{item.condition}</span>
+                                                <h4 className="font-bold text-white text-sm md:text-base leading-tight line-clamp-2">{item.title}</h4>
+                                                <p className="text-[10px] md:text-xs text-slate-400 mt-1 flex items-center gap-1">
+                                                    <span className="bg-slate-800 px-1.5 py-0.5 rounded uppercase">{item.condition}</span>
                                                 </p>
                                             </div>
-                                            <button onClick={() => removeFromCart(item.id)} className="text-slate-500 hover:text-red-400 p-1 transition-colors bg-slate-800/50 rounded-full">
+                                            <button onClick={() => removeFromCart(item.id)} className="text-slate-500 hover:text-red-400 p-1.5 transition-colors bg-slate-800/50 rounded-full shrink-0">
                                                 <Trash2 size={16}/>
                                             </button>
                                         </div>
 
-                                        <div className="flex justify-between items-end mt-4">
+                                        <div className="flex justify-between items-end mt-2 md:mt-4">
                                             <div>
                                                 {hasDiscount && (
-                                                    <div className="text-xs text-slate-500 line-through mb-0.5">{original} $</div>
+                                                    <div className="text-[10px] md:text-xs text-slate-500 line-through mb-0.5">{original} $</div>
                                                 )}
-                                                <div className={`font-mono font-bold text-xl ${hasDiscount ? 'text-red-400' : 'text-amber-400'}`}>
+                                                <div className={`font-mono font-bold text-lg md:text-xl ${hasDiscount ? 'text-red-400' : 'text-amber-400'}`}>
                                                     {item.price} $
                                                 </div>
                                             </div>
 
-                                            <div className="flex items-center gap-3 bg-slate-800 rounded-lg p-1 border border-slate-700">
-                                                <button onClick={() => updateQuantity(item.id, -1)} className="w-7 h-7 flex items-center justify-center hover:bg-slate-700 rounded text-slate-300 transition-colors"><Minus size={14}/></button>
-                                                <span className="text-sm font-bold text-white w-4 text-center">{item.quantity}</span>
-                                                <button onClick={() => updateQuantity(item.id, 1)} className="w-7 h-7 flex items-center justify-center hover:bg-slate-700 rounded text-slate-300 transition-colors"><Plus size={14}/></button>
+                                            {/* Quantity Controls (Optimized for touch) */}
+                                            <div className="flex items-center gap-1 md:gap-3 bg-slate-800 rounded-lg p-0.5 md:p-1 border border-slate-700">
+                                                <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 md:w-7 md:h-7 flex items-center justify-center hover:bg-slate-700 rounded text-slate-300 transition-colors active:bg-slate-600"><Minus size={14}/></button>
+                                                <span className="text-sm font-bold text-white w-6 md:w-4 text-center">{item.quantity}</span>
+                                                <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 md:w-7 md:h-7 flex items-center justify-center hover:bg-slate-700 rounded text-slate-300 transition-colors active:bg-slate-600"><Plus size={14}/></button>
                                             </div>
                                         </div>
                                     </div>
@@ -144,8 +148,26 @@ export default function Cart() {
                 </div>
 
                 {/* Right Column: Checkout Panel */}
-                <div className="space-y-6">
-                    {/* Order Summary */}
+                <div className="space-y-4 md:space-y-6">
+                    
+                    {/* Shipping Form - High priority, so placing it visibly */}
+                    <div id="shipping-form" className="bg-slate-900 p-4 md:p-6 rounded-2xl border border-slate-800 scroll-mt-24">
+                        <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-sm uppercase tracking-wide text-slate-500"><Truck size={16}/> Datos de Envío</h3>
+                        <div className="space-y-3">
+                            <input type="text" placeholder="Nombre Completo *" value={shipping.fullName} onChange={e => setShipping({...shipping, fullName: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 md:py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
+                            <div className="relative">
+                                <MapPin size={16} className="absolute left-3 top-3 text-slate-500 pointer-events-none"/>
+                                <input type="text" placeholder="Dirección *" value={shipping.address} onChange={e => setShipping({...shipping, address: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-3 md:py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <input type="text" placeholder="Ciudad" value={shipping.city} onChange={e => setShipping({...shipping, city: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 md:py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
+                                <input type="text" placeholder="C.P." value={shipping.zipCode} onChange={e => setShipping({...shipping, zipCode: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 md:py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
+                            </div>
+                            <input type="tel" placeholder="Teléfono *" value={shipping.phoneNumber} onChange={e => setShipping({...shipping, phoneNumber: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 md:py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
+                        </div>
+                    </div>
+
+                    {/* Order Summary (Desktop) */}
                     <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl">
                         <h3 className="font-bold text-white mb-4 text-lg">Resumen del Pedido</h3>
                         
@@ -192,38 +214,33 @@ export default function Cart() {
                             Confirmar Compra
                         </button>
                     </div>
-
-                    {/* Shipping Form (Simplified in Accordion style or Clean Card) */}
-                    <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
-                        <h3 className="font-bold text-white mb-4 flex items-center gap-2 text-sm uppercase tracking-wide text-slate-500"><Truck size={16}/> Datos de Envío</h3>
-                        <div className="space-y-3">
-                            <input type="text" placeholder="Nombre Completo" value={shipping.fullName} onChange={e => setShipping({...shipping, fullName: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
-                            <input type="text" placeholder="Dirección" value={shipping.address} onChange={e => setShipping({...shipping, address: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
-                            <div className="grid grid-cols-2 gap-3">
-                                <input type="text" placeholder="Ciudad" value={shipping.city} onChange={e => setShipping({...shipping, city: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
-                                <input type="text" placeholder="C.P." value={shipping.zipCode} onChange={e => setShipping({...shipping, zipCode: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
-                            </div>
-                            <input type="text" placeholder="Teléfono" value={shipping.phoneNumber} onChange={e => setShipping({...shipping, phoneNumber: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none transition-colors" />
-                        </div>
-                    </div>
                 </div>
             </div>
 
             {/* Mobile Sticky Checkout Bar */}
-            <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 p-4 safe-area-bottom z-40">
-                <div className="flex gap-4 items-center">
+            <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 p-4 pb-safe z-40 shadow-2xl">
+                <div className="flex gap-4 items-center mb-1">
                     <div className="flex-1">
-                        <div className="text-xs text-slate-400">Total a Pagar</div>
-                        <div className="text-xl font-bold text-amber-400">{totals.total.toFixed(2)} $</div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-400 uppercase font-bold">Total</span>
+                            {savings > 0 && <span className="text-[10px] bg-emerald-900/30 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30">Ahorras {savings.toFixed(0)}$</span>}
+                        </div>
+                        <div className="text-2xl font-black text-amber-400 leading-none mt-0.5">{totals.total.toFixed(2)} <span className="text-sm text-amber-600">$</span></div>
                     </div>
                     <button 
                         onClick={handleCheckout}
                         disabled={loading || (user ? Number(user.balance) < totals.total : true)}
-                        className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 shadow-lg"
+                        className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-3.5 px-8 rounded-xl flex items-center gap-2 shadow-lg active:scale-95 transition-all"
                     >
-                        {loading ? <Loader2 className="animate-spin"/> : 'Pagar'} <ArrowRight size={18}/>
+                        {loading ? <Loader2 className="animate-spin"/> : (user && Number(user.balance) < totals.total ? 'Sin Saldo' : 'Pagar')} 
+                        {!loading && <ArrowRight size={18}/>}
                     </button>
                 </div>
+                {user && Number(user.balance) < totals.total && (
+                    <div className="text-[10px] text-red-400 text-center mt-2 font-bold animate-pulse">
+                        Saldo insuficiente ({Number(user.balance).toFixed(2)} $)
+                    </div>
+                )}
             </div>
         </div>
     );
