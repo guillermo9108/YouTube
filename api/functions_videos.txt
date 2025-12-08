@@ -117,24 +117,111 @@ function video_server_import($pdo, $input) {
     respond(true, ['message' => 'Queued']);
 }
 
-// --- NEW FAST SCANNING LOGIC WITH SYNOLOGY @eaDir SUPPORT ---
+// --- FTP FUNCTIONS ---
+
+function getFtpConnection($pdo) {
+    $stmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
+    $json = $stmt->fetchColumn();
+    $s = json_decode($json, true);
+    
+    if (!$s || empty($s['host'])) throw new Exception("FTP Settings not configured");
+    
+    $conn = ftp_connect($s['host'], $s['port'] ?? 21, 10);
+    if (!$conn) throw new Exception("Could not connect to FTP host");
+    
+    if (!@ftp_login($conn, $s['user'], $s['pass'])) throw new Exception("FTP Login failed");
+    
+    ftp_pasv($conn, true);
+    return $conn;
+}
+
+function video_ftp_list($pdo, $input) {
+    try {
+        $conn = getFtpConnection($pdo);
+        $path = $input['path'] ?? '/';
+        
+        $rawList = ftp_mlsd($conn, $path);
+        $files = [];
+        
+        if (is_array($rawList)) {
+            foreach ($rawList as $item) {
+                if ($item['name'] == '.' || $item['name'] == '..') continue;
+                
+                // Only folders and common video files
+                $isDir = $item['type'] == 'dir';
+                $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
+                $isVideo = in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'm4v', 'ts', 'flv']);
+                
+                if ($isDir || $isVideo) {
+                    $fullPath = rtrim($path, '/') . '/' . $item['name'];
+                    $files[] = [
+                        'name' => $item['name'],
+                        'type' => $item['type'],
+                        'size' => isset($item['size']) ? round($item['size'] / 1024 / 1024, 2) . ' MB' : '-',
+                        'path' => $fullPath
+                    ];
+                }
+            }
+        }
+        
+        ftp_close($conn);
+        respond(true, $files);
+    } catch (Exception $e) {
+        respond(false, null, $e->getMessage());
+    }
+}
+
+function video_ftp_import($pdo, $input) {
+    $remotePath = $input['path'];
+    
+    try {
+        // Just verify connection works before adding
+        $conn = getFtpConnection($pdo);
+        ftp_close($conn);
+        
+        $filename = basename($remotePath);
+        
+        // We do NOT download the file. We just index the path.
+        // ID Generation
+        $vidId = 'ftp_' . md5($remotePath);
+        
+        // Use a placeholder thumb. The visual scanner (Step 2) will play this via the FTP proxy and extract a real thumb.
+        $thumbPath = "https://via.placeholder.com/640x360.png?text=FTP+Scan";
+        
+        // For FTP videos, we store the REMOTE PATH in 'videoUrl'
+        // We set isLocal = 2 to indicate it's an FTP Stream
+        $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+        
+        $stmt = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'PENDING', 0, 2)");
+        $stmt->execute([$vidId, $filename, "Streaming from FTP", $thumbPath, $remotePath, $adminId, time()]);
+        
+        respond(true, ['id' => $vidId, 'message' => 'Indexed successfully. Run Scanner to fetch metadata.']);
+        
+    } catch (Exception $e) {
+        respond(false, null, $e->getMessage());
+    }
+}
+
+// --- SYNOLOGY & LOCAL SCANNER ---
 
 function video_scan_local($pdo, $input) {
     $path = $input['path'];
     if (!is_dir($path) && !@scandir($path)) respond(true, ['success' => false, 'error' => "Cannot access directory: $path"]);
 
+    // Recursive Search for Videos
     $filesFound = [];
     try {
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
         foreach ($iterator as $file) {
-            // Skip @eaDir itself when looking for videos
+            // Ignore hidden @eaDir folders during video search
             if (strpos($file->getPathname(), '@eaDir') !== false) continue;
 
             if ($file->isFile()) {
                 $ext = strtolower($file->getExtension());
-                if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv'])) {
+                // Common formats including MKV/AVI which often lack browser support but are valid
+                if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
                     $fullPath = $file->getPathname();
-                    // Encode path to avoid SQL issues with special chars
+                    // Fix encoding for special chars
                     if (!mb_check_encoding($fullPath, 'UTF-8')) $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
                     $filesFound[] = $fullPath;
                 }
@@ -145,6 +232,7 @@ function video_scan_local($pdo, $input) {
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $addedCount = 0;
     
+    // Prepared Statements
     $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? COLLATE utf8mb4_unicode_ci");
     $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'PENDING', 0, 1)");
 
@@ -155,20 +243,24 @@ function video_scan_local($pdo, $input) {
             $title = basename($fullPath);
             $thumbUrl = "https://via.placeholder.com/640x360.png?text=Processing";
             
-            // --- SYNOLOGY @eaDir & LOCAL ASSET DISCOVERY ---
-            $dir = dirname($fullPath);
-            $file = basename($fullPath);
+            // --- SYNOLOGY MEDIA SERVER THUMBNAIL EXTRACTION ---
+            // Synology stores metadata in a hidden @eaDir directory
             
-            // 1. Synology Structure: @eaDir/Filename/SYNOVIDEO_VIDEO_SCREENSHOT.jpg
-            $eaDir = $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $file;
+            $dir = dirname($fullPath);
+            $filename = basename($fullPath);
             $rawName = pathinfo($fullPath, PATHINFO_FILENAME);
-
+            
+            // Candidate paths for thumbnails
             $candidates = [
-                // Synology
-                $eaDir . DIRECTORY_SEPARATOR . 'SYNOVIDEO_VIDEO_SCREENSHOT.jpg',
-                $eaDir . DIRECTORY_SEPARATOR . 'SYNOVIDEO_VIDEO_BIG.jpg',
-                $eaDir . DIRECTORY_SEPARATOR . 'SYNOVIDEO_VIDEO_M.jpg',
-                // Standard Sidecars (Plex/Jellyfin/Kodi)
+                // Synology Media Server Standard
+                $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename . DIRECTORY_SEPARATOR . 'SYNOVIDEO_VIDEO_SCREENSHOT.jpg',
+                $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename . DIRECTORY_SEPARATOR . 'SYNOVIDEO_VIDEO_BIG.jpg',
+                $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename . DIRECTORY_SEPARATOR . 'cover.jpg',
+                
+                // Recursively search inside @eaDir specific folder for ANY jpg if exact match fails
+                'SCAN_DIR_' . $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename,
+
+                // Standard Sidecars
                 $dir . DIRECTORY_SEPARATOR . $rawName . '.jpg',
                 $dir . DIRECTORY_SEPARATOR . $rawName . '-poster.jpg',
                 $dir . DIRECTORY_SEPARATOR . 'poster.jpg',
@@ -177,18 +269,38 @@ function video_scan_local($pdo, $input) {
             ];
 
             foreach ($candidates as $cand) {
+                // Special recursive scan for @eaDir folder content
+                if (strpos($cand, 'SCAN_DIR_') === 0) {
+                    $scanDir = substr($cand, 9);
+                    if (is_dir($scanDir)) {
+                        $files = scandir($scanDir);
+                        foreach($files as $f) {
+                            if (strtolower(pathinfo($f, PATHINFO_EXTENSION)) === 'jpg') {
+                                $fullCand = $scanDir . DIRECTORY_SEPARATOR . $f;
+                                $newThumbName = $vidId . '.jpg';
+                                $dest = THUMB_DIR . $newThumbName;
+                                if (copy($fullCand, $dest)) {
+                                    $thumbUrl = "api/" . $dest; 
+                                    break 2; // Break both loops
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 if (file_exists($cand)) {
                     $newThumbName = $vidId . '.jpg';
                     $dest = THUMB_DIR . $newThumbName;
                     if (copy($cand, $dest)) {
-                        $thumbUrl = "api/" . $dest; // Set as found!
+                        $thumbUrl = "api/" . $dest; // SUCCESS: Found a thumbnail!
                     }
-                    break; 
+                    break;
                 }
             }
-            // -----------------------------
+            // -------------------------------------------
 
-            $insert->execute([$vidId, mb_convert_encoding($title, 'UTF-8', 'auto'), "Local Video", $thumbUrl, $fullPath, $adminId, time()]);
+            $insert->execute([$vidId, mb_convert_encoding($title, 'UTF-8', 'auto'), "Local Library", $thumbUrl, $fullPath, $adminId, time()]);
             $addedCount++;
         }
     }
@@ -196,54 +308,47 @@ function video_scan_local($pdo, $input) {
     respond(true, ['success' => true, 'totalFound' => count($filesFound), 'newToImport' => $addedCount]);
 }
 
-// Step 2: Get Pending
 function video_get_unprocessed($pdo) {
-    $mode = $_GET['mode'] ?? 'normal';
-    $limit = intval($_GET['limit'] ?? 50);
-    $limit = max(1, min(50, $limit));
-
-    // 'PENDING' means user hasn't processed it in the UI scanner yet
-    $sql = "SELECT id, videoUrl, title, thumbnailUrl FROM videos WHERE category = 'PENDING' AND isLocal = 1";
-    
-    if ($mode === 'random') {
-        $sql .= " ORDER BY RAND()";
-    }
-    $sql .= " LIMIT $limit";
-
+    // Only get videos marked PENDING.
+    // Order by isLocal DESC to prioritize local files which scan faster.
+    $limit = 50;
+    $sql = "SELECT id, videoUrl, title, thumbnailUrl FROM videos WHERE category = 'PENDING' LIMIT $limit";
     $stmt = $pdo->query($sql);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
 }
 
-// Step 3: Update Metadata (From Client)
 function video_update_metadata($pdo, $post, $files) {
     $id = $post['id'];
     $duration = floatval($post['duration']);
     
     if (!$id) respond(false);
 
-    if ($duration <= 0) {
-        $category = 'UNKNOWN'; 
-        $price = 0;
-        $title = null;
-    } else {
-        $category = detectCategoryFromDuration($duration);
-        $settings = $pdo->query("SELECT * FROM system_settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-        $price = getPriceForCategory($category, $settings);
+    $category = 'UNKNOWN'; 
+    $price = 0;
+    $title = null;
 
-        // Smart Renaming
-        $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
-        $stmt->execute([$id]);
-        $path = $stmt->fetchColumn();
-        
-        $smart = smartParseFilename($path, $category);
-        $title = $smart['title'];
-        
-        if ($smart['category'] && $smart['category'] !== 'OTHER') {
-            $category = $smart['category'];
-            $price = getPriceForCategory($category, $settings);
-        }
+    // Smart logic: If duration > 0, we trust it. If 0 (failed scan), we default to OTHER but keep it valid.
+    
+    $category = detectCategoryFromDuration($duration);
+    $settings = $pdo->query("SELECT * FROM system_settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $price = getPriceForCategory($category, $settings);
+
+    // Smart Renaming
+    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $path = $stmt->fetchColumn();
+    
+    // Sanitize path if it's an API URL
+    $cleanPath = str_replace('api/', '', $path);
+    
+    $smart = smartParseFilename($cleanPath, $category);
+    $title = $smart['title'];
+    
+    if ($smart['category'] && $smart['category'] !== 'OTHER') {
+        $category = $smart['category'];
+        $price = getPriceForCategory($category, $settings);
     }
 
     $params = [$category, $duration, $price];
@@ -254,7 +359,6 @@ function video_update_metadata($pdo, $post, $files) {
         $params[] = $title;
     }
     
-    // Only update thumbnail if a file was uploaded (Client generated one)
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         $thumbPath = THUMB_DIR . "{$id}.jpg";
         if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) {
@@ -267,7 +371,6 @@ function video_update_metadata($pdo, $post, $files) {
     $params[] = $id;
     
     $pdo->prepare($sql)->execute($params);
-    
     respond(true);
 }
 
@@ -285,116 +388,6 @@ function video_update_prices_bulk($pdo, $input) {
     respond(true);
 }
 
-// --- FFmpeg Server-Side Processing (Synology Optimized) ---
-
-function get_ffmpeg_binary() {
-    $paths = [
-        '/usr/bin/ffmpeg',
-        '/usr/local/bin/ffmpeg',
-        '/bin/ffmpeg',
-        '/var/packages/CodecPack/target/bin/ffmpeg',
-        '/var/packages/VideoStation/target/bin/ffmpeg'
-    ];
-    foreach ($paths as $path) {
-        if (file_exists($path) && is_executable($path)) return $path;
-    }
-    // Fallback: assume in PATH
-    return 'ffmpeg';
-}
-
-function video_scan_ftp($pdo, $input) {
-    // This function is reused for the "Server Batch Process" button
-    // It fetches 5 pending videos and processes them with FFmpeg on the server
-    
-    $ffmpeg = get_ffmpeg_binary();
-    $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE category = 'PENDING' AND isLocal = 1 LIMIT 5");
-    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $processed = [];
-    $remaining = 0;
-    
-    // Get Settings for pricing
-    $settings = $pdo->query("SELECT * FROM system_settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-
-    foreach ($videos as $v) {
-        $id = $v['id'];
-        $path = $v['videoUrl']; // This is the absolute path for local files
-        
-        $duration = 0;
-        
-        // 1. Get Duration
-        // Command: ffmpeg -i file 2>&1 | grep "Duration"
-        $cmd = "$ffmpeg -i " . escapeshellarg($path) . " 2>&1";
-        $output = shell_exec($cmd);
-        
-        if (preg_match('/Duration: (\d+):(\d+):(\d+)/', $output, $matches)) {
-            $hours = (int)$matches[1];
-            $mins = (int)$matches[2];
-            $secs = (int)$matches[3];
-            $duration = ($hours * 3600) + ($mins * 60) + $secs;
-        }
-        
-        // 2. Extract Thumbnail (if missing or placeholder)
-        $hasThumb = false;
-        // Check if DB already has a good thumb (from @eaDir scan)
-        $currThumb = $pdo->query("SELECT thumbnailUrl FROM videos WHERE id = '$id'")->fetchColumn();
-        if (strpos($currThumb, 'placeholder') !== false) {
-            // Generate thumb at 10% or 10 seconds
-            $seek = max(5, min(30, $duration * 0.1));
-            $thumbFile = THUMB_DIR . "{$id}.jpg";
-            $cmdThumb = "$ffmpeg -y -ss $seek -i " . escapeshellarg($path) . " -vframes 1 -q:v 2 " . escapeshellarg($thumbFile) . " 2>&1";
-            shell_exec($cmdThumb);
-            
-            if (file_exists($thumbFile)) {
-                $hasThumb = true;
-                $currThumb = "api/" . $thumbFile;
-            }
-        } else {
-            $hasThumb = true; // Already had one
-        }
-        
-        // 3. Update DB
-        if ($duration > 0) {
-            $category = detectCategoryFromDuration($duration);
-            $price = getPriceForCategory($category, $settings);
-            
-            // Smart Rename
-            $smart = smartParseFilename($path, $category);
-            $title = $smart['title'];
-            if ($smart['category'] && $smart['category'] !== 'OTHER') {
-                $category = $smart['category'];
-                $price = getPriceForCategory($category, $settings);
-            }
-            
-            $sql = "UPDATE videos SET category = ?, duration = ?, price = ?, title = ?";
-            $params = [$category, $duration, $price, $title];
-            
-            if ($hasThumb) {
-                $sql .= ", thumbnailUrl = ?";
-                $params[] = $currThumb;
-            }
-            
-            $sql .= " WHERE id = ?";
-            $params[] = $id;
-            
-            $pdo->prepare($sql)->execute($params);
-            
-            $processed[] = ['id' => $id, 'title' => $title, 'category' => $category, 'status' => 'OK'];
-        } else {
-            // Failed to read file? Mark as UNKNOWN to skip next time
-            $pdo->prepare("UPDATE videos SET category = 'UNKNOWN' WHERE id = ?")->execute([$id]);
-            $processed[] = ['id' => $id, 'title' => basename($path), 'error' => 'FFmpeg failed to read duration'];
-        }
-    }
-    
-    $remaining = $pdo->query("SELECT COUNT(*) FROM videos WHERE category = 'PENDING' AND isLocal = 1")->fetchColumn();
-    
-    respond(true, [
-        'processed' => $processed, 
-        'remaining' => $remaining, 
-        'completed' => ($remaining == 0)
-    ]);
-}
-
 function video_get_scan_status($pdo) { respond(true, ['active' => false]); }
+function video_scan_ftp($pdo, $input) { respond(true, ['completed' => true]); } // Stub
 ?>

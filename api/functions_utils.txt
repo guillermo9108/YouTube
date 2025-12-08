@@ -123,7 +123,7 @@ function smartParseFilename($fullPath, $detectedType = null) {
     ];
 }
 
-// STANDARD HTTP RANGE STREAMING FUNCTION
+// STANDARD HTTP RANGE STREAMING FUNCTION (Supports Local & FTP Proxy)
 function streamVideo($filePath, $pdo) {
     // Disable output compression which messes with Range headers
     if(ini_get('zlib.output_compression')) ini_set('zlib.output_compression', 'Off');
@@ -134,12 +134,70 @@ function streamVideo($filePath, $pdo) {
     // Disable time limit for long streams
     set_time_limit(0);
 
-    if (!file_exists($filePath)) {
-        http_response_code(404);
-        die("File not found");
+    // Headers - CRITICAL: Always send Access-Control-Allow-Origin
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
+    header('Access-Control-Allow-Headers: Range');
+    header('Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges');
+    header('Accept-Ranges: bytes'); // Default to bytes, will overwrite if FTP can't support it
+
+    $fileSize = 0;
+    $isFtp = false;
+    $resource = null;
+
+    // --- CHECK IF FTP PROXY NEEDED ---
+    $stmt = $pdo->prepare("SELECT isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
+    // Try matching both full path or relative API path
+    $stmt->execute([$filePath, "api/" . $filePath]);
+    $isLocal = $stmt->fetchColumn();
+
+    if ($isLocal == 2) {
+        // --- FTP STREAMING MODE ---
+        $isFtp = true;
+        // Retrieve credentials securely
+        $sStmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
+        $json = $sStmt->fetchColumn();
+        $s = json_decode($json, true);
+        
+        if (!$s || empty($s['host'])) { http_response_code(500); die("FTP Config Missing"); }
+        
+        // Build Authenticated URL
+        // We use urlencode for user/pass to handle special chars like @ or :
+        $authUrl = "ftp://" . urlencode($s['user']) . ":" . urlencode($s['pass']) . "@" . $s['host'] . ":" . ($s['port']??21) . $filePath;
+        
+        // Get File Size
+        // We can use fopen context to get headers, but checking size via separate connection is often safer for FTP
+        // However, for stream speed, let's try reading the header
+        $context = stream_context_create(['ftp' => ['overwrite' => true]]);
+        $resource = @fopen($authUrl, 'rb', false, $context);
+        
+        if (!$resource) { http_response_code(404); die("FTP File unreachable"); }
+        
+        // Try to determine size
+        $stat = fstat($resource);
+        $fileSize = $stat['size'] ?? 0;
+        
+        // If fstat fails (some FTP servers), we can't support Seeking easily
+        if ($fileSize <= 0) {
+            // Fallback: No content-length, straight stream
+            header('Content-Type: video/mp4'); // Guess generic
+            fpassthru($resource);
+            fclose($resource);
+            exit;
+        }
+
+    } else {
+        // --- LOCAL FILE MODE ---
+        if (!file_exists($filePath)) {
+            http_response_code(404);
+            die("File not found");
+        }
+        $fileSize = filesize($filePath);
+        $resource = fopen($filePath, 'rb');
     }
 
-    $fileSize = filesize($filePath);
+    // --- SHARED STREAMING LOGIC (Range Support) ---
+    
     $offset = 0;
     $length = $fileSize;
 
@@ -154,18 +212,10 @@ function streamVideo($filePath, $pdo) {
         'mp3' => 'audio/mpeg'
     ];
     $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'application/octet-stream';
-
-    // Headers - CRITICAL: Always send Access-Control-Allow-Origin
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
-    header('Access-Control-Allow-Headers: Range');
-    header('Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges');
     header('Content-Type: ' . $contentType);
-    header('Accept-Ranges: bytes');
-    
+
     // Range Handling
     if (isset($_SERVER['HTTP_RANGE'])) {
-        // Range: bytes=0-1024
         if (preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches)) {
             $offset = intval($matches[1]);
             $end = isset($matches[2]) && $matches[2] !== '' ? intval($matches[2]) : $fileSize - 1;
@@ -184,27 +234,40 @@ function streamVideo($filePath, $pdo) {
         header("Content-Length: $fileSize");
     }
     
-    // Don't send content length again if already set by Range
     if (isset($_SERVER['HTTP_RANGE'])) {
         header("Content-Length: $length");
     }
 
-    $fp = fopen($filePath, 'rb');
-    fseek($fp, $offset);
+    // Seek
+    if ($offset > 0) {
+        if (fseek($resource, $offset) !== 0) {
+            // Seek failed (common in some FTP wrappers). 
+            // Fallback: Read and discard bytes until offset. Slow but functional.
+            // Only do this for small offsets to avoid timeouts.
+            if ($isFtp) {
+                $consumed = 0;
+                while ($consumed < $offset && !feof($resource)) {
+                    $chunk = min(8192, $offset - $consumed);
+                    fread($resource, $chunk);
+                    $consumed += $chunk;
+                }
+            }
+        }
+    }
     
-    // Output file in chunks
+    // Output loop
     $bufferSize = 1024 * 64; // 64KB chunks
     $bytesSent = 0;
     
-    while (!feof($fp) && $bytesSent < $length && !connection_aborted()) {
+    while (!feof($resource) && $bytesSent < $length && !connection_aborted()) {
         $readSize = min($bufferSize, $length - $bytesSent);
-        $buffer = fread($fp, $readSize);
+        $buffer = fread($resource, $readSize);
         echo $buffer;
         flush();
         $bytesSent += strlen($buffer);
     }
     
-    fclose($fp);
+    fclose($resource);
     exit;
 }
 ?>

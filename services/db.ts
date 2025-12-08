@@ -1,4 +1,6 @@
 
+
+
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest, MarketplaceReview } from '../types';
 
 const API_BASE = 'api';
@@ -231,6 +233,10 @@ class DatabaseService {
   }
   // Deprecated/Stub
   async processScanBatch(): Promise<any> { return { completed: true }; }
+
+  // --- FTP ---
+  async listFtpFiles(path: string): Promise<any[]> { return this.request<any[]>('index.php?action=ftp_list', 'POST', { path }); }
+  async importFtpFile(path: string): Promise<void> { await this.request('index.php?action=ftp_import', 'POST', { path }); }
 
   async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> { await this.request('index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice }); }
   
