@@ -3,61 +3,92 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Play, Maximize, X, Info, VolumeX, Volume2 } from 'lucide-react';
+import { FolderSearch, Loader2, Play, Maximize, X, Info, VolumeX, Volume2, Image as ImageIcon } from 'lucide-react';
 
 // --- VISIBLE SCANNER PLAYER COMPONENT ---
 const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete: (dur: number, thumb: File | null) => void, onSkip: () => void }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState('Loading...');
+    const [status, setStatus] = useState('Checking...');
     const [isMuted, setIsMuted] = useState(true);
-    const attemptRef = useRef(0);
+    
+    // Detect if we already have a real thumbnail from the server (Synology @eaDir extraction)
+    // A "real" thumbnail is not the placeholder.
+    const hasRealThumbnail = video.thumbnailUrl && !video.thumbnailUrl.includes('placeholder');
 
     useEffect(() => {
-        // Safety timeout - Give it 30s to load and play 1.5s
+        if (hasRealThumbnail) {
+            setStatus('Metadata Only (Fast Mode)...');
+        } else {
+            setStatus('Loading Video...');
+        }
+
         const timer = setTimeout(() => {
-            console.warn("Scanner timeout for", video.title);
             const vid = videoRef.current;
             if (vid && vid.duration > 0 && !isNaN(vid.duration)) {
-                // If we at least got duration, save it without thumb
                 onComplete(vid.duration, null);
             } else {
+                console.warn("Scanner timeout for", video.title);
                 onSkip();
             }
-        }, 30000);
-        return () => clearTimeout(timer);
-    }, [video]);
+        }, hasRealThumbnail ? 10000 : 30000); // Shorter timeout for metadata scan
 
-    const handleTimeUpdate = async () => {
+        return () => clearTimeout(timer);
+    }, [video, hasRealThumbnail]);
+
+    // 1. Event: Metadata Loaded (Duration available)
+    const handleLoadedMetadata = () => {
         const vid = videoRef.current;
         if (!vid) return;
 
-        // Wait until we have played at least 1.5 seconds to ensure we have a valid frame
+        // If we already have a thumbnail from the server, we don't need to play/seek!
+        if (hasRealThumbnail) {
+            setStatus('Saving Metadata...');
+            const duration = (!isNaN(vid.duration) && vid.duration > 0) ? vid.duration : 0;
+            // Short delay to ensure state updates visually before moving on
+            setTimeout(() => onComplete(duration, null), 500); 
+        } else {
+            // No thumbnail? Try to play to capture one.
+            setStatus('Waiting for playback...');
+            vid.play().catch(e => {
+                console.error("Autoplay failed", e);
+                // If autoplay fails, we can't get a canvas frame easily without interaction.
+                // Fallback: Just save duration if we have it.
+                if (vid.duration > 0) {
+                    setStatus('Autoplay blocked - Saving duration only');
+                    setTimeout(() => onComplete(vid.duration, null), 1000);
+                }
+            });
+        }
+    };
+
+    // 2. Event: Time Updated (Only needed if we are generating a thumbnail)
+    const handleTimeUpdate = async () => {
+        if (hasRealThumbnail) return; // Ignore if we have thumb
+
+        const vid = videoRef.current;
+        if (!vid) return;
+
+        // Wait until > 1.5s to ensure valid frame
         if (vid.currentTime > 1.5) {
-            setStatus('Capturing...');
+            setStatus('Capturing Frame...');
             vid.pause();
             
             let thumbnail: File | null = null;
-
             try {
                 const canvas = document.createElement('canvas');
                 canvas.width = 640;
                 canvas.height = 360; 
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
-                    // Draw current frame
                     ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-                    
                     const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.7));
-                    if (blob) {
-                        thumbnail = new File([blob], "thumb.jpg", { type: 'image/jpeg' });
-                    }
+                    if (blob) thumbnail = new File([blob], "thumb.jpg", { type: 'image/jpeg' });
                 }
             } catch (e) {
                 console.warn("Thumbnail capture failed (CORS/Taint):", e);
             }
 
             setStatus('Saving...');
-            // Ensure duration is valid
             const duration = (!isNaN(vid.duration) && vid.duration > 0) ? vid.duration : 0;
             onComplete(duration, thumbnail);
         }
@@ -66,22 +97,17 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
     const handleError = (e: any) => {
         const err = videoRef.current?.error;
         console.error("Scanner Video Error:", err, video.videoUrl);
-        setStatus(`Playback Error: ${err?.code || 'Unknown'}`);
         
-        // Retry once logic could go here, but for now we skip to keep queue moving
-        setTimeout(onSkip, 1000);
+        // If error, but we have a thumbnail from server, we might still have metadata!
+        if (hasRealThumbnail && videoRef.current?.duration) {
+             onComplete(videoRef.current.duration, null);
+             return;
+        }
+
+        setStatus(`Error: ${err?.code || 'Codec/Net'}`);
+        setTimeout(onSkip, 1500);
     };
 
-    const handlePlaying = () => {
-        setStatus('Playing...');
-    };
-
-    const handleWaiting = () => {
-        setStatus('Buffering...');
-    };
-
-    // Use a timestamp to prevent caching of failed requests
-    // Force absolute path handling if needed, though 'api/...' usually works
     const videoSrc = `${video.videoUrl}${video.videoUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
     return (
@@ -89,44 +115,57 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
             <h3 className="text-lg font-bold text-white mb-2 truncate w-full text-center">{video.title}</h3>
             
             <div className="relative aspect-video w-full bg-black rounded-lg overflow-hidden border border-slate-800 mb-4">
-                <video
-                    key={video.id}
-                    ref={videoRef}
-                    src={videoSrc} 
-                    crossOrigin="anonymous"
-                    className="w-full h-full object-contain"
-                    muted={isMuted}
-                    autoPlay
-                    playsInline
-                    onTimeUpdate={handleTimeUpdate}
-                    onPlaying={handlePlaying}
-                    onWaiting={handleWaiting}
-                    onError={handleError}
-                />
+                {hasRealThumbnail ? (
+                    /* Metadata Mode: Hidden Video + Visible Server Thumb */
+                    <>
+                        <img src={video.thumbnailUrl} className="w-full h-full object-cover opacity-50" alt="Server Thumb" />
+                        <div className="absolute inset-0 flex flex-col items-center justify-center">
+                            <ImageIcon size={48} className="text-emerald-500 mb-2"/>
+                            <span className="text-emerald-400 font-bold text-sm bg-black/50 px-2 py-1 rounded">Thumbnail Found on Server</span>
+                        </div>
+                        <video
+                            ref={videoRef}
+                            src={videoSrc}
+                            className="absolute opacity-0 pointer-events-none"
+                            preload="metadata"
+                            muted
+                            onLoadedMetadata={handleLoadedMetadata}
+                            onError={handleError}
+                        />
+                    </>
+                ) : (
+                    /* Capture Mode: Visible Video */
+                    <video
+                        key={video.id}
+                        ref={videoRef}
+                        src={videoSrc} 
+                        crossOrigin="anonymous"
+                        className="w-full h-full object-contain"
+                        muted={isMuted}
+                        playsInline
+                        onLoadedMetadata={handleLoadedMetadata}
+                        onTimeUpdate={handleTimeUpdate}
+                        onError={handleError}
+                    />
+                )}
                 
                 {/* Status Overlay */}
-                <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-3 py-1.5 rounded backdrop-blur-md font-mono border border-white/10 flex items-center gap-2">
+                <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-3 py-1.5 rounded backdrop-blur-md font-mono border border-white/10 flex items-center gap-2 z-10">
                     <div className={`w-2 h-2 rounded-full ${status.includes('Error') ? 'bg-red-500' : 'bg-emerald-500 animate-pulse'}`}></div>
                     {status}
                 </div>
-
-                {/* Mute Toggle */}
-                <button 
-                    onClick={() => setIsMuted(!isMuted)}
-                    className="absolute bottom-2 right-2 bg-black/60 p-2 rounded-full text-white hover:bg-black/80 transition-colors"
-                >
-                    {isMuted ? <VolumeX size={16}/> : <Volume2 size={16}/>}
-                </button>
             </div>
 
             <div className="flex gap-4 w-full">
                 <button onClick={onSkip} className="flex-1 bg-red-900/20 hover:bg-red-900/40 text-red-200 py-3 rounded-lg font-bold transition-colors text-xs uppercase tracking-wider border border-red-900/30">
-                    Force Skip Video
+                    Skip Video
                 </button>
             </div>
             
             <p className="text-xs text-slate-500 mt-4 text-center max-w-sm">
-                The video will play automatically. Once it reaches 1.5 seconds, a snapshot will be taken and it will proceed to the next video.
+                {hasRealThumbnail 
+                    ? "Thumbnail detected on server. Only extracting duration (Fast)." 
+                    : "Playing video to capture thumbnail and duration."}
             </p>
         </div>
     );
@@ -247,7 +286,12 @@ export default function AdminLibrary() {
             <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
                 <h3 className="font-bold text-white flex items-center gap-2"><FolderSearch size={18}/> Escaneo de Librería Local</h3>
                 <div className="p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-lg text-sm text-indigo-200/80">
-                    <strong>Método Híbrido:</strong> Servidor Indexa &rarr; Cliente (Tu móvil) Procesa.
+                    <strong>Método Híbrido (Synology Optimized):</strong>
+                    <ul className="list-disc list-inside mt-2 space-y-1">
+                        <li>Indexa archivos en el servidor.</li>
+                        <li>Busca miniaturas generadas por Synology (@eaDir).</li>
+                        <li>El cliente (navegador) solo calcula la duración si ya existe miniatura.</li>
+                    </ul>
                 </div>
 
                 <div>
@@ -256,11 +300,11 @@ export default function AdminLibrary() {
                 </div>
 
                 <button onClick={handleScanLibrary} disabled={isScanning || activeScan} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                    {isScanning ? <Loader2 className="animate-spin"/> : <FolderSearch size={20}/>} Paso 1: Indexar Archivos
+                    {isScanning ? <Loader2 className="animate-spin"/> : <FolderSearch size={20}/>} Paso 1: Indexar (+ Buscar Miniaturas)
                 </button>
                 
                 <button onClick={startActiveScan} disabled={isScanning || activeScan} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2">
-                    {activeScan ? <Loader2 className="animate-spin"/> : <Play size={20}/>} Paso 2: Procesar (Escáner Visual)
+                    {activeScan ? <Loader2 className="animate-spin"/> : <Play size={20}/>} Paso 2: Procesar Metadatos
                 </button>
             </div>
 
@@ -287,7 +331,7 @@ export default function AdminLibrary() {
                     
                     <div className="mt-8 text-slate-500 text-sm max-w-md text-center">
                         <Info size={16} className="inline mr-1"/>
-                        Do not close this window. The app is scanning your videos to extract duration and thumbnails.
+                        Do not close this window.
                     </div>
                 </div>
             )}
