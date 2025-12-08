@@ -16,65 +16,93 @@ const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: num
     return Math.floor(colorSum / (width * height));
 };
 
+const blobCache = new Map<string, string>();
+
 export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thumbnail: File | null, duration: number }> => {
-  let finalUrl = '';
-  let isBlob = false;
+  const isFile = typeof fileOrUrl !== 'string';
+  let videoUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
+  let tempBlobUrl: string | null = null;
 
-  // 1. Determine Source Type
-  if (typeof fileOrUrl !== 'string') {
-      finalUrl = URL.createObjectURL(fileOrUrl);
-      isBlob = true;
-  } else {
-      finalUrl = fileOrUrl;
-  }
-
+  // Cleanup helper
   const cleanup = (video: HTMLVideoElement) => {
       try {
           video.pause();
           video.removeAttribute('src'); 
           video.load(); 
           video.remove();
-          if (isBlob) URL.revokeObjectURL(finalUrl);
+          if (isFile) URL.revokeObjectURL(videoUrl);
+          if (tempBlobUrl) URL.revokeObjectURL(tempBlobUrl);
       } catch(e) {}
   };
 
+  // --- STRATEGY 1: PARTIAL FETCH (The "Local File" Simulation) ---
+  // We download the first 5MB. This bypasses CORS and usually gets the MOOV atom (metadata).
+  if (!isFile) {
+      try {
+          // console.log("Attempting Partial Fetch (5MB)...");
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for fetch
+          
+          const response = await fetch(videoUrl, { 
+              headers: { 'Range': 'bytes=0-5242880' }, // 5MB
+              signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (response.ok || response.status === 206) {
+              const blob = await response.blob();
+              // Re-create blob with specific type to help browser
+              const fixedBlob = new Blob([blob], { type: 'video/mp4' }); 
+              tempBlobUrl = URL.createObjectURL(fixedBlob);
+              // Use the blob URL instead of the remote URL
+              videoUrl = tempBlobUrl; 
+          }
+      } catch (e) {
+          console.warn("Partial fetch failed, falling back to direct stream.", e);
+      }
+  }
+
+  // --- MAIN VIDEO PROCESSOR ---
   return new Promise((resolve) => {
       const video = document.createElement('video');
-      let attemptMode: 'CORS' | 'NO_CORS' = 'CORS';
       
-      // Default config
-      video.preload = "metadata";
+      // Config for maximum compatibility
+      video.preload = "auto"; // Force load
       video.muted = true;
       video.playsInline = true;
-      video.crossOrigin = "anonymous"; // Try CORS first to get Thumbnail
       
-      // Position off-screen
+      // If we are using a BLOB (Strategy 1), we don't need crossorigin (it's same-origin).
+      // If we are using remote URL, we try anonymous first.
+      if (!tempBlobUrl && !isFile) {
+          video.crossOrigin = "anonymous";
+      }
+      
+      // Hidden placement
       video.style.position = 'fixed';
-      video.style.top = '0';
-      video.style.left = '0';
-      video.style.width = '1px';
-      video.style.height = '1px';
-      video.style.opacity = '0.01';
+      video.style.opacity = '0';
       video.style.pointerEvents = 'none';
-      
       document.body.appendChild(video);
 
-      let resolved = false;
-      const done = (data: { thumbnail: File | null, duration: number }) => {
-          if (resolved) return;
-          resolved = true;
+      let isResolved = false;
+      
+      const finalize = (thumb: File | null, dur: number) => {
+          if (isResolved) return;
+          isResolved = true;
           cleanup(video);
-          resolve(data);
+          resolve({ thumbnail: thumb, duration: dur });
       };
 
-      // Safety Timeout - 45s for slow NAS
-      const timer = setTimeout(() => {
-          if (video.duration && !isNaN(video.duration) && video.duration > 0 && video.duration !== Infinity) {
-              done({ thumbnail: null, duration: video.duration });
+      // TIMEOUTS
+      // 60s Hard Timeout (for NAS spin-up)
+      const hardTimeout = setTimeout(() => {
+          if (video.duration && video.duration > 0 && video.duration !== Infinity) {
+              finalize(null, video.duration); // Return what we have
           } else {
-              done({ thumbnail: null, duration: 0 });
+              // Strategy 3: Rescue Mode. Return 1s duration so it marks as "processed" and doesn't loop forever.
+              console.error("Hard timeout reached. Marking as 1s to skip.");
+              finalize(null, 1); 
           }
-      }, 45000);
+      }, 60000);
 
       video.onloadedmetadata = () => {
           if (video.duration === Infinity) {
@@ -84,18 +112,19 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       };
 
       video.onloadeddata = () => {
-          // Seek logic
-          let target = 2.0;
-          if (video.duration > 0) {
-              if (video.duration < 5) target = video.duration * 0.2;
-              else if (video.duration < 60) target = 5.0;
-              else target = 15.0;
+          let seekTarget = 1.0;
+          if (video.duration > 5) seekTarget = 5.0;
+          if (video.duration > 60) seekTarget = 15.0;
+          
+          // If using partial blob, ensure we don't seek past downloaded range
+          if (tempBlobUrl && video.duration > 30) {
+              seekTarget = 1.0; // Stay safe with blob
           }
-          video.currentTime = target;
+          
+          video.currentTime = seekTarget;
       };
 
-      let seekAttempts = 0;
-
+      let attempts = 0;
       video.onseeked = () => {
           if (!video.duration) return;
 
@@ -103,60 +132,56 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               const canvas = document.createElement('canvas');
               canvas.width = 640; 
               canvas.height = 360; 
-              
               const ctx = canvas.getContext('2d');
+              
               if (ctx) {
                   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                   
-                  // Check brightness to avoid black frames
-                  const brightness = getBrightness(ctx, canvas.width, canvas.height);
-                  
-                  if (brightness < 10 && seekAttempts < 1 && video.duration > 10) {
-                      // console.log("Frame too dark, seeking forward...");
-                      seekAttempts++;
-                      video.currentTime += 10;
+                  // Simple darkness check
+                  if (getBrightness(ctx, canvas.width, canvas.height) < 10 && attempts < 1 && !tempBlobUrl) {
+                      attempts++;
+                      video.currentTime += 5; // Try jumping forward
                       return;
                   }
 
-                  canvas.toBlob((b) => {
-                      if (b) {
-                          const file = new File([b], "thumbnail.jpg", { type: "image/jpeg" });
-                          clearTimeout(timer);
-                          done({ thumbnail: file, duration: video.duration });
+                  canvas.toBlob(blob => {
+                      clearTimeout(hardTimeout);
+                      if (blob) {
+                          finalize(new File([blob], "thumb.jpg", { type: "image/jpeg" }), video.duration);
                       } else {
-                          clearTimeout(timer);
-                          done({ thumbnail: null, duration: video.duration });
+                          finalize(null, video.duration);
                       }
-                  }, 'image/jpeg', 0.75);
+                  }, 'image/jpeg', 0.7);
               } else {
-                  clearTimeout(timer);
-                  done({ thumbnail: null, duration: video.duration });
+                  clearTimeout(hardTimeout);
+                  finalize(null, video.duration);
               }
           } catch (e) {
-              // Tainted canvas (CORS error) or other issue
-              // We successfully loaded video, so return duration at least
-              clearTimeout(timer);
-              done({ thumbnail: null, duration: video.duration });
+              // Canvas tainted (CORS error) - This is expected if Strategy 2 is active
+              // We successfully loaded video metadata, so just return the duration.
+              clearTimeout(hardTimeout);
+              // console.warn("Canvas security blocked thumbnail. Returning duration only.");
+              finalize(null, video.duration);
           }
       };
 
       video.onerror = (e) => {
-          // If CORS attempt failed, retry without CORS
-          if (attemptMode === 'CORS' && !isBlob) {
-              console.warn("CORS Load failed, retrying without CORS to recover Duration...");
-              attemptMode = 'NO_CORS';
+          // --- STRATEGY 2: DIRECT STREAM FALLBACK ---
+          // If Strategy 1 (Blob) failed OR standard CORS failed
+          if (video.crossOrigin === "anonymous" && !tempBlobUrl) {
+              // console.log("CORS load failed. Retrying in Opaque Mode (Duration Only)...");
               video.removeAttribute('crossOrigin');
-              video.src = finalUrl; // Reload
-              video.load();
-              return;
+              video.src = videoUrl; // Reload same URL without CORS header
+              return; // Let it retry
           }
-
-          // If failed again or blob failed
-          console.error("Video Error Event", video.error);
-          clearTimeout(timer);
-          done({ thumbnail: null, duration: 0 });
+          
+          // If we are here, everything failed.
+          console.error("Video load error", video.error);
+          clearTimeout(hardTimeout);
+          finalize(null, 0); // 0 indicates failure to Admin.tsx
       };
 
-      video.src = finalUrl;
+      // Start loading
+      video.src = videoUrl;
   });
 };

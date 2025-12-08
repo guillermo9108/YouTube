@@ -221,11 +221,11 @@ export default function Admin() {
           setScanLog(prev => [...prev, `Error on ${item.title}: ${e.message}`]);
       }
 
-      // 1.5s delay to ensure NAS/Browser resources are freed
+      // Increased delay to 2.0s to give NAS disks time to recover/seek
       setTimeout(() => {
           processingRef.current = false;
           setScanIndex(prev => prev + 1);
-      }, 1500); 
+      }, 2000); 
   };
 
   // Trigger processing when index changes or scan starts
