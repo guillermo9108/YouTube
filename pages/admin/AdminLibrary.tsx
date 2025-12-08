@@ -6,80 +6,71 @@ import { useToast } from '../../context/ToastContext';
 import { FolderSearch, Loader2, Play, Maximize, X, Info } from 'lucide-react';
 
 // --- VISIBLE SCANNER PLAYER COMPONENT ---
-// Ensures metadata is loaded by actually playing the video in the DOM
-// This resolves CORS issues with remote Synology files
+// Ensures metadata is loaded by loading the video in the DOM and seeking (more reliable than playing)
 const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete: (dur: number, thumb: File | null) => void, onSkip: () => void }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState('Loading stream...');
-    const [retries, setRetries] = useState(0);
+    const [status, setStatus] = useState('Initializing...');
 
     useEffect(() => {
-        // Safety timeout - skip if stuck for 25 seconds
+        // Safety timeout - skip if stuck for 15 seconds
         const timer = setTimeout(() => {
             console.warn("Scanner timeout for", video.title);
-            onSkip();
-        }, 25000);
+            // If we at least got the duration, salvage it
+            if (videoRef.current && videoRef.current.duration > 0 && !isNaN(videoRef.current.duration)) {
+                onComplete(videoRef.current.duration, null);
+            } else {
+                onSkip();
+            }
+        }, 15000);
         return () => clearTimeout(timer);
     }, [video]);
 
-    useEffect(() => {
-        const v = videoRef.current;
-        if(v) {
-            v.volume = 0;
-            v.muted = true;
-            v.play().catch(e => {
-                console.warn("Autoplay blocked/failed", e);
-                setStatus('Autoplay failed. Retrying...');
-                setTimeout(() => v.play().catch(() => {}), 1000);
-            });
-        }
-    }, [video]);
+    const handleLoadedMetadata = () => {
+        const vid = videoRef.current;
+        if (!vid) return;
+        setStatus('Metadata OK. Seeking...');
+        // Seek to 5 seconds or 20% of duration (whichever is smaller) to get a good frame
+        // Avoiding 0s (black frame)
+        const target = Math.min(5, vid.duration > 0 ? vid.duration * 0.2 : 0);
+        vid.currentTime = target;
+    };
 
-    const handleTimeUpdate = async () => {
+    const handleSeeked = async () => {
         const vid = videoRef.current;
         if (!vid) return;
 
-        // Wait until we have passed the 2-second mark to ensure we have a valid frame and duration
-        if (vid.currentTime > 2.0 && vid.duration > 0) {
-            vid.pause();
-            setStatus('Capturing metadata...');
-            
-            let thumbnail: File | null = null;
-            const duration = vid.duration;
+        setStatus('Extracting frame...');
+        let thumbnail: File | null = null;
 
-            try {
-                const canvas = document.createElement('canvas');
-                canvas.width = 640;
-                canvas.height = 360; 
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-                    const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.7));
-                    if (blob) {
-                        thumbnail = new File([blob], "thumb.jpg", { type: 'image/jpeg' });
-                    }
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 360; 
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+                const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.7));
+                if (blob) {
+                    thumbnail = new File([blob], "thumb.jpg", { type: 'image/jpeg' });
                 }
-            } catch (e) {
-                console.warn("Canvas capture failed (likely Tainted/CORS). Saving duration only.", e);
             }
-
-            onComplete(duration, thumbnail);
+        } catch (e) {
+            console.warn("Thumbnail capture failed (CORS/Taint or Codec):", e);
         }
+
+        onComplete(vid.duration, thumbnail);
     };
 
     const handleError = () => {
-        if (retries < 2) {
-            setRetries(p => p + 1);
-            setStatus(`Retry ${retries + 1}...`);
-            if(videoRef.current) {
-                videoRef.current.load();
-                videoRef.current.play().catch(() => {});
-            }
-        } else {
-            console.error("Video Error:", videoRef.current?.error);
-            onSkip();
-        }
+        const err = videoRef.current?.error;
+        setStatus(`Error: ${err?.message || err?.code || 'Unknown'}`);
+        console.error("Scanner Video Error:", err);
+        // Wait a moment so user sees the error before skipping
+        setTimeout(onSkip, 1500);
     };
+
+    // Cache buster to prevent browser from using a cached failed response (404) from previous attempts
+    const videoSrc = `${video.videoUrl}${video.videoUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
 
     return (
         <div className="flex flex-col items-center justify-center p-6 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl max-w-2xl w-full mx-4">
@@ -87,22 +78,24 @@ const ScannerPlayer = ({ video, onComplete, onSkip }: { video: Video, onComplete
             <div className="relative aspect-video w-full bg-black rounded-lg overflow-hidden border border-slate-800 mb-4">
                 <video
                     ref={videoRef}
-                    src={video.videoUrl} // No CORS attribute implies Same-Origin which works if API is on same domain
+                    src={videoSrc} 
+                    crossOrigin="anonymous" // Critical for canvas.toBlob()
                     className="w-full h-full object-contain"
                     muted
-                    playsInline
-                    onTimeUpdate={handleTimeUpdate}
+                    preload="auto"
+                    onLoadedMetadata={handleLoadedMetadata}
+                    onSeeked={handleSeeked}
                     onError={handleError}
+                    onLoadStart={() => setStatus('Connecting...')}
                     onWaiting={() => setStatus('Buffering...')}
-                    onPlaying={() => setStatus('Scanning...')}
                 />
-                <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-md">
+                <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-md font-mono border border-white/10">
                     {status}
                 </div>
             </div>
             <div className="flex gap-4 w-full">
-                <button onClick={onSkip} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 rounded-lg font-bold transition-colors">
-                    Skip Video
+                <button onClick={onSkip} className="flex-1 bg-red-900/20 hover:bg-red-900/40 text-red-200 py-3 rounded-lg font-bold transition-colors text-xs uppercase tracking-wider border border-red-900/30">
+                    Force Skip Video
                 </button>
             </div>
         </div>
@@ -206,7 +199,7 @@ export default function AdminLibrary() {
     const handleVideoSkip = async () => {
         const item = scanQueue[currentScanIndex];
         setScanLog(prev => [...prev, `Skipped: ${item.title}`]);
-        // Mark as processed with 0 duration to avoid loop
+        // Mark as processed with 0 duration to avoid loop (sets category to UNKNOWN)
         await db.updateVideoMetadata(item.id, 0, null);
         
         const nextIdx = currentScanIndex + 1;
@@ -264,7 +257,7 @@ export default function AdminLibrary() {
                     
                     <div className="mt-8 text-slate-500 text-sm max-w-md text-center">
                         <Info size={16} className="inline mr-1"/>
-                        Do not close this window. The app is playing videos to extract metadata.
+                        Do not close this window. The app is scanning your videos to extract duration and thumbnails.
                     </div>
                 </div>
             )}

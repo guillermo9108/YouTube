@@ -125,7 +125,10 @@ function smartParseFilename($fullPath, $detectedType = null) {
 
 // STANDARD HTTP RANGE STREAMING FUNCTION
 function streamVideo($filePath, $pdo) {
-    // Clean all buffers to prevent corruption
+    // Disable output compression which messes with Range headers
+    if(ini_get('zlib.output_compression')) ini_set('zlib.output_compression', 'Off');
+
+    // Clean all buffers to prevent corruption (whitespace, notices)
     while (ob_get_level()) ob_end_clean();
     
     // Disable time limit for long streams
