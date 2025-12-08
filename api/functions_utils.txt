@@ -125,62 +125,50 @@ function smartParseFilename($fullPath, $detectedType = null) {
 
 // Advanced Streaming with Fix for Broken Videos
 function streamVideo($path, $pdo) {
-    // 1. Disable Compression & Clean Buffer (Critical for binary streams)
-    @ini_set('zlib.output_compression', 'Off');
-    @ini_set('output_buffering', 'Off');
-    @ini_set('output_handler', '');
-    
+    // 1. Clean buffers completely
     while (ob_get_level()) ob_end_clean();
 
-    // Headers - Always Send CORS first (CRITICAL FOR CANVAS EXTRACTION)
-    header("Access-Control-Allow-Origin: *"); 
+    // 2. CORS Headers (Strict & Early)
+    header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
-    header("Access-Control-Allow-Headers: Range");
-    header("Access-Control-Expose-Headers: Content-Range, Content-Length");
+    header("Access-Control-Allow-Headers: Range, Content-Type, Origin");
+    header("Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges");
 
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         http_response_code(200);
         exit;
     }
 
-    // 2. Check direct file access
     if (!file_exists($path)) {
         http_response_code(404);
-        die("Video file not found.");
+        die("File not found");
     }
 
-    clearstatcache(); // Ensure file size is accurate
     $size = filesize($path);
     $length = $size;
     $start = 0;
     $end = $size - 1;
 
-    // Detect MIME type
+    // Detect MIME
     $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-    $mime = 'video/mp4'; // default
+    $mime = 'video/mp4'; 
     if ($ext === 'mkv') $mime = 'video/x-matroska';
     if ($ext === 'webm') $mime = 'video/webm';
     if ($ext === 'avi') $mime = 'video/x-msvideo';
     if ($ext === 'mov') $mime = 'video/quicktime';
-    if ($ext === 'm4v') $mime = 'video/x-m4v';
-    if ($ext === 'ts') $mime = 'video/mp2t';
 
-    // 3. Content Headers
     header("Content-Type: $mime");
     header("Accept-Ranges: bytes");
     
-    // Prevent caching for live processing to avoid partial corrupt cache
-    header("Cache-Control: no-cache, must-revalidate"); 
-    header("Expires: 0");
-
-    // 4. Range Handling
     if (isset($_SERVER['HTTP_RANGE'])) {
         list(, $range) = explode('=', $_SERVER['HTTP_RANGE'], 2);
+        
         if (strpos($range, ',') !== false) {
             header('HTTP/1.1 416 Requested Range Not Satisfiable');
             header("Content-Range: bytes $start-$end/$size");
             exit;
         }
+        
         if ($range == '-') {
             $c_start = $size - substr($range, 1);
         } else {
@@ -188,30 +176,34 @@ function streamVideo($path, $pdo) {
             $c_start = $range[0];
             $c_end = (isset($range[1]) && is_numeric($range[1])) ? $range[1] : $size;
         }
+        
         $c_end = ($c_end > $end) ? $end : $c_end;
         if ($c_start > $c_end || $c_start > $size - 1 || $c_end >= $size) {
             header('HTTP/1.1 416 Requested Range Not Satisfiable');
             header("Content-Range: bytes $start-$end/$size");
             exit;
         }
+        
         $start = $c_start;
         $end = $c_end;
         $length = $end - $start + 1;
+        
         header('HTTP/1.1 206 Partial Content');
+        header("Content-Length: " . $length);
         header("Content-Range: bytes $start-$end/$size");
     } else {
         header("Content-Length: " . $size);
     }
-    
-    // 5. Output
+
     $fp = fopen($path, 'rb');
     fseek($fp, $start);
-    $buffer = 1024 * 16; // 16KB buffer
+    $buffer = 1024 * 8;
+    
     while (!feof($fp) && ($p = ftell($fp)) <= $end) {
         if ($p + $buffer > $end) {
             $buffer = $end - $p + 1;
         }
-        set_time_limit(0); // Reset timeout per chunk
+        set_time_limit(0);
         echo fread($fp, $buffer);
         flush();
     }

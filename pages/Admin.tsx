@@ -44,7 +44,6 @@ export default function Admin() {
   const [activeScan, setActiveScan] = useState(false);
   const [scanQueue, setScanQueue] = useState<Video[]>([]);
   const [scanIndex, setScanIndex] = useState(0);
-  const [scanMode, setScanMode] = useState<'SECURE' | 'INSECURE'>('SECURE'); // SECURE = CORS (Thumb+Duration), INSECURE = NO-CORS (Duration Only)
   const [scanStatus, setScanStatus] = useState('Initializing...');
   const videoRef = useRef<HTMLVideoElement>(null);
   const wakeLock = useRef<any>(null);
@@ -159,7 +158,7 @@ export default function Admin() {
       }
   };
 
-  // --- ACTIVE SCANNER LOGIC ---
+  // --- ACTIVE SCANNER LOGIC (Simpler, Same-Origin Friendly) ---
 
   const startActiveScan = async () => {
       setScanLog(prev => [...prev, "Fetching unprocessed videos..."]);
@@ -172,15 +171,13 @@ export default function Admin() {
 
       setScanQueue(pending);
       setScanIndex(0);
-      setScanMode('SECURE'); // Always try secure first
       processingRef.current = false;
       setActiveScan(true);
       
-      // Request Wake Lock to keep screen on
       try {
           if ('wakeLock' in navigator) {
               wakeLock.current = await (navigator as any).wakeLock.request('screen');
-              toast.success("Active Scan Started - Screen will stay on");
+              toast.success("Scanner Active - Keep screen on");
           }
       } catch(e) { console.warn("Wake Lock failed", e); }
   };
@@ -194,7 +191,6 @@ export default function Admin() {
       }
   };
 
-  // Triggered via onTimeUpdate when video has played > 0.5 second (Reduced from 2.0 to be faster)
   const captureAndAdvance = async () => {
       if (processingRef.current) return;
       processingRef.current = true; // Lock
@@ -203,32 +199,30 @@ export default function Admin() {
       const item = scanQueue[scanIndex];
       
       if (!video || !item) {
-          moveToNext(1000);
+          moveToNext(500);
           return;
       }
 
       video.pause();
-      setScanStatus('Analyzing Metadata...');
+      setScanStatus('Generating Thumb...');
 
       try {
           let thumbnail: File | null = null;
           
-          // Only attempt thumbnail capture if we are in Secure Mode (CORS allowed)
-          if (scanMode === 'SECURE') {
-              try {
-                  const canvas = document.createElement('canvas');
-                  canvas.width = video.videoWidth;
-                  canvas.height = video.videoHeight;
-                  const ctx = canvas.getContext('2d');
-                  if (ctx) {
-                      ctx.drawImage(video, 0, 0);
-                      const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.6));
-                      if (blob) thumbnail = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                  }
-              } catch(e) {
-                  console.warn("Canvas capture failed (CORS?)", e);
-                  // If this fails, we just send duration/metadata without thumbnail
+          // Canvas capture (Works without CORS if same-origin)
+          try {
+              const canvas = document.createElement('canvas');
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                  ctx.drawImage(video, 0, 0);
+                  const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.6));
+                  if (blob) thumbnail = new File([blob], "thumb.jpg", { type: "image/jpeg" });
               }
+          } catch(e) {
+              console.warn("Canvas capture failed", e);
+              // Likely CORS issue or format issue. We proceed without thumbnail to save the video.
           }
 
           const duration = video.duration || 0;
@@ -237,68 +231,52 @@ export default function Admin() {
               await db.updateVideoMetadata(item.id, duration, thumbnail);
               setScanLog(prev => [...prev, `Processed: ${item.title} (${Math.floor(duration)}s)`]);
           } else {
-              // Mark as bad but processed to stop loop
+              // Mark as bad but processed
               await db.updateVideoMetadata(item.id, 0, null);
-              setScanLog(prev => [...prev, `Marked Bad (No Duration): ${item.title}`]);
+              setScanLog(prev => [...prev, `Marked Bad (No Metadata): ${item.title}`]);
           }
 
       } catch (e: any) {
           setScanLog(prev => [...prev, `Error processing ${item.title}: ${e.message}`]);
       }
 
-      moveToNext(1500); // 1.5s pause between videos to clear buffers
+      moveToNext(500);
   };
 
   const moveToNext = (delay: number) => {
-      // FORCE CLEANUP OF VIDEO ELEMENT
-      if (videoRef.current) {
-          videoRef.current.pause();
-          videoRef.current.removeAttribute('src'); // Detach media
-          videoRef.current.load(); // Reset element
-      }
-
       setTimeout(() => {
           if (scanIndex < scanQueue.length - 1) {
-              setScanMode('SECURE'); // Reset to secure for next video
               processingRef.current = false;
               setScanIndex(prev => prev + 1);
           } else {
               toast.success("Scan Complete!");
               setScanLog(prev => [...prev, "Batch Complete."]);
               stopActiveScan();
-              loadData(); // Refresh lists
+              loadData(); 
           }
       }, delay);
   };
 
   const handleVideoError = () => {
-      // If error occurs immediately
       if (processingRef.current) return;
-
       const item = scanQueue[scanIndex];
-      if (scanMode === 'SECURE') {
-          // First failure: Try switching to INSECURE mode (remove crossOrigin)
-          // This fixes "Failed to load" caused by strict CORS on some NAS configs
-          console.warn(`Video ${item?.title} failed secure load. Retrying insecurely...`);
-          setScanLog(prev => [...prev, `Retrying ${item?.title} (Insecure Mode - Duration Only)...`]);
-          setScanMode('INSECURE');
-          // React key change will force reload
+      console.error(`Video ${item?.title} failed to load.`);
+      setScanLog(prev => [...prev, `Failed to load: ${item?.title}`]);
+      
+      // Force skip if video is corrupt
+      processingRef.current = true;
+      if(item) {
+          db.updateVideoMetadata(item.id, 0, null).finally(() => moveToNext(500));
       } else {
-          // Second failure: Give up
-          console.error(`Video ${item?.title} failed completely.`);
-          setScanLog(prev => [...prev, `Failed to load: ${item?.title}`]);
-          
-          // Mark bad in DB to prevent infinite loop
-          if(item) {
-              processingRef.current = true;
-              db.updateVideoMetadata(item.id, 0, null).finally(() => {
-                  moveToNext(1000);
-              });
-          } else {
-              moveToNext(1000);
-          }
+          moveToNext(500);
       }
   };
+
+  // Determine if we need CORS. For local Synology (api/...), it's same-origin so we DON'T want attribute.
+  const currentVideoUrl = scanQueue[scanIndex]?.videoUrl || '';
+  const isSameOrigin = currentVideoUrl.startsWith('api/') || currentVideoUrl.startsWith('/') || currentVideoUrl.includes(window.location.host);
+  // Only add crossOrigin="anonymous" if it's truly external (e.g. S3, YouTube proxy). Local files break if forced.
+  const crossOriginAttr = isSameOrigin ? undefined : "anonymous";
 
   const handleCleanupOrphans = async () => {
       if (!confirm("Esta acción eliminará FÍSICAMENTE los archivos (videos, fotos, avatares) que no estén registrados en la base de datos. ¿Continuar?")) return;
@@ -977,19 +955,25 @@ export default function Admin() {
                   {scanQueue[scanIndex] && (
                       <video 
                         ref={videoRef}
-                        // KEY CHANGE: Force remount if mode changes to handle crossOrigin attribute correctly
-                        key={scanQueue[scanIndex].id + scanMode} 
                         src={scanQueue[scanIndex].videoUrl}
                         className="max-w-full max-h-full"
-                        controls={true} // Show controls for user confidence
+                        controls={true}
                         autoPlay
                         muted
                         playsInline
-                        // CRITICAL: Mode switching for CORS
-                        crossOrigin={scanMode === 'SECURE' ? "anonymous" : undefined}
+                        // CRITICAL: Only set crossOrigin if it is NOT same-origin (local)
+                        crossOrigin={crossOriginAttr}
                         
+                        onLoadedMetadata={(e) => {
+                            // Fast-forward to ensure we have a frame
+                            e.currentTarget.currentTime = 1.0;
+                        }}
+                        onSeeked={() => {
+                            // Capture immediately after seek
+                            captureAndAdvance();
+                        }}
                         onTimeUpdate={(e) => {
-                            // FAST TRIGGER: Only need > 0.5s to validate stream works
+                            // Fallback if seek event missed but time progressed
                             if (e.currentTarget.currentTime > 0.5) {
                                 captureAndAdvance();
                             }
@@ -1009,11 +993,6 @@ export default function Admin() {
                                   {scanStatus}
                               </span>
                           </div>
-                          {scanMode === 'INSECURE' && (
-                              <p className="text-amber-400 text-[10px] mt-2 font-bold">
-                                  ⚠ Mode: Rescue (Duration Only)
-                              </p>
-                          )}
                       </div>
                   </div>
               </div>

@@ -26,6 +26,10 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
 
   const src = isUrl ? (fileOrUrl as string) : objectUrl;
 
+  // Determine if this is a same-origin request (local NAS file)
+  // If so, we SHOULD NOT set crossOrigin="anonymous" to avoid unneeded preflight failures
+  const isSameOrigin = isUrl && (src.startsWith('/') || src.startsWith('api/') || src.includes(window.location.host));
+
   const cleanup = (video: HTMLVideoElement) => {
       try {
           video.pause();
@@ -35,12 +39,14 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       } catch(e) {}
   };
 
-  const loadVideo = (mode: 'cors' | 'no-cors'): Promise<{ video: HTMLVideoElement, duration: number, error?: boolean }> => {
+  const loadVideo = (mode: 'cors' | 'no-cors' | 'same-origin'): Promise<{ video: HTMLVideoElement, duration: number, error?: boolean }> => {
       return new Promise((resolve) => {
           const video = document.createElement('video');
-          // Important: In 'cors' mode we ask for permission to screenshot.
-          // In 'no-cors', we accept we can't screenshot, but we want metadata (duration).
-          if (mode === 'cors') video.crossOrigin = "anonymous";
+          
+          // CRITICAL FIX: Only set crossOrigin if NOT same-origin and NOT no-cors mode
+          if (mode === 'cors') {
+              video.crossOrigin = "anonymous";
+          }
           
           video.preload = "auto"; 
           video.muted = true;
@@ -54,7 +60,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               resolve(data);
           };
 
-          // Timeout: Increased to 30s/45s for slow NAS response times
+          // Timeout: Increased for slow NAS response times
           const timer = setTimeout(() => {
               // Rescue: If we at least got metadata, return success
               if (video.readyState > 0 && video.duration) {
@@ -62,15 +68,15 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               } else {
                   done({ video, duration: 0, error: true });
               }
-          }, mode === 'cors' ? 30000 : 45000); 
+          }, 45000); 
 
           video.onloadedmetadata = () => {
               if (mode === 'no-cors') {
                   // In no-cors, we can't capture, so just resolve with duration
                   done({ video, duration: video.duration || 0 });
               } else {
-                  // In cors mode, we seek to start to ensure we have a frame
-                  video.currentTime = 0.1;
+                  // Seek to ensure we have a frame
+                  video.currentTime = 1.0;
               }
           };
 
@@ -89,13 +95,13 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       });
   };
 
-  // Step 1: Try Secure Load (CORS enabled) -> Needed for Thumbnail
-  let result = await loadVideo('cors');
+  // Step 1: Intelligent Load Strategy
+  // If same-origin (NAS), try 'same-origin' (no attribute). 
+  // If external URL, try 'cors'.
+  let result = await loadVideo(isSameOrigin ? 'same-origin' : 'cors');
 
   // Step 2: Fallback to Insecure Load (No CORS) -> Needed for Duration if CORS headers missing on NAS
-  // This allows "Failed to load" videos to at least be categorized and playable.
   if (result.error && isUrl) {
-      // console.warn("CORS load failed, retrying no-cors for duration...");
       cleanup(result.video);
       result = await loadVideo('no-cors');
   }
@@ -108,7 +114,6 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       // Try to capture thumbnail
       try {
           const video = result.video;
-          // Canvas will throw SecurityError if video loaded in no-cors mode (tainted)
           const canvas = document.createElement('canvas');
           canvas.width = video.videoWidth > 480 ? 480 : video.videoWidth; // Reduce res for speed
           const scale = canvas.width / video.videoWidth;
@@ -117,7 +122,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           const ctx = canvas.getContext('2d');
           if (ctx) {
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              // This is where it fails if no-cors. We catch it.
+              // This is where it fails if tainted. We catch it.
               const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.6));
               if (blob) {
                   thumbFile = new File([blob], "thumbnail.jpg", { type: "image/jpeg" });
@@ -129,7 +134,6 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
   }
 
   // Step 4: Cleanup
-  // Ensure we fully detach to help the Garbage Collector
   cleanup(result.video);
   if (objectUrl) URL.revokeObjectURL(objectUrl);
 
