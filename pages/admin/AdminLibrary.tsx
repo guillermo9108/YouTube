@@ -20,10 +20,11 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
                 // Si logramos leer la duración antes del timeout, guardamos eso
                 onComplete(durationRef.current, null);
             } else {
-                // Fallo total
+                // Fallo total (video corrupto o no soportado por navegador Android)
+                // Lo guardamos como 0 para que no se quede en el limbo.
                 onComplete(0, null);
             }
-        }, 15000); // 15 segundos máximo absoluto
+        }, 10000); // 10 segundos máximo (Reducido para agilidad)
         return () => clearTimeout(timer);
     }, [video, onComplete]);
 
@@ -77,14 +78,15 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
 
     const handleError = () => {
         const vid = videoRef.current;
-        console.warn(`Error reproducción (Intento ${attempt}):`, vid?.error?.message);
+        const msg = vid?.error?.message || "Unknown error";
+        console.warn(`Error reproducción (Intento ${attempt}):`, msg);
 
         if (attempt === 1) {
             // FALLBACK STRATEGY
             // Si falla el primer intento (CORS o error de red por headers),
             // reintentamos SIN CORS. Esto permitirá que el video cargue y obtengamos la DURACIÓN.
             // Sacrificamos la miniatura para salvar la categorización.
-            setStatus('Reintentando en modo compatibilidad...');
+            setStatus(`Reintentando sin CORS (Error: ${msg})...`);
             setCorsMode(undefined); // Quitar 'crossOrigin'
             setAttempt(2);
             if (vid) {
@@ -94,8 +96,9 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
                 vid.load();
             }
         } else {
-            // Si falla el segundo intento, el video está corrupto o formato no soportado
-            setStatus('Formato no soportado. Saltando...');
+            // Si falla el segundo intento, el video está corrupto o formato no soportado (ej. H.265 en Chrome antiguo)
+            setStatus('Formato no soportado. Guardando sin datos...');
+            // Forzamos la finalización para pasar al siguiente video
             onComplete(0, null);
         }
     };

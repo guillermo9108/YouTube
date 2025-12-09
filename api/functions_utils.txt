@@ -64,10 +64,20 @@ function smartParseFilename($fullPath, $detectedType = null) {
     $junk = [
         '/1080p/i', '/720p/i', '/480p/i', '/x264/i', '/h264/i', '/x265/i', '/HEVC/i', 
         '/AAC/i', '/AC3/i', '/BluRay/i', '/WEB-DL/i', '/WEBRip/i', '/HDRip/i', 
-        '/www\..+\.com/i', '/\[.*?\]/', '/\(.*?\)/'
+        '/www\..+\.com/i', '/\[.*?\]/', '/\(.*?\)/', 
+        '/VID_\d{8}_\d{6}/i', '/PXL_\d{8}_\d{9}/i' // Android Camera patterns
     ];
+    
+    // Check if it's a raw camera file (e.g. VID_2023...)
+    $isCameraFile = preg_match('/^VID_|^PXL_/', $filename);
+    
     $cleanName = preg_replace($junk, '', $filename);
     $cleanName = str_replace(['.', '_'], ' ', $cleanName);
+    
+    // If it was a camera file and name is empty or just numbers, use parent folder + date
+    if ($isCameraFile && strlen(trim($cleanName)) < 3) {
+        $cleanName = $folderName . ' - ' . date("Y-m-d", filemtime($fullPath));
+    }
     
     // 2. Detect Season/Episode
     $season = '';
@@ -112,6 +122,8 @@ function smartParseFilename($fullPath, $detectedType = null) {
     $finalTitle = ucwords(strtolower($finalTitle));
     $finalTitle = preg_replace('/\s+/', ' ', $finalTitle); // Remove double spaces
     
+    if (empty($finalTitle)) $finalTitle = "Video " . basename($fullPath);
+    
     $finalCategory = $detectedType;
     if (!$finalCategory && $isEpisodic) {
         $finalCategory = 'SERIES';
@@ -131,7 +143,7 @@ function streamVideo($filePath, $pdo) {
     // Clean all buffers aggressively to prevent corruption
     while (ob_get_level()) ob_end_clean();
     
-    // Disable time limit for long streams
+    // Disable time limit for long streams (CRITICAL FOR ANDROID/SLOW SERVERS)
     set_time_limit(0);
 
     // Headers - CRITICAL: Always send Access-Control-Allow-Origin
@@ -139,7 +151,7 @@ function streamVideo($filePath, $pdo) {
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
     header('Access-Control-Allow-Headers: Range');
     header('Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges');
-    header('Accept-Ranges: bytes'); // Default to bytes, will overwrite if FTP can't support it
+    header('Accept-Ranges: bytes'); 
 
     $fileSize = 0;
     $isFtp = false;
@@ -169,21 +181,27 @@ function streamVideo($filePath, $pdo) {
         
         if (!$resource) { http_response_code(404); die("FTP File unreachable"); }
         
-        // Try to determine size logic (simplified for reliability)
-        // Note: Accurately seeking FTP in PHP without downloading whole file is tricky depending on server support.
-        // We rely on standard stream passthru for basic playback.
+        // Simple stream passthrough for FTP
         header('Content-Type: video/mp4');
         fpassthru($resource);
         fclose($resource);
         exit;
 
     } else {
-        // --- LOCAL FILE MODE ---
+        // --- LOCAL FILE MODE (ANDROID OPTIMIZED) ---
         if (!file_exists($filePath)) {
-            http_response_code(404);
-            die("File not found");
+            // Android fallback: Check if path needs decoding
+            $decodedPath = rawurldecode($filePath);
+            if (file_exists($decodedPath)) {
+                $filePath = $decodedPath;
+            } else {
+                http_response_code(404);
+                die("File not found: " . $filePath);
+            }
         }
-        $fileSize = filesize($filePath);
+        
+        // Use sprintf to handle 32-bit integer overflow on Android for files > 2GB
+        $fileSize = sprintf("%u", filesize($filePath));
         $resource = fopen($filePath, 'rb');
     }
 
@@ -197,12 +215,13 @@ function streamVideo($filePath, $pdo) {
     $mimeTypes = [
         'mp4' => 'video/mp4',
         'webm' => 'video/webm',
-        'mkv' => 'video/mp4', // Trick for some browsers to try playing MKV container
+        'mkv' => 'video/mp4', // Browser trick
         'mov' => 'video/quicktime',
         'avi' => 'video/x-msvideo',
-        'mp3' => 'audio/mpeg'
+        'mp3' => 'audio/mpeg',
+        'm4v' => 'video/mp4'
     ];
-    $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'application/octet-stream';
+    $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'video/mp4'; // Default to mp4 for safety
     header('Content-Type: ' . $contentType);
 
     // Range Handling
@@ -234,15 +253,15 @@ function streamVideo($filePath, $pdo) {
         fseek($resource, $offset);
     }
     
-    // Output loop
-    $bufferSize = 1024 * 64; // 64KB chunks
+    // Output loop - Optimized buffer size for Mobile Servers (1MB chunks)
+    $bufferSize = 1024 * 1024; 
     $bytesSent = 0;
     
     while (!feof($resource) && $bytesSent < $length && !connection_aborted()) {
         $readSize = min($bufferSize, $length - $bytesSent);
         $buffer = fread($resource, $readSize);
         echo $buffer;
-        flush();
+        flush(); // Critical for streaming
         $bytesSent += strlen($buffer);
     }
     
