@@ -77,7 +77,7 @@ export default function Home() {
 
         const isDirty = localStorage.getItem('sp_home_dirty') === 'true';
 
-        // 1. Try to restore from Snapshot if clean
+        // 1. Try to restore from Snapshot if clean (Fast Load)
         if (!isDirty && homeSnapshot) {
             setVideos(homeSnapshot.videos);
             setShuffledMasterList(homeSnapshot.shuffledList);
@@ -88,17 +88,21 @@ export default function Home() {
             if(homeSnapshot.categories.length > INITIAL_CATEGORIES.length) setCategoryList(homeSnapshot.categories);
             setLoading(false);
             
+            // Re-validate in background to check for new/deleted videos
+            checkForUpdates(homeSnapshot.videos);
+            
             if (user) {
                 db.getUserActivity(user.id).then(act => setWatchedIds(act.watched || []));
             }
             return;
         }
 
-        // 2. Fresh Load
+        // 2. Fresh Load (or Dirty)
         setLoading(true);
         if (isDirty) localStorage.removeItem('sp_home_dirty');
         
         try {
+            // Force fetch latest from DB/Network
             const allVideos = await db.getAllVideos();
             setVideos(allVideos);
             
@@ -118,6 +122,22 @@ export default function Home() {
     };
     init();
   }, [user]);
+
+  // Background Sync: Checks if server has different data than snapshot
+  const checkForUpdates = async (currentSnapshotVideos: Video[]) => {
+      try {
+          const freshVideos = await db.getAllVideos();
+          // Simple diff check based on length or IDs
+          if (freshVideos.length !== currentSnapshotVideos.length || freshVideos[0]?.id !== currentSnapshotVideos[0]?.id) {
+              // Data changed! Update silently
+              setVideos(freshVideos);
+              const shuffled = [...freshVideos].sort(() => Math.random() - 0.5);
+              setShuffledMasterList(shuffled);
+          }
+      } catch (e) {
+          // Ignore network errors in background sync
+      }
+  };
 
   // SNAPSHOT SAVE on Unmount
   // Use a ref to access latest state inside cleanup function

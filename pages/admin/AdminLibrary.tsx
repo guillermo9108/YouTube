@@ -1,5 +1,4 @@
 
-
 import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
@@ -15,13 +14,9 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState('Cargando...');
     const processedRef = useRef(false);
-    const [manualMode, setManualMode] = useState(false);
 
-    // Determine secure stream URL
     const getVideoSrc = (v: Video) => {
-        // If it's already an http url (remote) or blob use it
         if (v.videoUrl.startsWith('http') || v.videoUrl.startsWith('blob')) return v.videoUrl;
-        // Otherwise treat as local stream
         return `api/index.php?action=stream&id=${v.id}`;
     };
 
@@ -30,36 +25,29 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     useEffect(() => {
         const vid = videoRef.current;
         if (!vid) return;
-        
-        // Reset state for new video
         processedRef.current = false;
-        setManualMode(false);
         setStatus('Iniciando...');
-        
-        vid.load(); // Force reload for new src
 
         const startPlay = async () => {
             try {
-                vid.muted = true; // Always mute for scanner
+                // Force mute for speed and stability
+                vid.muted = true;
                 await vid.play();
-                setStatus('Reproduciendo...');
+                setStatus('Procesando...');
             } catch (e) {
-                console.warn("Autoplay blocked, waiting for interaction", e);
-                setManualMode(true);
-                setStatus('Click para iniciar');
+                console.warn("Autoplay blocked", e);
+                setStatus('Esperando click manual...');
             }
         };
-        
-        // Small delay to ensure DOM is ready
-        const timer = setTimeout(startPlay, 100);
+        const timer = setTimeout(startPlay, 200);
         return () => clearTimeout(timer);
-    }, [video.id]); // Use ID as dependency to ensure reset on change
+    }, [video, streamSrc]); 
 
     const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
         if (!vid || processedRef.current) return;
 
-        // Logic from Watch.tsx: Wait for > 1.5s to ensure valid frame
+        // Process quickly at 1.5s
         if (vid.currentTime > 1.5) {
             vid.pause();
             processedRef.current = true;
@@ -77,81 +65,46 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
                     canvas.toBlob(blob => {
-                        if (blob) {
-                            file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                        }
+                        if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
                         onComplete(duration, file);
                     }, 'image/jpeg', 0.8);
                 } else {
-                    // Canvas failed (e.g. Tainted), save duration only
                     onComplete(duration, null);
                 }
             } catch (err) {
-                // General error, save duration only
                 onComplete(duration, null);
             }
         }
     };
 
-    const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-        // Backup: Save duration immediately in case playback fails later
-        if(e.currentTarget.duration) {
-             // We don't submit yet, just ensure we have it if we need to force skip
-        }
-    };
-
     const handleError = () => {
         if (processedRef.current) return;
-        setStatus("Error. Reintentando...");
-        
-        // Wait 5s then skip if still stuck
+        setStatus("Error. Saltando...");
         setTimeout(() => {
             if (!processedRef.current) {
-                console.warn("Video failed to play, saving as 0s");
                 processedRef.current = true;
-                onComplete(0, null); // Skip with 0 duration
+                onComplete(0, null);
             }
-        }, 5000);
+        }, 2000); // Wait 2s then skip
     };
 
     return (
         <div className="w-full max-w-lg mx-auto bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl relative mb-4">
-            <div className="relative aspect-video bg-black flex items-center justify-center group">
+            <div className="relative aspect-video bg-black flex items-center justify-center">
                 <video 
-                    key={video.id} // FORCE REMOUNT ON CHANGE
                     ref={videoRef} 
                     src={streamSrc} 
                     className="w-full h-full object-contain" 
-                    controls={true} // Enable controls for manual rescue
+                    controls
                     playsInline
                     muted={true}
                     preload="auto"
                     onTimeUpdate={handleTimeUpdate}
-                    onLoadedMetadata={handleLoadedMetadata}
                     onError={handleError}
                 />
-                
-                {/* Status Overlay */}
-                <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] font-mono text-white z-10 pointer-events-none backdrop-blur-md border border-white/10">
-                    <span className={`w-2 h-2 rounded-full inline-block mr-2 ${status.includes('Error') ? 'bg-red-500' : (status.includes('Capturando') ? 'bg-purple-500' : 'bg-emerald-500 animate-pulse')}`}></span>
+                <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] font-mono text-white z-10 pointer-events-none">
                     {status}
                 </div>
-
-                {/* Manual Play Button if Autoplay Blocked */}
-                {manualMode && !processedRef.current && (
-                    <button 
-                        onClick={() => { videoRef.current?.play(); setManualMode(false); }}
-                        className="absolute inset-0 flex items-center justify-center bg-black/50 hover:bg-black/40 transition-colors z-20 cursor-pointer"
-                    >
-                        <div className="bg-indigo-600 p-4 rounded-full shadow-xl transform group-hover:scale-110 transition-transform">
-                            <Play size={32} className="text-white fill-white"/>
-                        </div>
-                    </button>
-                )}
-            </div>
-            <div className="p-3 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
-                <div className="text-xs text-slate-400 truncate max-w-[200px]">{video.title}</div>
-                <div className="text-[10px] font-mono bg-slate-800 px-2 py-1 rounded text-slate-500">{video.id}</div>
             </div>
         </div>
     );
@@ -263,7 +216,7 @@ export default function AdminLibrary() {
                 if (res.remaining && res.remaining > 0) {
                     addToLog(`Quedan ${res.remaining} videos. Continuando...`);
                     // Update progress visually (fake progress for batching)
-                    setOrganizeProgress(prev => ({processed: prev.processed + res.processed, total: prev.processed + res.processed + (res.remaining || 0)}));
+                    setOrganizeProgress(prev => ({processed: prev.processed + res.processed, total: prev.processed + res.processed + res.remaining}));
                     setTimeout(processBatch, 500); // Small delay to prevent freeze
                 } else {
                     addToLog("Organización Finalizada.");

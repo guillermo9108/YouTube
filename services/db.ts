@@ -73,6 +73,7 @@ class DatabaseService {
   private performSave(key: string, data: any) {
       const cacheItem = JSON.stringify({ timestamp: Date.now(), data: data });
       try {
+          // Cache most requests, but handle action specifically
           if (key.includes('action=')) localStorage.setItem(`sp_cache_${key}`, cacheItem);
       } catch (e: any) {
           if (e.name === 'QuotaExceededError') {
@@ -111,25 +112,23 @@ class DatabaseService {
   public invalidateCache(endpointKey: string) { localStorage.removeItem(`sp_cache_${endpointKey}`); }
   public setHomeDirty() { localStorage.setItem('sp_home_dirty', 'true'); }
 
+  // Save user for offline persistence
+  public saveOfflineUser(user: User) {
+      localStorage.setItem('sp_offline_user', JSON.stringify(user));
+  }
+
+  public getOfflineUser(): User | null {
+      const u = localStorage.getItem('sp_offline_user');
+      return u ? JSON.parse(u) : null;
+  }
+
   private async request<T>(endpoint: string, method: string = 'GET', body?: any, silent: boolean = false): Promise<T> {
     if (this.isDemoMode) return this.handleMockRequest<T>(endpoint, method, body);
 
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
     const cacheKey = cleanEndpoint; 
     
-    if (method === 'GET' && cleanEndpoint.includes('get_videos') && !cleanEndpoint.includes('id=')) {
-        const cached = this.getFromCache<T>(cacheKey, 5 * 60 * 1000); 
-        if (cached) return cached;
-    }
-
-    if (this.isOffline && method === 'GET') {
-        const cached = this.getFromCache<T>(cacheKey);
-        if (cached) return cached;
-        throw new Error("Offline and no cache.");
-    }
-
-    if (this.isOffline && method === 'POST') throw new Error("Offline. Action not available.");
-
+    // 1. If online and GET, try standard fetch
     const url = method === 'GET' ? `${API_BASE}/${cleanEndpoint}${cleanEndpoint.includes('?') ? '&' : '?'}_t=${Date.now()}` : `${API_BASE}/${cleanEndpoint}`;
     const headers: HeadersInit = { 'Cache-Control': 'no-cache', 'Expires': '0' };
     let requestBody: BodyInit | undefined;
@@ -137,17 +136,37 @@ class DatabaseService {
     else if (body) { headers['Content-Type'] = 'application/json'; requestBody = JSON.stringify(body); }
 
     try {
+        if (this.isOffline && method === 'GET') throw new Error("Offline Mode");
+
         const response = await fetch(url, { method, headers, body: requestBody });
+        
+        // Critical: Check content type. If HTML is returned (PHP error or 404 page), treat as error
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") === -1) {
+             throw new Error("Server returned non-JSON response");
+        }
+
         const text = await response.text();
         if (!response.ok) throw new Error(`Server Error: ${response.status}`);
         
         let json;
-        try { json = JSON.parse(text); } catch { throw new Error(`Invalid JSON response: ${text.substring(0, 50)}...`); }
+        try { json = JSON.parse(text); } catch { throw new Error(`Invalid JSON response`); }
         if (!json.success) throw new Error(json.error || 'Operation failed');
 
         if (method === 'GET') this.saveToCache(cacheKey, json.data);
         return json.data as T;
+
     } catch (error: any) {
+        // FAILOVER TO CACHE
+        // If it's a GET request and we failed (Network, Server Error, Offline), try to load stale cache
+        if (method === 'GET') {
+            const cached = this.getFromCache<T>(cacheKey); // No max age, get whatever we have
+            if (cached) {
+                if (!silent) console.log(`[Offline] Serving cached data for ${endpoint}`);
+                return cached;
+            }
+        }
+
         if (!silent) console.error("API Error:", endpoint, error);
         throw error;
     }

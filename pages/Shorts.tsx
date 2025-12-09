@@ -1,5 +1,6 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2 } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft } from 'lucide-react';
 import { db } from '../services/db';
 import { Video, Comment, UserInteraction } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -45,6 +46,28 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
       }
     }
   }, [user, video.id, video.creatorId, shouldLoad, isActive]);
+
+  // --- AUTO PURCHASE LOGIC ---
+  useEffect(() => {
+      // Only run if active, not unlocked, not currently purchasing, and user exists
+      if (isActive && !isUnlocked && !purchasing && user && video.price > 0) {
+          const price = Number(video.price);
+          const limit = Number(user.autoPurchaseLimit);
+          const balance = Number(user.balance);
+
+          // Check limits and balance
+          if (price <= limit && balance >= price) {
+              setPurchasing(true);
+              db.purchaseVideo(user.id, video.id)
+                  .then(() => {
+                      setIsUnlocked(true);
+                      refreshUser(); // Update context balance
+                  })
+                  .catch(e => console.error("Auto-buy failed", e))
+                  .finally(() => setPurchasing(false));
+          }
+      }
+  }, [isActive, isUnlocked, purchasing, user, video.price, video.id]);
 
   // Handle Play/Pause & Cleanup
   useEffect(() => {
@@ -395,6 +418,12 @@ export default function Shorts() {
       className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative"
       style={{ scrollBehavior: 'smooth' }}
     >
+      <div className="fixed top-4 left-4 z-50">
+          <Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white hover:bg-black/60 transition-colors flex items-center justify-center">
+              <ArrowLeft size={24} />
+          </Link>
+      </div>
+
       {videos.map((video, idx) => {
           // Window Logic - Widened to 2 for smoother DOM handling
           const distance = Math.abs(idx - activeIndex);
