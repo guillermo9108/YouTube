@@ -7,89 +7,87 @@ import { FolderSearch, Loader2, Play, Terminal, CheckCircle, AlertTriangle, Film
 
 const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: number, thumb: File | null) => void }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState('Iniciando...');
+    const [status, setStatus] = useState('Cargando flujo de video...');
     const [corsMode, setCorsMode] = useState<'anonymous' | undefined>('anonymous');
-    const [attempt, setAttempt] = useState(1);
-    const durationRef = useRef(0);
+    const [retryCount, setRetryCount] = useState(0);
+    const capturedRef = useRef(false);
 
-    // Timeout de seguridad
+    // Timeout de seguridad global (30 segundos por video)
     useEffect(() => {
         const timer = setTimeout(() => {
-            console.warn("Scanner timeout for", video.title);
-            if (durationRef.current > 0) {
-                onComplete(durationRef.current, null);
-            } else {
-                onComplete(0, null);
+            if (!capturedRef.current) {
+                console.warn("Scanner timeout for", video.title);
+                // Si se agota el tiempo, intentamos guardar lo que tengamos
+                const vid = videoRef.current;
+                const dur = vid?.duration && !isNaN(vid.duration) ? vid.duration : 0;
+                onComplete(dur, null);
             }
-        }, 12000); 
+        }, 30000); 
         return () => clearTimeout(timer);
     }, [video, onComplete]);
 
-    const handleLoadedMetadata = () => {
+    // Lógica idéntica a Watch.tsx: Escuchar el progreso natural
+    const handleTimeUpdate = () => {
         const vid = videoRef.current;
-        if (!vid) return;
-        durationRef.current = vid.duration || 0;
-        setStatus(`Duración: ${Math.floor(vid.duration)}s. Buscando imagen...`);
-        const target = Math.min(Math.max(5, vid.duration * 0.15), vid.duration - 1);
-        vid.currentTime = target;
-    };
+        if (!vid || capturedRef.current) return;
 
-    const handleSeeked = async () => {
-        const vid = videoRef.current;
-        if (!vid) return;
+        // Si ya tenemos duración y el video ha avanzado más de 1 segundo
+        if (vid.duration > 0 && vid.currentTime > 1.0) {
+            capturedRef.current = true;
+            setStatus('Capturando datos...');
+            vid.pause();
 
-        let file: File | null = null;
-        if (corsMode === 'anonymous') {
-            setStatus('Extrayendo miniatura...');
-            try {
-                const canvas = document.createElement('canvas');
-                canvas.width = 640;
-                canvas.height = 360;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-                    const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.8));
-                    if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
+            let file: File | null = null;
+
+            // Intentar extraer miniatura si tenemos permisos CORS
+            if (corsMode === 'anonymous') {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 640;
+                    canvas.height = 360;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+                        canvas.toBlob(blob => {
+                            if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
+                            onComplete(vid.duration, file);
+                        }, 'image/jpeg', 0.7);
+                        return; // Salir, el callback del blob finalizará
+                    }
+                } catch (e) {
+                    console.warn("Canvas Tainted (CORS restriction):", e);
                 }
-            } catch (e) { console.warn("Canvas Tainted:", e); }
+            }
+            
+            // Si falló el canvas o no hay CORS, guardamos solo duración
+            onComplete(vid.duration, file);
         }
-        onComplete(durationRef.current, file);
     };
 
-    const handleError = async () => {
+    const handleError = () => {
+        if (capturedRef.current) return;
+        
         const vid = videoRef.current;
-        const msg = vid?.error?.message || "Error desconocido";
-        console.warn(`Error reproducción (Intento ${attempt}):`, msg, vid?.error?.code);
+        const err = vid?.error;
+        console.warn(`Error reproducción: ${err?.code} - ${err?.message}`);
 
-        // DEBUGGING: If error, try to fetch the URL to see if it returns HTML/Error text
-        if (attempt === 1) {
-            setStatus("Verificando respuesta del servidor...");
-            try {
-                const res = await fetch(video.videoUrl, { method: 'HEAD' });
-                const type = res.headers.get('content-type');
-                if (type && type.includes('text/html')) {
-                    setStatus(`ERROR CRÍTICO: Servidor envió HTML en lugar de Video.`);
-                    // Stop trying, this is a backend config issue
-                    setTimeout(() => onComplete(0, null), 2000);
-                    return;
-                }
-            } catch(e) {}
-
-            setStatus(`Reintentando sin CORS...`);
-            setCorsMode(undefined); 
-            setAttempt(2);
+        if (retryCount === 0) {
+            setStatus('Error de seguridad. Reintentando modo compatible...');
+            setRetryCount(1);
+            setCorsMode(undefined); // Quitamos 'anonymous' para permitir cargar sin headers CORS (pierde miniatura, gana duración)
             if (vid) {
-                const separator = video.videoUrl.includes('?') ? '&' : '?';
-                vid.src = `${video.videoUrl}${separator}retry=${Date.now()}`;
-                vid.load();
+                vid.load(); // Recargar con nueva config
             }
         } else {
-            setStatus('Formato no soportado. Guardando sin datos...');
+            // Si falla de nuevo, nos rendimos pero NO bloqueamos la cola. Guardamos duración 0.
+            capturedRef.current = true;
+            setStatus('Formato no soportado. Saltando...');
             onComplete(0, null);
         }
     };
 
-    const initialSrc = `${video.videoUrl}${video.videoUrl.includes('?') ? '&' : '?'}scan=${Date.now()}`;
+    // Forzamos cache-busting para evitar que el navegador use una respuesta fallida anterior
+    const srcUrl = `${video.videoUrl}${video.videoUrl.includes('?') ? '&' : '?'}scanner_t=${Date.now()}`;
 
     return (
         <div className="flex flex-col items-center justify-center p-6 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl max-w-lg w-full mx-4 animate-in zoom-in-95">
@@ -98,19 +96,23 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
             <div className="relative aspect-video w-full bg-black rounded-lg overflow-hidden border border-slate-800 mb-4 flex items-center justify-center">
                 <video 
                     ref={videoRef} 
-                    src={attempt === 1 ? initialSrc : undefined}
+                    src={srcUrl}
                     crossOrigin={corsMode} 
-                    className="w-full h-full object-contain opacity-50" 
+                    className="w-full h-full object-contain" 
                     muted 
+                    autoPlay
                     playsInline 
-                    autoPlay 
-                    onLoadedMetadata={handleLoadedMetadata} 
-                    onSeeked={handleSeeked}
-                    onError={handleError} 
+                    onTimeUpdate={handleTimeUpdate}
+                    onError={handleError}
                 />
+                
+                {/* Overlay de estado */}
+                <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] text-white font-mono">
+                    {corsMode ? 'Modo: Full' : 'Modo: Compatible'}
+                </div>
+
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                     <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-2" />
-                    {attempt === 2 && <AlertTriangle size={24} className="text-amber-500 animate-pulse"/>}
                 </div>
                 
                 <div className="absolute bottom-0 left-0 right-0 bg-black/90 text-white text-[10px] py-1 text-center font-mono border-t border-slate-800">
@@ -118,9 +120,8 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
                 </div>
             </div>
             
-            <div className="text-center text-xs text-slate-500 w-full flex justify-between px-4">
-                <span>Modo: {corsMode ? 'Full' : 'Basic'}</span>
-                <span>Intento: {attempt}/2</span>
+            <div className="text-xs text-slate-500 text-center">
+                No cierres esta ventana. Procesando video...
             </div>
         </div>
     );
@@ -190,13 +191,17 @@ export default function AdminLibrary() {
 
     const handleVideoProcessed = async (duration: number, thumbnail: File | null) => {
         const item = scanQueue[currentScanIndex];
+        
+        // Guardamos, aunque duration sea 0, para quitarle el estado 'PENDING'
+        // Esto evita bucles infinitos.
         try {
             await db.updateVideoMetadata(item.id, duration, thumbnail);
-            const duraFmt = duration > 0 ? `${Math.floor(duration)}s` : 'Error';
-            const thumbIcon = thumbnail ? '📸' : '❌';
-            addToLog(`Procesado: ${item.title} | ${duraFmt} | Img: ${thumbIcon}`);
+            
+            const duraFmt = duration > 0 ? `${Math.floor(duration)}s` : 'N/A';
+            const thumbIcon = thumbnail ? '📸' : '⚪';
+            addToLog(`[${currentScanIndex + 1}/${scanQueue.length}] ${item.title.substring(0, 20)}... | ${duraFmt} | ${thumbIcon}`);
         } catch (e: any) {
-            addToLog(`Fallo al guardar DB: ${item.title}`);
+            addToLog(`Error guardando DB: ${item.title}`);
         }
         
         const nextIdx = currentScanIndex + 1;
@@ -207,7 +212,8 @@ export default function AdminLibrary() {
             db.invalidateCache('index.php?action=get_videos');
             db.setHomeDirty();
         } else {
-            setCurrentScanIndex(nextIdx);
+            // Pequeña pausa para permitir que el navegador libere memoria del Canvas anterior
+            setTimeout(() => setCurrentScanIndex(nextIdx), 200);
         }
     };
 

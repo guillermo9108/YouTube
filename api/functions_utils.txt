@@ -125,11 +125,12 @@ function smartParseFilename($fullPath, $detectedType = null) {
 }
 
 function streamVideo($filePath, $pdo) {
-    // SECURITY: KILL ALL OUTPUT BUFFERS AND ERRORS
+    // SECURITY: KILL ALL OUTPUT BUFFERS AND ERRORS AGGRESSIVELY
     while (ob_get_level()) ob_end_clean();
     error_reporting(0);
     ini_set('display_errors', 0);
     
+    // Disable execution limits for big files
     set_time_limit(0);
 
     // Headers
@@ -137,6 +138,10 @@ function streamVideo($filePath, $pdo) {
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
     header('Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type');
     
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        exit(0);
+    }
+
     // Check FTP
     $stmt = $pdo->prepare("SELECT isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
     $stmt->execute([$filePath, "api/" . $filePath]);
@@ -157,6 +162,7 @@ function streamVideo($filePath, $pdo) {
         if (!$resource) { http_response_code(404); exit; }
         
         header('Content-Type: video/mp4');
+        // No range support for simple FTP proxy, just stream
         fpassthru($resource);
         fclose($resource);
         exit;
@@ -206,8 +212,9 @@ function streamVideo($filePath, $pdo) {
             header("Content-Length: $fileSize");
         }
         
-        if (isset($_SERVER['HTTP_RANGE'])) {
-            header("Content-Length: $length");
+        // Ensure no headers were sent
+        if (headers_sent()) {
+            exit;
         }
 
         $fp = fopen($realPath, 'rb');
