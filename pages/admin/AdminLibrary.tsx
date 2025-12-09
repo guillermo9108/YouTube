@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, SkipForward, Play, AlertCircle, Wand2 } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, SkipForward, Play, AlertCircle, Wand2, Database, Clock, Pause, Check } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -13,67 +13,41 @@ interface ScannerPlayerProps {
 const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState('Cargando...');
-    const [isError, setIsError] = useState(false);
     const processedRef = useRef(false);
 
-    // CRITICAL FIX: Ensure URL is always a stream URL for local files/scans
-    // This handles cases where backend might send raw paths (e.g. /storage/...)
-    // or if the user's browser cache is stale.
     const getVideoSrc = (v: Video) => {
         if (v.videoUrl.startsWith('http') || v.videoUrl.startsWith('blob')) return v.videoUrl;
-        // If it looks like a path (starts with / or has no protocol), force stream API
-        // This bypasses "Not allowed to load local resource" errors.
         return `api/index.php?action=stream&id=${v.id}`;
     };
 
     const streamSrc = getVideoSrc(video);
 
-    // Watch.tsx Style Autoplay Logic
     useEffect(() => {
         const vid = videoRef.current;
         if (!vid) return;
-
-        // Reset state
         processedRef.current = false;
-        setIsError(false);
         setStatus('Iniciando...');
-
-        // Debug log
-        console.log("Scanner attempting play:", streamSrc);
 
         const startPlay = async () => {
             try {
-                // Intento 1: Reproducción normal con sonido bajo
-                vid.volume = 0.1; 
+                // Force mute for speed and stability
+                vid.muted = true;
                 await vid.play();
-                setStatus('Reproduciendo...');
+                setStatus('Procesando...');
             } catch (e) {
-                console.warn("Autoplay blocked, trying muted...", e);
-                try {
-                    // Intento 2: Muteado (Fallback estándar de navegadores)
-                    vid.muted = true;
-                    await vid.play();
-                    setStatus('Reproduciendo (Muteado)...');
-                } catch (e2) {
-                    console.error("Playback failed completely", e2);
-                    setStatus('Esperando click manual...');
-                }
+                console.warn("Autoplay blocked", e);
+                setStatus('Esperando click manual...');
             }
         };
-
-        // Pequeño delay para asegurar que el DOM esté listo y el navegador no se sature
-        const timer = setTimeout(startPlay, 500);
+        const timer = setTimeout(startPlay, 200);
         return () => clearTimeout(timer);
     }, [video, streamSrc]); 
 
-    // Watch.tsx Style Time Update & Capture Logic
     const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
         if (!vid || processedRef.current) return;
 
-        setStatus(`Escaneando: ${vid.currentTime.toFixed(1)}s`);
-
-        // Esperamos a 1.5s (Igual que Watch.tsx repair logic) para asegurar imagen estable
+        // Process quickly at 1.5s
         if (vid.currentTime > 1.5) {
             vid.pause();
             processedRef.current = true;
@@ -91,82 +65,46 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
                     canvas.toBlob(blob => {
-                        if (blob) {
-                            file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                        }
+                        if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
                         onComplete(duration, file);
                     }, 'image/jpeg', 0.8);
                 } else {
-                    // Fallback si falla contexto 2d
                     onComplete(duration, null);
                 }
             } catch (err) {
-                console.warn("Capture error (Likely CORS/Tainted)", err);
-                // Si falla la captura (ej. CORS), al menos guardamos la duración
                 onComplete(duration, null);
             }
         }
     };
 
-    const handleError = (e: any) => {
+    const handleError = () => {
         if (processedRef.current) return;
-        console.error("Media Error:", e);
-        setIsError(true);
-        setStatus("Error al reproducir. Reintentando...");
-        
-        // Esperar 4 segundos y saltar automáticamente si falla
+        setStatus("Error. Saltando...");
         setTimeout(() => {
             if (!processedRef.current) {
                 processedRef.current = true;
                 onComplete(0, null);
             }
-        }, 4000);
+        }, 2000); // Wait 2s then skip
     };
 
     return (
-        <div className="w-full max-w-2xl mx-auto bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl relative">
+        <div className="w-full max-w-lg mx-auto bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl relative mb-4">
             <div className="relative aspect-video bg-black flex items-center justify-center">
-                {/* 
-                   NOTA: No usamos crossOrigin="anonymous" aquí para mantener paridad exacta con Watch.tsx 
-                   y evitar Preflight OPTIONS que fallan en servidores simples.
-                */}
                 <video 
                     ref={videoRef} 
                     src={streamSrc} 
                     className="w-full h-full object-contain" 
-                    controls // Importante: Permite al usuario dar play si el autoplay falla
+                    controls
                     playsInline
+                    muted={true}
                     preload="auto"
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
                 />
-                
-                {/* Status Overlay */}
-                <div className="absolute top-2 left-2 bg-black/70 backdrop-blur px-3 py-1 rounded text-xs font-mono text-white border border-white/10 z-10 pointer-events-none">
+                <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] font-mono text-white z-10 pointer-events-none">
                     {status}
                 </div>
-
-                {/* Botón Gigante de Play si falla el Autoplay */}
-                {status.includes('Esperando') && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-20 cursor-pointer" onClick={() => videoRef.current?.play()}>
-                        <div className="w-20 h-20 bg-indigo-600/90 rounded-full flex items-center justify-center animate-pulse shadow-2xl">
-                            <Play size={40} className="text-white ml-2"/>
-                        </div>
-                    </div>
-                )}
-            </div>
-            
-            <div className="p-3 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
-                <div className="min-w-0 flex-1 mr-4">
-                    <h3 className="font-bold text-white truncate text-sm">{video.title}</h3>
-                    <p className="text-[10px] text-slate-500 font-mono truncate">{streamSrc}</p>
-                </div>
-                <button 
-                    onClick={() => { processedRef.current = true; onComplete(0, null); }} 
-                    className="shrink-0 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 px-4 py-2 rounded flex items-center gap-2 border border-red-900/50 transition-colors"
-                >
-                    <SkipForward size={14}/> Saltar
-                </button>
             </div>
         </div>
     );
@@ -174,13 +112,21 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
 export default function AdminLibrary() {
     const toast = useToast();
+    
+    // Config
     const [localPath, setLocalPath] = useState('');
+    const [step2Limit, setStep2Limit] = useState(''); // Empty = All
+    
+    // States
     const [isIndexing, setIsIndexing] = useState(false);
-    const [isOrganizing, setIsOrganizing] = useState(false);
-    const [scanLog, setScanLog] = useState<string[]>([]);
     const [activeScan, setActiveScan] = useState(false);
+    const [isOrganizing, setIsOrganizing] = useState(false);
+    
+    // Data
+    const [scanLog, setScanLog] = useState<string[]>([]);
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
     const [currentScanIndex, setCurrentScanIndex] = useState(0);
+    const [organizeProgress, setOrganizeProgress] = useState({processed: 0, total: 0});
 
     useEffect(() => {
         db.getSystemSettings().then(s => {
@@ -189,45 +135,48 @@ export default function AdminLibrary() {
     }, []);
 
     const addToLog = (msg: string) => {
-        setScanLog(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 200));
+        setScanLog(prev => [`> ${msg}`, ...prev].slice(0, 100));
     };
 
+    // --- STEP 1: INDEX ---
     const handleIndexLibrary = async () => {
         if (!localPath.trim()) return;
         setIsIndexing(true);
         setScanLog([]); 
-        addToLog('Iniciando indexado de archivos...');
-        addToLog(`Ruta: ${localPath}`);
+        addToLog('Indexando archivos...');
         
         try {
             await db.updateSystemSettings({ localLibraryPath: localPath });
             const res = await db.scanLocalLibrary(localPath);
             if (res.success) {
-                addToLog(`Archivos encontrados: ${res.totalFound}`);
-                addToLog(`Nuevos añadidos a cola: ${res.newToImport}`);
-                if (res.newToImport > 0) {
-                    addToLog("IMPORTANTE: Ejecuta el Paso 2 para procesar.");
-                } else {
-                    addToLog("La librería está actualizada.");
-                }
-            } else {
-                addToLog(`Error: ${res.errors || 'Desconocido'}`);
+                addToLog(`Encontrados: ${res.totalFound}`);
+                addToLog(`Nuevos: ${res.newToImport}`);
+                toast.success("Paso 1 Completado");
             }
         } catch (e: any) {
-            addToLog(`Error Crítico: ${e.message}`);
+            addToLog(`Error: ${e.message}`);
         } finally {
             setIsIndexing(false);
         }
     };
 
+    // --- STEP 2: SCAN ---
     const startBrowserScan = async () => {
-        addToLog("Cargando cola de procesamiento...");
-        const pending = await db.getUnprocessedVideos();
+        addToLog("Cargando videos pendientes...");
+        // API supports limit param. Empty/0 = All.
+        const limit = step2Limit ? parseInt(step2Limit) : 0; 
+        
+        // Custom URL builder to pass limit
+        const response = await fetch(`api/index.php?action=get_unprocessed_videos&limit=${limit}`);
+        const json = await response.json();
+        const pending = json.data || [];
+
         if (pending.length === 0) {
-            addToLog("No hay videos pendientes de procesar.");
+            addToLog("No hay videos pendientes (PENDING).");
             return;
         }
-        addToLog(`Iniciando escáner visual para ${pending.length} videos.`);
+        
+        addToLog(`Iniciando escáner para ${pending.length} videos.`);
         setScanQueue(pending);
         setCurrentScanIndex(0);
         setActiveScan(true);
@@ -237,120 +186,208 @@ export default function AdminLibrary() {
 
     const handleVideoProcessed = async (duration: number, thumbnail: File | null) => {
         const item = scanQueue[currentScanIndex];
-        
         try {
             await db.updateVideoMetadata(item.id, duration, thumbnail);
-            
-            const duraFmt = duration > 0 ? `${Math.floor(duration)}s` : 'Err';
-            const thumbIcon = thumbnail ? '📸' : '⚪';
-            addToLog(`[${currentScanIndex + 1}/${scanQueue.length}] ${item.title.substring(0, 20)}... | ${duraFmt} | ${thumbIcon}`);
-        } catch (e: any) {
-            addToLog(`Error guardando DB: ${item.title}`);
-        }
+        } catch (e) { console.error(e); }
         
         const nextIdx = currentScanIndex + 1;
         if (nextIdx >= scanQueue.length) {
             stopActiveScan();
-            toast.success("¡Importación Completada!");
-            addToLog("--- PROCESO TERMINADO ---");
-            addToLog("Recomendación: Ejecuta el Paso 3 para limpiar nombres.");
-            db.invalidateCache('index.php?action=get_videos');
-            db.setHomeDirty();
+            toast.success("Paso 2 Completado");
+            addToLog("Escaneo visual finalizado.");
         } else {
             setCurrentScanIndex(nextIdx);
         }
     };
 
+    // --- STEP 3: ORGANIZE ---
     const handleSmartOrganize = async () => {
-        if (!confirm("Esto analizará todos los videos, limpiará nombres (quitando '1080p', etc.) y asignará categorías según duración/título. ¿Continuar?")) return;
-        
         setIsOrganizing(true);
-        addToLog("Iniciando organización inteligente...");
+        setOrganizeProgress({processed: 0, total: 100}); // Indeterminate start
+        addToLog("Iniciando organización por lotes...");
         
-        try {
-            const res = await db.smartOrganizeLibrary();
-            addToLog(`Procesados: ${res.processed}`);
-            addToLog(`Renombrados: ${res.renamed}`);
-            addToLog(`Categorizados: ${res.categorized}`);
-            
-            if (res.details && res.details.length > 0) {
-                res.details.forEach(d => addToLog(`> ${d}`));
+        const processBatch = async () => {
+            try {
+                const res = await db.smartOrganizeLibrary();
+                
+                if (res.details) res.details.forEach(d => addToLog(d));
+                
+                // If remaining > 0, continue recursively
+                if (res.remaining && res.remaining > 0) {
+                    addToLog(`Quedan ${res.remaining} videos. Continuando...`);
+                    // Update progress visually (fake progress for batching)
+                    setOrganizeProgress(prev => ({processed: prev.processed + res.processed, total: prev.processed + res.processed + res.remaining}));
+                    setTimeout(processBatch, 500); // Small delay to prevent freeze
+                } else {
+                    addToLog("Organización Finalizada.");
+                    toast.success("Paso 3 Completado");
+                    setIsOrganizing(false);
+                    db.invalidateCache('index.php?action=get_videos');
+                    db.setHomeDirty();
+                }
+            } catch (e: any) {
+                addToLog(`Error: ${e.message}`);
+                setIsOrganizing(false);
             }
-            
-            toast.success("Librería Organizada");
-            db.invalidateCache('index.php?action=get_videos');
-            db.setHomeDirty();
-        } catch (e: any) {
-            addToLog(`Error: ${e.message}`);
-        } finally {
-            setIsOrganizing(false);
-        }
+        };
+
+        processBatch();
+    };
+
+    // Helpers
+    const getEstimatedTime = (count: number, secsPerItem: number) => {
+        const totalSecs = count * secsPerItem;
+        const mins = Math.floor(totalSecs / 60);
+        const secs = Math.floor(totalSecs % 60);
+        return `${mins}m ${secs}s`;
     };
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in">
-            <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 space-y-4">
-                <h3 className="font-bold text-white flex items-center gap-2"><FolderSearch size={18}/> Escáner de Librería</h3>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta del Servidor</label>
-                    <input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-3 text-white font-mono text-sm" placeholder="/storage/emulated/0/DCIM/Camera" />
-                </div>
+        <div className="space-y-6 animate-in fade-in pb-20">
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-2">
+                <Database size={24} className="text-indigo-400"/>
+                <h2 className="text-2xl font-bold text-white">Gestión de Librería</h2>
+            </div>
 
-                <div className="grid grid-cols-1 gap-3">
-                    <button onClick={handleIndexLibrary} disabled={isIndexing || activeScan || isOrganizing} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all">
-                        {isIndexing ? <Loader2 className="animate-spin"/> : <FolderSearch size={20}/>} Paso 1: Buscar Archivos
-                    </button>
-                    
-                    <button onClick={startBrowserScan} disabled={isIndexing || activeScan || isOrganizing} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 transition-all">
-                        <Film size={20}/> Paso 2: Procesar (Escáner Visual)
-                    </button>
-
-                    <button onClick={handleSmartOrganize} disabled={isIndexing || activeScan || isOrganizing} className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-purple-900/20 transition-all">
-                        {isOrganizing ? <Loader2 className="animate-spin"/> : <Wand2 size={20}/>} Paso 3: Renombrado & Categorización
-                    </button>
+            {/* STEP 1: INDEX */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden group">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-blue-500"></div>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                        <span className="bg-blue-500/20 text-blue-400 w-6 h-6 rounded flex items-center justify-center text-xs">1</span>
+                        Indexar Archivos
+                    </h3>
+                    {isIndexing && <Loader2 className="animate-spin text-blue-500"/>}
                 </div>
                 
-                <div className="text-xs text-slate-500 mt-2 bg-slate-950 p-3 rounded border border-slate-800">
-                    <p className="mb-1"><strong className="text-indigo-400">Nota Importante:</strong></p>
-                    <p>El "Paso 2" abrirá un reproductor. Si el video no inicia automáticamente, <strong>haz click en él</strong>.</p>
-                    <p className="mt-1">El "Paso 3" es automático y no requiere reproducción.</p>
-                </div>
-            </div>
-
-            <div className="flex flex-col gap-4 h-[500px]">
-                <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 flex-1 overflow-y-auto shadow-inner relative">
-                    <div className="absolute top-2 right-2 text-slate-600 opacity-50 pointer-events-none"><Terminal size={16}/></div>
-                    <div className="flex flex-col gap-1">
-                        {scanLog.map((line, i) => (
-                            <div key={i} className={`pb-1 break-all border-b border-slate-900/50 ${line.includes('Error') ? 'text-red-400' : (line.includes('IMPORTANTE') ? 'text-amber-400 font-bold' : 'text-slate-400')}`}>
-                                {line}
-                            </div>
-                        ))}
-                    </div>
-                    {(isIndexing || activeScan || isOrganizing) && <div className="animate-pulse text-emerald-500 mt-2">_ Procesando...</div>}
-                </div>
-            </div>
-
-            {/* Modal de Escaneo Visual */}
-            {activeScan && scanQueue.length > 0 && (
-                <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-lg flex flex-col items-center justify-center animate-in fade-in duration-300 p-4">
-                    <div className="w-full max-w-2xl flex justify-between items-center mb-4 text-white">
-                        <h2 className="font-bold text-xl flex items-center gap-2"><Film className="text-emerald-500"/> Escáner Activo</h2>
-                        <span className="font-mono bg-slate-800 px-3 py-1 rounded text-sm">{currentScanIndex + 1} / {scanQueue.length}</span>
-                    </div>
-                    
-                    {/* CRITICAL: Key prop ensures fresh mount for every video */}
-                    <ScannerPlayer 
-                        key={scanQueue[currentScanIndex].id}
-                        video={scanQueue[currentScanIndex]} 
-                        onComplete={handleVideoProcessed} 
+                <div className="flex gap-3">
+                    <input 
+                        type="text" 
+                        value={localPath} 
+                        onChange={e => setLocalPath(e.target.value)} 
+                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-white" 
+                        placeholder="/storage/..." 
                     />
-                    
-                    <div className="mt-6 flex flex-col items-center gap-2">
-                        <p className="text-slate-400 text-sm">Por favor, no cierres esta ventana.</p>
-                        <button onClick={stopActiveScan} className="px-6 py-2 text-red-400 hover:text-red-300 text-sm font-bold transition-colors">
-                            Cancelar Proceso
+                    <button 
+                        onClick={handleIndexLibrary} 
+                        disabled={isIndexing || activeScan || isOrganizing}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2"
+                    >
+                        <FolderSearch size={16}/> Escanear
+                    </button>
+                </div>
+                {isIndexing && <div className="mt-2 h-1 bg-blue-900/30 w-full overflow-hidden rounded"><div className="h-full bg-blue-500 w-1/3 animate-progress-indeterminate"></div></div>}
+            </div>
+
+            {/* STEP 2: PROCESS */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-emerald-500"></div>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                        <span className="bg-emerald-500/20 text-emerald-400 w-6 h-6 rounded flex items-center justify-center text-xs">2</span>
+                        Extracción de Datos
+                    </h3>
+                    {activeScan && <div className="text-xs font-mono text-emerald-400 animate-pulse">PROCESANDO</div>}
+                </div>
+
+                {!activeScan ? (
+                    <div className="flex gap-3 items-end">
+                        <div className="flex-1">
+                            <label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Límite (Opcional)</label>
+                            <input 
+                                type="number" 
+                                value={step2Limit} 
+                                onChange={e => setStep2Limit(e.target.value)} 
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" 
+                                placeholder="Sin límite (Todos)" 
+                            />
+                        </div>
+                        <button 
+                            onClick={startBrowserScan} 
+                            disabled={isIndexing || isOrganizing}
+                            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold px-6 py-2 rounded-lg text-sm flex items-center gap-2 h-[38px]"
+                        >
+                            <Film size={16}/> Iniciar Escáner
                         </button>
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        <div className="flex justify-between text-xs text-slate-400">
+                            <span>Video {currentScanIndex + 1} de {scanQueue.length}</span>
+                            <span>Estimado: {getEstimatedTime(scanQueue.length - currentScanIndex, 2.5)}</span>
+                        </div>
+                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 transition-all duration-300" style={{width: `${((currentScanIndex) / scanQueue.length) * 100}%`}}></div>
+                        </div>
+                        
+                        {/* THE SCANNER MODAL EMBEDDED OR OVERLAY - Keep Overlay for focus */}
+                    </div>
+                )}
+            </div>
+
+            {/* STEP 3: ORGANIZE */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-purple-500"></div>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                        <span className="bg-purple-500/20 text-purple-400 w-6 h-6 rounded flex items-center justify-center text-xs">3</span>
+                        Organización Inteligente
+                    </h3>
+                    {isOrganizing && <Loader2 className="animate-spin text-purple-500"/>}
+                </div>
+
+                {!isOrganizing ? (
+                    <button 
+                        onClick={handleSmartOrganize} 
+                        disabled={isIndexing || activeScan}
+                        className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all"
+                    >
+                        <Wand2 size={18}/> Organizar y Publicar Todos
+                    </button>
+                ) : (
+                    <div className="space-y-2">
+                        <div className="flex justify-between text-xs text-slate-400">
+                            <span>Procesando lotes...</span>
+                            <span>{organizeProgress.processed} completados</span>
+                        </div>
+                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            {/* Indeterminate if total unknown, else determinate */}
+                            <div className="h-full bg-purple-500 animate-pulse w-full"></div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* LOG CONSOLE */}
+            <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-[10px] text-slate-300 h-48 overflow-y-auto shadow-inner relative">
+                <div className="absolute top-2 right-2 opacity-50"><Terminal size={14}/></div>
+                {scanLog.length === 0 && <div className="text-slate-600 italic">Esperando comandos...</div>}
+                {scanLog.map((line, i) => (
+                    <div key={i} className="pb-0.5 border-b border-slate-900/50 truncate">{line}</div>
+                ))}
+            </div>
+
+            {/* OVERLAY SCANNER PLAYER (HIDDEN BUT ACTIVE) */}
+            {activeScan && scanQueue.length > 0 && (
+                <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur flex flex-col items-center justify-center p-4">
+                    <div className="w-full max-w-md bg-slate-900 rounded-xl border border-slate-700 p-6 shadow-2xl">
+                        <h3 className="text-white font-bold mb-4 flex items-center gap-2"><Film className="text-emerald-400"/> Escaneando...</h3>
+                        <ScannerPlayer 
+                            key={scanQueue[currentScanIndex].id}
+                            video={scanQueue[currentScanIndex]} 
+                            onComplete={handleVideoProcessed} 
+                        />
+                        <div className="mt-4 space-y-2">
+                            <div className="flex justify-between text-xs text-slate-400">
+                                <span>Progreso: {Math.round(((currentScanIndex) / scanQueue.length) * 100)}%</span>
+                                <span>{currentScanIndex + 1}/{scanQueue.length}</span>
+                            </div>
+                            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-500 transition-all duration-300" style={{width: `${((currentScanIndex) / scanQueue.length) * 100}%`}}></div>
+                            </div>
+                            <button onClick={stopActiveScan} className="w-full mt-4 py-2 text-red-400 hover:bg-slate-800 rounded text-xs font-bold">Cancelar</button>
+                        </div>
                     </div>
                 </div>
             )}

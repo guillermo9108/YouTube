@@ -379,7 +379,9 @@ function video_scan_local($pdo, $input) {
 function video_get_unprocessed($pdo) {
     // Only get videos marked PENDING.
     // CRITICAL: Must select isLocal to allow video_process_rows to transform paths!
-    $limit = 50;
+    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 10000;
+    if ($limit <= 0) $limit = 10000; // Unlimited effectively
+    
     $sql = "SELECT id, videoUrl, title, thumbnailUrl, isLocal FROM videos WHERE category = 'PENDING' LIMIT $limit";
     $stmt = $pdo->query($sql);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -393,39 +395,13 @@ function video_update_metadata($pdo, $post, $files) {
     
     if (!$id) respond(false);
 
-    $category = 'UNKNOWN'; 
-    $price = 0;
-    $title = null;
+    // STEP 2 CHANGE: Set to 'PROCESSING' instead of specific category. 
+    // This hides it from Home until Step 3 organizes it.
+    $category = 'PROCESSING'; 
+    $price = 0; // Temporary
 
-    // Smart logic: If duration > 0, we trust it. If 0 (failed scan), we default to OTHER but keep it valid.
-    
-    $category = detectCategoryFromDuration($duration);
-    $settings = $pdo->query("SELECT * FROM system_settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-    $price = getPriceForCategory($category, $settings);
-
-    // Smart Renaming
-    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
-    $stmt->execute([$id]);
-    $path = $stmt->fetchColumn();
-    
-    // Sanitize path if it's an API URL
-    $cleanPath = str_replace('api/', '', $path);
-    
-    $smart = smartParseFilename($cleanPath, $category);
-    $title = $smart['title'];
-    
-    if ($smart['category'] && $smart['category'] !== 'OTHER') {
-        $category = $smart['category'];
-        $price = getPriceForCategory($category, $settings);
-    }
-
-    $params = [$category, $duration, $price];
     $sql = "UPDATE videos SET category = ?, duration = ?, price = ?";
-    
-    if (!empty($title)) {
-        $sql .= ", title = ?";
-        $params[] = $title;
-    }
+    $params = [$category, $duration, $price];
     
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         $thumbPath = THUMB_DIR . "{$id}.jpg";
@@ -451,59 +427,53 @@ function video_repair_thumbnail($pdo, $post, $files) {
     respond(false);
 }
 
+// STEP 3: Organize Logic
 function video_smart_organize($pdo) {
     set_time_limit(300); // 5 min timeout
     
     $stmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    // Get all videos that might need organizing (local or ftp)
-    $stmt = $pdo->query("SELECT id, title, videoUrl, duration, category FROM videos WHERE isLocal > 0");
+    // STEP 3: Only process videos that are in 'PROCESSING' state (Passed Step 2)
+    // Batch limit to prevent timeouts
+    $limit = 50; 
+    $stmt = $pdo->query("SELECT id, title, videoUrl, duration, category FROM videos WHERE category = 'PROCESSING' LIMIT $limit");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     $stats = ['processed' => 0, 'renamed' => 0, 'categorized' => 0, 'details' => []];
-    
     $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, price = ? WHERE id = ?");
     
     foreach ($videos as $v) {
         $stats['processed']++;
         
         $path = str_replace('api/', '', $v['videoUrl']);
-        // Use current category as hint if it's specific, else pass null to detect from filename
-        $currentCatHint = ($v['category'] !== 'PENDING' && $v['category'] !== 'OTHER') ? $v['category'] : null;
         
         // 1. Parse Filename
-        $smart = smartParseFilename($path, $currentCatHint);
+        $smart = smartParseFilename($path, null);
         $newTitle = $smart['title'];
         $newCat = $smart['category'];
         
-        // 2. Refine Category by Duration (if regex didn't find specific Series/Movie tag)
-        if (!$newCat || $newCat === 'OTHER') {
+        // 2. Refine Category by Duration
+        if (!$newCat || $newCat === 'OTHER' || $newCat === 'PROCESSING') {
             $newCat = detectCategoryFromDuration($v['duration']);
         }
         
-        // 3. Compare changes
-        $titleChanged = ($newTitle !== $v['title']);
-        $catChanged = ($newCat !== $v['category']);
+        $newPrice = getPriceForCategory($newCat, $settings);
         
-        if ($titleChanged || $catChanged) {
-            $newPrice = getPriceForCategory($newCat, $settings);
-            
-            $updateStmt->execute([$newTitle, $newCat, $newPrice, $v['id']]);
-            
-            if ($titleChanged) {
-                $stats['renamed']++;
-                $stats['details'][] = "Renamed: {$v['title']} -> $newTitle";
-            }
-            if ($catChanged) {
-                $stats['categorized']++;
-                $stats['details'][] = "Categorized: {$v['title']} -> $newCat";
-            }
+        // Always update to move out of PROCESSING state
+        $updateStmt->execute([$newTitle, $newCat, $newPrice, $v['id']]);
+        
+        if ($newTitle !== $v['title']) {
+            $stats['renamed']++;
+            $stats['details'][] = "Renamed: {$v['title']} -> $newTitle";
         }
+        $stats['categorized']++;
+        $stats['details'][] = "Categorized: $newCat";
     }
     
-    // Limit details log size
-    $stats['details'] = array_slice($stats['details'], 0, 50);
+    // Add count of remaining items
+    $count = $pdo->query("SELECT COUNT(*) FROM videos WHERE category = 'PROCESSING'")->fetchColumn();
+    $stats['remaining'] = $count;
     
     respond(true, $stats);
 }

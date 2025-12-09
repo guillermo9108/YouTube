@@ -166,8 +166,8 @@ export default function Home() {
       
       let filtered = shuffledMasterList;
       
-      // Filter out PENDING
-      filtered = filtered.filter(v => v.category !== 'PENDING');
+      // Filter out PENDING and PROCESSING (Step 2 videos not yet organized)
+      filtered = filtered.filter(v => v.category !== 'PENDING' && v.category !== 'PROCESSING');
       
       if (activeCategory === 'SUBSCRIPTIONS') {
           filtered = filtered.filter(v => subscribedCreators.includes(v.creatorId));

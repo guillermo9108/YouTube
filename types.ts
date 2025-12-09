@@ -1,6 +1,5 @@
 
 
-
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -186,6 +185,14 @@ export interface SystemSettings {
   ftpSettings?: FtpSettings;
   videoCommission: number; // Percentage (0-100)
   marketCommission: number; // Percentage (0-100)
+}
+
+export interface OrganizeResult {
+  processed: number;
+  renamed: number;
+  categorized: number;
+  details: string[];
+  remaining?: number;
 }
 
 export interface SmartCleanerResult {
