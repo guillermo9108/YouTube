@@ -206,6 +206,69 @@ function video_ftp_import($pdo, $input) {
     }
 }
 
+function video_ftp_scan_recursive($pdo, $input) {
+    $startPath = $input['path'] ?? '/';
+    // Increase time limit for long scans
+    set_time_limit(600); 
+
+    try {
+        $conn = getFtpConnection($pdo);
+        
+        $filesFound = [];
+        $queue = [$startPath];
+        
+        // Iterative BFS scan to find all videos
+        while(!empty($queue)) {
+            $currentDir = array_shift($queue);
+            $list = @ftp_mlsd($conn, $currentDir);
+            
+            if(!is_array($list)) continue;
+            
+            foreach($list as $item) {
+                if($item['name'] == '.' || $item['name'] == '..') continue;
+                
+                $fullPath = rtrim($currentDir, '/') . '/' . $item['name'];
+                
+                if($item['type'] == 'dir') {
+                    $queue[] = $fullPath;
+                } else {
+                    $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
+                    if(in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'm4v', 'ts', 'flv'])) {
+                        $filesFound[] = $fullPath;
+                    }
+                }
+            }
+        }
+        
+        ftp_close($conn);
+        
+        // Insert into DB
+        $added = 0;
+        $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+        
+        // Check existing to avoid duplicates
+        $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
+        $stmtInsert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'PENDING', 0, 2)");
+        
+        foreach($filesFound as $path) {
+            $stmtCheck->execute([$path]);
+            if($stmtCheck->fetchColumn() == 0) {
+                $vidId = 'ftp_' . md5($path);
+                $filename = basename($path);
+                $thumbPath = "https://via.placeholder.com/640x360.png?text=Pending";
+                
+                $stmtInsert->execute([$vidId, $filename, "FTP Stream", $thumbPath, $path, $adminId, time()]);
+                $added++;
+            }
+        }
+        
+        respond(true, ['scanned' => count($filesFound), 'added' => $added]);
+        
+    } catch (Exception $e) {
+        respond(false, null, $e->getMessage());
+    }
+}
+
 // --- SYNOLOGY & LOCAL SCANNER ---
 
 function video_scan_local($pdo, $input) {
@@ -395,4 +458,3 @@ function video_update_prices_bulk($pdo, $input) {
 function video_get_scan_status($pdo) { respond(true, ['active' => false]); }
 function video_scan_ftp($pdo, $input) { respond(true, ['completed' => true]); } // Stub
 ?>
-    

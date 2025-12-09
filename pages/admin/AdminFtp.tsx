@@ -1,8 +1,11 @@
 
+
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../../services/db';
 import { useToast } from '../../context/ToastContext';
-import { Network, Save, RefreshCw, Download, Folder, FileVideo, HardDrive, FilePlus } from 'lucide-react';
+import { Network, Save, RefreshCw, Download, Folder, FileVideo, HardDrive, FilePlus, Layers, ArrowRight } from 'lucide-react';
+import { useNavigate } from '../../components/Router';
 
 interface FtpFile {
     name: string;
@@ -13,6 +16,7 @@ interface FtpFile {
 
 export default function AdminFtp() {
     const toast = useToast();
+    const navigate = useNavigate();
     const [config, setConfig] = useState({
         host: '',
         port: 21,
@@ -25,6 +29,7 @@ export default function AdminFtp() {
     const [loading, setLoading] = useState(false);
     const [importing, setImporting] = useState<string | null>(null);
     const [currentPath, setCurrentPath] = useState('/');
+    const [scanningRecursive, setScanningRecursive] = useState(false);
 
     useEffect(() => {
         db.getSystemSettings().then(s => {
@@ -77,11 +82,30 @@ export default function AdminFtp() {
         try {
             // Now this is instant (Index only)
             await db.importFtpFile(file.path);
-            toast.success(`${file.name} añadido al índice. Ve a 'Librería' para escanear.`);
+            toast.success(`${file.name} añadido al índice.`);
         } catch (e: any) {
             toast.error("Error al indexar: " + e.message);
         } finally {
             setImporting(null);
+        }
+    };
+
+    const handleRecursiveScan = async () => {
+        if (!confirm(`Esto escaneará recursivamente todas las carpetas a partir de '${currentPath}' y agregará todos los videos encontrados. Esto puede tomar varios minutos. ¿Continuar?`)) return;
+        
+        setScanningRecursive(true);
+        try {
+            const res = await db.scanFtpRecursive(currentPath);
+            toast.success(`Escaneo completado. Encontrados: ${res.scanned}. Añadidos: ${res.added}.`);
+            if (res.added > 0) {
+                if (confirm(`${res.added} nuevos videos indexados. ¿Ir a Librería para procesar miniaturas?`)) {
+                    navigate('/admin'); // Redirect to Admin root, user clicks Library manually or we could deep link
+                }
+            }
+        } catch (e: any) {
+            toast.error("Error Escaneo: " + e.message);
+        } finally {
+            setScanningRecursive(false);
         }
     };
 
@@ -127,11 +151,24 @@ export default function AdminFtp() {
 
             {/* File Browser */}
             <div className="lg:col-span-2 bg-slate-900 rounded-xl border border-slate-800 flex flex-col h-[600px]">
-                <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
-                    <div className="font-mono text-xs text-slate-400 break-all flex items-center gap-2">
+                <div className="p-4 border-b border-slate-800 bg-slate-950 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div className="font-mono text-xs text-slate-400 break-all flex items-center gap-2 flex-1">
                         <Folder size={14} className="text-amber-500"/> {currentPath}
                     </div>
-                    <button onClick={() => listFiles(currentPath)} className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"><RefreshCw size={14}/></button>
+                    
+                    <div className="flex gap-2 w-full md:w-auto">
+                        {files.length > 0 && (
+                            <button 
+                                onClick={handleRecursiveScan}
+                                disabled={scanningRecursive}
+                                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-900/20"
+                            >
+                                {scanningRecursive ? <RefreshCw className="animate-spin" size={14}/> : <Layers size={14}/>}
+                                {scanningRecursive ? 'Escaneando...' : 'Escanear Recursivo'}
+                            </button>
+                        )}
+                        <button onClick={() => listFiles(currentPath)} className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white bg-slate-800"><RefreshCw size={14}/></button>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-2">
@@ -176,11 +213,22 @@ export default function AdminFtp() {
                                             {importing === file.name ? 'Indexando...' : 'Indexar'}
                                         </button>
                                     )}
+                                    {file.type === 'dir' && (
+                                        <div className="text-slate-600">
+                                            <ArrowRight size={14}/>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
                     )}
                 </div>
+                
+                {files.length > 0 && (
+                    <div className="p-3 bg-slate-950/50 text-[10px] text-slate-500 text-center border-t border-slate-800">
+                        Nota: Usa 'Escanear Recursivo' para añadir carpetas enteras. Luego ve a Librería - Paso 2.
+                    </div>
+                )}
             </div>
         </div>
     );

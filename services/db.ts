@@ -1,6 +1,8 @@
 
 
 
+
+
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest, MarketplaceReview } from '../types';
 
 const API_BASE = 'api';
@@ -237,6 +239,7 @@ class DatabaseService {
   // --- FTP ---
   async listFtpFiles(path: string): Promise<any[]> { return this.request<any[]>('index.php?action=ftp_list', 'POST', { path }); }
   async importFtpFile(path: string): Promise<void> { await this.request('index.php?action=ftp_import', 'POST', { path }); }
+  async scanFtpRecursive(path: string): Promise<{scanned: number, added: number}> { return this.request<{scanned: number, added: number}>('index.php?action=scan_ftp_recursive', 'POST', { path }); }
 
   async updatePricesBulk(creatorId: string, newPrice: number): Promise<void> { await this.request('index.php?action=update_prices_bulk', 'POST', { creatorId, newPrice }); }
   
