@@ -41,7 +41,7 @@ function get_youtube_video($query, $config) {
 
 // Helper: Auto Categorize based on duration
 function detectCategoryFromDuration($duration) {
-    if ($duration == 0) return 'OTRO'; 
+    if ($duration <= 0) return 'OTRO'; 
     if ($duration <= 180) return 'SHORTS'; // < 3 min
     if ($duration <= 300) return 'MUSICA'; // < 5 min
     if ($duration <= 1500) return 'CORTOMETRAJE'; // < 25 min
@@ -162,29 +162,20 @@ function streamVideo($filePath, $pdo) {
         if (!$s || empty($s['host'])) { http_response_code(500); die("FTP Config Missing"); }
         
         // Build Authenticated URL
-        // We use urlencode for user/pass to handle special chars like @ or :
         $authUrl = "ftp://" . urlencode($s['user']) . ":" . urlencode($s['pass']) . "@" . $s['host'] . ":" . ($s['port']??21) . $filePath;
         
-        // Get File Size
-        // We can use fopen context to get headers, but checking size via separate connection is often safer for FTP
-        // However, for stream speed, let's try reading the header
         $context = stream_context_create(['ftp' => ['overwrite' => true]]);
         $resource = @fopen($authUrl, 'rb', false, $context);
         
         if (!$resource) { http_response_code(404); die("FTP File unreachable"); }
         
-        // Try to determine size
-        $stat = fstat($resource);
-        $fileSize = $stat['size'] ?? 0;
-        
-        // If fstat fails (some FTP servers), we can't support Seeking easily
-        if ($fileSize <= 0) {
-            // Fallback: No content-length, straight stream
-            header('Content-Type: video/mp4'); // Guess generic
-            fpassthru($resource);
-            fclose($resource);
-            exit;
-        }
+        // Try to determine size logic (simplified for reliability)
+        // Note: Accurately seeking FTP in PHP without downloading whole file is tricky depending on server support.
+        // We rely on standard stream passthru for basic playback.
+        header('Content-Type: video/mp4');
+        fpassthru($resource);
+        fclose($resource);
+        exit;
 
     } else {
         // --- LOCAL FILE MODE ---
@@ -240,19 +231,7 @@ function streamVideo($filePath, $pdo) {
 
     // Seek
     if ($offset > 0) {
-        if (fseek($resource, $offset) !== 0) {
-            // Seek failed (common in some FTP wrappers). 
-            // Fallback: Read and discard bytes until offset. Slow but functional.
-            // Only do this for small offsets to avoid timeouts.
-            if ($isFtp) {
-                $consumed = 0;
-                while ($consumed < $offset && !feof($resource)) {
-                    $chunk = min(8192, $offset - $consumed);
-                    fread($resource, $chunk);
-                    $consumed += $chunk;
-                }
-            }
-        }
+        fseek($resource, $offset);
     }
     
     // Output loop
