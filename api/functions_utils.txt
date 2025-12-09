@@ -55,33 +55,66 @@ function getPriceForCategory($cat, $settings) {
 
 function smartParseFilename($fullPath, $detectedType = null) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
-    $folderName = basename(dirname($fullPath));
     
+    // Normalizar separadores de directorio y dividir
+    $fullPathNormalized = str_replace('\\', '/', $fullPath);
+    $pathParts = explode('/', dirname($fullPathNormalized));
+    
+    // --- LÓGICA 1: DETECCIÓN POR CARPETA (Prioridad Alta) ---
+    // Analizamos las carpetas padre buscando palabras clave en Español e Inglés
+    if (!$detectedType || $detectedType === 'PROCESSING' || $detectedType === 'OTHER') {
+        // Mapa de palabras clave a categorías
+        $categoryMap = [
+            'SERIES' => ['series', 'serie', 'temporada', 'season', 'tv shows', 'capitulos', 'episodes', 'tvs'],
+            'NOVELAS' => ['novelas', 'telenovelas', 'soap operas', 'dramas'],
+            'MOVIE' => ['movies', 'movie', 'peliculas', 'pelicula', 'films', 'cine', 'cinema', 'largometrajes'],
+            'SHORTS' => ['shorts', 'cortos', 'tiktok', 'reels', 'vertical', 'stories'],
+            'MUSIC' => ['music', 'musica', 'video clips', 'videoclips', 'concerts', 'conciertos', 'albums'],
+            'EDUCATION' => ['education', 'educacion', 'cursos', 'courses', 'learning', 'tutoriales', 'tutorials'],
+            'SHORT_FILM' => ['short film', 'cortometrajes']
+        ];
+
+        // Iteramos desde la carpeta más cercana al archivo hacia arriba
+        foreach (array_reverse($pathParts) as $part) {
+            $p = strtolower(trim($part));
+            foreach ($categoryMap as $catKey => $keywords) {
+                foreach ($keywords as $kw) {
+                    // Coincidencia exacta o parcial segura (ej: "Mis Series")
+                    if (strpos($p, $kw) !== false) {
+                        $detectedType = $catKey;
+                        break 3; // Romper todos los bucles si encontramos una categoría
+                    }
+                }
+            }
+        }
+    }
+
+    // --- LÓGICA 2: LIMPIEZA DE NOMBRE ---
     $junk = [
-        '/1080p/i', '/720p/i', '/480p/i', '/x264/i', '/h264/i', '/x265/i', '/HEVC/i', 
-        '/AAC/i', '/AC3/i', '/BluRay/i', '/WEB-DL/i', '/WEBRip/i', '/HDRip/i', 
+        '/1080p/i', '/720p/i', '/480p/i', '/2160p/i', '/4k/i', 
+        '/x264/i', '/h264/i', '/x265/i', '/HEVC/i', 
+        '/AAC/i', '/AC3/i', '/E-AC3/i', '/DTS/i', '/TrueHD/i',
+        '/BluRay/i', '/WEB-DL/i', '/WEBRip/i', '/HDRip/i', '/HDTV/i',
         '/www\..+\.com/i', '/\[.*?\]/', '/\(.*?\)/', 
-        '/VID_\d{8}_\d{6}/i', '/PXL_\d{8}_\d{9}/i'
+        '/VID_\d{8}_\d{6}/i', '/PXL_\d{8}_\d{9}/i', // Android Camera
+        '/WhatsApp Video/i'
     ];
     
-    $isCameraFile = preg_match('/^VID_|^PXL_/', $filename);
     $cleanName = preg_replace($junk, '', $filename);
-    $cleanName = str_replace(['.', '_'], ' ', $cleanName);
+    $cleanName = str_replace(['.', '_', '-'], ' ', $cleanName);
     
-    if ($isCameraFile && strlen(trim($cleanName)) < 3) {
-        $cleanName = $folderName . ' - ' . date("Y-m-d", filemtime($fullPath));
-    }
-    
+    // --- LÓGICA 3: DETECCIÓN DE EPISODIOS (Series/Novelas) ---
     $season = '';
     $episode = '';
     $isEpisodic = false;
 
-    if (preg_match('/S(\d+)E(\d+)/i', $filename, $m)) {
+    // Patrones comunes: S01E01, 1x01, Cap 01, Ep 01
+    if (preg_match('/S(\d+)\s*E(\d+)/i', $filename, $m)) {
         $season = (int)$m[1];
         $episode = (int)$m[2];
         $isEpisodic = true;
     }
-    else if (preg_match('/(\d+)x(\d+)/i', $filename, $m)) {
+    else if (preg_match('/(\d+)[xX](\d+)/', $filename, $m)) {
         $season = (int)$m[1];
         $episode = (int)$m[2];
         $isEpisodic = true;
@@ -91,46 +124,80 @@ function smartParseFilename($fullPath, $detectedType = null) {
         $isEpisodic = true;
     }
     
+    // Forzar categoría SERIES si parece un episodio y no se detectó otra cosa específica
+    if ($isEpisodic && (!$detectedType || $detectedType === 'OTHER' || $detectedType === 'PROCESSING')) {
+        $detectedType = 'SERIES';
+    }
+
     $finalTitle = trim($cleanName);
     
-    if ($detectedType === 'SERIES' || $detectedType === 'NOVELAS' || $isEpisodic) {
+    // --- LÓGICA 4: CONSTRUCCIÓN INTELIGENTE DEL TÍTULO ---
+    // Si es una serie, intentamos usar el nombre de la carpeta padre si el archivo tiene un nombre genérico
+    if ($detectedType === 'SERIES' || $detectedType === 'NOVELAS') {
+        $parentFolder = end($pathParts); // Carpeta contenedora directa
+        $grandParent = prev($pathParts); // Carpeta abuela
+
+        // Limpiar nombre de carpeta de palabras comunes de estructura
+        $cleanParent = preg_replace('/(Season|Temporada)\s*\d+/i', '', $parentFolder);
+        $cleanParent = trim(str_replace(['_', '.'], ' ', $cleanParent));
+        
+        // Formatear números de episodio
+        $epString = "";
         if ($season !== '' && $episode !== '') {
             $s = str_pad($season, 2, '0', STR_PAD_LEFT);
             $e = str_pad($episode, 2, '0', STR_PAD_LEFT);
-            if (stripos($filename, $folderName) === false && strlen($finalTitle) < 5) {
-                 $finalTitle = "$folderName - S{$s}E{$e}";
-            } else {
-                 $finalTitle = "$folderName - " . preg_replace('/S\d+E\d+/i', '', $finalTitle) . " S{$s}E{$e}";
-            }
+            $epString = "S{$s}E{$e}";
         } elseif ($episode !== '') {
             $e = str_pad($episode, 2, '0', STR_PAD_LEFT);
-            $finalTitle = "$folderName - Cap $e";
+            $epString = "Cap {$e}";
+        }
+
+        // Si el nombre del archivo es muy corto o solo contiene números/episodios, USAR CARPETA
+        // Ej: "1x02.mp4" dentro de "Inmortal" -> "Inmortal - S01E02"
+        // Ej: "Inmortal 1x02.mp4" -> "Inmortal - S01E02" (Limpiando duplicados)
+        
+        // Comprobamos si el nombre del archivo ya contiene el nombre de la carpeta (aprox)
+        $similitud = 0;
+        if (!empty($cleanParent)) {
+            similar_text(strtolower($finalTitle), strtolower($cleanParent), $similitud);
+        }
+
+        if ($similitud < 50 || strlen($finalTitle) < 5) {
+            // El archivo no tiene el nombre de la serie, lo agregamos
+            // Si la carpeta padre es "Temporada 1", usamos la abuela
+            if (preg_match('/^(Season|Temporada)\s*\d+$/i', $parentFolder) && !empty($grandParent)) {
+                $seriesName = $grandParent;
+            } else {
+                $seriesName = !empty($cleanParent) ? $cleanParent : $parentFolder;
+            }
+            
+            $finalTitle = "$seriesName - $epString";
+        } else {
+            // El archivo ya tiene el nombre, solo formateamos el episodio
+            // Quitamos el patrón detectado del nombre original para re-formatearlo bonito
+            $titleWithoutEp = preg_replace('/S\d+\s*E\d+|(\d+)[xX](\d+)|(Cap|Ep)\s*\d+/i', '', $finalTitle);
+            $finalTitle = trim($titleWithoutEp) . " - " . $epString;
         }
     }
 
+    // Limpieza final de espacios y mayúsculas
     $finalTitle = ucwords(strtolower($finalTitle));
     $finalTitle = preg_replace('/\s+/', ' ', $finalTitle);
+    $finalTitle = trim($finalTitle, " -");
     
     if (empty($finalTitle)) $finalTitle = "Video " . basename($fullPath);
     
-    $finalCategory = $detectedType;
-    if (!$finalCategory && $isEpisodic) {
-        $finalCategory = 'SERIES';
-    }
-
     return [
         'title' => $finalTitle,
-        'category' => $finalCategory
+        'category' => $detectedType ?: 'OTHER' // Default si nada funcionó
     ];
 }
 
 function streamVideo($filePath, $pdo) {
-    // AGGRESSIVE BUFFER CLEANING - CRITICAL FOR ANDROID/LOCAL SERVERS
+    // AGGRESSIVE BUFFER CLEANING
     if (function_exists('ini_set')) {
         ini_set('zlib.output_compression', 'Off');
     }
-    
-    // Clean all output buffers.
     while (ob_get_level() > 0) ob_end_clean();
     
     ini_set('display_errors', 0);
@@ -140,13 +207,9 @@ function streamVideo($filePath, $pdo) {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
     header('Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type');
-    
-    // Close connection immediately after finishing to free up sockets on Android/Light servers
     header('Connection: close');
     
-    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-        exit(0);
-    }
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(0); }
 
     // Check FTP
     $stmt = $pdo->prepare("SELECT isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
@@ -154,7 +217,7 @@ function streamVideo($filePath, $pdo) {
     $isLocal = $stmt->fetchColumn();
 
     if ($isLocal == 2) {
-        // FTP PROXY STREAM
+        // FTP PROXY
         $sStmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
         $json = $sStmt->fetchColumn();
         $s = json_decode($json, true);
@@ -172,10 +235,10 @@ function streamVideo($filePath, $pdo) {
         fclose($resource);
         exit;
     } else {
-        // LOCAL FILE STREAM
+        // LOCAL FILE
         $realPath = $filePath;
         if (!file_exists($realPath)) {
-            $realPath = rawurldecode($filePath); // Try decoded path for Android/Spaces
+            $realPath = rawurldecode($filePath);
         }
 
         if (!file_exists($realPath)) {
@@ -184,13 +247,10 @@ function streamVideo($filePath, $pdo) {
         }
         
         $fileSize = sprintf("%u", filesize($realPath));
-        
-        // Accurate Mime Type
         $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
         $mimeTypes = [
             'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/mp4', 
-            'mov' => 'video/quicktime', 'avi' => 'video/x-msvideo', 'mp3' => 'audio/mpeg',
-            'm4v' => 'video/x-m4v'
+            'mov' => 'video/quicktime', 'avi' => 'video/x-msvideo', 'mp3' => 'audio/mpeg'
         ];
         $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'video/mp4';
         
@@ -204,13 +264,11 @@ function streamVideo($filePath, $pdo) {
             if (preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches)) {
                 $offset = intval($matches[1]);
                 $end = isset($matches[2]) && $matches[2] !== '' ? intval($matches[2]) : $fileSize - 1;
-                
                 if ($offset >= $fileSize || $end >= $fileSize || $offset > $end) {
                     header('HTTP/1.1 416 Requested Range Not Satisfiable');
                     header("Content-Range: bytes */$fileSize");
                     exit;
                 }
-
                 $length = $end - $offset + 1;
                 header('HTTP/1.1 206 Partial Content');
                 header("Content-Range: bytes $offset-$end/$fileSize");
@@ -224,7 +282,7 @@ function streamVideo($filePath, $pdo) {
         $fp = fopen($realPath, 'rb');
         if ($offset > 0) fseek($fp, $offset);
         
-        $buffer = 1024 * 256; // 256KB chunks
+        $buffer = 1024 * 256; 
         while (!feof($fp) && ($p = ftell($fp)) <= $offset + $length) {
             if ($p + $buffer > $offset + $length) $buffer = $offset + $length - $p + 1;
             echo fread($fp, $buffer);

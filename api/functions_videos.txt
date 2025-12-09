@@ -14,6 +14,8 @@ function video_process_rows(&$rows) {
 }
 
 function video_get_all($pdo) {
+    // Admin dashboard might need PENDING, but main feed filters them in frontend.
+    // For safety, let's allow fetching all here, frontend handles filtering for main view.
     $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id ORDER BY v.createdAt DESC");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
@@ -35,7 +37,8 @@ function video_get_one($pdo, $id) {
 }
 
 function video_get_by_creator($pdo, $creatorId) {
-    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? ORDER BY v.createdAt DESC");
+    // Filter out unprocessed videos from public creator profiles
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.createdAt DESC");
     $stmt->execute([$creatorId]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
@@ -43,14 +46,125 @@ function video_get_by_creator($pdo, $creatorId) {
 }
 
 function video_get_related($pdo, $id) {
-    $stmt = $pdo->prepare("SELECT category, creatorId FROM videos WHERE id = ?");
+    // 1. Get Current Video Details
+    $stmt = $pdo->prepare("SELECT title, category, creatorId, videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
-    $source = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$source) respond(true, []);
-    $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.category = ? OR v.creatorId = ?) ORDER BY RAND() LIMIT 8";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([$id, $source['category'], $source['creatorId']]);
+    $current = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$current) { respond(true, []); return; }
+
+    $cat = $current['category'];
+    $currentPath = str_replace('\\', '/', $current['videoUrl']);
+    
+    // Base SQL
+    $baseSql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                FROM videos v 
+                LEFT JOIN users u ON v.creatorId = u.id 
+                WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING')";
+    $params = [$id];
+
+    // --- SMART LOGIC BY CATEGORY ---
+
+    if ($cat === 'SERIES' || $cat === 'NOVELAS') {
+        // STRATEGY: Contextual Folder Matching & Sequential Order
+        // If path is ".../Series/Breaking Bad/Season 1/ep1.mp4"
+        // We want to match ".../Series/Breaking Bad/%" to get all seasons.
+        
+        $dir = dirname($currentPath); // .../Season 1
+        $parentDir = dirname($dir);   // .../Breaking Bad
+        
+        // Safety: If structure is flat, fallback to current dir
+        if (strlen($parentDir) < 5 || $parentDir === '.') $parentDir = $dir;
+
+        // Use standard path separator for LIKE query
+        $matchPath = $parentDir . '%';
+        
+        // Order by Title ASC to ensure S01E01 comes before S01E02
+        $baseSql .= " AND v.videoUrl LIKE ? AND v.category = ? ORDER BY v.title ASC";
+        $params[] = $matchPath;
+        $params[] = $cat;
+    }
+    else if ($cat === 'MUSIC') {
+        // STRATEGY: Artist Matching or Album Folder
+        // 1. Try to extract "Artist" from "Artist - Song.mp4"
+        $parts = explode('-', $current['title']);
+        $artist = trim($parts[0]);
+        
+        // 2. Folder matching (Album)
+        $dir = dirname($currentPath);
+
+        $baseSql .= " AND v.category = 'MUSIC' AND (v.title LIKE ? OR v.videoUrl LIKE ?) ORDER BY RAND()";
+        $params[] = "%$artist%"; // Match Artist in title
+        $params[] = $dir . '%';  // Match same folder
+    }
+    else if ($cat === 'MOVIE') {
+        // STRATEGY: Sequels & Genre Folders
+        // 1. Title Keywords (First 2 words for sequels e.g. "Iron Man")
+        $words = explode(' ', preg_replace('/[^a-zA-Z0-9 ]/', '', $current['title']));
+        $titleKey = $words[0];
+        if (isset($words[1]) && strlen($words[1]) > 2) $titleKey .= " " . $words[1];
+
+        // 2. Folder Genre keywords (look at parent folders)
+        $pathParts = explode('/', $currentPath);
+        $genreFolder = '';
+        // Look at parent and grandparent folder names
+        if (count($pathParts) > 2) {
+            $parent = $pathParts[count($pathParts)-2];
+            // Filter out generic names
+            if (!in_array(strtolower($parent), ['movies', 'peliculas', 'videos', 'uploads', 'cine'])) {
+                $genreFolder = $parent;
+            }
+        }
+
+        $conditions = ["v.title LIKE ?"];
+        $params[] = "%$titleKey%";
+
+        if ($genreFolder) {
+            $conditions[] = "v.videoUrl LIKE ?";
+            $params[] = "%$genreFolder%";
+        }
+
+        $baseSql .= " AND v.category = 'MOVIE' AND (" . implode(' OR ', $conditions) . ") ORDER BY RAND()";
+    }
+    else {
+        // SHORTS, OTHER, EDUCATION
+        // Random shuffle within category for discovery
+        $baseSql .= " AND v.category = ? ORDER BY RAND()";
+        $params[] = $cat;
+    }
+
+    $baseSql .= " LIMIT 12";
+
+    // Execute Smart Query
+    $stmt = $pdo->prepare($baseSql);
+    $stmt->execute($params);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // --- FALLBACK ---
+    // If smart logic was too strict and returned few results, fill with randoms from same category
+    if (count($videos) < 4) {
+        $excludeIds = array_map(function($v) { return $v['id']; }, $videos);
+        $excludeIds[] = $id;
+        
+        $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
+        
+        $fallbackSql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                        FROM videos v 
+                        LEFT JOIN users u ON v.creatorId = u.id 
+                        WHERE v.category = ? 
+                        AND v.category NOT IN ('PENDING', 'PROCESSING')
+                        AND v.id NOT IN ($placeholders)
+                        ORDER BY RAND() LIMIT " . (12 - count($videos));
+        
+        $fallbackParams = array_merge([$cat], $excludeIds);
+        
+        $stmtFallback = $pdo->prepare($fallbackSql);
+        $stmtFallback->execute($fallbackParams);
+        $moreVideos = $stmtFallback->fetchAll(PDO::FETCH_ASSOC);
+        
+        $videos = array_merge($videos, $moreVideos);
+    }
+
     video_process_rows($videos);
     respond(true, $videos);
 }
@@ -475,13 +589,14 @@ function video_smart_organize($pdo) {
         // 1. Parse Filename
         $smart = smartParseFilename($path, null);
         $newTitle = $smart['title'];
-        $newCat = $smart['category'];
+        $newCat = $smart['category']; // Can be SERIES if pattern matches
         
-        // 2. Refine Category by Duration
+        // 2. Refine Category by Duration if not already set by Name
         if (!$newCat || $newCat === 'OTHER' || $newCat === 'PROCESSING') {
             $newCat = detectCategoryFromDuration($v['duration']);
         }
         
+        // 3. Get Price configured for this category
         $newPrice = getPriceForCategory($newCat, $settings);
         
         // Always update to move out of PROCESSING state
@@ -492,7 +607,7 @@ function video_smart_organize($pdo) {
             $stats['details'][] = "Renamed: {$v['title']} -> $newTitle";
         }
         $stats['categorized']++;
-        $stats['details'][] = "Categorized: $newCat";
+        $stats['details'][] = "Categorized: $newCat | Price: $newPrice";
     }
     
     // Add count of remaining items
