@@ -1,3 +1,4 @@
+
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest, MarketplaceReview, OrganizeResult } from '../types';
 
 const API_BASE = 'api';
@@ -143,14 +144,17 @@ class DatabaseService {
         // Critical: Check content type. If HTML is returned (PHP error or 404 page), treat as error
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.indexOf("application/json") === -1) {
-             throw new Error("Server returned non-JSON response");
+             const text = await response.text();
+             // Extract first 150 chars of error to help debugging
+             const snippet = text.substring(0, 150).replace(/<[^>]*>/g, '');
+             throw new Error(`Server Error (non-JSON): ${snippet}...`);
         }
 
         const text = await response.text();
         if (!response.ok) throw new Error(`Server Error: ${response.status}`);
         
         let json;
-        try { json = JSON.parse(text); } catch { throw new Error(`Invalid JSON response`); }
+        try { json = JSON.parse(text); } catch { throw new Error(`Invalid JSON response: ${text.substring(0, 50)}`); }
         if (!json.success) throw new Error(json.error || 'Operation failed');
 
         if (method === 'GET') this.saveToCache(cacheKey, json.data);

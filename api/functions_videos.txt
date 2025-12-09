@@ -273,29 +273,53 @@ function video_ftp_scan_recursive($pdo, $input) {
 // --- SYNOLOGY & LOCAL SCANNER ---
 
 function video_scan_local($pdo, $input) {
+    // Increase limits for Synology large scans
+    set_time_limit(600);
+    ini_set('memory_limit', '512M');
+
     $path = $input['path'];
-    if (!is_dir($path) && !@scandir($path)) respond(true, ['success' => false, 'error' => "Cannot access directory: $path"]);
+    
+    // Validations specifically for Synology permissions
+    if (!is_dir($path)) {
+        respond(true, ['success' => false, 'error' => "Ruta no encontrada o no es un directorio: $path"]);
+    }
+    if (!is_readable($path)) {
+        respond(true, ['success' => false, 'error' => "Permiso denegado: $path (Revisa open_basedir en Web Station)"]);
+    }
 
     // Recursive Search for Videos
     $filesFound = [];
+    
     try {
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
-        foreach ($iterator as $file) {
-            // Ignore hidden @eaDir folders during video search
-            if (strpos($file->getPathname(), '@eaDir') !== false) continue;
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST,
+            RecursiveIteratorIterator::CATCH_GET_CHILD // Continue on error
+        );
 
-            if ($file->isFile()) {
-                $ext = strtolower($file->getExtension());
-                // Common formats including MKV/AVI which often lack browser support but are valid
-                if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
-                    $fullPath = $file->getPathname();
-                    // Fix encoding for special chars
-                    if (!mb_check_encoding($fullPath, 'UTF-8')) $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
-                    $filesFound[] = $fullPath;
+        foreach ($iterator as $file) {
+            try {
+                // Ignore hidden @eaDir folders during video search
+                if (strpos($file->getPathname(), '@eaDir') !== false) continue;
+
+                if ($file->isFile()) {
+                    $ext = strtolower($file->getExtension());
+                    // Common formats including MKV/AVI which often lack browser support but are valid
+                    if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
+                        $fullPath = $file->getPathname();
+                        // Fix encoding for special chars
+                        if (!mb_check_encoding($fullPath, 'UTF-8')) $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
+                        $filesFound[] = $fullPath;
+                    }
                 }
+            } catch (Exception $e) {
+                // Skip files causing read errors
+                continue;
             }
         }
-    } catch (Exception $e) { respond(true, ['success' => false, 'error' => $e->getMessage()]); }
+    } catch (Exception $e) { 
+        respond(true, ['success' => false, 'error' => "Error de escaneo: " . $e->getMessage()]); 
+    }
 
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $addedCount = 0;
