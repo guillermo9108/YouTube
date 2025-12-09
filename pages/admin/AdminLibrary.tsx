@@ -9,39 +9,41 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
     const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState('Cargando...');
     const processedRef = useRef(false);
+    const [useCors, setUseCors] = useState(true);
 
-    // Timeout de seguridad: Si en 30 segundos no avanza, marcar como error/skip
+    // Timeout de seguridad: Si en 25 segundos no avanza, marcar como error pero guardar lo posible
     useEffect(() => {
         const timer = setTimeout(() => {
             if (!processedRef.current) {
-                console.warn("Scanner timeout - Guardando lo que se pueda");
-                // Intentamos salvar la duración si el video cargó algo de metadata
+                console.warn("Scanner timeout - Forzando guardado");
                 const vid = videoRef.current;
                 const dur = vid && vid.duration && isFinite(vid.duration) ? vid.duration : 0;
                 finishProcess(dur, null);
             }
-        }, 30000);
+        }, 25000);
         return () => clearTimeout(timer);
     }, [video]);
 
     useEffect(() => {
         // Reset state on new video
         processedRef.current = false;
-        setStatus('Inicializando...');
+        setStatus('Iniciando...');
         if (videoRef.current) {
             videoRef.current.load();
-            videoRef.current.muted = true; // Force mute for autoplay policy
+            videoRef.current.muted = true; // Obligatorio para autoplay
             
             const playPromise = videoRef.current.play();
             if (playPromise !== undefined) {
                 playPromise.catch(e => {
-                    console.warn("Autoplay blocked/failed", e);
-                    // Si falla autoplay, intentamos denuevo con mute (aunque ya lo seteamos)
-                    if(videoRef.current) videoRef.current.muted = true;
+                    console.warn("Autoplay falló, intentando mute forzado", e);
+                    if(videoRef.current) {
+                        videoRef.current.muted = true;
+                        videoRef.current.play().catch(() => {});
+                    }
                 });
             }
         }
-    }, [video]);
+    }, [video, useCors]);
 
     const finishProcess = (duration: number, file: File | null) => {
         if (processedRef.current) return;
@@ -53,22 +55,20 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
         const vid = videoRef.current;
         if (!vid || processedRef.current) return;
 
-        setStatus(`Analizando: ${vid.currentTime.toFixed(1)}s`);
+        setStatus(`Escaneando: ${vid.currentTime.toFixed(1)}s`);
 
         // ESTRATEGIA WATCH.TSX:
-        // Esperamos a que el video avance naturalmente > 1.0s.
-        // Esto asegura que el frame buffer tenga datos reales.
-        if (vid.currentTime > 1.0 && vid.duration > 0) {
+        // Esperar reproducción natural > 1.5s para asegurar datos válidos
+        if (vid.currentTime > 1.5 && vid.duration > 0) {
             vid.pause();
-            setStatus("Capturando...");
+            setStatus("Procesando...");
 
-            let file: File | null = null;
             try {
                 const canvas = document.createElement('canvas');
                 canvas.width = vid.videoWidth;
                 canvas.height = vid.videoHeight;
                 
-                // Reducir si es 4K para ahorrar memoria
+                // Optimización de memoria: Max 1080p
                 if (canvas.width > 1920) {
                     const ratio = 1920 / canvas.width;
                     canvas.width = 1920;
@@ -79,18 +79,21 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
                     canvas.toBlob(blob => {
-                        if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                        finishProcess(vid.duration, file);
+                        if (blob) {
+                            const file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
+                            finishProcess(vid.duration, file);
+                        } else {
+                            // Blob falló pero tenemos duración
+                            finishProcess(vid.duration, null);
+                        }
                     }, 'image/jpeg', 0.7);
                 } else {
-                    // Si falla el contexto (raro), guardamos duración
                     finishProcess(vid.duration, null);
                 }
             } catch (e) {
-                console.warn("Canvas Security/CORS Error:", e);
-                // Si el canvas está "sucio" (Tainted) por CORS, fallará al exportar.
-                // PERO ya tenemos la duración, que es la PRIORIDAD #1.
-                // Guardamos duración y null thumbnail.
+                console.warn("Canvas Tainted (CORS) - Guardando solo duración:", e);
+                // Si falla por seguridad (Tainted Canvas), PRIORIZAMOS LA DURACIÓN.
+                // No extraemos foto, pero el video queda funcional.
                 finishProcess(vid.duration, null);
             }
         }
@@ -98,28 +101,30 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
 
     const handleError = (e: any) => {
         console.error("Error Reproducción:", e);
-        // Si el video falla (formato no soportado, 404), NO nos detenemos.
-        // Guardamos duración 0 y seguimos. Así el usuario puede editarlo manualmente luego.
-        setStatus("Error Formato. Saltando...");
-        setTimeout(() => finishProcess(0, null), 1000);
+        // Si falla con CORS, reintentar sin CORS (permitirá duración pero no foto)
+        if (useCors) {
+            setStatus("Reintentando sin CORS...");
+            setUseCors(false);
+            return;
+        }
+        
+        // Si falla totalmente (formato no soportado), guardar como 00:00 y seguir
+        setStatus("Formato no soportado. Saltando...");
+        setTimeout(() => finishProcess(0, null), 500);
     };
 
     return (
         <div className="w-full max-w-3xl mx-auto bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl animate-in zoom-in-95">
             <div className="relative aspect-video bg-slate-900 flex items-center justify-center">
-                {/* 
-                    IMPORTANTE: Reproductor idéntico a Watch.tsx 
-                    - Sin crossOrigin="anonymous" para evitar bloqueos CORS en servidores simples/Android
-                    - AutoPlay y Muted activados
-                */}
                 <video 
                     ref={videoRef} 
                     src={video.videoUrl} 
                     className="w-full h-full object-contain" 
-                    controls 
+                    controls={false}
                     autoPlay
                     muted 
                     playsInline
+                    crossOrigin={useCors ? "anonymous" : undefined}
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
                 />
@@ -133,7 +138,8 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
             <div className="p-4 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
                 <div>
                     <h3 className="font-bold text-white truncate max-w-md">{video.title}</h3>
-                    <p className="text-xs text-slate-400">Prioridad: Duración > Miniatura</p>
+                    {/* CORREGIDO: &gt; en lugar de > para evitar error TS1382 */}
+                    <p className="text-xs text-slate-400">Prioridad: Duración &gt; Miniatura</p>
                 </div>
                 <button onClick={() => finishProcess(0, null)} className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded flex items-center gap-1">
                     <SkipForward size={14}/> Forzar Salto
@@ -209,13 +215,9 @@ export default function AdminLibrary() {
         const item = scanQueue[currentScanIndex];
         
         try {
-            // Guardamos metadatos. 
-            // Si duration > 0, es un éxito (aunque no haya thumbnail).
-            // Si duration == 0, fue un error de carga, PERO igual llamamos al update
-            // para que el backend pueda decidir si lo deja en PENDING o le pone duración 0.
             await db.updateVideoMetadata(item.id, duration, thumbnail);
             
-            const duraFmt = duration > 0 ? `${Math.floor(duration)}s` : 'Error/Skip';
+            const duraFmt = duration > 0 ? `${Math.floor(duration)}s` : '0s (Error/Skip)';
             const thumbIcon = thumbnail ? '📸' : '⚪';
             addToLog(`[${currentScanIndex + 1}/${scanQueue.length}] ${item.title.substring(0, 20)}... | ${duraFmt} | ${thumbIcon}`);
         } catch (e: any) {
@@ -231,7 +233,7 @@ export default function AdminLibrary() {
             db.setHomeDirty();
         } else {
             // Pequeña pausa para liberar memoria del navegador
-            setTimeout(() => setCurrentScanIndex(nextIdx), 500);
+            setTimeout(() => setCurrentScanIndex(nextIdx), 300);
         }
     };
 

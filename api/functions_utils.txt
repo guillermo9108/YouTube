@@ -126,20 +126,17 @@ function smartParseFilename($fullPath, $detectedType = null) {
 
 function streamVideo($filePath, $pdo) {
     // AGGRESSIVE BUFFER CLEANING - CRITICAL FOR ANDROID/LOCAL SERVERS
-    // Disable compression to prevent ZLIB header corruption which breaks video playback
     if (function_exists('ini_set')) {
         ini_set('zlib.output_compression', 'Off');
     }
     
-    // Clean all output buffers. If there is any whitespace/HTML before the video binary, playback fails.
+    // Clean all output buffers.
     while (ob_get_level() > 0) ob_end_clean();
     
-    // Disable error display (logs to file only) to prevent warnings from breaking the stream
     ini_set('display_errors', 0);
     error_reporting(0);
     set_time_limit(0);
 
-    // Standard CORS Headers for Video Streaming
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
     header('Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type');
@@ -219,13 +216,11 @@ function streamVideo($filePath, $pdo) {
             header("Content-Length: $fileSize");
         }
         
-        // Final sanity check before output
         if (headers_sent()) exit;
 
         $fp = fopen($realPath, 'rb');
         if ($offset > 0) fseek($fp, $offset);
         
-        // Chunked Output (Optimized for Android/PHP)
         $buffer = 1024 * 256; // 256KB chunks
         while (!feof($fp) && ($p = ftell($fp)) <= $offset + $length) {
             if ($p + $buffer > $offset + $length) $buffer = $offset + $length - $p + 1;
