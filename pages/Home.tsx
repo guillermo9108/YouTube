@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useLayoutEffect, useMemo } from 'react';
 import { Compass, RefreshCw, Search, X, Filter, Home as HomeIcon, Smartphone, Upload, User, LogOut, DownloadCloud } from 'lucide-react';
 import { db } from '../services/db';
@@ -127,8 +128,24 @@ export default function Home() {
   const checkForUpdates = async (currentSnapshotVideos: Video[]) => {
       try {
           const freshVideos = await db.getAllVideos();
-          // Simple diff check based on length or IDs
-          if (freshVideos.length !== currentSnapshotVideos.length || freshVideos[0]?.id !== currentSnapshotVideos[0]?.id) {
+          
+          // Check for any difference in ID list to detect additions or deletions
+          const currentIds = new Set(currentSnapshotVideos.map(v => v.id));
+          const freshIds = new Set(freshVideos.map(v => v.id));
+          
+          let hasChanges = freshVideos.length !== currentSnapshotVideos.length;
+          
+          if (!hasChanges) {
+              // Same length, check if IDs are different (replacement)
+              for (const v of freshVideos) {
+                  if (!currentIds.has(v.id)) {
+                      hasChanges = true;
+                      break;
+                  }
+              }
+          }
+
+          if (hasChanges) {
               // Data changed! Update silently
               setVideos(freshVideos);
               const shuffled = [...freshVideos].sort(() => Math.random() - 0.5);

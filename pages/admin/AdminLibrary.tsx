@@ -101,6 +101,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                     preload="auto"
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
+                    key={video.id} // Force re-render on video change
                 />
                 <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] font-mono text-white z-10 pointer-events-none">
                     {status}
@@ -216,7 +217,12 @@ export default function AdminLibrary() {
                 if (res.remaining && res.remaining > 0) {
                     addToLog(`Quedan ${res.remaining} videos. Continuando...`);
                     // Update progress visually (fake progress for batching)
-                    setOrganizeProgress(prev => ({processed: prev.processed + res.processed, total: prev.processed + res.processed + res.remaining}));
+                    // Fix: Ensure remaining is treated as number to avoid TS error
+                    const remaining = res.remaining || 0;
+                    setOrganizeProgress(prev => ({
+                        processed: prev.processed + res.processed, 
+                        total: prev.processed + res.processed + remaining
+                    }));
                     setTimeout(processBatch, 500); // Small delay to prevent freeze
                 } else {
                     addToLog("Organización Finalizada.");
