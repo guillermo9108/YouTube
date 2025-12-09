@@ -3,125 +3,121 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Play, Terminal, CheckCircle, AlertTriangle, Film } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, Play, AlertTriangle } from 'lucide-react';
 
 const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: number, thumb: File | null) => void }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState('Cargando flujo de video...');
-    const [corsMode, setCorsMode] = useState<'anonymous' | undefined>('anonymous');
-    const [retryCount, setRetryCount] = useState(0);
-    const capturedRef = useRef(false);
+    const [status, setStatus] = useState('Iniciando...');
+    const processedRef = useRef(false);
 
-    // Timeout de seguridad global (30 segundos por video)
+    // Timeout de seguridad: Si en 30 segundos no ha hecho nada, forzar salto
     useEffect(() => {
         const timer = setTimeout(() => {
-            if (!capturedRef.current) {
-                console.warn("Scanner timeout for", video.title);
-                // Si se agota el tiempo, intentamos guardar lo que tengamos
-                const vid = videoRef.current;
-                const dur = vid?.duration && !isNaN(vid.duration) ? vid.duration : 0;
-                onComplete(dur, null);
+            if (!processedRef.current) {
+                console.warn("Scanner timeout - Forzando salto");
+                handleError(); 
             }
-        }, 30000); 
+        }, 30000);
         return () => clearTimeout(timer);
-    }, [video, onComplete]);
+    }, [video]);
 
-    // Lógica idéntica a Watch.tsx: Escuchar el progreso natural
+    // Forzar reproducción al montar o cambiar video
+    useEffect(() => {
+        const vid = videoRef.current;
+        if (vid) {
+            processedRef.current = false;
+            setStatus(`Cargando: ${video.title}`);
+            vid.load();
+            
+            const p = vid.play();
+            if (p !== undefined) {
+                p.catch(e => {
+                    console.warn("Autoplay bloqueado, intentando mute", e);
+                    vid.muted = true;
+                    vid.play().catch(e2 => setStatus("Error Play: " + e2.message));
+                });
+            }
+        }
+    }, [video]);
+
     const handleTimeUpdate = () => {
         const vid = videoRef.current;
-        if (!vid || capturedRef.current) return;
+        if (!vid || processedRef.current) return;
 
-        // Si ya tenemos duración y el video ha avanzado más de 1 segundo
-        if (vid.duration > 0 && vid.currentTime > 1.0) {
-            capturedRef.current = true;
-            setStatus('Capturando datos...');
+        setStatus(`Reproduciendo... ${vid.currentTime.toFixed(1)}s`);
+
+        // Esperamos a que avance > 1.5s para asegurar que hay imagen visible
+        if (vid.currentTime > 1.5 && vid.duration > 0) {
+            processedRef.current = true;
             vid.pause();
+            setStatus("Capturando miniatura...");
 
             let file: File | null = null;
-
-            // Intentar extraer miniatura si tenemos permisos CORS
-            if (corsMode === 'anonymous') {
-                try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 640;
-                    canvas.height = 360;
-                    const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-                        canvas.toBlob(blob => {
-                            if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                            onComplete(vid.duration, file);
-                        }, 'image/jpeg', 0.7);
-                        return; // Salir, el callback del blob finalizará
-                    }
-                } catch (e) {
-                    console.warn("Canvas Tainted (CORS restriction):", e);
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 640;
+                canvas.height = 360;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+                    canvas.toBlob(blob => {
+                        if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
+                        onComplete(vid.duration, file);
+                    }, 'image/jpeg', 0.8);
+                } else {
+                    onComplete(vid.duration, null);
                 }
+            } catch (e) {
+                console.warn("Error Canvas (Posible CORS si es dominio distinto):", e);
+                // Si falla la foto, guardamos al menos la duración para no volver a escanear
+                onComplete(vid.duration, null);
             }
-            
-            // Si falló el canvas o no hay CORS, guardamos solo duración
-            onComplete(vid.duration, file);
         }
     };
 
     const handleError = () => {
-        if (capturedRef.current) return;
+        if (processedRef.current) return;
+        processedRef.current = true;
         
         const vid = videoRef.current;
-        const err = vid?.error;
-        console.warn(`Error reproducción: ${err?.code} - ${err?.message}`);
-
-        if (retryCount === 0) {
-            setStatus('Error de seguridad. Reintentando modo compatible...');
-            setRetryCount(1);
-            setCorsMode(undefined); // Quitamos 'anonymous' para permitir cargar sin headers CORS (pierde miniatura, gana duración)
-            if (vid) {
-                vid.load(); // Recargar con nueva config
-            }
-        } else {
-            // Si falla de nuevo, nos rendimos pero NO bloqueamos la cola. Guardamos duración 0.
-            capturedRef.current = true;
-            setStatus('Formato no soportado. Saltando...');
-            onComplete(0, null);
-        }
+        console.error("Error Video:", vid?.error);
+        
+        // Si falla la carga, guardamos duración 0 y null thumbnail.
+        // Esto saca al video de "PENDING" en la lógica del backend si lo actualizamos,
+        // o podemos decidir no actualizarlo. En este caso, enviamos 0 para que el proceso continue.
+        onComplete(0, null);
     };
 
-    // Forzamos cache-busting para evitar que el navegador use una respuesta fallida anterior
-    const srcUrl = `${video.videoUrl}${video.videoUrl.includes('?') ? '&' : '?'}scanner_t=${Date.now()}`;
-
     return (
-        <div className="flex flex-col items-center justify-center p-6 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl max-w-lg w-full mx-4 animate-in zoom-in-95">
-            <h3 className="text-lg font-bold text-white mb-2 truncate w-full text-center">{video.title}</h3>
-            
-            <div className="relative aspect-video w-full bg-black rounded-lg overflow-hidden border border-slate-800 mb-4 flex items-center justify-center">
+        <div className="w-full max-w-3xl mx-auto bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl animate-in zoom-in-95">
+            <div className="relative aspect-video bg-slate-900 flex items-center justify-center">
                 <video 
                     ref={videoRef} 
-                    src={srcUrl}
-                    crossOrigin={corsMode} 
+                    src={video.videoUrl} 
                     className="w-full h-full object-contain" 
-                    muted 
+                    controls // Importante: Controles visibles
                     autoPlay
                     playsInline 
+                    muted // Mute inicial para facilitar autoplay
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
+                    // NOTA: Quitamos crossOrigin="anonymous" para evitar problemas con OPTIONS en servidores simples.
+                    // Al ser same-origin (api/...), el canvas funcionará igual.
                 />
                 
-                {/* Overlay de estado */}
-                <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] text-white font-mono">
-                    {corsMode ? 'Modo: Full' : 'Modo: Compatible'}
-                </div>
-
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-2" />
-                </div>
-                
-                <div className="absolute bottom-0 left-0 right-0 bg-black/90 text-white text-[10px] py-1 text-center font-mono border-t border-slate-800">
+                <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-mono text-white border border-white/10 shadow-lg">
                     {status}
                 </div>
             </div>
             
-            <div className="text-xs text-slate-500 text-center">
-                No cierres esta ventana. Procesando video...
+            <div className="p-4 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
+                <div>
+                    <h3 className="font-bold text-white truncate max-w-md">{video.title}</h3>
+                    <p className="text-xs text-slate-400">No cierres esta ventana. Escaneando...</p>
+                </div>
+                <div className="animate-spin text-indigo-500">
+                    <Loader2 size={24}/>
+                </div>
             </div>
         </div>
     );
@@ -160,7 +156,7 @@ export default function AdminLibrary() {
                 addToLog(`Archivos encontrados: ${res.totalFound}`);
                 addToLog(`Nuevos añadidos a cola: ${res.newToImport}`);
                 if (res.newToImport > 0) {
-                    addToLog("IMPORTANTE: Ejecuta el Paso 2 para obtener duración.");
+                    addToLog("IMPORTANTE: Ejecuta el Paso 2 para procesar.");
                 } else {
                     addToLog("La librería está actualizada.");
                 }
@@ -178,10 +174,10 @@ export default function AdminLibrary() {
         addToLog("Cargando cola de procesamiento...");
         const pending = await db.getUnprocessedVideos();
         if (pending.length === 0) {
-            addToLog("No hay videos pendientes.");
+            addToLog("No hay videos pendientes de procesar.");
             return;
         }
-        addToLog(`Iniciando escáner para ${pending.length} videos.`);
+        addToLog(`Iniciando escáner visual para ${pending.length} videos.`);
         setScanQueue(pending);
         setCurrentScanIndex(0);
         setActiveScan(true);
@@ -192,12 +188,12 @@ export default function AdminLibrary() {
     const handleVideoProcessed = async (duration: number, thumbnail: File | null) => {
         const item = scanQueue[currentScanIndex];
         
-        // Guardamos, aunque duration sea 0, para quitarle el estado 'PENDING'
-        // Esto evita bucles infinitos.
         try {
+            // Guardamos metadatos. Si duration es 0, igual lo marcamos para sacarlo de PENDING
+            // o podríamos dejarlo si queremos reintentar, pero para evitar bucles lo guardamos.
             await db.updateVideoMetadata(item.id, duration, thumbnail);
             
-            const duraFmt = duration > 0 ? `${Math.floor(duration)}s` : 'N/A';
+            const duraFmt = duration > 0 ? `${Math.floor(duration)}s` : 'Error/Skip';
             const thumbIcon = thumbnail ? '📸' : '⚪';
             addToLog(`[${currentScanIndex + 1}/${scanQueue.length}] ${item.title.substring(0, 20)}... | ${duraFmt} | ${thumbIcon}`);
         } catch (e: any) {
@@ -212,8 +208,8 @@ export default function AdminLibrary() {
             db.invalidateCache('index.php?action=get_videos');
             db.setHomeDirty();
         } else {
-            // Pequeña pausa para permitir que el navegador libere memoria del Canvas anterior
-            setTimeout(() => setCurrentScanIndex(nextIdx), 200);
+            // Pequeña pausa para liberar memoria del navegador
+            setTimeout(() => setCurrentScanIndex(nextIdx), 300);
         }
     };
 
@@ -232,8 +228,12 @@ export default function AdminLibrary() {
                     </button>
                     
                     <button onClick={startBrowserScan} disabled={isIndexing || activeScan} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 transition-all">
-                        <Film size={20}/> Paso 2: Escáner Visual
+                        <Film size={20}/> Paso 2: Procesar (Escáner Visual)
                     </button>
+                </div>
+                
+                <div className="text-xs text-slate-500 mt-2 bg-slate-950 p-3 rounded border border-slate-800">
+                    <p><strong>Nota:</strong> El paso 2 abrirá un reproductor. Mantén la ventana activa para que el navegador genere las miniaturas.</p>
                 </div>
             </div>
 
@@ -251,17 +251,22 @@ export default function AdminLibrary() {
                 </div>
             </div>
 
+            {/* Modal de Escaneo Visual */}
             {activeScan && scanQueue.length > 0 && (
-                <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in duration-300">
+                <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex flex-col items-center justify-center animate-in fade-in duration-300 p-4">
                     <ScannerPlayer 
                         video={scanQueue[currentScanIndex]} 
                         onComplete={handleVideoProcessed} 
                     />
-                    <div className="mt-6 text-slate-400 font-bold font-mono text-sm flex items-center gap-3 bg-slate-900/50 px-4 py-2 rounded-full border border-slate-700">
-                        <Loader2 className="animate-spin text-indigo-500" size={16}/>
-                        Video {currentScanIndex + 1} de {scanQueue.length}
+                    
+                    <div className="mt-8 flex gap-4">
+                        <button onClick={() => handleVideoProcessed(0, null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-full font-bold text-sm transition-colors border border-slate-600 flex items-center gap-2">
+                            <AlertTriangle size={16} /> Saltar Video
+                        </button>
+                        <button onClick={stopActiveScan} className="px-6 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-full font-bold text-sm transition-colors border border-red-800">
+                            Cancelar Todo
+                        </button>
                     </div>
-                    <button onClick={stopActiveScan} className="mt-8 text-slate-500 hover:text-red-400 underline text-xs transition-colors">Cancelar Escaneo</button>
                 </div>
             )}
         </div>
