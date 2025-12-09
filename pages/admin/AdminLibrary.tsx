@@ -5,164 +5,138 @@ import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
 import { FolderSearch, Loader2, Terminal, Film, SkipForward, Play, AlertCircle } from 'lucide-react';
 
-const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: number, thumb: File | null) => void }) => {
+interface ScannerPlayerProps {
+    video: Video;
+    onComplete: (dur: number, thumb: File | null) => void;
+}
+
+const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState('Iniciando...');
-    const [needsInteraction, setNeedsInteraction] = useState(false);
+    const [status, setStatus] = useState('Cargando...');
+    const [isError, setIsError] = useState(false);
     const processedRef = useRef(false);
 
-    // Timeout de seguridad: 60 segundos por video máximo
+    // Watch.tsx Style Autoplay Logic
     useEffect(() => {
-        const timer = setTimeout(() => {
-            if (!processedRef.current) {
-                console.warn("Scanner timeout global");
-                const vid = videoRef.current;
-                const dur = vid && vid.duration && isFinite(vid.duration) ? vid.duration : 0;
-                finishProcess(dur, null);
-            }
-        }, 60000);
-        return () => clearTimeout(timer);
-    }, [video]);
+        const vid = videoRef.current;
+        if (!vid) return;
 
-    useEffect(() => {
-        // Reset al cambiar de video
+        // Reset state
         processedRef.current = false;
-        setNeedsInteraction(false);
-        setStatus('Cargando...');
-        
-        if (videoRef.current) {
-            videoRef.current.load();
-        }
-    }, [video]);
+        setIsError(false);
+        setStatus('Iniciando...');
 
-    const finishProcess = (duration: number, file: File | null) => {
-        if (processedRef.current) return;
-        processedRef.current = true;
-        
-        setStatus("Guardando...");
-        // Pequeño delay para UX
-        setTimeout(() => {
-            onComplete(duration, file);
-        }, 300); 
-    };
-
-    const attemptPlay = () => {
-        const vid = videoRef.current;
-        if (!vid) return;
-
-        const p = vid.play();
-        if (p !== undefined) {
-            p.then(() => {
-                setNeedsInteraction(false);
+        const startPlay = async () => {
+            try {
+                // Intento 1: Reproducción normal con sonido bajo
+                vid.volume = 0.1; 
+                await vid.play();
                 setStatus('Reproduciendo...');
-            }).catch(e => {
-                console.warn("Autoplay bloqueado:", e);
-                setNeedsInteraction(true);
-                setStatus('Esperando interacción...');
-                // Intentar muteado como fallback
-                vid.muted = true;
-                vid.play().catch(() => setNeedsInteraction(true));
-            });
-        }
-    };
+            } catch (e) {
+                console.warn("Autoplay blocked, trying muted...", e);
+                try {
+                    // Intento 2: Muteado (Fallback estándar de navegadores)
+                    vid.muted = true;
+                    await vid.play();
+                    setStatus('Reproduciendo (Muteado)...');
+                } catch (e2) {
+                    console.error("Playback failed completely", e2);
+                    setStatus('Esperando click manual...');
+                }
+            }
+        };
 
-    const handleLoadedMetadata = () => {
-        const vid = videoRef.current;
-        if (!vid) return;
-        setStatus(`Duración: ${Math.floor(vid.duration)}s`);
-        // Esperar un momento antes de reproducir para asegurar buffer
-        setTimeout(attemptPlay, 500);
-    };
+        // Pequeño delay para asegurar que el DOM esté listo y el navegador no se sature
+        const timer = setTimeout(startPlay, 500);
+        return () => clearTimeout(timer);
+    }, [video]); // Se ejecuta cada vez que cambia el objeto video
 
-    const handleTimeUpdate = () => {
-        const vid = videoRef.current;
+    // Watch.tsx Style Time Update & Capture Logic
+    const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+        const vid = e.currentTarget;
         if (!vid || processedRef.current) return;
 
-        // Mostrar progreso
-        if (!needsInteraction) {
-            setStatus(`Escaneando: ${vid.currentTime.toFixed(1)}s`);
-        }
+        setStatus(`Escaneando: ${vid.currentTime.toFixed(1)}s`);
 
-        // LÓGICA DE CAPTURA: Esperar a 2 segundos
-        if (vid.currentTime > 2.0) {
+        // Esperamos a 1.5s (Igual que Watch.tsx repair logic) para asegurar imagen estable
+        if (vid.currentTime > 1.5) {
             vid.pause();
-            setStatus("Capturando...");
+            processedRef.current = true;
+            setStatus('Capturando...');
 
-            const duration = isFinite(vid.duration) ? vid.duration : 0;
+            const duration = vid.duration && isFinite(vid.duration) ? vid.duration : 0;
+            let file: File | null = null;
 
             try {
                 const canvas = document.createElement('canvas');
-                canvas.width = 640; 
-                canvas.height = 360; 
-                
+                canvas.width = vid.videoWidth || 640;
+                canvas.height = vid.videoHeight || 360;
                 const ctx = canvas.getContext('2d');
+                
                 if (ctx) {
-                    // crossOrigin='anonymous' no está puesto en el video tag para evitar errores de red en local
-                    // Esto significa que si el video viene de otro dominio sin CORS, canvas fallará (Tainted)
-                    // Si es local (mismo origen), funcionará.
-                    try {
-                        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-                        canvas.toBlob(blob => {
-                            if (blob) {
-                                const file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                                finishProcess(duration, file);
-                            } else {
-                                finishProcess(duration, null);
-                            }
-                        }, 'image/jpeg', 0.7);
-                    } catch (drawErr) {
-                        console.warn("Canvas Tainted (Security):", drawErr);
-                        // Si falla por seguridad, guardamos duración y seguimos
-                        finishProcess(duration, null);
-                    }
+                    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+                    canvas.toBlob(blob => {
+                        if (blob) {
+                            file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
+                        }
+                        onComplete(duration, file);
+                    }, 'image/jpeg', 0.8);
                 } else {
-                    finishProcess(duration, null);
+                    // Fallback si falla contexto 2d
+                    onComplete(duration, null);
                 }
-            } catch (e) {
-                finishProcess(duration, null);
+            } catch (err) {
+                console.warn("Capture error (Likely CORS/Tainted)", err);
+                // Si falla la captura (ej. CORS), al menos guardamos la duración
+                onComplete(duration, null);
             }
         }
     };
 
     const handleError = (e: any) => {
-        console.error("Video Error:", e);
-        setStatus("Error de reproducción");
-        // Esperar un poco para que el usuario vea el error, luego saltar
+        if (processedRef.current) return;
+        console.error("Media Error:", e);
+        setIsError(true);
+        setStatus("Error al reproducir. Reintentando...");
+        
+        // Esperar 4 segundos y saltar automáticamente si falla
         setTimeout(() => {
             if (!processedRef.current) {
-                finishProcess(0, null);
+                processedRef.current = true;
+                onComplete(0, null);
             }
-        }, 3000);
+        }, 4000);
     };
 
     return (
         <div className="w-full max-w-2xl mx-auto bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl relative">
             <div className="relative aspect-video bg-black flex items-center justify-center">
+                {/* 
+                   NOTA: No usamos crossOrigin="anonymous" aquí para mantener paridad exacta con Watch.tsx 
+                   y evitar Preflight OPTIONS que fallan en servidores simples.
+                */}
                 <video 
                     ref={videoRef} 
                     src={video.videoUrl} 
                     className="w-full h-full object-contain" 
-                    muted={false} // Intentar con sonido primero si el usuario interactuó
-                    controls // CRÍTICO: Permitir al usuario dar play manual
+                    controls // Importante: Permite al usuario dar play si el autoplay falla
                     playsInline
                     preload="auto"
-                    onLoadedMetadata={handleLoadedMetadata}
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
                 />
                 
-                {/* Overlay de Estado */}
-                <div className="absolute top-2 left-2 bg-black/70 backdrop-blur px-3 py-1 rounded text-xs font-mono text-white border border-white/10 z-10">
+                {/* Status Overlay */}
+                <div className="absolute top-2 left-2 bg-black/70 backdrop-blur px-3 py-1 rounded text-xs font-mono text-white border border-white/10 z-10 pointer-events-none">
                     {status}
                 </div>
 
-                {/* Botón de Interacción Manual (Si autoplay falla) */}
-                {needsInteraction && (
-                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm cursor-pointer" onClick={attemptPlay}>
-                        <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center shadow-2xl animate-pulse">
-                            <Play size={40} className="text-white ml-2" />
+                {/* Botón Gigante de Play si falla el Autoplay */}
+                {status.includes('Esperando') && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-20 cursor-pointer" onClick={() => videoRef.current?.play()}>
+                        <div className="w-20 h-20 bg-indigo-600/90 rounded-full flex items-center justify-center animate-pulse shadow-2xl">
+                            <Play size={40} className="text-white ml-2"/>
                         </div>
-                        <p className="mt-4 text-white font-bold text-lg">Click para Iniciar Escáner</p>
                     </div>
                 )}
             </div>
@@ -173,10 +147,10 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
                     <p className="text-[10px] text-slate-500 font-mono truncate">{video.videoUrl}</p>
                 </div>
                 <button 
-                    onClick={() => finishProcess(0, null)} 
+                    onClick={() => { processedRef.current = true; onComplete(0, null); }} 
                     className="shrink-0 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-300 px-4 py-2 rounded flex items-center gap-2 border border-red-900/50 transition-colors"
                 >
-                    <SkipForward size={14}/> Forzar Salto
+                    <SkipForward size={14}/> Saltar
                 </button>
             </div>
         </div>
@@ -317,7 +291,9 @@ export default function AdminLibrary() {
                         <span className="font-mono bg-slate-800 px-3 py-1 rounded text-sm">{currentScanIndex + 1} / {scanQueue.length}</span>
                     </div>
                     
+                    {/* CRITICAL: Key prop ensures fresh mount for every video */}
                     <ScannerPlayer 
+                        key={scanQueue[currentScanIndex].id}
                         video={scanQueue[currentScanIndex]} 
                         onComplete={handleVideoProcessed} 
                     />

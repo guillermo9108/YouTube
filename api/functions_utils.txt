@@ -141,6 +141,9 @@ function streamVideo($filePath, $pdo) {
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
     header('Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type');
     
+    // Close connection immediately after finishing to free up sockets on Android/Light servers
+    header('Connection: close');
+    
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         exit(0);
     }
