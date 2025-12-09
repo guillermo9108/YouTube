@@ -16,6 +16,18 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const [isError, setIsError] = useState(false);
     const processedRef = useRef(false);
 
+    // CRITICAL FIX: Ensure URL is always a stream URL for local files/scans
+    // This handles cases where backend might send raw paths (e.g. /storage/...)
+    // or if the user's browser cache is stale.
+    const getVideoSrc = (v: Video) => {
+        if (v.videoUrl.startsWith('http') || v.videoUrl.startsWith('blob')) return v.videoUrl;
+        // If it looks like a path (starts with / or has no protocol), force stream API
+        // This bypasses "Not allowed to load local resource" errors.
+        return `api/index.php?action=stream&id=${v.id}`;
+    };
+
+    const streamSrc = getVideoSrc(video);
+
     // Watch.tsx Style Autoplay Logic
     useEffect(() => {
         const vid = videoRef.current;
@@ -25,6 +37,9 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         processedRef.current = false;
         setIsError(false);
         setStatus('Iniciando...');
+
+        // Debug log
+        console.log("Scanner attempting play:", streamSrc);
 
         const startPlay = async () => {
             try {
@@ -49,7 +64,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         // Pequeño delay para asegurar que el DOM esté listo y el navegador no se sature
         const timer = setTimeout(startPlay, 500);
         return () => clearTimeout(timer);
-    }, [video]); // Se ejecuta cada vez que cambia el objeto video
+    }, [video, streamSrc]); 
 
     // Watch.tsx Style Time Update & Capture Logic
     const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
@@ -117,7 +132,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                 */}
                 <video 
                     ref={videoRef} 
-                    src={video.videoUrl} 
+                    src={streamSrc} 
                     className="w-full h-full object-contain" 
                     controls // Importante: Permite al usuario dar play si el autoplay falla
                     playsInline
@@ -144,7 +159,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
             <div className="p-3 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
                 <div className="min-w-0 flex-1 mr-4">
                     <h3 className="font-bold text-white truncate text-sm">{video.title}</h3>
-                    <p className="text-[10px] text-slate-500 font-mono truncate">{video.videoUrl}</p>
+                    <p className="text-[10px] text-slate-500 font-mono truncate">{streamSrc}</p>
                 </div>
                 <button 
                     onClick={() => { processedRef.current = true; onComplete(0, null); }} 

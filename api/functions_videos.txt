@@ -4,6 +4,7 @@
 function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
+        // If isLocal is 1 (Local) or 2 (FTP), use stream
         if (!empty($v['isLocal'])) {
             $v['videoUrl'] = "api/index.php?action=stream&id=" . $v['id'];
         }
@@ -377,9 +378,9 @@ function video_scan_local($pdo, $input) {
 
 function video_get_unprocessed($pdo) {
     // Only get videos marked PENDING.
-    // Order by isLocal DESC to prioritize local files which scan faster.
+    // CRITICAL: Must select isLocal to allow video_process_rows to transform paths!
     $limit = 50;
-    $sql = "SELECT id, videoUrl, title, thumbnailUrl FROM videos WHERE category = 'PENDING' LIMIT $limit";
+    $sql = "SELECT id, videoUrl, title, thumbnailUrl, isLocal FROM videos WHERE category = 'PENDING' LIMIT $limit";
     $stmt = $pdo->query($sql);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
