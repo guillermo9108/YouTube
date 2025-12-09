@@ -3,89 +3,87 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, Play, AlertTriangle } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, Play, AlertTriangle, SkipForward } from 'lucide-react';
 
 const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: number, thumb: File | null) => void }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState('Iniciando...');
+    const [status, setStatus] = useState('Cargando...');
+    const [errorCount, setErrorCount] = useState(0);
     const processedRef = useRef(false);
 
-    // Timeout de seguridad: Si en 30 segundos no ha hecho nada, forzar salto
+    // Timeout de seguridad: Si en 20 segundos no avanza, marcar como error/skip
     useEffect(() => {
         const timer = setTimeout(() => {
             if (!processedRef.current) {
-                console.warn("Scanner timeout - Forzando salto");
-                handleError(); 
+                console.warn("Scanner timeout - Forzando fin");
+                finishProcess(0, null);
             }
-        }, 30000);
+        }, 20000);
         return () => clearTimeout(timer);
     }, [video]);
 
-    // Forzar reproducción al montar o cambiar video
     useEffect(() => {
-        const vid = videoRef.current;
-        if (vid) {
-            processedRef.current = false;
-            setStatus(`Cargando: ${video.title}`);
-            vid.load();
-            
-            const p = vid.play();
-            if (p !== undefined) {
-                p.catch(e => {
-                    console.warn("Autoplay bloqueado, intentando mute", e);
-                    vid.muted = true;
-                    vid.play().catch(e2 => setStatus("Error Play: " + e2.message));
-                });
-            }
+        // Reset state on new video
+        processedRef.current = false;
+        setStatus('Inicializando...');
+        if (videoRef.current) {
+            videoRef.current.load();
         }
     }, [video]);
+
+    const finishProcess = (duration: number, file: File | null) => {
+        if (processedRef.current) return;
+        processedRef.current = true;
+        onComplete(duration, file);
+    };
 
     const handleTimeUpdate = () => {
         const vid = videoRef.current;
         if (!vid || processedRef.current) return;
 
-        setStatus(`Reproduciendo... ${vid.currentTime.toFixed(1)}s`);
+        setStatus(`Reproduciendo: ${vid.currentTime.toFixed(1)}s`);
 
-        // Esperamos a que avance > 1.5s para asegurar que hay imagen visible
+        // IGUAL QUE EN WATCH.TSX: Esperamos a que avance un poco (1.5s) para asegurar imagen válida
         if (vid.currentTime > 1.5 && vid.duration > 0) {
-            processedRef.current = true;
             vid.pause();
-            setStatus("Capturando miniatura...");
+            setStatus("Procesando imagen...");
 
             let file: File | null = null;
             try {
                 const canvas = document.createElement('canvas');
-                canvas.width = 640;
-                canvas.height = 360;
+                canvas.width = vid.videoWidth; // Usar resolución nativa
+                canvas.height = vid.videoHeight;
+                
+                // Reducir si es 4K para ahorrar memoria
+                if (canvas.width > 1920) {
+                    const ratio = 1920 / canvas.width;
+                    canvas.width = 1920;
+                    canvas.height = canvas.height * ratio;
+                }
+
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
                     canvas.toBlob(blob => {
                         if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                        onComplete(vid.duration, file);
-                    }, 'image/jpeg', 0.8);
+                        finishProcess(vid.duration, file);
+                    }, 'image/jpeg', 0.7);
                 } else {
-                    onComplete(vid.duration, null);
+                    finishProcess(vid.duration, null);
                 }
             } catch (e) {
-                console.warn("Error Canvas (Posible CORS si es dominio distinto):", e);
-                // Si falla la foto, guardamos al menos la duración para no volver a escanear
-                onComplete(vid.duration, null);
+                console.warn("Canvas Security Error (CORS):", e);
+                // Si falla la foto (ej: CORS), guardamos SOLO la duración (Prioridad #1)
+                finishProcess(vid.duration, null);
             }
         }
     };
 
-    const handleError = () => {
-        if (processedRef.current) return;
-        processedRef.current = true;
-        
-        const vid = videoRef.current;
-        console.error("Error Video:", vid?.error);
-        
-        // Si falla la carga, guardamos duración 0 y null thumbnail.
-        // Esto saca al video de "PENDING" en la lógica del backend si lo actualizamos,
-        // o podemos decidir no actualizarlo. En este caso, enviamos 0 para que el proceso continue.
-        onComplete(0, null);
+    const handleError = (e: any) => {
+        console.error("Error Reproducción:", e);
+        setStatus("Error de formato/codec. Saltando...");
+        // Si falla totalmente, enviamos 0. El padre decidirá si lo marca como error o guarda lo que tiene.
+        setTimeout(() => finishProcess(0, null), 1000);
     };
 
     return (
@@ -95,17 +93,18 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
                     ref={videoRef} 
                     src={video.videoUrl} 
                     className="w-full h-full object-contain" 
-                    controls // Importante: Controles visibles
+                    controls 
                     autoPlay
-                    playsInline 
-                    muted // Mute inicial para facilitar autoplay
+                    muted 
+                    playsInline
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
-                    // NOTA: Quitamos crossOrigin="anonymous" para evitar problemas con OPTIONS en servidores simples.
-                    // Al ser same-origin (api/...), el canvas funcionará igual.
+                    // IMPORTANTE: Sin crossOrigin explícito para máxima compatibilidad de reproducción en servidores simples.
+                    // Si el servidor backend está en el mismo origen (api/...), el canvas funcionará.
                 />
                 
-                <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-mono text-white border border-white/10 shadow-lg">
+                <div className="absolute top-4 left-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-lg text-sm font-mono text-emerald-400 border border-emerald-500/30 shadow-lg z-10 flex items-center gap-2">
+                    <Loader2 size={16} className="animate-spin"/>
                     {status}
                 </div>
             </div>
@@ -113,11 +112,11 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
             <div className="p-4 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
                 <div>
                     <h3 className="font-bold text-white truncate max-w-md">{video.title}</h3>
-                    <p className="text-xs text-slate-400">No cierres esta ventana. Escaneando...</p>
+                    <p className="text-xs text-slate-400">Extrayendo metadatos en tiempo real...</p>
                 </div>
-                <div className="animate-spin text-indigo-500">
-                    <Loader2 size={24}/>
-                </div>
+                <button onClick={() => finishProcess(0, null)} className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded flex items-center gap-1">
+                    <SkipForward size={14}/> Forzar Salto
+                </button>
             </div>
         </div>
     );
@@ -189,8 +188,10 @@ export default function AdminLibrary() {
         const item = scanQueue[currentScanIndex];
         
         try {
-            // Guardamos metadatos. Si duration es 0, igual lo marcamos para sacarlo de PENDING
-            // o podríamos dejarlo si queremos reintentar, pero para evitar bucles lo guardamos.
+            // Guardamos metadatos. 
+            // Si duration > 0, es un éxito (aunque no haya thumbnail).
+            // Si duration == 0, fue un error de carga, PERO igual llamamos al update
+            // para que el backend pueda decidir si lo deja en PENDING o le pone duración 0.
             await db.updateVideoMetadata(item.id, duration, thumbnail);
             
             const duraFmt = duration > 0 ? `${Math.floor(duration)}s` : 'Error/Skip';
@@ -233,7 +234,7 @@ export default function AdminLibrary() {
                 </div>
                 
                 <div className="text-xs text-slate-500 mt-2 bg-slate-950 p-3 rounded border border-slate-800">
-                    <p><strong>Nota:</strong> El paso 2 abrirá un reproductor. Mantén la ventana activa para que el navegador genere las miniaturas.</p>
+                    <p><strong>Nota:</strong> El paso 2 abrirá un reproductor. Mantén la ventana activa para que el navegador genere las miniaturas. Si un video falla, se guardará con duración 0.</p>
                 </div>
             </div>
 
@@ -260,9 +261,6 @@ export default function AdminLibrary() {
                     />
                     
                     <div className="mt-8 flex gap-4">
-                        <button onClick={() => handleVideoProcessed(0, null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-full font-bold text-sm transition-colors border border-slate-600 flex items-center gap-2">
-                            <AlertTriangle size={16} /> Saltar Video
-                        </button>
                         <button onClick={stopActiveScan} className="px-6 py-2 bg-red-900/50 hover:bg-red-900 text-red-200 rounded-full font-bold text-sm transition-colors border border-red-800">
                             Cancelar Todo
                         </button>
