@@ -1,8 +1,3 @@
-
-
-
-
-
 import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest, MarketplaceReview } from '../types';
 
 const API_BASE = 'api';
@@ -49,6 +44,13 @@ export interface SaleRecord extends Transaction {
     itemImage: string;
     buyerName: string;
     buyerAvatar: string;
+}
+
+export interface OrganizeResult {
+    processed: number;
+    renamed: number;
+    categorized: number;
+    details: string[];
 }
 
 class DatabaseService {
@@ -235,6 +237,9 @@ class DatabaseService {
   }
   // Deprecated/Stub
   async processScanBatch(): Promise<any> { return { completed: true }; }
+  
+  // Smart Organize (Step 3)
+  async smartOrganizeLibrary(): Promise<OrganizeResult> { return this.request<OrganizeResult>('index.php?action=smart_organize', 'POST', {}); }
 
   // --- FTP ---
   async listFtpFiles(path: string): Promise<any[]> { return this.request<any[]>('index.php?action=ftp_list', 'POST', { path }); }

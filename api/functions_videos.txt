@@ -451,6 +451,63 @@ function video_repair_thumbnail($pdo, $post, $files) {
     respond(false);
 }
 
+function video_smart_organize($pdo) {
+    set_time_limit(300); // 5 min timeout
+    
+    $stmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    // Get all videos that might need organizing (local or ftp)
+    $stmt = $pdo->query("SELECT id, title, videoUrl, duration, category FROM videos WHERE isLocal > 0");
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $stats = ['processed' => 0, 'renamed' => 0, 'categorized' => 0, 'details' => []];
+    
+    $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, price = ? WHERE id = ?");
+    
+    foreach ($videos as $v) {
+        $stats['processed']++;
+        
+        $path = str_replace('api/', '', $v['videoUrl']);
+        // Use current category as hint if it's specific, else pass null to detect from filename
+        $currentCatHint = ($v['category'] !== 'PENDING' && $v['category'] !== 'OTHER') ? $v['category'] : null;
+        
+        // 1. Parse Filename
+        $smart = smartParseFilename($path, $currentCatHint);
+        $newTitle = $smart['title'];
+        $newCat = $smart['category'];
+        
+        // 2. Refine Category by Duration (if regex didn't find specific Series/Movie tag)
+        if (!$newCat || $newCat === 'OTHER') {
+            $newCat = detectCategoryFromDuration($v['duration']);
+        }
+        
+        // 3. Compare changes
+        $titleChanged = ($newTitle !== $v['title']);
+        $catChanged = ($newCat !== $v['category']);
+        
+        if ($titleChanged || $catChanged) {
+            $newPrice = getPriceForCategory($newCat, $settings);
+            
+            $updateStmt->execute([$newTitle, $newCat, $newPrice, $v['id']]);
+            
+            if ($titleChanged) {
+                $stats['renamed']++;
+                $stats['details'][] = "Renamed: {$v['title']} -> $newTitle";
+            }
+            if ($catChanged) {
+                $stats['categorized']++;
+                $stats['details'][] = "Categorized: {$v['title']} -> $newCat";
+            }
+        }
+    }
+    
+    // Limit details log size
+    $stats['details'] = array_slice($stats['details'], 0, 50);
+    
+    respond(true, $stats);
+}
+
 function video_update_prices_bulk($pdo, $input) {
     $pdo->prepare("UPDATE videos SET price = ? WHERE creatorId = ?")->execute([$input['newPrice'], $input['creatorId']]);
     respond(true);

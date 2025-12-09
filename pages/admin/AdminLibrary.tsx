@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, SkipForward, Play, AlertCircle } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, SkipForward, Play, AlertCircle, Wand2 } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -176,6 +176,7 @@ export default function AdminLibrary() {
     const toast = useToast();
     const [localPath, setLocalPath] = useState('');
     const [isIndexing, setIsIndexing] = useState(false);
+    const [isOrganizing, setIsOrganizing] = useState(false);
     const [scanLog, setScanLog] = useState<string[]>([]);
     const [activeScan, setActiveScan] = useState(false);
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
@@ -252,10 +253,37 @@ export default function AdminLibrary() {
             stopActiveScan();
             toast.success("¡Importación Completada!");
             addToLog("--- PROCESO TERMINADO ---");
+            addToLog("Recomendación: Ejecuta el Paso 3 para limpiar nombres.");
             db.invalidateCache('index.php?action=get_videos');
             db.setHomeDirty();
         } else {
             setCurrentScanIndex(nextIdx);
+        }
+    };
+
+    const handleSmartOrganize = async () => {
+        if (!confirm("Esto analizará todos los videos, limpiará nombres (quitando '1080p', etc.) y asignará categorías según duración/título. ¿Continuar?")) return;
+        
+        setIsOrganizing(true);
+        addToLog("Iniciando organización inteligente...");
+        
+        try {
+            const res = await db.smartOrganizeLibrary();
+            addToLog(`Procesados: ${res.processed}`);
+            addToLog(`Renombrados: ${res.renamed}`);
+            addToLog(`Categorizados: ${res.categorized}`);
+            
+            if (res.details && res.details.length > 0) {
+                res.details.forEach(d => addToLog(`> ${d}`));
+            }
+            
+            toast.success("Librería Organizada");
+            db.invalidateCache('index.php?action=get_videos');
+            db.setHomeDirty();
+        } catch (e: any) {
+            addToLog(`Error: ${e.message}`);
+        } finally {
+            setIsOrganizing(false);
         }
     };
 
@@ -269,18 +297,23 @@ export default function AdminLibrary() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-3">
-                    <button onClick={handleIndexLibrary} disabled={isIndexing || activeScan} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all">
+                    <button onClick={handleIndexLibrary} disabled={isIndexing || activeScan || isOrganizing} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all">
                         {isIndexing ? <Loader2 className="animate-spin"/> : <FolderSearch size={20}/>} Paso 1: Buscar Archivos
                     </button>
                     
-                    <button onClick={startBrowserScan} disabled={isIndexing || activeScan} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 transition-all">
+                    <button onClick={startBrowserScan} disabled={isIndexing || activeScan || isOrganizing} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 transition-all">
                         <Film size={20}/> Paso 2: Procesar (Escáner Visual)
+                    </button>
+
+                    <button onClick={handleSmartOrganize} disabled={isIndexing || activeScan || isOrganizing} className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-purple-900/20 transition-all">
+                        {isOrganizing ? <Loader2 className="animate-spin"/> : <Wand2 size={20}/>} Paso 3: Renombrado & Categorización
                     </button>
                 </div>
                 
                 <div className="text-xs text-slate-500 mt-2 bg-slate-950 p-3 rounded border border-slate-800">
                     <p className="mb-1"><strong className="text-indigo-400">Nota Importante:</strong></p>
-                    <p>El "Paso 2" abrirá un reproductor. Si el video no inicia automáticamente, <strong>haz click en él</strong>. El sistema necesita reproducir al menos 2 segundos de cada video para extraer la miniatura y duración real.</p>
+                    <p>El "Paso 2" abrirá un reproductor. Si el video no inicia automáticamente, <strong>haz click en él</strong>.</p>
+                    <p className="mt-1">El "Paso 3" es automático y no requiere reproducción.</p>
                 </div>
             </div>
 
@@ -294,7 +327,7 @@ export default function AdminLibrary() {
                             </div>
                         ))}
                     </div>
-                    {(isIndexing || activeScan) && <div className="animate-pulse text-emerald-500 mt-2">_ Procesando...</div>}
+                    {(isIndexing || activeScan || isOrganizing) && <div className="animate-pulse text-emerald-500 mt-2">_ Procesando...</div>}
                 </div>
             </div>
 
