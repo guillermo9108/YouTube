@@ -126,15 +126,15 @@ function smartParseFilename($fullPath, $detectedType = null) {
 
 function streamVideo($filePath, $pdo) {
     // AGGRESSIVE BUFFER CLEANING - CRITICAL FOR ANDROID/LOCAL SERVERS
-    // Disable compression to prevent ZLIB header corruption
+    // Disable compression to prevent ZLIB header corruption which breaks video playback
     if (function_exists('ini_set')) {
         ini_set('zlib.output_compression', 'Off');
     }
     
-    // Clean all buffers to ensure NO HTML/Whitespace is sent before video binary
+    // Clean all output buffers. If there is any whitespace/HTML before the video binary, playback fails.
     while (ob_get_level() > 0) ob_end_clean();
     
-    // Disable error display (logs to file only)
+    // Disable error display (logs to file only) to prevent warnings from breaking the stream
     ini_set('display_errors', 0);
     error_reporting(0);
     set_time_limit(0);

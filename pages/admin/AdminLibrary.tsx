@@ -3,22 +3,24 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, Play, AlertTriangle, SkipForward } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, SkipForward } from 'lucide-react';
 
 const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: number, thumb: File | null) => void }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState('Cargando...');
-    const [errorCount, setErrorCount] = useState(0);
     const processedRef = useRef(false);
 
-    // Timeout de seguridad: Si en 20 segundos no avanza, marcar como error/skip
+    // Timeout de seguridad: Si en 30 segundos no avanza, marcar como error/skip
     useEffect(() => {
         const timer = setTimeout(() => {
             if (!processedRef.current) {
-                console.warn("Scanner timeout - Forzando fin");
-                finishProcess(0, null);
+                console.warn("Scanner timeout - Guardando lo que se pueda");
+                // Intentamos salvar la duración si el video cargó algo de metadata
+                const vid = videoRef.current;
+                const dur = vid && vid.duration && isFinite(vid.duration) ? vid.duration : 0;
+                finishProcess(dur, null);
             }
-        }, 20000);
+        }, 30000);
         return () => clearTimeout(timer);
     }, [video]);
 
@@ -28,6 +30,16 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
         setStatus('Inicializando...');
         if (videoRef.current) {
             videoRef.current.load();
+            videoRef.current.muted = true; // Force mute for autoplay policy
+            
+            const playPromise = videoRef.current.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(e => {
+                    console.warn("Autoplay blocked/failed", e);
+                    // Si falla autoplay, intentamos denuevo con mute (aunque ya lo seteamos)
+                    if(videoRef.current) videoRef.current.muted = true;
+                });
+            }
         }
     }, [video]);
 
@@ -41,17 +53,19 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
         const vid = videoRef.current;
         if (!vid || processedRef.current) return;
 
-        setStatus(`Reproduciendo: ${vid.currentTime.toFixed(1)}s`);
+        setStatus(`Analizando: ${vid.currentTime.toFixed(1)}s`);
 
-        // IGUAL QUE EN WATCH.TSX: Esperamos a que avance un poco (1.5s) para asegurar imagen válida
-        if (vid.currentTime > 1.5 && vid.duration > 0) {
+        // ESTRATEGIA WATCH.TSX:
+        // Esperamos a que el video avance naturalmente > 1.0s.
+        // Esto asegura que el frame buffer tenga datos reales.
+        if (vid.currentTime > 1.0 && vid.duration > 0) {
             vid.pause();
-            setStatus("Procesando imagen...");
+            setStatus("Capturando...");
 
             let file: File | null = null;
             try {
                 const canvas = document.createElement('canvas');
-                canvas.width = vid.videoWidth; // Usar resolución nativa
+                canvas.width = vid.videoWidth;
                 canvas.height = vid.videoHeight;
                 
                 // Reducir si es 4K para ahorrar memoria
@@ -69,11 +83,14 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
                         finishProcess(vid.duration, file);
                     }, 'image/jpeg', 0.7);
                 } else {
+                    // Si falla el contexto (raro), guardamos duración
                     finishProcess(vid.duration, null);
                 }
             } catch (e) {
-                console.warn("Canvas Security Error (CORS):", e);
-                // Si falla la foto (ej: CORS), guardamos SOLO la duración (Prioridad #1)
+                console.warn("Canvas Security/CORS Error:", e);
+                // Si el canvas está "sucio" (Tainted) por CORS, fallará al exportar.
+                // PERO ya tenemos la duración, que es la PRIORIDAD #1.
+                // Guardamos duración y null thumbnail.
                 finishProcess(vid.duration, null);
             }
         }
@@ -81,14 +98,20 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
 
     const handleError = (e: any) => {
         console.error("Error Reproducción:", e);
-        setStatus("Error de formato/codec. Saltando...");
-        // Si falla totalmente, enviamos 0. El padre decidirá si lo marca como error o guarda lo que tiene.
+        // Si el video falla (formato no soportado, 404), NO nos detenemos.
+        // Guardamos duración 0 y seguimos. Así el usuario puede editarlo manualmente luego.
+        setStatus("Error Formato. Saltando...");
         setTimeout(() => finishProcess(0, null), 1000);
     };
 
     return (
         <div className="w-full max-w-3xl mx-auto bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl animate-in zoom-in-95">
             <div className="relative aspect-video bg-slate-900 flex items-center justify-center">
+                {/* 
+                    IMPORTANTE: Reproductor idéntico a Watch.tsx 
+                    - Sin crossOrigin="anonymous" para evitar bloqueos CORS en servidores simples/Android
+                    - AutoPlay y Muted activados
+                */}
                 <video 
                     ref={videoRef} 
                     src={video.videoUrl} 
@@ -99,8 +122,6 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
                     playsInline
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
-                    // IMPORTANTE: Sin crossOrigin explícito para máxima compatibilidad de reproducción en servidores simples.
-                    // Si el servidor backend está en el mismo origen (api/...), el canvas funcionará.
                 />
                 
                 <div className="absolute top-4 left-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-lg text-sm font-mono text-emerald-400 border border-emerald-500/30 shadow-lg z-10 flex items-center gap-2">
@@ -112,7 +133,7 @@ const ScannerPlayer = ({ video, onComplete }: { video: Video, onComplete: (dur: 
             <div className="p-4 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
                 <div>
                     <h3 className="font-bold text-white truncate max-w-md">{video.title}</h3>
-                    <p className="text-xs text-slate-400">Extrayendo metadatos en tiempo real...</p>
+                    <p className="text-xs text-slate-400">Prioridad: Duración > Miniatura</p>
                 </div>
                 <button onClick={() => finishProcess(0, null)} className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded flex items-center gap-1">
                     <SkipForward size={14}/> Forzar Salto
@@ -210,7 +231,7 @@ export default function AdminLibrary() {
             db.setHomeDirty();
         } else {
             // Pequeña pausa para liberar memoria del navegador
-            setTimeout(() => setCurrentScanIndex(nextIdx), 300);
+            setTimeout(() => setCurrentScanIndex(nextIdx), 500);
         }
     };
 
@@ -234,7 +255,7 @@ export default function AdminLibrary() {
                 </div>
                 
                 <div className="text-xs text-slate-500 mt-2 bg-slate-950 p-3 rounded border border-slate-800">
-                    <p><strong>Nota:</strong> El paso 2 abrirá un reproductor. Mantén la ventana activa para que el navegador genere las miniaturas. Si un video falla, se guardará con duración 0.</p>
+                    <p><strong>Nota:</strong> El paso 2 abrirá un reproductor. Mantén la ventana activa. Si un video no se puede reproducir (ej. HEVC en Chrome), se guardará sin duración.</p>
                 </div>
             </div>
 
