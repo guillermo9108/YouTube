@@ -1,4 +1,4 @@
-import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest, MarketplaceReview } from '../types';
+import { User, Video, Transaction, Comment, UserInteraction, UserRole, ContentRequest, SystemSettings, VideoCategory, SmartCleanerResult, Notification, MarketplaceItem, CartItem, FtpSettings, BalanceRequest, MarketplaceReview, OrganizeResult } from '../types';
 
 const API_BASE = 'api';
 
@@ -44,13 +44,6 @@ export interface SaleRecord extends Transaction {
     itemImage: string;
     buyerName: string;
     buyerAvatar: string;
-}
-
-export interface OrganizeResult {
-    processed: number;
-    renamed: number;
-    categorized: number;
-    details: string[];
 }
 
 class DatabaseService {
