@@ -39,7 +39,6 @@ function get_youtube_video($query, $config) {
     return $results;
 }
 
-// Helper: Auto Categorize based on duration
 function detectCategoryFromDuration($duration) {
     if ($duration <= 0) return 'OTRO'; 
     if ($duration <= 180) return 'SHORTS'; // < 3 min
@@ -49,37 +48,30 @@ function detectCategoryFromDuration($duration) {
     return 'PELICULA'; // > 45 min
 }
 
-// Helper: Get Price from Settings
 function getPriceForCategory($cat, $settings) {
     $prices = json_decode($settings['categoryPrices'] ?? '{}', true);
     return isset($prices[$cat]) ? $prices[$cat] : 1; 
 }
 
-// Helper: Smart Filename Cleaning & Parsing
 function smartParseFilename($fullPath, $detectedType = null) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $folderName = basename(dirname($fullPath));
     
-    // 1. Clean common "junk"
     $junk = [
         '/1080p/i', '/720p/i', '/480p/i', '/x264/i', '/h264/i', '/x265/i', '/HEVC/i', 
         '/AAC/i', '/AC3/i', '/BluRay/i', '/WEB-DL/i', '/WEBRip/i', '/HDRip/i', 
         '/www\..+\.com/i', '/\[.*?\]/', '/\(.*?\)/', 
-        '/VID_\d{8}_\d{6}/i', '/PXL_\d{8}_\d{9}/i' // Android Camera patterns
+        '/VID_\d{8}_\d{6}/i', '/PXL_\d{8}_\d{9}/i'
     ];
     
-    // Check if it's a raw camera file (e.g. VID_2023...)
     $isCameraFile = preg_match('/^VID_|^PXL_/', $filename);
-    
     $cleanName = preg_replace($junk, '', $filename);
     $cleanName = str_replace(['.', '_'], ' ', $cleanName);
     
-    // If it was a camera file and name is empty or just numbers, use parent folder + date
     if ($isCameraFile && strlen(trim($cleanName)) < 3) {
         $cleanName = $folderName . ' - ' . date("Y-m-d", filemtime($fullPath));
     }
     
-    // 2. Detect Season/Episode
     $season = '';
     $episode = '';
     $isEpisodic = false;
@@ -101,13 +93,10 @@ function smartParseFilename($fullPath, $detectedType = null) {
     
     $finalTitle = trim($cleanName);
     
-    // 3. Logic for Series/Novelas Renaming
     if ($detectedType === 'SERIES' || $detectedType === 'NOVELAS' || $isEpisodic) {
         if ($season !== '' && $episode !== '') {
             $s = str_pad($season, 2, '0', STR_PAD_LEFT);
             $e = str_pad($episode, 2, '0', STR_PAD_LEFT);
-            
-            // Logic: If filename is generic, use folder name
             if (stripos($filename, $folderName) === false && strlen($finalTitle) < 5) {
                  $finalTitle = "$folderName - S{$s}E{$e}";
             } else {
@@ -120,7 +109,7 @@ function smartParseFilename($fullPath, $detectedType = null) {
     }
 
     $finalTitle = ucwords(strtolower($finalTitle));
-    $finalTitle = preg_replace('/\s+/', ' ', $finalTitle); // Remove double spaces
+    $finalTitle = preg_replace('/\s+/', ' ', $finalTitle);
     
     if (empty($finalTitle)) $finalTitle = "Video " . basename($fullPath);
     
@@ -135,137 +124,104 @@ function smartParseFilename($fullPath, $detectedType = null) {
     ];
 }
 
-// STANDARD HTTP RANGE STREAMING FUNCTION (Supports Local & FTP Proxy)
 function streamVideo($filePath, $pdo) {
-    // Disable output compression which messes with Range headers
-    if(ini_get('zlib.output_compression')) ini_set('zlib.output_compression', 'Off');
-
-    // Clean all buffers aggressively to prevent corruption
+    // SECURITY: KILL ALL OUTPUT BUFFERS AND ERRORS
     while (ob_get_level()) ob_end_clean();
+    error_reporting(0);
+    ini_set('display_errors', 0);
     
-    // Disable time limit for long streams (CRITICAL FOR ANDROID/SLOW SERVERS)
     set_time_limit(0);
 
-    // Headers - CRITICAL: Always send Access-Control-Allow-Origin
+    // Headers
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
-    header('Access-Control-Allow-Headers: Range');
-    header('Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges');
-    header('Accept-Ranges: bytes'); 
-
-    $fileSize = 0;
-    $isFtp = false;
-    $resource = null;
-
-    // --- CHECK IF FTP PROXY NEEDED ---
+    header('Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type');
+    
+    // Check FTP
     $stmt = $pdo->prepare("SELECT isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
-    // Try matching both full path or relative API path
     $stmt->execute([$filePath, "api/" . $filePath]);
     $isLocal = $stmt->fetchColumn();
 
     if ($isLocal == 2) {
-        // --- FTP STREAMING MODE ---
-        $isFtp = true;
-        // Retrieve credentials securely
+        // FTP PROXY STREAM
         $sStmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
         $json = $sStmt->fetchColumn();
         $s = json_decode($json, true);
         
-        if (!$s || empty($s['host'])) { http_response_code(500); die("FTP Config Missing"); }
+        if (!$s || empty($s['host'])) { http_response_code(500); exit; }
         
-        // Build Authenticated URL
         $authUrl = "ftp://" . urlencode($s['user']) . ":" . urlencode($s['pass']) . "@" . $s['host'] . ":" . ($s['port']??21) . $filePath;
-        
         $context = stream_context_create(['ftp' => ['overwrite' => true]]);
         $resource = @fopen($authUrl, 'rb', false, $context);
         
-        if (!$resource) { http_response_code(404); die("FTP File unreachable"); }
+        if (!$resource) { http_response_code(404); exit; }
         
-        // Simple stream passthrough for FTP
         header('Content-Type: video/mp4');
         fpassthru($resource);
         fclose($resource);
         exit;
-
     } else {
-        // --- LOCAL FILE MODE (ANDROID OPTIMIZED) ---
-        if (!file_exists($filePath)) {
-            // Android fallback: Check if path needs decoding
-            $decodedPath = rawurldecode($filePath);
-            if (file_exists($decodedPath)) {
-                $filePath = $decodedPath;
-            } else {
-                http_response_code(404);
-                die("File not found: " . $filePath);
-            }
+        // LOCAL FILE STREAM
+        $realPath = $filePath;
+        if (!file_exists($realPath)) {
+            $realPath = rawurldecode($filePath); // Try decoded path for Android
+        }
+
+        if (!file_exists($realPath)) {
+            header("HTTP/1.0 404 Not Found");
+            exit;
         }
         
-        // Use sprintf to handle 32-bit integer overflow on Android for files > 2GB
-        $fileSize = sprintf("%u", filesize($filePath));
-        $resource = fopen($filePath, 'rb');
-    }
+        $fileSize = sprintf("%u", filesize($realPath));
+        
+        // Mime Type Logic
+        $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+        $mimeTypes = [
+            'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/mp4', 
+            'mov' => 'video/quicktime', 'avi' => 'video/x-msvideo', 'mp3' => 'audio/mpeg'
+        ];
+        $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'video/mp4';
+        header('Content-Type: ' . $contentType);
+        header('Accept-Ranges: bytes');
 
-    // --- SHARED STREAMING LOGIC (Range Support) ---
-    
-    $offset = 0;
-    $length = $fileSize;
+        $offset = 0;
+        $length = $fileSize;
 
-    // Determine MIME type
-    $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-    $mimeTypes = [
-        'mp4' => 'video/mp4',
-        'webm' => 'video/webm',
-        'mkv' => 'video/mp4', // Browser trick
-        'mov' => 'video/quicktime',
-        'avi' => 'video/x-msvideo',
-        'mp3' => 'audio/mpeg',
-        'm4v' => 'video/mp4'
-    ];
-    $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'video/mp4'; // Default to mp4 for safety
-    header('Content-Type: ' . $contentType);
+        if (isset($_SERVER['HTTP_RANGE'])) {
+            if (preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches)) {
+                $offset = intval($matches[1]);
+                $end = isset($matches[2]) && $matches[2] !== '' ? intval($matches[2]) : $fileSize - 1;
+                
+                if ($offset >= $fileSize || $end >= $fileSize || $offset > $end) {
+                    header('HTTP/1.1 416 Requested Range Not Satisfiable');
+                    header("Content-Range: bytes */$fileSize");
+                    exit;
+                }
 
-    // Range Handling
-    if (isset($_SERVER['HTTP_RANGE'])) {
-        if (preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches)) {
-            $offset = intval($matches[1]);
-            $end = isset($matches[2]) && $matches[2] !== '' ? intval($matches[2]) : $fileSize - 1;
-            
-            if ($offset >= $fileSize || $end >= $fileSize || $offset > $end) {
-                header('HTTP/1.1 416 Requested Range Not Satisfiable');
-                header('Content-Range: bytes */' . $fileSize);
-                exit;
+                $length = $end - $offset + 1;
+                header('HTTP/1.1 206 Partial Content');
+                header("Content-Range: bytes $offset-$end/$fileSize");
             }
-
-            $length = $end - $offset + 1;
-            header('HTTP/1.1 206 Partial Content');
-            header("Content-Range: bytes $offset-$end/$fileSize");
+        } else {
+            header("Content-Length: $fileSize");
         }
-    } else {
-        header("Content-Length: $fileSize");
-    }
-    
-    if (isset($_SERVER['HTTP_RANGE'])) {
-        header("Content-Length: $length");
-    }
+        
+        if (isset($_SERVER['HTTP_RANGE'])) {
+            header("Content-Length: $length");
+        }
 
-    // Seek
-    if ($offset > 0) {
-        fseek($resource, $offset);
+        $fp = fopen($realPath, 'rb');
+        if ($offset > 0) fseek($fp, $offset);
+        
+        // Output in chunks
+        $buffer = 1024 * 512; // 512KB chunks
+        while (!feof($fp) && ($p = ftell($fp)) <= $offset + $length) {
+            if ($p + $buffer > $offset + $length) $buffer = $offset + $length - $p + 1;
+            echo fread($fp, $buffer);
+            flush();
+        }
+        fclose($fp);
+        exit;
     }
-    
-    // Output loop - Optimized buffer size for Mobile Servers (1MB chunks)
-    $bufferSize = 1024 * 1024; 
-    $bytesSent = 0;
-    
-    while (!feof($resource) && $bytesSent < $length && !connection_aborted()) {
-        $readSize = min($bufferSize, $length - $bytesSent);
-        $buffer = fread($resource, $readSize);
-        echo $buffer;
-        flush(); // Critical for streaming
-        $bytesSent += strlen($buffer);
-    }
-    
-    fclose($resource);
-    exit;
 }
 ?>

@@ -1,15 +1,46 @@
-
 <?php
 ob_start();
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
-set_time_limit(300);
+set_time_limit(0); // Disable timeout for streams
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Range');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { ob_clean(); http_response_code(200); exit(); }
+
+// --- STREAMING HANDLER (TOP PRIORITY) ---
+// Must happen before loading heavy libraries to prevent buffer pollution
+if (isset($_GET['action']) && $_GET['action'] === 'stream') {
+    $configFile = 'db_config.json';
+    if (file_exists($configFile)) {
+        $db_config = json_decode(file_get_contents($configFile), true);
+        try {
+            $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password']);
+            $vid = $_GET['id'] ?? '';
+            
+            // Get path directly
+            $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ?");
+            $stmt->execute([$vid]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($row) {
+                // Import only the streaming function to keep it lightweight
+                require_once 'functions_utils.php';
+                streamVideo($row['videoUrl'], $pdo);
+                exit; // Stop execution immediately after streaming
+            }
+        } catch (Exception $e) {
+            http_response_code(500); // Server error
+            exit;
+        }
+    }
+    http_response_code(404);
+    exit;
+}
+
+// --- STANDARD API HANDLER ---
 
 require_once 'functions_schema.php';
 
@@ -18,6 +49,7 @@ define('THUMB_DIR', 'uploads/thumbnails/');
 define('AVATAR_DIR', 'uploads/avatars/');
 define('MARKET_DIR', 'uploads/market/');
 
+// Error Catcher
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
@@ -55,16 +87,6 @@ require_once 'functions_admin.php';
 
 $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-
-if ($action === 'stream') {
-    $vid = $_GET['id'] ?? '';
-    $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ?");
-    $stmt->execute([$vid]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($row && $row['isLocal']) streamVideo($row['videoUrl'], $pdo);
-    else { http_response_code(404); die("Invalid stream target"); }
-    exit;
-}
 
 try {
     switch ($action) {
