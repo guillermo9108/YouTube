@@ -18,7 +18,10 @@ export default function Watch() {
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [comments, setComments] = useState<Comment[]>([]);
+    
+    // Related Videos State
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
+    const [loadingRelated, setLoadingRelated] = useState(false);
     
     // Comment Form
     const [newComment, setNewComment] = useState('');
@@ -29,18 +32,26 @@ export default function Watch() {
         setLoading(true);
         setVideo(null); // Reset to prevent stale state
         setIsUnlocked(false); // Reset lock state
+        setRelatedVideos([]); // Reset related
+        setLoadingRelated(true); // Start loading related
 
         const fetchMeta = async () => {
             try {
                 const v = await db.getVideo(id);
                 if (v) {
                     setVideo(v);
+                    
                     // Load related
-                    db.getRelatedVideos(v.id).then(setRelatedVideos).catch(() => {});
+                    db.getRelatedVideos(v.id)
+                      .then(res => setRelatedVideos(res))
+                      .catch(err => console.error("Related error", err))
+                      .finally(() => setLoadingRelated(false));
+
                     // Load comments
                     db.getComments(v.id).then(setComments).catch(() => {});
                 } else {
                     toast.error("Video no encontrado");
+                    setLoadingRelated(false);
                 }
             } catch (e: any) {
                 console.error(e);
@@ -118,8 +129,8 @@ export default function Watch() {
         <div className="max-w-7xl mx-auto p-4 lg:px-8 flex flex-col lg:flex-row gap-6 animate-in fade-in">
             {/* Main Content */}
             <div className="flex-1 min-w-0">
-                {/* Player Container */}
-                <div className="relative aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl mb-4 group border border-slate-800">
+                {/* Player Container - Responsive Height for Locked State */}
+                <div className={`relative bg-black rounded-2xl overflow-hidden shadow-2xl mb-4 group border border-slate-800 ${isUnlocked ? 'aspect-video' : 'min-h-[400px] md:min-h-0 md:aspect-video'}`}>
                     {isUnlocked ? (
                         <video 
                             src={video.videoUrl} 
@@ -146,12 +157,13 @@ export default function Watch() {
                                 <div className="absolute inset-0 bg-black/60"></div>
                             </div>
                             
-                            <div className="relative z-20 bg-slate-900/90 backdrop-blur-md p-8 rounded-2xl border border-slate-700 text-center max-w-sm mx-4 shadow-2xl">
-                                <Lock className="mx-auto mb-4 text-amber-400" size={48}/>
-                                <h2 className="text-2xl font-bold text-white mb-2">Contenido Premium</h2>
-                                <p className="text-slate-400 mb-6 text-sm">Este video requiere acceso para visualizarlo.</p>
-                                <div className="text-4xl font-black text-amber-400 mb-6">{video.price} $</div>
-                                <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
+                            {/* Compact Lock Card */}
+                            <div className="relative z-20 bg-slate-900/90 backdrop-blur-md p-6 md:p-8 rounded-2xl border border-slate-700 text-center max-w-sm mx-4 shadow-2xl flex flex-col items-center">
+                                <Lock className="mb-3 text-amber-400" size={40}/>
+                                <h2 className="text-xl md:text-2xl font-bold text-white mb-2">Contenido Premium</h2>
+                                <p className="text-slate-400 mb-4 text-xs md:text-sm">Este video requiere acceso para visualizarlo.</p>
+                                <div className="text-3xl md:text-4xl font-black text-amber-400 mb-6">{video.price} $</div>
+                                <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm md:text-base">
                                     Desbloquear Ahora
                                 </button>
                             </div>
@@ -241,12 +253,19 @@ export default function Watch() {
             <div className="w-full lg:w-80 shrink-0">
                 <h3 className="font-bold text-white mb-4">A continuación</h3>
                 <div className="flex flex-col gap-3">
-                    {relatedVideos.length > 0 ? (
+                    {loadingRelated ? (
+                        <div className="text-center py-10 flex flex-col items-center">
+                            <Loader2 className="animate-spin text-indigo-500 mb-2" />
+                            <span className="text-slate-500 text-sm italic">Buscando sugerencias...</span>
+                        </div>
+                    ) : relatedVideos.length > 0 ? (
                         relatedVideos.map(v => (
                             <VideoCard key={v.id} video={v} isUnlocked={false} isWatched={false} />
                         ))
                     ) : (
-                        <div className="text-slate-500 text-sm text-center py-10 italic">Cargando sugerencias...</div>
+                        <div className="text-slate-500 text-sm text-center py-10 italic border border-slate-800 rounded-xl bg-slate-900/50">
+                            No hay videos relacionados.
+                        </div>
                     )}
                 </div>
             </div>

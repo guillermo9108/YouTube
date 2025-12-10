@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../components/VideoCard';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/db';
 import { Video, VideoCategory } from '../types';
-import { RefreshCw, Search, Filter, X } from 'lucide-react';
+import { RefreshCw, Search, Filter, X, ArrowDown } from 'lucide-react';
 import { Link } from '../components/Router';
 
 export default function Home() {
@@ -13,7 +14,6 @@ export default function Home() {
   const [activeCategory, setActiveCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
-  const [purchasedIds, setPurchasedIds] = useState<string[]>([]);
   
   // Custom categories state
   const [categories, setCategories] = useState<string[]>(['ALL', ...Object.values(VideoCategory)]);
@@ -34,21 +34,6 @@ export default function Home() {
             if (settings && settings.customCategories) {
                 setCategories(['ALL', ...Object.values(VideoCategory), ...settings.customCategories]);
             }
-
-            if (user) {
-                // Determine watched and purchased for quick UI feedback
-                // Note: ideally backend sends this in video object or separate sync endpoint
-                // For now, we might rely on individual checks in cards or a bulk fetch if available.
-                // Assuming we might not have a bulk fetch for "all watched", we'll track locally what we can 
-                // or let VideoCard handle async checks. 
-                // However, for filtering "watched", we need the list.
-                // Simulating a bulk fetch for now or relying on VideoCard internal state.
-                // To keep Home performant, let's just pass user data down.
-                
-                // Fetch purchased IDs for user (optimization)
-                // const purchases = await db.getUserPurchases(user.id);
-                // setPurchasedIds(purchases);
-            }
         } catch (e) {
             console.error("Failed to load home data", e);
         } finally {
@@ -57,18 +42,6 @@ export default function Home() {
     };
     loadData();
   }, [user]);
-
-  // Infinite Scroll Observer
-  useEffect(() => {
-      const observer = new IntersectionObserver((entries) => {
-          if (entries[0].isIntersecting) {
-              setVisibleCount(prev => prev + 12);
-          }
-      }, { threshold: 0.1 });
-
-      if (loadMoreRef.current) observer.observe(loadMoreRef.current);
-      return () => observer.disconnect();
-  }, [videos, activeCategory, searchQuery]);
 
   const processedList = useMemo(() => {
       return videos.filter(v => {
@@ -79,14 +52,33 @@ export default function Home() {
       });
   }, [videos, activeCategory, searchQuery]);
 
+  // Infinite Scroll Observer
+  useEffect(() => {
+      // If we already show everything, stop observing
+      if (visibleCount >= processedList.length) return;
+
+      const observer = new IntersectionObserver((entries) => {
+          if (entries[0].isIntersecting) {
+              setVisibleCount(prev => prev + 12);
+          }
+      }, { threshold: 0.1 });
+
+      if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+      
+      return () => observer.disconnect();
+  }, [processedList.length, visibleCount]); // Ensure re-observation when counts change
+
+  // Reset pagination on filter change
+  useEffect(() => {
+      setVisibleCount(12);
+  }, [activeCategory, searchQuery]);
+
   const displayList = processedList.slice(0, visibleCount);
 
   // Helper for Card
   const isUnlocked = (videoId: string, creatorId: string) => {
       if (!user) return false;
       if (user.role === 'ADMIN' || user.id === creatorId) return true;
-      // In a real app we'd check purchasedIds array. 
-      // For now, let VideoCard handle individual async check or pass false if unknown.
       return false; 
   };
 
@@ -155,10 +147,28 @@ export default function Home() {
                  </div>
              )}
              
+             {/* Load More Trigger */}
              {visibleCount < processedList.length && (
-                <div ref={loadMoreRef} className="py-24 flex justify-center">
+                <div className="py-12 flex flex-col items-center gap-4">
+                    <div ref={loadMoreRef} className="h-4 w-4"></div> {/* Invisible trigger target */}
+                    
                     <RefreshCw className="animate-spin text-slate-600" />
+                    
+                    {/* Manual Fallback Button if observer fails */}
+                    <button 
+                        onClick={() => setVisibleCount(prev => prev + 12)}
+                        className="text-xs text-indigo-400 hover:text-white underline"
+                    >
+                        Cargar más videos manualmente
+                    </button>
                 </div>
+             )}
+             
+             {/* End of List Message */}
+             {visibleCount >= processedList.length && processedList.length > 0 && (
+                 <div className="py-12 text-center text-slate-600 text-xs">
+                     Has llegado al final de la lista.
+                 </div>
              )}
           </>
       )}
