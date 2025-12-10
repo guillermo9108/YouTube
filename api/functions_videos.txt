@@ -46,153 +46,167 @@ function video_get_by_creator($pdo, $creatorId) {
 }
 
 function video_get_related($pdo, $id) {
-    // 1. Get Current Video Details
+    // --- STRATEGY: CASCADE FALLBACK ---
+    // 1. Search Context (if active)
+    // 2. Sibling File Match (Same folder structure)
+    // 3. Keyword Match (Title)
+    // 4. Same Category (Filler)
+    // 5. Global Random (Last Resort)
+
     $stmt = $pdo->prepare("SELECT title, category, creatorId, videoUrl, description FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $current = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$current) { respond(true, []); return; }
 
-    $cat = $current['category'];
-    $currentPath = str_replace('\\', '/', $current['videoUrl']);
-    
-    // Check for explicit Search Context passed via GET params
+    $finalVideos = [];
+    $excludeIds = [$id];
+    $needed = 12;
+
+    // --- PHASE 1: EXPLICIT SEARCH CONTEXT ---
     $searchContext = isset($_GET['q']) ? $_GET['q'] : '';
-    $catContext = isset($_GET['cat']) ? $_GET['cat'] : 'ALL';
-
-    $baseSql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
-                FROM videos v 
-                LEFT JOIN users u ON v.creatorId = u.id 
-                WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING')";
-    $params = [$id];
-
-    // --- MODE A: SEARCH CONTEXT (User came from a search) ---
     if (!empty($searchContext)) {
-        $baseSql .= " AND (v.title LIKE ? OR v.description LIKE ? OR u.username LIKE ?)";
-        $term = "%$searchContext%";
-        $params[] = $term;
-        $params[] = $term;
-        $params[] = $term;
-
-        if ($catContext !== 'ALL' && $catContext !== 'SUBSCRIPTIONS') {
-            $baseSql .= " AND v.category = ?";
-            $params[] = $catContext;
-        }
+        $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
+                WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING')
+                AND (v.title LIKE ? OR v.description LIKE ?)";
+        $params = [$id, "%$searchContext%", "%$searchContext%"];
         
-        $baseSql .= " LIMIT 20";
-        
-        $stmt = $pdo->prepare($baseSql);
+        $stmt = $pdo->prepare($sql . " LIMIT 10");
         $stmt->execute($params);
-        $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        video_process_rows($videos);
-        respond(true, $videos);
+        foreach ($results as $v) {
+            $finalVideos[] = $v;
+            $excludeIds[] = $v['id'];
+        }
+    }
+
+    // If we have enough, return early (but usually we want more variety or specific sorting for series)
+    if (count($finalVideos) >= $needed) {
+        video_process_rows($finalVideos);
+        respond(true, $finalVideos);
         return;
     }
 
-    // --- MODE B: SMART RELATED (Default) ---
-
-    if ($cat === 'SERIES' || $cat === 'NOVELAS') {
-        $dir = dirname($currentPath); 
-        $parentDir = dirname($dir);   
+    // --- PHASE 2: FOLDER/SIBLING MATCHING (High Priority for Series) ---
+    // Normalize path separators
+    $currentPath = str_replace('\\', '/', $current['videoUrl']);
+    $dir = dirname($currentPath);
+    
+    // Only attempt strict folder matching if path is deep enough (avoid matching root '/')
+    if (strlen($dir) > 5 && $dir !== '.') {
+        // Escape special chars for LIKE, use standard separator
+        $dirPattern = addcslashes($dir, '%_') . '%';
         
-        if (strlen($parentDir) < 5 || $parentDir === '.') $parentDir = $dir;
-
-        $escapedParentDir = addcslashes($parentDir, '%_');
-        $matchPath = $escapedParentDir . '%';
+        $excludePlaceholders = implode(',', array_fill(0, count($excludeIds), '?'));
+        $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
+                WHERE v.id NOT IN ($excludePlaceholders) 
+                AND v.category NOT IN ('PENDING', 'PROCESSING')
+                AND v.videoUrl LIKE ? 
+                LIMIT " . ($needed - count($finalVideos));
         
-        $baseSql .= " AND (v.videoUrl LIKE ? OR v.description LIKE ?) AND v.category = ?";
-        $params[] = $matchPath;
-        $params[] = "%" . str_replace(['/', '\\'], ' > ', $parentDir) . "%"; 
-        $params[] = $cat;
-    }
-    else if ($cat === 'MUSIC') {
-        $parts = explode('-', $current['title']);
-        $artist = trim($parts[0]);
-        $dir = dirname($currentPath);
-        $escapedDir = addcslashes($dir, '%_');
-
-        $baseSql .= " AND v.category = 'MUSIC' AND (v.title LIKE ? OR v.videoUrl LIKE ?) ORDER BY RAND()";
-        $params[] = "%$artist%"; 
-        $params[] = $escapedDir . '%';
-    }
-    else if ($cat === 'MOVIE') {
-        $rawTitle = preg_replace('/[^a-zA-Z0-9 ]/', '', $current['title']);
-        $words = explode(' ', $rawTitle);
-        $stopWords = ['the', 'a', 'an', 'el', 'la', 'los', 'las', 'un', 'una', 'of', 'in', 'on', 'at', 'to'];
-        $filteredWords = array_filter($words, function($w) use ($stopWords) {
-            return !in_array(strtolower($w), $stopWords) && strlen($w) > 2;
-        });
-        $filteredWords = array_values($filteredWords);
+        $params = array_merge($excludeIds, [$dirPattern]);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $siblings = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        $titleKey = '';
-        if (count($filteredWords) > 0) $titleKey = $filteredWords[0];
-        if (count($filteredWords) > 1) $titleKey .= " " . $filteredWords[1];
-        if (empty($titleKey) && isset($words[0])) $titleKey = $words[0];
-
-        $pathParts = explode('/', $currentPath);
-        $genreFolder = '';
-        if (count($pathParts) > 2) {
-            $parent = $pathParts[count($pathParts)-2];
-            if (!in_array(strtolower($parent), ['movies', 'peliculas', 'videos', 'uploads', 'cine'])) {
-                $genreFolder = $parent;
-            }
-        }
-
-        $conditions = ["v.title LIKE ?"];
-        $params[] = "%$titleKey%";
-
-        if ($genreFolder) {
-            $conditions[] = "v.videoUrl LIKE ?";
-            $params[] = "%" . addcslashes($genreFolder, '%_') . "%";
-        }
-
-        $baseSql .= " AND v.category = 'MOVIE' AND (" . implode(' OR ', $conditions) . ") ORDER BY RAND()";
-    }
-    else {
-        $baseSql .= " AND v.category = ? ORDER BY RAND()";
-        $params[] = $cat;
-    }
-
-    $baseSql .= " LIMIT 20";
-
-    $stmt = $pdo->prepare($baseSql);
-    $stmt->execute($params);
-    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    if ($cat === 'SERIES' || $cat === 'NOVELAS') {
-        usort($videos, function($a, $b) {
+        // Sort siblings naturally (Ep 1, Ep 2...)
+        usort($siblings, function($a, $b) {
             return strnatcasecmp($a['title'], $b['title']);
         });
+
+        foreach ($siblings as $v) {
+            $finalVideos[] = $v;
+            $excludeIds[] = $v['id'];
+        }
     }
 
-    $videos = array_slice($videos, 0, 12);
-
-    if (count($videos) < 4) {
-        $excludeIds = array_map(function($v) { return $v['id']; }, $videos);
-        $excludeIds[] = $id;
-        
-        $placeholders = implode(',', array_fill(0, count($excludeIds), '?'));
-        
-        $fallbackSql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
-                        FROM videos v 
-                        LEFT JOIN users u ON v.creatorId = u.id 
-                        WHERE v.category = ? 
-                        AND v.category NOT IN ('PENDING', 'PROCESSING')
-                        AND v.id NOT IN ($placeholders)
-                        ORDER BY RAND() LIMIT " . (12 - count($videos));
-        
-        $fallbackParams = array_merge([$cat], $excludeIds);
-        
-        $stmtFallback = $pdo->prepare($fallbackSql);
-        $stmtFallback->execute($fallbackParams);
-        $moreVideos = $stmtFallback->fetchAll(PDO::FETCH_ASSOC);
-        
-        $videos = array_merge($videos, $moreVideos);
+    if (count($finalVideos) >= $needed) {
+        video_process_rows($finalVideos);
+        respond(true, $finalVideos);
+        return;
     }
 
-    video_process_rows($videos);
-    respond(true, $videos);
+    // --- PHASE 3: KEYWORD MATCHING (Title) ---
+    // Extract significant words
+    $rawTitle = preg_replace('/[^a-zA-Z0-9 ]/', '', $current['title']);
+    $words = explode(' ', $rawTitle);
+    $stopWords = ['the', 'a', 'an', 'el', 'la', 'los', 'las', 'un', 'una', 'of', 'in', 'on', 'at', 'to', 'video', 'capitulo', 'episode'];
+    $keywords = array_filter($words, function($w) use ($stopWords) {
+        return !in_array(strtolower($w), $stopWords) && strlen($w) > 3;
+    });
+    
+    if (!empty($keywords)) {
+        $keywordConditions = [];
+        $keywordParams = [];
+        foreach ($keywords as $word) {
+            $keywordConditions[] = "v.title LIKE ?";
+            $keywordParams[] = "%$word%";
+        }
+        
+        $excludePlaceholders = implode(',', array_fill(0, count($excludeIds), '?'));
+        $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
+                WHERE v.id NOT IN ($excludePlaceholders) 
+                AND v.category NOT IN ('PENDING', 'PROCESSING')
+                AND (" . implode(' OR ', $keywordConditions) . ")
+                LIMIT " . ($needed - count($finalVideos));
+                
+        $params = array_merge($excludeIds, $keywordParams);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        foreach ($matches as $v) {
+            $finalVideos[] = $v;
+            $excludeIds[] = $v['id'];
+        }
+    }
+
+    // --- PHASE 4: CATEGORY FILLER ---
+    if (count($finalVideos) < $needed) {
+        $excludePlaceholders = implode(',', array_fill(0, count($excludeIds), '?'));
+        $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
+                WHERE v.id NOT IN ($excludePlaceholders)
+                AND v.category = ?
+                AND v.category NOT IN ('PENDING', 'PROCESSING')
+                ORDER BY RAND()
+                LIMIT " . ($needed - count($finalVideos));
+        
+        $params = array_merge($excludeIds, [$current['category']]);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $fillers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        foreach ($fillers as $v) {
+            $finalVideos[] = $v;
+            $excludeIds[] = $v['id'];
+        }
+    }
+
+    // --- PHASE 5: GLOBAL RANDOM FILLER (Last Resort) ---
+    if (count($finalVideos) < $needed) {
+        $excludePlaceholders = implode(',', array_fill(0, count($excludeIds), '?'));
+        $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
+                WHERE v.id NOT IN ($excludePlaceholders)
+                AND v.category NOT IN ('PENDING', 'PROCESSING')
+                ORDER BY RAND()
+                LIMIT " . ($needed - count($finalVideos));
+        
+        $params = $excludeIds;
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $randoms = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $finalVideos = array_merge($finalVideos, $randoms);
+    }
+
+    video_process_rows($finalVideos);
+    respond(true, $finalVideos);
 }
 
 function video_upload($pdo, $post, $files) {
@@ -292,6 +306,7 @@ function video_ftp_list($pdo, $input) {
             foreach ($rawList as $item) {
                 if ($item['name'] == '.' || $item['name'] == '..') continue;
                 
+                // Only folders and common video files
                 $isDir = $item['type'] == 'dir';
                 $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
                 $isVideo = in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'm4v', 'ts', 'flv']);
@@ -319,12 +334,21 @@ function video_ftp_import($pdo, $input) {
     $remotePath = $input['path'];
     
     try {
+        // Just verify connection works before adding
         $conn = getFtpConnection($pdo);
         ftp_close($conn);
         
         $filename = basename($remotePath);
+        
+        // We do NOT download the file. We just index the path.
+        // ID Generation
         $vidId = 'ftp_' . md5($remotePath);
+        
+        // Use a placeholder thumb. The visual scanner (Step 2) will play this via the FTP proxy and extract a real thumb.
         $thumbPath = "https://via.placeholder.com/640x360.png?text=FTP+Scan";
+        
+        // For FTP videos, we store the REMOTE PATH in 'videoUrl'
+        // We set isLocal = 2 to indicate it's an FTP Stream
         $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
         
         $stmt = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'PENDING', 0, 2)");
@@ -339,13 +363,16 @@ function video_ftp_import($pdo, $input) {
 
 function video_ftp_scan_recursive($pdo, $input) {
     $startPath = $input['path'] ?? '/';
+    // Increase time limit for long scans
     set_time_limit(600); 
 
     try {
         $conn = getFtpConnection($pdo);
+        
         $filesFound = [];
         $queue = [$startPath];
         
+        // Iterative BFS scan to find all videos
         while(!empty($queue)) {
             $currentDir = array_shift($queue);
             $list = @ftp_mlsd($conn, $currentDir);
@@ -370,9 +397,11 @@ function video_ftp_scan_recursive($pdo, $input) {
         
         ftp_close($conn);
         
+        // Insert into DB
         $added = 0;
         $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
         
+        // Check existing to avoid duplicates
         $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
         $stmtInsert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'PENDING', 0, 2)");
         
@@ -382,6 +411,7 @@ function video_ftp_scan_recursive($pdo, $input) {
                 $vidId = 'ftp_' . md5($path);
                 $filename = basename($path);
                 $thumbPath = "https://via.placeholder.com/640x360.png?text=Pending";
+                
                 $stmtInsert->execute([$vidId, $filename, "FTP Stream", $thumbPath, $path, $adminId, time()]);
                 $added++;
             }
@@ -397,34 +427,49 @@ function video_ftp_scan_recursive($pdo, $input) {
 // --- SYNOLOGY & LOCAL SCANNER ---
 
 function video_scan_local($pdo, $input) {
+    // Increase limits for Synology large scans
     set_time_limit(600);
     ini_set('memory_limit', '512M');
 
     $path = $input['path'];
-    if (!is_dir($path) || !is_readable($path)) {
-        respond(true, ['success' => false, 'error' => "Ruta inaccesible: $path"]);
+    
+    // Validations specifically for Synology permissions
+    if (!is_dir($path)) {
+        respond(true, ['success' => false, 'error' => "Ruta no encontrada o no es un directorio: $path"]);
+    }
+    if (!is_readable($path)) {
+        respond(true, ['success' => false, 'error' => "Permiso denegado: $path (Revisa open_basedir en Web Station)"]);
     }
 
+    // Recursive Search for Videos
     $filesFound = [];
+    
     try {
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS),
             RecursiveIteratorIterator::SELF_FIRST,
-            RecursiveIteratorIterator::CATCH_GET_CHILD
+            RecursiveIteratorIterator::CATCH_GET_CHILD // Continue on error
         );
 
         foreach ($iterator as $file) {
             try {
+                // Ignore hidden @eaDir folders during video search
                 if (strpos($file->getPathname(), '@eaDir') !== false) continue;
+
                 if ($file->isFile()) {
                     $ext = strtolower($file->getExtension());
+                    // Common formats including MKV/AVI which often lack browser support but are valid
                     if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
                         $fullPath = $file->getPathname();
+                        // Fix encoding for special chars
                         if (!mb_check_encoding($fullPath, 'UTF-8')) $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
                         $filesFound[] = $fullPath;
                     }
                 }
-            } catch (Exception $e) { continue; }
+            } catch (Exception $e) {
+                // Skip files causing read errors
+                continue;
+            }
         }
     } catch (Exception $e) { 
         respond(true, ['success' => false, 'error' => "Error de escaneo: " . $e->getMessage()]); 
@@ -433,6 +478,7 @@ function video_scan_local($pdo, $input) {
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $addedCount = 0;
     
+    // Prepared Statements
     $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? COLLATE utf8mb4_unicode_ci");
     $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 'PENDING', 0, 1)");
 
@@ -443,15 +489,58 @@ function video_scan_local($pdo, $input) {
             $title = basename($fullPath);
             $thumbUrl = "https://via.placeholder.com/640x360.png?text=Processing";
             
-            // --- THUMBNAIL LOGIC (Simplified for brevity, see original) ---
+            // --- SYNOLOGY MEDIA SERVER THUMBNAIL EXTRACTION ---
+            // Synology stores metadata in a hidden @eaDir directory
+            
             $dir = dirname($fullPath);
             $filename = basename($fullPath);
-            $candidates = [$dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename . DIRECTORY_SEPARATOR . 'cover.jpg'];
+            $rawName = pathinfo($fullPath, PATHINFO_FILENAME);
+            
+            // Candidate paths for thumbnails
+            $candidates = [
+                // Synology Media Server Standard
+                $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename . DIRECTORY_SEPARATOR . 'SYNOVIDEO_VIDEO_SCREENSHOT.jpg',
+                $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename . DIRECTORY_SEPARATOR . 'SYNOVIDEO_VIDEO_BIG.jpg',
+                $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename . DIRECTORY_SEPARATOR . 'cover.jpg',
+                
+                // Recursively search inside @eaDir specific folder for ANY jpg if exact match fails
+                'SCAN_DIR_' . $dir . DIRECTORY_SEPARATOR . '@eaDir' . DIRECTORY_SEPARATOR . $filename,
+
+                // Standard Sidecars
+                $dir . DIRECTORY_SEPARATOR . $rawName . '.jpg',
+                $dir . DIRECTORY_SEPARATOR . $rawName . '-poster.jpg',
+                $dir . DIRECTORY_SEPARATOR . 'poster.jpg',
+                $dir . DIRECTORY_SEPARATOR . 'cover.jpg',
+                $dir . DIRECTORY_SEPARATOR . 'folder.jpg'
+            ];
+
             foreach ($candidates as $cand) {
+                // Special recursive scan for @eaDir folder content
+                if (strpos($cand, 'SCAN_DIR_') === 0) {
+                    $scanDir = substr($cand, 9);
+                    if (is_dir($scanDir)) {
+                        $files = scandir($scanDir);
+                        foreach($files as $f) {
+                            if (strtolower(pathinfo($f, PATHINFO_EXTENSION)) === 'jpg') {
+                                $fullCand = $scanDir . DIRECTORY_SEPARATOR . $f;
+                                $newThumbName = $vidId . '.jpg';
+                                $dest = THUMB_DIR . $newThumbName;
+                                if (copy($fullCand, $dest)) {
+                                    $thumbUrl = "api/" . $dest; 
+                                    break 2; // Break both loops
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 if (file_exists($cand)) {
                     $newThumbName = $vidId . '.jpg';
-                    copy($cand, THUMB_DIR . $newThumbName);
-                    $thumbUrl = "api/" . THUMB_DIR . $newThumbName;
+                    $dest = THUMB_DIR . $newThumbName;
+                    if (copy($cand, $dest)) {
+                        $thumbUrl = "api/" . $dest; // SUCCESS: Found a thumbnail!
+                    }
                     break;
                 }
             }
@@ -466,8 +555,10 @@ function video_scan_local($pdo, $input) {
 }
 
 function video_get_unprocessed($pdo) {
+    // Only get videos marked PENDING.
+    // CRITICAL: Must select isLocal to allow video_process_rows to transform paths!
     $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 10000;
-    if ($limit <= 0) $limit = 10000;
+    if ($limit <= 0) $limit = 10000; // Unlimited effectively
     
     $sql = "SELECT id, videoUrl, title, thumbnailUrl, isLocal FROM videos WHERE category = 'PENDING' LIMIT $limit";
     $stmt = $pdo->query($sql);
@@ -479,10 +570,13 @@ function video_get_unprocessed($pdo) {
 function video_update_metadata($pdo, $post, $files) {
     $id = $post['id'];
     $duration = floatval($post['duration']);
+    
     if (!$id) respond(false);
 
+    // STEP 2 CHANGE: Set to 'PROCESSING' instead of specific category. 
+    // This hides it from Home until Step 3 organizes it.
     $category = 'PROCESSING'; 
-    $price = 0; 
+    $price = 0; // Temporary
 
     $sql = "UPDATE videos SET category = ?, duration = ?, price = ?";
     $params = [$category, $duration, $price];
@@ -513,47 +607,60 @@ function video_repair_thumbnail($pdo, $post, $files) {
 
 // STEP 3: Organize Logic
 function video_smart_organize($pdo) {
-    set_time_limit(300);
+    set_time_limit(300); // 5 min timeout
+    
     $stmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     
+    // STEP 3: Only process videos that are in 'PROCESSING' state (Passed Step 2)
+    // IMPORTANT: Include 'description' in SELECT to append to it
     $limit = 50; 
     $stmt = $pdo->query("SELECT id, title, description, videoUrl, duration, category FROM videos WHERE category = 'PROCESSING' LIMIT $limit");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     $stats = ['processed' => 0, 'renamed' => 0, 'categorized' => 0, 'details' => []];
+    
+    // Update statement now includes description
     $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, description = ?, category = ?, price = ? WHERE id = ?");
     
     foreach ($videos as $v) {
         $stats['processed']++;
         
-        // 1. Path Info
+        // 1. Get raw path for folder structure extraction
+        // Remove technical prefixes to get clean folder path
         $fullPath = $v['videoUrl'];
         $cleanPath = str_replace(['api/', 'uploads/videos/'], '', $fullPath);
         $folderStructure = dirname($cleanPath);
+        
+        // Format folder structure for display (e.g. "Series > Breaking Bad > Season 1")
         $displayPath = "";
         if ($folderStructure && $folderStructure !== '.') {
             $displayPath = str_replace(['/', '\\'], ' > ', $folderStructure);
         }
 
-        // 2. Smart Name
+        // 2. Parse Filename for Title
         $pathForParser = str_replace('api/', '', $v['videoUrl']);
         $smart = smartParseFilename($pathForParser, null);
         $newTitle = $smart['title'];
-        $newCat = $smart['category']; 
+        $newCat = $smart['category']; // Can be SERIES if pattern matches
         
-        // 3. Category & Price
+        // 3. Refine Category by Duration if not already set by Name
         if (!$newCat || $newCat === 'OTHER' || $newCat === 'PROCESSING') {
             $newCat = detectCategoryFromDuration($v['duration']);
         }
+        
+        // 4. Get Price configured for this category
         $newPrice = getPriceForCategory($newCat, $settings);
         
-        // 4. Update Description
+        // 5. Append Path to Description (Searchability Feature)
         $currentDesc = $v['description'] ?: '';
+        // Only append if we have a path and it's not already there
         if ($displayPath && strpos($currentDesc, $displayPath) === false) {
+            // Use a clean separator
             $currentDesc .= "\n\n📂 Ubicación: " . $displayPath;
         }
 
+        // Always update to move out of PROCESSING state
         $updateStmt->execute([$newTitle, $currentDesc, $newCat, $newPrice, $v['id']]);
         
         if ($newTitle !== $v['title']) {
@@ -561,8 +668,10 @@ function video_smart_organize($pdo) {
             $stats['details'][] = "Renamed: {$v['title']} -> $newTitle";
         }
         $stats['categorized']++;
+        $stats['details'][] = "Categorized: $newCat | Price: $newPrice";
     }
     
+    // Add count of remaining items
     $count = $pdo->query("SELECT COUNT(*) FROM videos WHERE category = 'PROCESSING'")->fetchColumn();
     $stats['remaining'] = $count;
     

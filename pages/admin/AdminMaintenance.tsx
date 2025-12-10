@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { db } from '../../services/db';
 import { VideoCategory, SmartCleanerResult } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { Wrench, Trash2, Database, Brush, Activity, Server, HardDrive, CheckCircle } from 'lucide-react';
+import { Wrench, Trash2, Database, Brush, Activity, Server, HardDrive, CheckCircle, Percent, Clock } from 'lucide-react';
 
 const SystemHealthCard = ({ icon: Icon, label, status, color }: any) => (
     <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col items-center text-center gap-2">
@@ -124,29 +124,37 @@ export default function AdminMaintenance() {
                     </p>
                     
                     <div className="space-y-4 flex-1">
-                        <div className="grid grid-cols-3 gap-2">
+                        <div>
+                            <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Categoría</label>
+                            <select value={cleanerCategory} onChange={e=>setCleanerCategory(e.target.value)} className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-lg p-2.5 outline-none focus:border-indigo-500">
+                                <option value="ALL">Todas las Categorías</option>
+                                {Object.values(VideoCategory).map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+                            </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Categoría</label>
-                                <select value={cleanerCategory} onChange={e=>setCleanerCategory(e.target.value)} className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded p-2 outline-none focus:border-indigo-500">
-                                    <option value="ALL">Todas</option>
-                                    {Object.values(VideoCategory).map(c => <option key={c} value={c}>{c}</option>)}
-                                </select>
+                                <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1 flex items-center gap-1"><Percent size={10}/> Agresividad (Eliminar %)</label>
+                                <input 
+                                    type="number" 
+                                    min="1" 
+                                    max="50" 
+                                    value={cleanerPercent} 
+                                    onChange={e => setCleanerPercent(parseInt(e.target.value))} 
+                                    className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-lg p-2.5 outline-none focus:border-indigo-500"
+                                    placeholder="%"
+                                />
                             </div>
                             <div>
-                                <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Agresividad</label>
-                                <select value={cleanerPercent} onChange={e=>setCleanerPercent(parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded p-2 outline-none focus:border-indigo-500">
-                                    <option value="5">Eliminar 5%</option>
-                                    <option value="10">Eliminar 10%</option>
-                                    <option value="20">Eliminar 20%</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Antigüedad</label>
-                                <select value={cleanerDays} onChange={e=>setCleanerDays(parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-700 text-white text-xs rounded p-2 outline-none focus:border-indigo-500">
-                                    <option value="7">+7 días</option>
-                                    <option value="30">+30 días</option>
-                                    <option value="90">+90 días</option>
-                                </select>
+                                <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1 flex items-center gap-1"><Clock size={10}/> Antigüedad (Días)</label>
+                                <input 
+                                    type="number" 
+                                    min="1" 
+                                    value={cleanerDays} 
+                                    onChange={e => setCleanerDays(parseInt(e.target.value))} 
+                                    className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-lg p-2.5 outline-none focus:border-indigo-500"
+                                    placeholder="Días"
+                                />
                             </div>
                         </div>
                         

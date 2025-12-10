@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../services/db';
 import { SystemSettings, VideoCategory } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign } from 'lucide-react';
+import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
@@ -25,9 +25,13 @@ export default function AdminConfig() {
     const toast = useToast();
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [openSection, setOpenSection] = useState<string>('SYSTEM');
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        db.getSystemSettings().then(setSettings);
+        db.getSystemSettings().then(s => {
+            setSettings(s);
+            setLoading(false);
+        }).catch(() => setLoading(false));
     }, []);
 
     const handleSaveConfig = async () => {
@@ -45,13 +49,14 @@ export default function AdminConfig() {
         setSettings({
             ...settings,
             categoryPrices: {
-                ...(settings.categoryPrices || {}), // SAFE: Handle null/undefined case
+                ...(settings.categoryPrices || {}), 
                 [cat]: price
             }
         });
     };
 
-    if (!settings) return null;
+    if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500"/></div>;
+    if (!settings) return <div className="p-10 text-center text-red-400">Error cargando configuración.</div>;
 
     return (
         <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in pb-20">

@@ -137,14 +137,16 @@ try {
 
         case 'admin_add_balance': admin_add_balance($pdo, $input); break;
         case 'admin_get_balance_requests': admin_get_balance_requests($pdo); break;
+        case 'admin_get_global_transactions': admin_get_global_transactions($pdo); break;
         case 'admin_handle_balance_request': admin_handle_balance_request($pdo, $input); break;
         case 'admin_cleanup_videos': admin_cleanup_videos($pdo); break;
         case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
         case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
         case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
-        case 'get_requests': admin_get_requests($pdo, $_GET['status'] ?? ''); break;
+        case 'get_requests': admin_get_requests($pdo, $_GET['status'] ?? 'ALL'); break;
         case 'request_content': admin_request_content($pdo, $input); break;
+        case 'admin_update_request_status': admin_update_request_status($pdo, $input); break;
         case 'delete_request': admin_delete_request($pdo, $input); break;
         case 'process_queue': admin_process_queue($pdo); break;
         case 'get_system_settings': admin_get_settings($pdo); break;

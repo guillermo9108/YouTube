@@ -1,22 +1,24 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../services/db';
-import { BalanceRequest } from '../../types';
+import { BalanceRequest, Transaction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { Check, X, Clock, DollarSign, Wallet, TrendingUp } from 'lucide-react';
+import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, ShoppingBag } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
     const [balanceRequests, setBalanceRequests] = useState<BalanceRequest[]>([]);
+    const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
 
-    const loadRequests = () => {
+    const loadData = () => {
         db.getBalanceRequests().then(setBalanceRequests);
+        db.getGlobalTransactions().then(setGlobalTransactions);
     };
 
     useEffect(() => {
-        loadRequests();
+        loadData();
     }, []);
 
     const handleHandleRequest = async (reqId: string, action: 'APPROVED' | 'REJECTED') => {
@@ -24,7 +26,7 @@ export default function AdminFinance() {
         try {
             await db.handleBalanceRequest(currentUser.id, reqId, action);
             toast.success(`Solicitud ${action === 'APPROVED' ? 'Aprobada' : 'Rechazada'}`);
-            loadRequests();
+            loadData();
         } catch (e: any) {
             toast.error("Error: " + e.message);
         }
@@ -121,6 +123,67 @@ export default function AdminFinance() {
                         </table>
                     </div>
                 )}
+            </div>
+
+            {/* Global Transactions History */}
+            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
+                <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
+                    <TrendingUp size={18} className="text-emerald-400"/>
+                    <h3 className="font-bold text-white">Actividad Reciente Global</h3>
+                </div>
+                <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-slate-500 uppercase bg-slate-950/50 sticky top-0">
+                            <tr>
+                                <th className="px-4 py-3">Tipo</th>
+                                <th className="px-4 py-3">Detalle</th>
+                                <th className="px-4 py-3 text-right">Monto</th>
+                                <th className="px-4 py-3 text-right">Comisión</th>
+                                <th className="px-4 py-3 text-right">Fecha</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                            {globalTransactions.length === 0 ? (
+                                <tr><td colSpan={5} className="text-center py-8 text-slate-500">Sin movimientos recientes</td></tr>
+                            ) : (
+                                globalTransactions.map(t => {
+                                    const isDeposit = t.type === 'DEPOSIT';
+                                    const isMarket = t.type === 'MARKETPLACE';
+                                    return (
+                                        <tr key={t.id} className="hover:bg-slate-800/30">
+                                            <td className="px-4 py-3">
+                                                <span className={`px-2 py-1 rounded text-[10px] font-bold ${isDeposit ? 'bg-emerald-500/20 text-emerald-400' : (isMarket ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400')}`}>
+                                                    {t.type}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {isDeposit ? (
+                                                    <div className="flex items-center gap-1 text-slate-300">
+                                                        <ArrowDownLeft size={14} className="text-emerald-500"/> Recarga de {t.buyerName}
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col">
+                                                        <span className="font-medium text-white">{t.itemTitle || t.videoTitle || 'Ítem'}</span>
+                                                        <span className="text-[10px] text-slate-500">{t.sellerName} <ArrowUpRight size={10} className="inline"/> {t.buyerName}</span>
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-mono text-white">
+                                                {Number(t.amount).toFixed(2)}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-mono text-slate-400">
+                                                {Number(t.adminFee) > 0 ? '+' + Number(t.adminFee).toFixed(2) : '-'}
+                                            </td>
+                                            <td className="px-4 py-3 text-right text-xs text-slate-500">
+                                                {new Date(t.timestamp * 1000).toLocaleString()}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );

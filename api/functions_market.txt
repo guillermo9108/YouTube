@@ -43,6 +43,9 @@ function market_get_items($pdo) {
 }
 
 function market_admin_get_items($pdo) {
+    // Ensure table exists for Admin view too
+    market_ensure_schema($pdo);
+
     $stmt = $pdo->query("
         SELECT m.*, u.username as sellerName 
         FROM marketplace_items m 

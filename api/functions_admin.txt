@@ -38,6 +38,20 @@ function admin_get_balance_requests($pdo) {
     respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
+function admin_get_global_transactions($pdo) {
+    // Fetch last 100 transactions of any type
+    $sql = "SELECT t.*, b.username as buyerName, s.username as sellerName, v.title as videoTitle, m.title as itemTitle
+            FROM transactions t
+            LEFT JOIN users b ON t.buyerId = b.id
+            LEFT JOIN users s ON t.creatorId = s.id
+            LEFT JOIN videos v ON t.videoId = v.id
+            LEFT JOIN marketplace_items m ON t.marketplaceItemId = m.id
+            ORDER BY t.timestamp DESC LIMIT 100";
+    $stmt = $pdo->query($sql);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    respond(true, $rows);
+}
+
 // Admin Action: Handle Request
 function admin_handle_balance_request($pdo, $input) {
     $reqId = $input['requestId'];
@@ -104,13 +118,21 @@ function admin_cleanup_videos($pdo) {
 
 // Filesystem Cleanup: Removes physical files if not in DB (Orphaned files)
 function admin_cleanup_system_files($pdo) {
+    set_time_limit(600); // 10 minutes for large libraries
     $stats = ['videos' => 0, 'thumbnails' => 0, 'avatars' => 0, 'market' => 0];
     
+    // Helper to extract clean filename from DB path
+    // DB: "api/uploads/videos/file.mp4" -> "file.mp4"
+    // DB: "uploads/videos/file.mp4" -> "file.mp4"
+    $cleanName = function($path) {
+        return basename($path);
+    };
+
     // --- 1. CLEAN VIDEOS ---
     $validVideos = [];
     $stmt = $pdo->query("SELECT videoUrl FROM videos");
     while ($path = $stmt->fetchColumn()) {
-        $validVideos[] = basename($path);
+        $validVideos[] = $cleanName($path);
     }
     
     if (is_dir(UPLOAD_DIR)) {
@@ -127,13 +149,14 @@ function admin_cleanup_system_files($pdo) {
     $validThumbs = [];
     $stmt = $pdo->query("SELECT thumbnailUrl FROM videos");
     while ($path = $stmt->fetchColumn()) {
-        $validThumbs[] = basename($path);
+        $validThumbs[] = $cleanName($path);
     }
     
     if (is_dir(THUMB_DIR)) {
         $files = scandir(THUMB_DIR);
         foreach ($files as $f) {
             if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
+            // Thumbnails usually have IDs, but let's be strict
             if (!in_array($f, $validThumbs)) {
                 if (unlink(THUMB_DIR . $f)) $stats['thumbnails']++;
             }
@@ -144,8 +167,9 @@ function admin_cleanup_system_files($pdo) {
     $validAvatars = [];
     $stmt = $pdo->query("SELECT avatarUrl FROM users WHERE avatarUrl IS NOT NULL");
     while ($path = $stmt->fetchColumn()) {
-        $validAvatars[] = basename($path);
+        $validAvatars[] = $cleanName($path);
     }
+    // Also include marketplace buyer/seller avatars cache if any (usually linked to users, but check notifications/messages if implemented)
     
     if (is_dir(AVATAR_DIR)) {
         $files = scandir(AVATAR_DIR);
@@ -164,7 +188,7 @@ function admin_cleanup_system_files($pdo) {
         $imgs = json_decode($json, true);
         if (is_array($imgs)) {
             foreach ($imgs as $img) {
-                $validMarket[] = basename($img);
+                $validMarket[] = $cleanName($img);
             }
         }
     }
@@ -214,6 +238,9 @@ function admin_smart_cleaner_preview($pdo, $input) {
     
     $count = count($allCandidates);
     $limit = floor($count * ($percent / 100));
+    // Ensure we don't delete everything if list is small but percentage is high
+    if ($limit < 1 && $percent > 0 && $count > 0) $limit = 1;
+    
     $toDelete = array_slice($allCandidates, 0, $limit);
     
     // Estimate space (very rough, average 50MB if file missing)
@@ -221,6 +248,7 @@ function admin_smart_cleaner_preview($pdo, $input) {
     foreach ($toDelete as $v) {
         $path = str_replace('api/', '', $v['videoUrl']);
         if (file_exists($path)) $space += filesize($path);
+        else $space += 50 * 1024 * 1024; // Fallback estimate
     }
     
     respond(true, [
@@ -259,11 +287,30 @@ function admin_smart_cleaner_execute($pdo, $input) {
 
 function admin_get_requests($pdo, $status) {
     $sql = "SELECT r.*, u.username FROM requests r LEFT JOIN users u ON r.userId = u.id";
-    if ($status) $sql .= " WHERE r.status = '$status'";
+    if ($status && $status !== 'ALL') $sql .= " WHERE r.status = '$status'";
     $sql .= " ORDER BY r.createdAt DESC";
     
     $stmt = $pdo->query($sql);
     respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function admin_update_request_status($pdo, $input) {
+    $id = $input['id'];
+    $status = $input['status'];
+    $pdo->prepare("UPDATE requests SET status = ? WHERE id = ?")->execute([$status, $id]);
+    
+    // Notify User
+    $stmt = $pdo->prepare("SELECT userId, query FROM requests WHERE id = ?");
+    $stmt->execute([$id]);
+    $req = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($req && $status === 'COMPLETED') {
+        $nid = uniqid('n_');
+        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
+            ->execute([$nid, $req['userId'], "Tu petición '{$req['query']}' ha sido completada y añadida.", time()]);
+    }
+    
+    respond(true);
 }
 
 function admin_request_content($pdo, $input) {
@@ -288,17 +335,28 @@ function admin_get_settings($pdo) {
         $s = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     }
 
-    if ($s) {
-        // ROBUST JSON DECODING: Use '??' to default to empty array/object if null
-        $s['categoryPrices'] = json_decode($s['categoryPrices'] ?? '{}', true) ?: [];
-        $s['customCategories'] = json_decode($s['customCategories'] ?? '[]', true) ?: [];
-        $s['ftpSettings'] = json_decode($s['ftpSettings'] ?? '{}', true) ?: [];
-        
-        // Ensure Commissions are numbers
-        $s['videoCommission'] = intval($s['videoCommission']);
-        $s['marketCommission'] = intval($s['marketCommission']);
-    }
-    respond(true, $s);
+    // Default object structure to prevent frontend "empty" issues
+    $settings = [
+        'id' => 1,
+        'downloadStartTime' => $s['downloadStartTime'] ?? '01:00',
+        'downloadEndTime' => $s['downloadEndTime'] ?? '06:00',
+        'isQueuePaused' => (bool)($s['isQueuePaused'] ?? 0),
+        'batchSize' => intval($s['batchSize'] ?? 5),
+        'maxDuration' => intval($s['maxDuration'] ?? 600),
+        'maxResolution' => intval($s['maxResolution'] ?? 1080),
+        'pexelsKey' => $s['pexelsKey'] ?? '',
+        'pixabayKey' => $s['pixabayKey'] ?? '',
+        'ytDlpPath' => $s['ytDlpPath'] ?? '',
+        'enableYoutube' => (bool)($s['enableYoutube'] ?? 0),
+        'categoryPrices' => json_decode($s['categoryPrices'] ?? '{}', true) ?: [],
+        'customCategories' => json_decode($s['customCategories'] ?? '[]', true) ?: [],
+        'localLibraryPath' => $s['localLibraryPath'] ?? '',
+        'ftpSettings' => json_decode($s['ftpSettings'] ?? '{}', true) ?: [],
+        'videoCommission' => intval($s['videoCommission'] ?? 20),
+        'marketCommission' => intval($s['marketCommission'] ?? 25)
+    ];
+
+    respond(true, $settings);
 }
 
 function admin_update_settings($pdo, $input) {
