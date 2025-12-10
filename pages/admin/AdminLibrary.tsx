@@ -213,7 +213,7 @@ export default function AdminLibrary() {
             try {
                 const res = await db.smartOrganizeLibrary();
                 
-                if (res.details) res.details.forEach(d => addToLog(d));
+                if (res.details) res.details.forEach((d: string) => addToLog(d));
                 
                 // If remaining > 0, continue recursively
                 if (res.remaining && res.remaining > 0) {
