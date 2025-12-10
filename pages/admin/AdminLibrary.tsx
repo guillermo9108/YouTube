@@ -15,15 +15,23 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const [status, setStatus] = useState('Cargando...');
     const processedRef = useRef(false);
 
-    // STRICT: Use videoUrl directly like Watch.tsx. 
-    // The API/DB Service is responsible for formatting this correctly (e.g. streaming links).
-    // This ensures 1:1 behavior with the main player.
-    const streamSrc = video.videoUrl;
+    // FIX: Ensure we use a web-accessible URL. 
+    // If isLocal is true, we MUST use the stream API, not the raw file path.
+    let streamSrc = video.videoUrl;
+    const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
+
+    if (isLocal && !streamSrc.includes('action=stream')) {
+        // Fallback if backend didn't transform the URL
+        streamSrc = `api/index.php?action=stream&id=${video.id}`;
+        console.log("ScannerPlayer: Forcing stream URL for local video", video.id);
+    }
 
     useEffect(() => {
         const vid = videoRef.current;
         if (!vid) return;
         
+        console.log("ScannerPlayer: Loading", streamSrc);
+
         // Reset state for new video
         processedRef.current = false;
         setStatus('Iniciando...');
@@ -89,7 +97,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
     const handleError = (e: any) => {
         if (processedRef.current) return;
-        console.error("Video Load Error", e);
+        console.error("Video Load Error", streamSrc, e);
         setStatus("Error de Reproducción. Saltando...");
         
         // Force skip after short delay
@@ -136,6 +144,10 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                         <span className="text-[10px] font-mono font-bold text-white uppercase tracking-wider">{status}</span>
                     </div>
                 </div>
+            </div>
+            {/* Debug Info */}
+            <div className="text-[10px] text-slate-600 font-mono mt-1 px-2 truncate">
+                Src: {streamSrc}
             </div>
         </div>
     );

@@ -173,7 +173,9 @@ function video_upload($pdo, $post, $files) {
     $vidName = "{$vidId}.{$vidExt}";
     move_uploaded_file($files['video']['tmp_name'], UPLOAD_DIR . $vidName);
 
-    $thumbPath = "https://via.placeholder.com/640x360.png?text=" . urlencode($title);
+    // FIX: Use local placeholder if no thumb uploaded, for offline support
+    $thumbPath = "api/uploads/thumbnails/default.jpg";
+    
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         $thumbExt = strtolower(pathinfo($files['thumbnail']['name'], PATHINFO_EXTENSION));
         $thumbName = "{$vidId}.{$thumbExt}";
@@ -293,8 +295,8 @@ function video_ftp_import($pdo, $input) {
         // ID Generation
         $vidId = 'ftp_' . md5($remotePath);
         
-        // Use a placeholder thumb. The visual scanner (Step 2) will play this via the FTP proxy and extract a real thumb.
-        $thumbPath = "https://via.placeholder.com/640x360.png?text=FTP+Scan";
+        // Use local default for offline support
+        $thumbPath = "api/uploads/thumbnails/default.jpg";
         
         // For FTP videos, we store the REMOTE PATH in 'videoUrl'
         // We set isLocal = 2 to indicate it's an FTP Stream
@@ -359,7 +361,8 @@ function video_ftp_scan_recursive($pdo, $input) {
             if($stmtCheck->fetchColumn() == 0) {
                 $vidId = 'ftp_' . md5($path);
                 $filename = basename($path);
-                $thumbPath = "https://via.placeholder.com/640x360.png?text=Pending";
+                // Local default for offline support
+                $thumbPath = "api/uploads/thumbnails/default.jpg";
                 
                 $stmtInsert->execute([$vidId, $filename, "FTP Stream", $thumbPath, $path, $adminId, time()]);
                 $added++;
@@ -436,7 +439,9 @@ function video_scan_local($pdo, $input) {
         if ($check->fetchColumn() == 0) {
             $vidId = 'loc_' . md5($fullPath);
             $title = basename($fullPath);
-            $thumbUrl = "https://via.placeholder.com/640x360.png?text=Processing";
+            
+            // FIX: Use local default instead of external placeholder for offline support
+            $thumbUrl = "api/uploads/thumbnails/default.jpg";
             
             // --- SYNOLOGY MEDIA SERVER THUMBNAIL EXTRACTION ---
             // Synology stores metadata in a hidden @eaDir directory

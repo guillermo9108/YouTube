@@ -421,10 +421,14 @@ function admin_search_external($pdo, $input) {
              if ($res) {
                  $data = json_decode($res, true);
                  foreach ($data['hits'] as $hit) {
+                     // FIX: If userImageURL is missing, use empty string to let frontend handle it, 
+                     // or use local default. Ideally frontend handles empty.
+                     $thumb = $hit['userImageURL'] ?: "";
+                     
                      $results[] = [
                          'id' => 'pix_' . $hit['id'],
                          'source' => 'Pixabay',
-                         'thumbnail' => $hit['userImageURL'] ?: "https://via.placeholder.com/150",
+                         'thumbnail' => $thumb,
                          'title' => "Stock Video " . $hit['id'],
                          'downloadUrl' => $hit['videos']['medium']['url'],
                          'author' => $hit['user'],

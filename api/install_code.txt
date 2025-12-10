@@ -108,6 +108,22 @@ if ($action === 'install') {
         if (!file_exists('uploads/avatars')) mkdir('uploads/avatars', 0777, true);
         if (!file_exists('uploads/market')) mkdir('uploads/market', 0777, true);
 
+        // --- GENERATE DEFAULT THUMBNAIL IF NOT EXISTS ---
+        // This ensures the offline mode works without relying on external placeholders
+        $defaultThumb = 'uploads/thumbnails/default.jpg';
+        if (!file_exists($defaultThumb) && function_exists('imagecreatetruecolor')) {
+            $im = imagecreatetruecolor(640, 360);
+            $bg = imagecolorallocate($im, 15, 23, 42); // slate-950
+            imagefill($im, 0, 0, $bg);
+            $text_color = imagecolorallocate($im, 79, 70, 229); // indigo-600
+            // Draw a simple pattern since we might not have fonts
+            imagerectangle($im, 50, 50, 590, 310, $text_color);
+            imageline($im, 50, 50, 590, 310, $text_color);
+            imageline($im, 590, 50, 50, 310, $text_color);
+            imagejpeg($im, $defaultThumb);
+            imagedestroy($im);
+        }
+
         respond(true, ['message' => 'Installation successful']);
 
     } catch (PDOException $e) {
