@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, SkipForward, Play, AlertCircle, Wand2, Database, Clock, Pause, Check, Edit3 } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, Play, AlertCircle, Wand2, Database, Edit3 } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -15,22 +15,23 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const [status, setStatus] = useState('Cargando...');
     const processedRef = useRef(false);
 
-    const getVideoSrc = (v: Video) => {
-        if (v.videoUrl.startsWith('http') || v.videoUrl.startsWith('blob')) return v.videoUrl;
-        return `api/index.php?action=stream&id=${v.id}`;
-    };
-
-    const streamSrc = getVideoSrc(video);
+    // STRICT: Use videoUrl directly like Watch.tsx. 
+    // The API/DB Service is responsible for formatting this correctly (e.g. streaming links).
+    // This ensures 1:1 behavior with the main player.
+    const streamSrc = video.videoUrl;
 
     useEffect(() => {
         const vid = videoRef.current;
         if (!vid) return;
+        
+        // Reset state for new video
         processedRef.current = false;
         setStatus('Iniciando...');
+        vid.currentTime = 0;
 
         const startPlay = async () => {
             try {
-                // Force mute for speed and stability
+                // Force mute to allow autoplay policy compliance
                 vid.muted = true;
                 await vid.play();
                 setStatus('Procesando...');
@@ -39,25 +40,27 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                 setStatus('Esperando click manual...');
             }
         };
-        const timer = setTimeout(startPlay, 200);
+        
+        // Small buffer delay to ensure DOM is ready
+        const timer = setTimeout(startPlay, 250);
         return () => clearTimeout(timer);
-    }, [video, streamSrc]); 
+    }, [video.id, streamSrc]); 
 
     const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
         if (!vid || processedRef.current) return;
 
-        // Process quickly at 1.5s
+        // Capture logic: Wait for 1.5s mark to ensure we have a valid frame (not black start)
         if (vid.currentTime > 1.5) {
             vid.pause();
             processedRef.current = true;
             setStatus('Capturando...');
 
             const duration = vid.duration && isFinite(vid.duration) ? vid.duration : 0;
-            let file: File | null = null;
-
+            
             try {
                 const canvas = document.createElement('canvas');
+                // Use actual video dimensions for high quality thumb
                 canvas.width = vid.videoWidth || 640;
                 canvas.height = vid.videoHeight || 360;
                 const ctx = canvas.getContext('2d');
@@ -65,46 +68,73 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
                     canvas.toBlob(blob => {
-                        if (blob) file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                        onComplete(duration, file);
+                        if (blob) {
+                            const file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
+                            onComplete(duration, file);
+                        } else {
+                            // Fallback if blob fails (rare)
+                            onComplete(duration, null);
+                        }
                     }, 'image/jpeg', 0.8);
                 } else {
                     onComplete(duration, null);
                 }
             } catch (err) {
+                console.error("Canvas error", err);
+                // Usually happens due to CORS if crossOrigin isn't set
                 onComplete(duration, null);
             }
         }
     };
 
-    const handleError = () => {
+    const handleError = (e: any) => {
         if (processedRef.current) return;
-        setStatus("Error. Saltando...");
+        console.error("Video Load Error", e);
+        setStatus("Error de Reproducción. Saltando...");
+        
+        // Force skip after short delay
         setTimeout(() => {
             if (!processedRef.current) {
                 processedRef.current = true;
                 onComplete(0, null);
             }
-        }, 2000); // Wait 2s then skip
+        }, 1500); 
     };
 
     return (
-        <div className="w-full max-w-lg mx-auto bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl relative mb-4">
-            <div className="relative aspect-video bg-black flex items-center justify-center">
+        <div className="w-full max-w-lg mx-auto mb-4">
+            {/* 
+                VISUAL REPRODUCTION: 
+                Matches pages/Watch.tsx player container styles exactly 
+                (bg-black, rounded-2xl, shadow-2xl, border-slate-800)
+            */}
+            <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 aspect-video group">
                 <video 
                     ref={videoRef} 
-                    src={streamSrc} 
+                    src={streamSrc}
+                    poster={video.thumbnailUrl} 
                     className="w-full h-full object-contain" 
-                    controls
+                    controls={true} // Allow controls for debugging
                     playsInline
                     muted={true}
+                    autoPlay
                     preload="auto"
+                    crossOrigin="anonymous" // CRITICAL: Required for canvas.toBlob to work on scanned files
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
-                    key={video.id} // Force re-render on video change
+                    key={video.id} // Force full DOM remount on ID change
                 />
-                <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] font-mono text-white z-10 pointer-events-none">
-                    {status}
+                
+                {/* Overlay Status Badge */}
+                <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 z-20 pointer-events-none">
+                    <div className="flex items-center gap-2">
+                        {status === 'Procesando...' || status === 'Capturando...' ? (
+                            <Loader2 size={12} className="animate-spin text-emerald-400"/>
+                        ) : (
+                            <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></div>
+                        )}
+                        <span className="text-[10px] font-mono font-bold text-white uppercase tracking-wider">{status}</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -166,23 +196,24 @@ export default function AdminLibrary() {
     // --- STEP 2: SCAN ---
     const startBrowserScan = async () => {
         addToLog("Cargando videos pendientes...");
-        // API supports limit param. Empty/0 = All.
         const limit = step2Limit ? parseInt(step2Limit) : 0; 
         
-        // Custom URL builder to pass limit
-        const response = await fetch(`api/index.php?action=get_unprocessed_videos&limit=${limit}`);
-        const json = await response.json();
-        const pending = json.data || [];
+        try {
+            // Fetch queue
+            const pending = await db.getUnprocessedVideos(limit);
 
-        if (pending.length === 0) {
-            addToLog("No hay videos pendientes (PENDING).");
-            return;
+            if (pending.length === 0) {
+                addToLog("No hay videos pendientes (PENDING).");
+                return;
+            }
+            
+            addToLog(`Iniciando escáner para ${pending.length} videos.`);
+            setScanQueue(pending);
+            setCurrentScanIndex(0);
+            setActiveScan(true);
+        } catch (e: any) {
+            addToLog(`Error cargando cola: ${e.message}`);
         }
-        
-        addToLog(`Iniciando escáner para ${pending.length} videos.`);
-        setScanQueue(pending);
-        setCurrentScanIndex(0);
-        setActiveScan(true);
     };
 
     const stopActiveScan = () => { setActiveScan(false); setScanQueue([]); };
@@ -228,7 +259,7 @@ export default function AdminLibrary() {
                     addToLog("Organización Finalizada.");
                     toast.success("Paso 3 Completado");
                     setIsOrganizing(false);
-                    db.invalidateCache('index.php?action=get_videos');
+                    db.invalidateCache('get_videos');
                     db.setHomeDirty();
                 }
             } catch (e: any) {
@@ -262,7 +293,7 @@ export default function AdminLibrary() {
                     addToLog("Rectificación completada.");
                     toast.success("Títulos actualizados correctamente");
                     setIsRectifying(false);
-                    db.invalidateCache('index.php?action=get_videos');
+                    db.invalidateCache('get_videos');
                     db.setHomeDirty();
                 }
             } catch (e: any) {
