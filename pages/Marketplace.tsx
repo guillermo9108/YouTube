@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { db } from '../services/db';
 import { MarketplaceItem } from '../types';
@@ -16,7 +17,8 @@ export default function Marketplace() {
     const [search, setSearch] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('TODOS');
     const [sortOrder, setSortOrder] = useState<'NEWEST' | 'PRICE_ASC' | 'PRICE_DESC'>('NEWEST');
-    const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 });
+    // FIX: Increased default max price to 100,000
+    const [priceRange, setPriceRange] = useState({ min: 0, max: 100000 });
     const [condition, setCondition] = useState('TODOS');
 
     useEffect(() => {
@@ -33,7 +35,8 @@ export default function Marketplace() {
         const matchesSearch = item.title.toLowerCase().includes(search.toLowerCase());
         const matchesCategory = selectedCategory === 'TODOS' || item.category === selectedCategory;
         const matchesCondition = condition === 'TODOS' || item.condition === condition;
-        const matchesPrice = item.price >= priceRange.min && item.price <= priceRange.max;
+        // Ensure type safety comparison for price
+        const matchesPrice = Number(item.price) >= priceRange.min && Number(item.price) <= priceRange.max;
         return matchesSearch && matchesCategory && matchesCondition && matchesPrice;
     }).sort((a, b) => {
         if (sortOrder === 'PRICE_ASC') return a.price - b.price;
@@ -136,15 +139,15 @@ export default function Marketplace() {
                                 <input 
                                     type="range" 
                                     min="0" 
-                                    max="5000" 
-                                    step="10"
+                                    max="100000" 
+                                    step="100"
                                     value={priceRange.max}
                                     onChange={(e) => setPriceRange({...priceRange, max: parseInt(e.target.value)})}
                                     className="w-full accent-indigo-500 h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer"
                                 />
                                 <div className="flex justify-between text-[10px] text-slate-400 mt-1">
                                     <span>0 $</span>
-                                    <span>5000+ $</span>
+                                    <span>100000+ $</span>
                                 </div>
                             </div>
 
@@ -242,7 +245,7 @@ export default function Marketplace() {
                     <p className="text-lg font-medium">No encontramos resultados</p>
                     <p className="text-sm">Intenta ajustar los filtros o tu búsqueda.</p>
                     <button 
-                        onClick={() => {setSearch(''); setSelectedCategory('TODOS'); setPriceRange({min:0, max:5000});}}
+                        onClick={() => {setSearch(''); setSelectedCategory('TODOS'); setPriceRange({min:0, max:100000});}}
                         className="mt-4 text-indigo-400 hover:text-white underline text-sm"
                     >
                         Limpiar filtros

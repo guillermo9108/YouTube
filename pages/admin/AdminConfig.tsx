@@ -45,7 +45,7 @@ export default function AdminConfig() {
         setSettings({
             ...settings,
             categoryPrices: {
-                ...settings.categoryPrices,
+                ...(settings.categoryPrices || {}), // SAFE: Handle null/undefined case
                 [cat]: price
             }
         });
@@ -125,7 +125,7 @@ export default function AdminConfig() {
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Videos (%)</label>
                         <div className="relative">
-                            <input type="number" value={settings.videoCommission} onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
+                            <input type="number" value={settings.videoCommission ?? 20} onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
                             <span className="absolute right-3 top-2.5 text-slate-500 font-bold">%</span>
                         </div>
                         <p className="text-[10px] text-slate-500 mt-1">Retenido por el sistema en cada venta de video.</p>
@@ -134,7 +134,7 @@ export default function AdminConfig() {
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Marketplace (%)</label>
                         <div className="relative">
-                            <input type="number" value={settings.marketCommission} onChange={e => setSettings({...settings, marketCommission: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
+                            <input type="number" value={settings.marketCommission ?? 25} onChange={e => setSettings({...settings, marketCommission: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
                             <span className="absolute right-3 top-2.5 text-slate-500 font-bold">%</span>
                         </div>
                         <p className="text-[10px] text-slate-500 mt-1">Retenido en ventas de productos físicos.</p>

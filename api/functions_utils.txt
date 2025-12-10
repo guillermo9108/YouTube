@@ -108,7 +108,7 @@ function smartParseFilename($fullPath, $detectedType = null) {
     $episode = '';
     $isEpisodic = false;
 
-    // Patrones comunes: S01E01, 1x01, Cap 01, Ep 01
+    // Patrones Fuertes: S01E01, 1x01
     if (preg_match('/S(\d+)\s*E(\d+)/i', $filename, $m)) {
         $season = (int)$m[1];
         $episode = (int)$m[2];
@@ -124,7 +124,22 @@ function smartParseFilename($fullPath, $detectedType = null) {
         $isEpisodic = true;
     }
     
-    // Forzar categoría SERIES si parece un episodio y no se detectó otra cosa específica
+    // Patrones Débiles (Números sueltos) SOLO si ya sabemos que es Serie/Novela
+    // Esto arregla archivos llamados "01.mp4", "02.mp4" dentro de carpetas de series
+    if (!$isEpisodic && ($detectedType === 'SERIES' || $detectedType === 'NOVELAS')) {
+        // Busca un número de 1 a 3 dígitos al inicio o final del nombre, o rodeado de espacios
+        // Evita años (1990-2099)
+        if (preg_match('/(?:^|[\s_\.-])(\d{1,3})(?:$|[\s_\.-])/', $cleanName, $m)) {
+            $val = (int)$m[1];
+            // Filtro simple para evitar años si el número es > 1900
+            if ($val < 1900) {
+                $episode = $val;
+                $isEpisodic = true;
+            }
+        }
+    }
+    
+    // Forzar categoría SERIES si encontramos patrón de episodio fuerte
     if ($isEpisodic && (!$detectedType || $detectedType === 'OTHER' || $detectedType === 'PROCESSING')) {
         $detectedType = 'SERIES';
     }
@@ -149,34 +164,34 @@ function smartParseFilename($fullPath, $detectedType = null) {
             $epString = "S{$s}E{$e}";
         } elseif ($episode !== '') {
             $e = str_pad($episode, 2, '0', STR_PAD_LEFT);
-            $epString = "Cap {$e}";
-        }
-
-        // Si el nombre del archivo es muy corto o solo contiene números/episodios, USAR CARPETA
-        // Ej: "1x02.mp4" dentro de "Inmortal" -> "Inmortal - S01E02"
-        // Ej: "Inmortal 1x02.mp4" -> "Inmortal - S01E02" (Limpiando duplicados)
-        
-        // Comprobamos si el nombre del archivo ya contiene el nombre de la carpeta (aprox)
-        $similitud = 0;
-        if (!empty($cleanParent)) {
-            similar_text(strtolower($finalTitle), strtolower($cleanParent), $similitud);
-        }
-
-        if ($similitud < 50 || strlen($finalTitle) < 5) {
-            // El archivo no tiene el nombre de la serie, lo agregamos
-            // Si la carpeta padre es "Temporada 1", usamos la abuela
-            if (preg_match('/^(Season|Temporada)\s*\d+$/i', $parentFolder) && !empty($grandParent)) {
-                $seriesName = $grandParent;
-            } else {
-                $seriesName = !empty($cleanParent) ? $cleanParent : $parentFolder;
-            }
-            
-            $finalTitle = "$seriesName - $epString";
+            // Diferenciar nomenclatura para Novelas vs Series
+            $prefix = ($detectedType === 'NOVELAS') ? 'Cap' : 'Ep';
+            $epString = "$prefix {$e}";
         } else {
-            // El archivo ya tiene el nombre, solo formateamos el episodio
-            // Quitamos el patrón detectado del nombre original para re-formatearlo bonito
-            $titleWithoutEp = preg_replace('/S\d+\s*E\d+|(\d+)[xX](\d+)|(Cap|Ep)\s*\d+/i', '', $finalTitle);
-            $finalTitle = trim($titleWithoutEp) . " - " . $epString;
+            // Si es serie pero no detectamos número, forzamos un número basado en el hash o random para evitar duplicados
+            // O mejor, intentamos extraer cualquier número del nombre original
+             if (preg_match('/(\d+)/', $filename, $m)) {
+                 $epString = "Cap " . intval($m[1]);
+             }
+        }
+
+        // Si la carpeta padre es "Temporada 1", usamos la abuela como nombre de la serie
+        $seriesName = $parentFolder;
+        if (preg_match('/^(Season|Temporada|Serie)\s*\d*$/i', $parentFolder) && !empty($grandParent)) {
+            $seriesName = $grandParent;
+        } elseif (!empty($cleanParent)) {
+            $seriesName = $cleanParent;
+        }
+
+        // CONSTRUCCIÓN DEL TÍTULO FINAL
+        // Siempre priorizamos: "Nombre Serie - Capitulo X"
+        if (!empty($seriesName) && !empty($epString)) {
+            $finalTitle = "$seriesName - $epString";
+        } elseif (!empty($epString)) {
+            // Si no tenemos nombre de serie claro, pegamos el episodio al nombre limpio del archivo
+            // Pero quitamos el numero si ya estaba en el nombre para no duplicarlo "Naruto 01 - Cap 01" -> "Naruto - Cap 01"
+            $titleWithoutNum = preg_replace('/\b' . intval($episode) . '\b/', '', $finalTitle);
+            $finalTitle = trim($titleWithoutNum) . " - " . $epString;
         }
     }
 

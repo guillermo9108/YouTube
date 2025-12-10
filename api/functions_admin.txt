@@ -1,3 +1,4 @@
+
 <?php
 function admin_add_balance($pdo, $input) {
     $adminId = $input['adminId'];
@@ -280,16 +281,30 @@ function admin_delete_request($pdo, $input) {
 function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $s = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    // Ensure we always return settings, even if default is missing
+    if (!$s) {
+        $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
+        $s = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+    }
+
     if ($s) {
-        $s['categoryPrices'] = json_decode($s['categoryPrices'], true);
-        $s['customCategories'] = json_decode($s['customCategories'], true);
-        $s['ftpSettings'] = json_decode($s['ftpSettings'], true);
+        // ROBUST JSON DECODING: Use '??' to default to empty array/object if null
+        $s['categoryPrices'] = json_decode($s['categoryPrices'] ?? '{}', true) ?: [];
+        $s['customCategories'] = json_decode($s['customCategories'] ?? '[]', true) ?: [];
+        $s['ftpSettings'] = json_decode($s['ftpSettings'] ?? '{}', true) ?: [];
+        
+        // Ensure Commissions are numbers
+        $s['videoCommission'] = intval($s['videoCommission']);
+        $s['marketCommission'] = intval($s['marketCommission']);
     }
     respond(true, $s);
 }
 
 function admin_update_settings($pdo, $input) {
     $s = $input['settings'];
+    
+    // ROBUST DATA EXTRACTION: Default to existing or safe values if keys are missing
     $sql = "UPDATE system_settings SET 
             downloadStartTime = ?, 
             downloadEndTime = ?, 
@@ -310,22 +325,22 @@ function admin_update_settings($pdo, $input) {
             WHERE id = 1";
             
     $pdo->prepare($sql)->execute([
-        $s['downloadStartTime'], 
-        $s['downloadEndTime'], 
-        $s['isQueuePaused'] ? 1 : 0, 
-        $s['batchSize'], 
-        $s['maxDuration'], 
-        $s['maxResolution'], 
-        $s['pexelsKey'], 
-        $s['pixabayKey'],
-        $s['ytDlpPath'],
-        $s['enableYoutube'] ? 1 : 0,
-        json_encode($s['categoryPrices']),
-        json_encode($s['customCategories']),
+        $s['downloadStartTime'] ?? '01:00', 
+        $s['downloadEndTime'] ?? '06:00', 
+        isset($s['isQueuePaused']) ? ($s['isQueuePaused'] ? 1 : 0) : 0, 
+        intval($s['batchSize'] ?? 5), 
+        intval($s['maxDuration'] ?? 600), 
+        intval($s['maxResolution'] ?? 1080), 
+        $s['pexelsKey'] ?? '', 
+        $s['pixabayKey'] ?? '',
+        $s['ytDlpPath'] ?? '',
+        isset($s['enableYoutube']) ? ($s['enableYoutube'] ? 1 : 0) : 0,
+        json_encode($s['categoryPrices'] ?? []),
+        json_encode($s['customCategories'] ?? []),
         $s['localLibraryPath'] ?? '',
-        json_encode($s['ftpSettings'] ?? null),
-        $s['videoCommission'] ?? 20,
-        $s['marketCommission'] ?? 25
+        json_encode($s['ftpSettings'] ?? []),
+        intval($s['videoCommission'] ?? 20),
+        intval($s['marketCommission'] ?? 25)
     ]);
     respond(true);
 }
