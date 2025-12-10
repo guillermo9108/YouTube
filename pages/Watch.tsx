@@ -62,8 +62,7 @@ export default function Watch() {
         fetchMeta();
     }, [id]);
 
-    // Check Permissions & User Interaction (Runs on ID or User Change)
-    // We strictly use user?.id to avoid re-running on balance updates (user object reference change)
+    // Check Permissions & User Interaction (Runs on ID or User ID Change)
     useEffect(() => {
         if (!id || !user || !video) return;
 
@@ -73,9 +72,11 @@ export default function Watch() {
                 setIsUnlocked(true);
             } else {
                 try {
-                    const purchased = await db.hasPurchased(user.id, video.id);
-                    // Only update if true to avoid locking if we just purchased locally
-                    if (purchased) setIsUnlocked(true);
+                    // Check if already unlocked locally to prevent flicker
+                    if (!isUnlocked) {
+                        const purchased = await db.hasPurchased(user.id, video.id);
+                        if (purchased) setIsUnlocked(true);
+                    }
                 } catch (e) {}
             }
 
@@ -84,7 +85,7 @@ export default function Watch() {
         };
 
         checkAccess();
-    }, [id, user?.id, video?.id]); // Depend on IDs, not full objects
+    }, [id, user?.id, video?.id]); 
 
     const handlePurchase = async () => {
         if (!user || !video) return;
@@ -129,8 +130,8 @@ export default function Watch() {
         <div className="max-w-7xl mx-auto p-4 lg:px-8 flex flex-col lg:flex-row gap-6 animate-in fade-in">
             {/* Main Content */}
             <div className="flex-1 min-w-0">
-                {/* Player Container - Responsive Height for Locked State */}
-                <div className={`relative bg-black rounded-2xl overflow-hidden shadow-2xl mb-4 group border border-slate-800 ${isUnlocked ? 'aspect-video' : 'min-h-[400px] md:min-h-0 md:aspect-video'}`}>
+                {/* Player Container */}
+                <div className={`relative bg-black rounded-2xl overflow-hidden shadow-2xl mb-4 group border border-slate-800 ${isUnlocked ? 'aspect-video' : 'min-h-[450px] md:min-h-0 md:aspect-video'}`}>
                     {isUnlocked ? (
                         <video 
                             src={video.videoUrl} 
@@ -146,8 +147,8 @@ export default function Watch() {
                             }}
                         />
                     ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden">
-                            {/* Background Image with Fixed Styles */}
+                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
+                            {/* Background Image */}
                             <div className="absolute inset-0 z-0">
                                 <img 
                                     src={video.thumbnailUrl} 
