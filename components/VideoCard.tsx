@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
@@ -7,6 +8,7 @@ interface VideoCardProps {
   video: Video;
   isUnlocked: boolean;
   isWatched?: boolean;
+  context?: { query: string, category: string };
 }
 
 const formatTimeAgo = (timestamp: number) => {
@@ -38,16 +40,26 @@ const formatDuration = (seconds: number) => {
 };
 
 // React.memo to prevent re-renders of cards that didn't change when parent state updates
-const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched }) => {
+const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched, context }) => {
   // Check if video is "New" (less than 24 hours old)
   // PHP timestamp is seconds, so 24h = 86400 seconds
   const isNew = (Date.now() / 1000 - video.createdAt) < 86400;
   const [imgError, setImgError] = useState(false);
 
+  // When clicked, save the context (current search filter) to session storage
+  // This allows the Watch page to know we came from a specific search result list
+  const handleClick = () => {
+      if (context && context.query) {
+          sessionStorage.setItem('sp_nav_context', JSON.stringify(context));
+      } else {
+          sessionStorage.removeItem('sp_nav_context');
+      }
+  };
+
   return (
     <div className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
       {/* Thumbnail Container */}
-      <Link to={`/watch/${video.id}`} className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm group-hover:rounded-none transition-all duration-200 block">
+      <Link to={`/watch/${video.id}`} onClick={handleClick} className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm group-hover:rounded-none transition-all duration-200 block">
         {!imgError ? (
             <img 
               src={video.thumbnailUrl} 
@@ -107,7 +119,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
 
         {/* Text Info */}
         <div className="flex-1 min-w-0 flex flex-col">
-            <Link to={`/watch/${video.id}`} title={video.title}>
+            <Link to={`/watch/${video.id}`} onClick={handleClick} title={video.title}>
                 <h3 className="text-sm md:text-[15px] font-semibold text-white leading-snug line-clamp-2 mb-1 group-hover:text-indigo-400 transition-colors">
                     {video.title}
                 </h3>

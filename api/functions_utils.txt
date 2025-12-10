@@ -56,155 +56,204 @@ function getPriceForCategory($cat, $settings) {
 function smartParseFilename($fullPath, $detectedType = null) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     
-    // Normalizar separadores de directorio y dividir
+    // Normalizar separadores y dividir path
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
     $pathParts = explode('/', dirname($fullPathNormalized));
     
-    // --- LÓGICA 1: DETECCIÓN POR CARPETA (Prioridad Alta) ---
-    // Analizamos las carpetas padre buscando palabras clave en Español e Inglés
+    // Carpetas genéricas que debemos ignorar como título de serie
+    $genericFolders = ['series', 'serie', 'season', 'temporada', 'downloads', 'descargas', 'anime', 'tv shows', 'completed', 'videos', 'uploads', 'torrents'];
+
+    // 1. DETECCIÓN DE CATEGORÍA POR CARPETA
     if (!$detectedType || $detectedType === 'PROCESSING' || $detectedType === 'OTHER') {
-        // Mapa de palabras clave a categorías
         $categoryMap = [
-            'SERIES' => ['series', 'serie', 'temporada', 'season', 'tv shows', 'capitulos', 'episodes', 'tvs'],
-            'NOVELAS' => ['novelas', 'telenovelas', 'soap operas', 'dramas'],
-            'MOVIE' => ['movies', 'movie', 'peliculas', 'pelicula', 'films', 'cine', 'cinema', 'largometrajes'],
-            'SHORTS' => ['shorts', 'cortos', 'tiktok', 'reels', 'vertical', 'stories'],
-            'MUSIC' => ['music', 'musica', 'video clips', 'videoclips', 'concerts', 'conciertos', 'albums'],
-            'EDUCATION' => ['education', 'educacion', 'cursos', 'courses', 'learning', 'tutoriales', 'tutorials'],
-            'SHORT_FILM' => ['short film', 'cortometrajes']
+            'SERIES' => ['series', 'serie', 'temporada', 'season', 'tv shows', 'capitulos', 'episodes', 'anime'],
+            'NOVELAS' => ['novelas', 'telenovelas', 'dramas', 'soap'],
+            'MOVIE' => ['movies', 'movie', 'peliculas', 'pelicula', 'films', 'cine', '4k movies', 'hd movies'],
+            'SHORTS' => ['shorts', 'cortos', 'tiktok', 'reels'],
+            'MUSIC' => ['music', 'musica', 'concerts', 'conciertos', 'videoclips'],
+            'EDUCATION' => ['education', 'educacion', 'cursos', 'courses', 'tutoriales']
         ];
 
-        // Iteramos desde la carpeta más cercana al archivo hacia arriba
         foreach (array_reverse($pathParts) as $part) {
             $p = strtolower(trim($part));
             foreach ($categoryMap as $catKey => $keywords) {
                 foreach ($keywords as $kw) {
-                    // Coincidencia exacta o parcial segura (ej: "Mis Series")
                     if (strpos($p, $kw) !== false) {
                         $detectedType = $catKey;
-                        break 3; // Romper todos los bucles si encontramos una categoría
+                        break 3; 
                     }
                 }
             }
         }
     }
 
-    // --- LÓGICA 2: LIMPIEZA DE NOMBRE ---
-    $junk = [
-        '/1080p/i', '/720p/i', '/480p/i', '/2160p/i', '/4k/i', 
-        '/x264/i', '/h264/i', '/x265/i', '/HEVC/i', 
-        '/AAC/i', '/AC3/i', '/E-AC3/i', '/DTS/i', '/TrueHD/i',
-        '/BluRay/i', '/WEB-DL/i', '/WEBRip/i', '/HDRip/i', '/HDTV/i',
-        '/www\..+\.com/i', '/\[.*?\]/', '/\(.*?\)/', 
-        '/VID_\d{8}_\d{6}/i', '/PXL_\d{8}_\d{9}/i', // Android Camera
-        '/WhatsApp Video/i'
-    ];
+    // 2. EXTRACCIÓN DE INFORMACIÓN DE EPISODIO (Filename vs Foldername)
+    // A veces la info está en la carpeta: "One Piece 1050/video.mp4"
     
-    $cleanName = preg_replace($junk, '', $filename);
-    $cleanName = str_replace(['.', '_', '-'], ' ', $cleanName);
-    
-    // --- LÓGICA 3: DETECCIÓN DE EPISODIOS (Series/Novelas) ---
     $season = '';
     $episode = '';
+    $episodeEnd = ''; 
     $isEpisodic = false;
 
-    // Patrones Fuertes: S01E01, 1x01
-    if (preg_match('/S(\d+)\s*E(\d+)/i', $filename, $m)) {
-        $season = (int)$m[1];
-        $episode = (int)$m[2];
-        $isEpisodic = true;
-    }
-    else if (preg_match('/(\d+)[xX](\d+)/', $filename, $m)) {
-        $season = (int)$m[1];
-        $episode = (int)$m[2];
-        $isEpisodic = true;
-    }
-    else if (preg_match('/(Cap|Capitulo|Ep|Episode|Episodio)\s*(\d+)/i', $filename, $m)) {
-        $episode = (int)$m[2];
-        $isEpisodic = true;
-    }
+    // Función auxiliar para buscar patrones S01E01
+    $findEpisodeInfo = function($str) {
+        $res = ['s'=>'', 'e'=>'', 'e2'=>'', 'found'=>false];
+        
+        // S01E01
+        if (preg_match('/S(\d+)\s*E(\d+)(?:-?E?(\d+))?/i', $str, $m)) {
+            $res['s'] = (int)$m[1]; $res['e'] = (int)$m[2]; 
+            if(isset($m[3])) $res['e2'] = (int)$m[3];
+            $res['found'] = true;
+        }
+        // 1x01
+        else if (preg_match('/(\d+)[xX](\d+)/', $str, $m)) {
+            $res['s'] = (int)$m[1]; $res['e'] = (int)$m[2]; $res['found'] = true;
+        }
+        // Cap/Ep 01
+        else if (preg_match('/(Cap|Capitulo|Ep|Episode|Episodio)\s*[-.]?\s*(\d+)/i', $str, $m)) {
+            $res['e'] = (int)$m[2]; $res['found'] = true;
+        }
+        // Anime absoluto (e.g. "One Piece - 1050" o " [1050] ")
+        else if (preg_match('/[ \-\[\(](\d{2,4})[ \-\]\)]/', $str, $m)) {
+             // Solo si el número parece un episodio (>0) y no un año (contexto difícil, asumimos video reciente no es de año 1050)
+             // Evitamos 1990-2029
+             $num = (int)$m[1];
+             if ($num < 1900 || $num > 2100) {
+                 $res['e'] = $num; $res['found'] = true;
+             }
+        }
+        return $res;
+    };
+
+    // Intentar buscar en Nombre de Archivo
+    $info = $findEpisodeInfo($filename);
     
-    // Patrones Débiles (Números sueltos) SOLO si ya sabemos que es Serie/Novela
-    // Esto arregla archivos llamados "01.mp4", "02.mp4" dentro de carpetas de series
-    if (!$isEpisodic && ($detectedType === 'SERIES' || $detectedType === 'NOVELAS')) {
-        // Busca un número de 1 a 3 dígitos al inicio o final del nombre, o rodeado de espacios
-        // Evita años (1990-2099)
-        if (preg_match('/(?:^|[\s_\.-])(\d{1,3})(?:$|[\s_\.-])/', $cleanName, $m)) {
-            $val = (int)$m[1];
-            // Filtro simple para evitar años si el número es > 1900
-            if ($val < 1900) {
-                $episode = $val;
-                $isEpisodic = true;
-            }
+    // Si no encontramos info en el archivo, o el archivo es muy genérico, buscar en la carpeta PADRE
+    $parentFolder = end($pathParts);
+    if (!$info['found']) {
+        $parentInfo = $findEpisodeInfo($parentFolder);
+        if ($parentInfo['found']) {
+            $info = $parentInfo;
         }
     }
-    
-    // Forzar categoría SERIES si encontramos patrón de episodio fuerte
-    if ($isEpisodic && (!$detectedType || $detectedType === 'OTHER' || $detectedType === 'PROCESSING')) {
-        $detectedType = 'SERIES';
+
+    if ($info['found']) {
+        $season = $info['s'];
+        $episode = $info['e'];
+        $episodeEnd = $info['e2'];
+        $isEpisodic = true;
+        // Forzar categoría si encontramos patrón de episodio
+        if (!$detectedType || $detectedType === 'OTHER' || $detectedType === 'PROCESSING' || $detectedType === 'MOVIE') {
+            $detectedType = ($detectedType === 'NOVELAS') ? 'NOVELAS' : 'SERIES';
+        }
     }
 
-    $finalTitle = trim($cleanName);
-    
-    // --- LÓGICA 4: CONSTRUCCIÓN INTELIGENTE DEL TÍTULO ---
-    // Si es una serie, intentamos usar el nombre de la carpeta padre si el archivo tiene un nombre genérico
-    if ($detectedType === 'SERIES' || $detectedType === 'NOVELAS') {
-        $parentFolder = end($pathParts); // Carpeta contenedora directa
-        $grandParent = prev($pathParts); // Carpeta abuela
+    // 3. LIMPIEZA DE "BASURA"
+    $junkPatterns = [
+        '/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i',
+        '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i',
+        '/\b(aac|ac3|eac3|dts|truehd|flac|mp3|atmos|dd5\.1|dd\+|5\.1|7\.1)\b/i',
+        '/\b(hdr|hdr10|dv|dolby|vision|10bit|8bit|sdr)\b/i',
+        '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i',
+        '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i',
+        '/\b(mkv|mp4|avi|mov)\b/i',
+        '/www\.[a-z0-9-]+\.[a-z]+/i',
+        ($detectedType === 'SERIES' || $detectedType === 'NOVELAS') ? '/\b(19|20)\d{2}\b/' : ''
+    ];
 
-        // Limpiar nombre de carpeta de palabras comunes de estructura
-        $cleanParent = preg_replace('/(Season|Temporada)\s*\d+/i', '', $parentFolder);
-        $cleanParent = trim(str_replace(['_', '.'], ' ', $cleanParent));
+    $cleanText = function($txt) use ($junkPatterns) {
+        $t = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $txt);
+        foreach ($junkPatterns as $p) { if($p) $t = preg_replace($p, '', $t); }
+        return trim(preg_replace('/\s+/', ' ', $t));
+    };
+
+    $cleanName = $cleanText($filename);
+
+    // 4. CONSTRUCCIÓN DE TÍTULO INTELIGENTE
+    $finalTitle = $cleanName;
+
+    if ($detectedType === 'SERIES' || $detectedType === 'NOVELAS') {
+        $grandParent = prev($pathParts); // Mover puntero atrás
+
+        // Analizar Carpeta Padre para extraer nombre de serie
+        // Si la carpeta padre es "One Piece 1050", queremos "One Piece"
+        $cleanParent = $cleanText($parentFolder);
         
-        // Formatear números de episodio
+        // Quitar también patrones de episodio del nombre de la carpeta
+        $cleanParent = preg_replace('/S\d+\s*E\d+/i', '', $cleanParent);
+        $cleanParent = preg_replace('/\d+x\d+/i', '', $cleanParent);
+        $cleanParent = preg_replace('/(Ep|Cap)\s*\d+/i', '', $cleanParent);
+        $cleanParent = preg_replace('/(Season|Temporada|Serie)\s*\d+/i', '', $cleanParent);
+        
+        // Si después de limpiar quedan solo números (ej: "1050"), borrarlos
+        if (is_numeric(trim($cleanParent))) $cleanParent = "";
+        
+        // Limpieza final de espacios
+        $cleanParent = trim($cleanParent);
+
+        // DETERMINAR NOMBRE DE SERIE
+        $seriesName = "";
+        
+        // 1. Si el padre limpio tiene texto sustancial, úsalo (Ej: "Breaking Bad")
+        if (strlen($cleanParent) > 2 && !in_array(strtolower($cleanParent), $genericFolders)) {
+            $seriesName = $cleanParent;
+        } 
+        // 2. Si el padre era genérico ("Temporada 1"), usa el abuelo
+        else if (!empty($grandParent)) {
+            $cleanGrandParent = $cleanText($grandParent);
+            if (!in_array(strtolower($cleanGrandParent), $genericFolders)) {
+                $seriesName = $cleanGrandParent;
+            }
+        }
+
+        // FORMATO DE EPISODIO
         $epString = "";
         if ($season !== '' && $episode !== '') {
             $s = str_pad($season, 2, '0', STR_PAD_LEFT);
             $e = str_pad($episode, 2, '0', STR_PAD_LEFT);
             $epString = "S{$s}E{$e}";
+            if ($episodeEnd) $epString .= "-E".str_pad($episodeEnd, 2, '0', STR_PAD_LEFT);
         } elseif ($episode !== '') {
-            $e = str_pad($episode, 2, '0', STR_PAD_LEFT);
-            // Diferenciar nomenclatura para Novelas vs Series
-            $prefix = ($detectedType === 'NOVELAS') ? 'Cap' : 'Ep';
-            $epString = "$prefix {$e}";
-        } else {
-            // Si es serie pero no detectamos número, forzamos un número basado en el hash o random para evitar duplicados
-            // O mejor, intentamos extraer cualquier número del nombre original
-             if (preg_match('/(\d+)/', $filename, $m)) {
-                 $epString = "Cap " . intval($m[1]);
-             }
+            // Si es numero alto (>100) suele ser Anime absoluto (Ep 1050)
+            if ($episode > 99) $epString = "Ep {$episode}"; 
+            else $epString = ($detectedType === 'NOVELAS' ? 'Cap' : 'Ep') . " " . str_pad($episode, 2, '0', STR_PAD_LEFT);
         }
 
-        // Si la carpeta padre es "Temporada 1", usamos la abuela como nombre de la serie
-        $seriesName = $parentFolder;
-        if (preg_match('/^(Season|Temporada|Serie)\s*\d*$/i', $parentFolder) && !empty($grandParent)) {
-            $seriesName = $grandParent;
-        } elseif (!empty($cleanParent)) {
-            $seriesName = $cleanParent;
-        }
-
-        // CONSTRUCCIÓN DEL TÍTULO FINAL
-        // Siempre priorizamos: "Nombre Serie - Capitulo X"
-        if (!empty($seriesName) && !empty($epString)) {
-            $finalTitle = "$seriesName - $epString";
-        } elseif (!empty($epString)) {
-            // Si no tenemos nombre de serie claro, pegamos el episodio al nombre limpio del archivo
-            // Pero quitamos el numero si ya estaba en el nombre para no duplicarlo "Naruto 01 - Cap 01" -> "Naruto - Cap 01"
-            $titleWithoutNum = preg_replace('/\b' . intval($episode) . '\b/', '', $finalTitle);
-            $finalTitle = trim($titleWithoutNum) . " - " . $epString;
+        // ENSAMBLAJE
+        if ($seriesName) {
+            if ($epString) {
+                // "One Piece - Ep 1050"
+                $finalTitle = "$seriesName - $epString";
+                
+                // Si el nombre del archivo tenía un título extra (ej: "S01E01 - Pilot"), agregarlo
+                // Pero verificar que no sea redundante
+                $nameWithoutEp = str_replace($epString, '', $cleanName); // Quitar S01E01 del nombre de archivo
+                // Limpieza agresiva de lo que queda
+                $nameWithoutEp = trim(preg_replace('/[^a-zA-Z0-9\s]/', '', $nameWithoutEp));
+                
+                // Si queda texto real y no es igual a la serie, agregarlo
+                if (strlen($nameWithoutEp) > 3 && stripos($seriesName, $nameWithoutEp) === false) {
+                    $finalTitle .= " - $nameWithoutEp";
+                }
+            } else {
+                // Fallback si no detectamos episodio pero sí serie
+                $finalTitle = "$seriesName - $cleanName";
+            }
         }
     }
 
-    // Limpieza final de espacios y mayúsculas
+    // Capitalización (Title Case)
     $finalTitle = ucwords(strtolower($finalTitle));
-    $finalTitle = preg_replace('/\s+/', ' ', $finalTitle);
-    $finalTitle = trim($finalTitle, " -");
-    
-    if (empty($finalTitle)) $finalTitle = "Video " . basename($fullPath);
+    $finalTitle = str_replace([' - - ', '  '], [' - ', ' '], $finalTitle);
+    $finalTitle = trim($finalTitle, " -.");
+
+    if (empty($finalTitle) || strlen($finalTitle) < 2) {
+        $finalTitle = $filename;
+    }
     
     return [
         'title' => $finalTitle,
-        'category' => $detectedType ?: 'OTHER' // Default si nada funcionó
+        'category' => $detectedType ?: 'OTHER'
     ];
 }
 

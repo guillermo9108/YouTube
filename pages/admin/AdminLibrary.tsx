@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
 import { Video } from '../../types';
 import { useToast } from '../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, SkipForward, Play, AlertCircle, Wand2, Database, Clock, Pause, Check } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, SkipForward, Play, AlertCircle, Wand2, Database, Clock, Pause, Check, Edit3 } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -122,12 +122,14 @@ export default function AdminLibrary() {
     const [isIndexing, setIsIndexing] = useState(false);
     const [activeScan, setActiveScan] = useState(false);
     const [isOrganizing, setIsOrganizing] = useState(false);
+    const [isRectifying, setIsRectifying] = useState(false);
     
     // Data
     const [scanLog, setScanLog] = useState<string[]>([]);
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
     const [currentScanIndex, setCurrentScanIndex] = useState(0);
     const [organizeProgress, setOrganizeProgress] = useState({processed: 0, total: 0});
+    const [rectifyProgress, setRectifyProgress] = useState(0);
 
     useEffect(() => {
         db.getSystemSettings().then(s => {
@@ -216,8 +218,6 @@ export default function AdminLibrary() {
                 // If remaining > 0, continue recursively
                 if (res.remaining && res.remaining > 0) {
                     addToLog(`Quedan ${res.remaining} videos. Continuando...`);
-                    // Update progress visually (fake progress for batching)
-                    // Fix: Ensure remaining is treated as number to avoid TS error
                     const remaining = res.remaining || 0;
                     setOrganizeProgress(prev => ({
                         processed: prev.processed + res.processed, 
@@ -238,6 +238,40 @@ export default function AdminLibrary() {
         };
 
         processBatch();
+    };
+
+    // --- STEP 4: RECTIFY (FIX TITLES) ---
+    const handleRectifyTitles = async () => {
+        if (!confirm("Esto reanalizará TODOS los videos de la librería (no pendientes) para corregir sus nombres y descripciones basándose en la estructura de carpetas actual. ¿Continuar?")) return;
+        
+        setIsRectifying(true);
+        setRectifyProgress(0);
+        addToLog("Iniciando rectificación masiva...");
+        
+        const processRectifyBatch = async (lastId = '') => {
+            try {
+                const res = await db.rectifyLibraryTitles(lastId);
+                
+                setRectifyProgress(prev => prev + res.processed);
+                
+                if (!res.completed) {
+                    addToLog(`Procesados ${res.processed} videos...`);
+                    // Recursion with lastId cursor
+                    setTimeout(() => processRectifyBatch(res.lastId), 200); 
+                } else {
+                    addToLog("Rectificación completada.");
+                    toast.success("Títulos actualizados correctamente");
+                    setIsRectifying(false);
+                    db.invalidateCache('index.php?action=get_videos');
+                    db.setHomeDirty();
+                }
+            } catch (e: any) {
+                addToLog(`Error Rectificación: ${e.message}`);
+                setIsRectifying(false);
+            }
+        };
+
+        processRectifyBatch();
     };
 
     // Helpers
@@ -277,7 +311,7 @@ export default function AdminLibrary() {
                     />
                     <button 
                         onClick={handleIndexLibrary} 
-                        disabled={isIndexing || activeScan || isOrganizing}
+                        disabled={isIndexing || activeScan || isOrganizing || isRectifying}
                         className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2"
                     >
                         <FolderSearch size={16}/> Escanear
@@ -311,7 +345,7 @@ export default function AdminLibrary() {
                         </div>
                         <button 
                             onClick={startBrowserScan} 
-                            disabled={isIndexing || isOrganizing}
+                            disabled={isIndexing || isOrganizing || isRectifying}
                             className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold px-6 py-2 rounded-lg text-sm flex items-center gap-2 h-[38px]"
                         >
                             <Film size={16}/> Iniciar Escáner
@@ -326,8 +360,6 @@ export default function AdminLibrary() {
                         <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                             <div className="h-full bg-emerald-500 transition-all duration-300" style={{width: `${((currentScanIndex) / scanQueue.length) * 100}%`}}></div>
                         </div>
-                        
-                        {/* THE SCANNER MODAL EMBEDDED OR OVERLAY - Keep Overlay for focus */}
                     </div>
                 )}
             </div>
@@ -346,7 +378,7 @@ export default function AdminLibrary() {
                 {!isOrganizing ? (
                     <button 
                         onClick={handleSmartOrganize} 
-                        disabled={isIndexing || activeScan}
+                        disabled={isIndexing || activeScan || isRectifying}
                         className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all"
                     >
                         <Wand2 size={18}/> Organizar y Publicar Todos
@@ -360,6 +392,43 @@ export default function AdminLibrary() {
                         <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                             {/* Indeterminate if total unknown, else determinate */}
                             <div className="h-full bg-purple-500 animate-pulse w-full"></div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* STEP 4: RECTIFY (FIX RENAMING) */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-amber-500"></div>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                        <span className="bg-amber-500/20 text-amber-400 w-6 h-6 rounded flex items-center justify-center text-xs">4</span>
+                        Rectificar Títulos
+                    </h3>
+                    {isRectifying && <Loader2 className="animate-spin text-amber-500"/>}
+                </div>
+                
+                <p className="text-xs text-slate-400 mb-4 bg-slate-950 p-2 rounded border border-slate-800/50">
+                    Usa esto si actualizaste la lógica de nombrado y quieres aplicarla a videos antiguos. 
+                    Reanalizará las carpetas originales y actualizará los títulos y descripciones de <strong>toda la librería</strong>.
+                </p>
+
+                {!isRectifying ? (
+                    <button 
+                        onClick={handleRectifyTitles} 
+                        disabled={isIndexing || activeScan || isOrganizing}
+                        className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all"
+                    >
+                        <Edit3 size={18}/> Corregir Nombres (Batch Update)
+                    </button>
+                ) : (
+                    <div className="space-y-2">
+                        <div className="flex justify-between text-xs text-slate-400">
+                            <span>Analizando librería...</span>
+                            <span>{rectifyProgress} procesados</span>
+                        </div>
+                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-500 animate-pulse w-full"></div>
                         </div>
                     </div>
                 )}

@@ -1,8 +1,10 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link } from '../components/Router';
-import { db, SaleRecord } from '../services/db';
+import { db } from '../services/db';
+import { SaleRecord } from '../types';
 import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck, PlusCircle, Package, MapPin, Phone, TrendingUp } from 'lucide-react';
 import { Video, Transaction, VideoCategory } from '../types';
 import { useToast } from '../context/ToastContext';

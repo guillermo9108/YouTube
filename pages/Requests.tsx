@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { DownloadCloud, Search, Check, Loader2, Server, Globe, Clock, Trash2, Youtube, Image as ImageIcon, Layers } from 'lucide-react';
-import { db, VideoResult } from '../services/db';
+import { db } from '../services/db';
+import { VideoResult } from '../types';
 import { ContentRequest, VideoCategory } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from '../components/Router';

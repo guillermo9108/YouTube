@@ -154,7 +154,7 @@ export default function Marketplace() {
                             <div>
                                 <label className="text-xs font-bold text-slate-500 uppercase mb-3 block">Condición</label>
                                 <div className="flex flex-wrap gap-2">
-                                    {['TODOS', 'NUEVO', 'USADO'].map(c => (
+                                    {['TODOS', 'NUEVO', 'USADO', 'REACONDICIONADO'].map(c => (
                                         <button 
                                             key={c}
                                             onClick={() => setCondition(c)}

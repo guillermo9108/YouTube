@@ -214,3 +214,40 @@ export interface Notification {
   timestamp: number;
   avatarUrl?: string; 
 }
+
+export interface SaleRecord {
+  id: string;
+  amount: number;
+  adminFee?: number;
+  itemImage?: string;
+  itemTitle: string;
+  buyerAvatar?: string;
+  buyerName: string;
+  timestamp: number;
+  fulfillmentStatus?: string;
+  shippingData?: {
+      fullName: string;
+      address: string;
+      city: string;
+      zipCode: string;
+      country: string;
+      phoneNumber: string;
+  };
+}
+
+export interface VideoResult {
+    id: string;
+    title: string;
+    thumbnail: string;
+    duration: number;
+    source: 'Pexels' | 'Pixabay' | 'YouTube';
+    author: string;
+    downloadUrl: string;
+}
+
+export interface FtpFile {
+    name: string;
+    type: 'dir' | 'file';
+    size: string;
+    path: string;
+}
