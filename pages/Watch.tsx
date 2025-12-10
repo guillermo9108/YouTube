@@ -23,69 +23,57 @@ export default function Watch() {
     // Comment Form
     const [newComment, setNewComment] = useState('');
 
+    // Load Video Metadata (Only runs on ID change)
     useEffect(() => {
-        let isMounted = true;
         if (!id) return;
+        setLoading(true);
+        setVideo(null); // Reset to prevent stale state
+        setIsUnlocked(false); // Reset lock state
 
-        const loadWatchData = async () => {
-            setLoading(true);
-            // Reset states for new video
-            setIsUnlocked(false);
-            setVideo(null);
-            setRelatedVideos([]);
-
+        const fetchMeta = async () => {
             try {
-                // 1. Get Video Metadata
                 const v = await db.getVideo(id);
-                if (!v) throw new Error("Video not found");
-                
-                if (isMounted) setVideo(v);
-
-                // 2. Check Permissions & Interactions (Sequential to ensure security state before rendering)
-                if (user) {
-                    if (user.role === 'ADMIN' || user.id === v.creatorId) {
-                         if (isMounted) setIsUnlocked(true);
-                    } else {
-                        try {
-                            const purchased = await db.hasPurchased(user.id, v.id);
-                            if (isMounted) setIsUnlocked(purchased);
-                        } catch (e) {
-                            console.warn("Purchase check failed", e);
-                            if (isMounted) setIsUnlocked(false); // Default to locked on error
-                        }
-                    }
-                    
-                    // Load interaction in background
-                    db.getInteraction(user.id, v.id).then(res => isMounted && setInteraction(res)).catch(() => {});
+                if (v) {
+                    setVideo(v);
+                    // Load related
+                    db.getRelatedVideos(v.id).then(setRelatedVideos).catch(() => {});
+                    // Load comments
+                    db.getComments(v.id).then(setComments).catch(() => {});
                 } else {
-                    if (isMounted) setIsUnlocked(false);
+                    toast.error("Video no encontrado");
                 }
-
-                // 3. Load Comments
-                db.getComments(v.id).then(res => isMounted && setComments(res || [])).catch(() => {});
-                
-                // 4. Load Related Videos (Context Aware)
-                let context = undefined;
-                try {
-                    const storedContext = sessionStorage.getItem('sp_nav_context');
-                    if (storedContext) {
-                        context = JSON.parse(storedContext);
-                    }
-                } catch(e) {}
-
-                db.getRelatedVideos(v.id, context).then(res => isMounted && setRelatedVideos(res || [])).catch(() => {});
-
             } catch (e: any) {
                 console.error(e);
-                toast.error("Error cargando el video");
             } finally {
-                if (isMounted) setLoading(false);
+                setLoading(false);
             }
         };
+        fetchMeta();
+    }, [id]);
 
-        loadWatchData();
-        return () => { isMounted = false; };
-    }, [id, user]);
+    // Check Permissions & User Interaction (Runs on ID or User Change)
+    // We strictly use user?.id to avoid re-running on balance updates (user object reference change)
+    useEffect(() => {
+        if (!id || !user || !video) return;
+
+        const checkAccess = async () => {
+            // Permissions
+            if (user.role === 'ADMIN' || user.id === video.creatorId) {
+                setIsUnlocked(true);
+            } else {
+                try {
+                    const purchased = await db.hasPurchased(user.id, video.id);
+                    // Only update if true to avoid locking if we just purchased locally
+                    if (purchased) setIsUnlocked(true);
+                } catch (e) {}
+            }
+
+            // Interactions
+            db.getInteraction(user.id, video.id).then(setInteraction).catch(() => {});
+        };
+
+        checkAccess();
+    }, [id, user?.id, video?.id]); // Depend on IDs, not full objects
 
     const handlePurchase = async () => {
         if (!user || !video) return;
@@ -96,8 +84,9 @@ export default function Watch() {
 
         try {
             await db.purchaseVideo(user.id, video.id);
-            refreshUser();
+            // Optimistic Update
             setIsUnlocked(true);
+            refreshUser(); // Update balance in background
             toast.success("Video desbloqueado");
         } catch (e: any) {
             toast.error("Error al comprar: " + e.message);
@@ -146,9 +135,16 @@ export default function Watch() {
                             }}
                         />
                     ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
-                            <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover opacity-30 blur-md scale-105"/>
-                            <div className="absolute inset-0 bg-black/40"></div>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden">
+                            {/* Background Image with Fixed Styles */}
+                            <div className="absolute inset-0 z-0">
+                                <img 
+                                    src={video.thumbnailUrl} 
+                                    className="w-full h-full object-cover blur-md scale-110 opacity-50"
+                                    alt="Locked Content"
+                                />
+                                <div className="absolute inset-0 bg-black/60"></div>
+                            </div>
                             
                             <div className="relative z-20 bg-slate-900/90 backdrop-blur-md p-8 rounded-2xl border border-slate-700 text-center max-w-sm mx-4 shadow-2xl">
                                 <Lock className="mx-auto mb-4 text-amber-400" size={48}/>
@@ -250,7 +246,7 @@ export default function Watch() {
                             <VideoCard key={v.id} video={v} isUnlocked={false} isWatched={false} />
                         ))
                     ) : (
-                        <div className="text-slate-500 text-sm text-center py-10 italic">No hay sugerencias disponibles.</div>
+                        <div className="text-slate-500 text-sm text-center py-10 italic">Cargando sugerencias...</div>
                     )}
                 </div>
             </div>

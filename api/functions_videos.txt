@@ -47,162 +47,111 @@ function video_get_by_creator($pdo, $creatorId) {
 
 function video_get_related($pdo, $id) {
     // --- STRATEGY: CASCADE FALLBACK ---
-    // 1. Search Context (if active)
-    // 2. Sibling File Match (Same folder structure)
-    // 3. Keyword Match (Title)
-    // 4. Same Category (Filler)
-    // 5. Global Random (Last Resort)
-
+    // The goal is to ALWAYS return $needed amount of videos.
+    
     $stmt = $pdo->prepare("SELECT title, category, creatorId, videoUrl, description FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $current = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$current) { respond(true, []); return; }
+    // If main video not found, return randoms
+    if (!$current) { 
+        $stmt = $pdo->query("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY RAND() LIMIT 12");
+        $res = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        video_process_rows($res);
+        respond(true, $res);
+        return;
+    }
 
     $finalVideos = [];
-    $excludeIds = [$id];
+    $excludeIds = [$id]; // Strings
     $needed = 12;
 
-    // --- PHASE 1: EXPLICIT SEARCH CONTEXT ---
-    $searchContext = isset($_GET['q']) ? $_GET['q'] : '';
-    if (!empty($searchContext)) {
-        $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
-                FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
-                WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING')
-                AND (v.title LIKE ? OR v.description LIKE ?)";
-        $params = [$id, "%$searchContext%", "%$searchContext%"];
-        
-        $stmt = $pdo->prepare($sql . " LIMIT 10");
-        $stmt->execute($params);
-        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        foreach ($results as $v) {
-            $finalVideos[] = $v;
-            $excludeIds[] = $v['id'];
+    // Helper to add videos ensuring uniqueness
+    $addVideos = function($rows) use (&$finalVideos, &$excludeIds, $needed) {
+        foreach ($rows as $r) {
+            if (count($finalVideos) >= $needed) break;
+            if (!in_array($r['id'], $excludeIds)) {
+                $finalVideos[] = $r;
+                $excludeIds[] = $r['id'];
+            }
         }
-    }
+    };
 
-    // If we have enough, return early (but usually we want more variety or specific sorting for series)
-    if (count($finalVideos) >= $needed) {
-        video_process_rows($finalVideos);
-        respond(true, $finalVideos);
-        return;
-    }
-
-    // --- PHASE 2: FOLDER/SIBLING MATCHING (High Priority for Series) ---
-    // Normalize path separators
-    $currentPath = str_replace('\\', '/', $current['videoUrl']);
-    $dir = dirname($currentPath);
+    // --- PHASE 1: FOLDER/SIBLING MATCHING (Series Logic) ---
+    // Extract parent folder name
+    $path = str_replace(['api/', 'uploads/videos/', '\\'], ['', '', '/'], $current['videoUrl']);
+    $dir = dirname($path);
     
-    // Only attempt strict folder matching if path is deep enough (avoid matching root '/')
-    if (strlen($dir) > 5 && $dir !== '.') {
-        // Escape special chars for LIKE, use standard separator
-        $dirPattern = addcslashes($dir, '%_') . '%';
-        
-        $excludePlaceholders = implode(',', array_fill(0, count($excludeIds), '?'));
+    if (strlen($dir) > 3 && $dir !== '.') {
+        $dirPattern = '%' . $dir . '%';
         $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
                 FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
-                WHERE v.id NOT IN ($excludePlaceholders) 
+                WHERE v.id != ? 
                 AND v.category NOT IN ('PENDING', 'PROCESSING')
                 AND v.videoUrl LIKE ? 
-                LIMIT " . ($needed - count($finalVideos));
-        
-        $params = array_merge($excludeIds, [$dirPattern]);
+                LIMIT 20";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
+        $stmt->execute([$id, $dirPattern]);
         $siblings = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        // Sort siblings naturally (Ep 1, Ep 2...)
-        usort($siblings, function($a, $b) {
-            return strnatcasecmp($a['title'], $b['title']);
-        });
-
-        foreach ($siblings as $v) {
-            $finalVideos[] = $v;
-            $excludeIds[] = $v['id'];
-        }
+        // Natural Sort for episodes
+        usort($siblings, function($a, $b) { return strnatcasecmp($a['title'], $b['title']); });
+        $addVideos($siblings);
     }
 
-    if (count($finalVideos) >= $needed) {
-        video_process_rows($finalVideos);
-        respond(true, $finalVideos);
-        return;
-    }
-
-    // --- PHASE 3: KEYWORD MATCHING (Title) ---
-    // Extract significant words
-    $rawTitle = preg_replace('/[^a-zA-Z0-9 ]/', '', $current['title']);
-    $words = explode(' ', $rawTitle);
-    $stopWords = ['the', 'a', 'an', 'el', 'la', 'los', 'las', 'un', 'una', 'of', 'in', 'on', 'at', 'to', 'video', 'capitulo', 'episode'];
-    $keywords = array_filter($words, function($w) use ($stopWords) {
-        return !in_array(strtolower($w), $stopWords) && strlen($w) > 3;
-    });
-    
-    if (!empty($keywords)) {
-        $keywordConditions = [];
-        $keywordParams = [];
-        foreach ($keywords as $word) {
-            $keywordConditions[] = "v.title LIKE ?";
-            $keywordParams[] = "%$word%";
-        }
-        
-        $excludePlaceholders = implode(',', array_fill(0, count($excludeIds), '?'));
-        $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
-                FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
-                WHERE v.id NOT IN ($excludePlaceholders) 
-                AND v.category NOT IN ('PENDING', 'PROCESSING')
-                AND (" . implode(' OR ', $keywordConditions) . ")
-                LIMIT " . ($needed - count($finalVideos));
-                
-        $params = array_merge($excludeIds, $keywordParams);
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $matches = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        foreach ($matches as $v) {
-            $finalVideos[] = $v;
-            $excludeIds[] = $v['id'];
-        }
-    }
-
-    // --- PHASE 4: CATEGORY FILLER ---
+    // --- PHASE 2: KEYWORD MATCHING ---
     if (count($finalVideos) < $needed) {
-        $excludePlaceholders = implode(',', array_fill(0, count($excludeIds), '?'));
+        // Simple word extraction (first 2 words usually define the series/content)
+        $words = explode(' ', preg_replace('/[^a-zA-Z0-9 ]/', '', $current['title']));
+        $searchTerms = array_slice(array_filter($words, function($w) { return strlen($w) > 3; }), 0, 2);
+        
+        if (!empty($searchTerms)) {
+            $conditions = [];
+            $params = [$id];
+            foreach ($searchTerms as $term) {
+                $conditions[] = "v.title LIKE ?";
+                $params[] = "%$term%";
+            }
+            
+            $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                    FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
+                    WHERE v.id != ? 
+                    AND v.category NOT IN ('PENDING', 'PROCESSING')
+                    AND (" . implode(' OR ', $conditions) . ")
+                    LIMIT " . ($needed * 2);
+            
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $addVideos($stmt->fetchAll(PDO::FETCH_ASSOC));
+        }
+    }
+
+    // --- PHASE 3: CATEGORY FILLER ---
+    if (count($finalVideos) < $needed) {
         $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
                 FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
-                WHERE v.id NOT IN ($excludePlaceholders)
+                WHERE v.id != ? 
                 AND v.category = ?
                 AND v.category NOT IN ('PENDING', 'PROCESSING')
                 ORDER BY RAND()
                 LIMIT " . ($needed - count($finalVideos));
-        
-        $params = array_merge($excludeIds, [$current['category']]);
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $fillers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        foreach ($fillers as $v) {
-            $finalVideos[] = $v;
-            $excludeIds[] = $v['id'];
-        }
+        $stmt->execute([$id, $current['category']]);
+        $addVideos($stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    // --- PHASE 5: GLOBAL RANDOM FILLER (Last Resort) ---
+    // --- PHASE 4: GLOBAL RANDOM (Last Resort) ---
     if (count($finalVideos) < $needed) {
-        $excludePlaceholders = implode(',', array_fill(0, count($excludeIds), '?'));
+        $limit = $needed - count($finalVideos);
         $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
                 FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
-                WHERE v.id NOT IN ($excludePlaceholders)
+                WHERE v.id != ? 
                 AND v.category NOT IN ('PENDING', 'PROCESSING')
                 ORDER BY RAND()
-                LIMIT " . ($needed - count($finalVideos));
-        
-        $params = $excludeIds;
+                LIMIT $limit";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $randoms = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        $finalVideos = array_merge($finalVideos, $randoms);
+        $stmt->execute([$id]);
+        $addVideos($stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     video_process_rows($finalVideos);

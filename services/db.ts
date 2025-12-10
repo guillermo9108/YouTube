@@ -156,7 +156,8 @@ class DBService {
     }
 
     async handleBalanceRequest(adminId: string, reqId: string, action: 'APPROVED' | 'REJECTED'): Promise<void> {
-        await this.request('index.php?action=admin_handle_balance_request', 'POST', { adminId, reqId, action });
+        // Fix: Use 'requestId' instead of 'reqId' to match PHP expectation
+        await this.request('index.php?action=admin_handle_balance_request', 'POST', { adminId, requestId: reqId, action });
     }
 
     async adminAddBalance(adminId: string, targetId: string, amount: number): Promise<void> {
@@ -379,11 +380,13 @@ class DBService {
     }
 
     async getSmartCleanerPreview(category: string, percent: number, days: number): Promise<SmartCleanerResult> {
-        return this.request<SmartCleanerResult>('index.php?action=get_smart_cleaner_preview', 'POST', { category, percent, days });
+        // Fix: Use correct endpoint name defined in API
+        return this.request<SmartCleanerResult>('index.php?action=admin_smart_cleaner_preview', 'POST', { category, percent, days });
     }
 
     async executeSmartCleaner(ids: string[]): Promise<{deleted: number}> {
-        return this.request<{deleted: number}>('index.php?action=execute_smart_cleaner', 'POST', { ids });
+        // Fix: Use correct endpoint name defined in API
+        return this.request<{deleted: number}>('index.php?action=admin_smart_cleaner_execute', 'POST', { ids });
     }
 
     // --- EXTERNAL & REQUESTS ---
