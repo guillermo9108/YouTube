@@ -171,6 +171,10 @@ function video_upload($pdo, $post, $files) {
     $vidId = 'v_' . uniqid();
     $vidExt = strtolower(pathinfo($files['video']['name'], PATHINFO_EXTENSION));
     $vidName = "{$vidId}.{$vidExt}";
+    
+    // Ensure directory exists
+    if (!is_dir(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
+    
     move_uploaded_file($files['video']['tmp_name'], UPLOAD_DIR . $vidName);
 
     // FIX: Use local placeholder if no thumb uploaded, for offline support
@@ -180,6 +184,8 @@ function video_upload($pdo, $post, $files) {
         $thumbExt = strtolower(pathinfo($files['thumbnail']['name'], PATHINFO_EXTENSION));
         $thumbName = "{$vidId}.{$thumbExt}";
         $thumbPath = THUMB_DIR . $thumbName;
+        
+        if (!is_dir(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
         move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
     }
 
@@ -413,8 +419,14 @@ function video_scan_local($pdo, $input) {
                     // Common formats including MKV/AVI which often lack browser support but are valid
                     if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
                         $fullPath = $file->getPathname();
-                        // Fix encoding for special chars
-                        if (!mb_check_encoding($fullPath, 'UTF-8')) $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
+                        
+                        // FIX: Robust encoding check. Some lightweight PHP installs miss mbstring.
+                        if (function_exists('mb_check_encoding')) {
+                            if (!mb_check_encoding($fullPath, 'UTF-8')) {
+                                $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'ISO-8859-1');
+                            }
+                        }
+                        
                         $filesFound[] = $fullPath;
                     }
                 }
@@ -500,7 +512,12 @@ function video_scan_local($pdo, $input) {
             }
             // -------------------------------------------
 
-            $insert->execute([$vidId, mb_convert_encoding($title, 'UTF-8', 'auto'), "Local Library", $thumbUrl, $fullPath, $adminId, time()]);
+            $convTitle = $title;
+            if (function_exists('mb_convert_encoding')) {
+                $convTitle = mb_convert_encoding($title, 'UTF-8', 'auto');
+            }
+
+            $insert->execute([$vidId, $convTitle, "Local Library", $thumbUrl, $fullPath, $adminId, time()]);
             $addedCount++;
         }
     }

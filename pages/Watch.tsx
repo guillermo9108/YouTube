@@ -123,8 +123,19 @@ export default function Watch() {
         } catch(e) { toast.error("Error posting comment"); }
     };
 
-    if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>;
-    if (!video) return <div className="min-h-screen flex items-center justify-center text-slate-500">Video no encontrado.</div>;
+    // --- CRITICAL PATH FIX ---
+    // Ensure local videos use the stream API, not raw filesystem paths.
+    // Handles cases where backend might send raw path or cache is stale.
+    const getVideoSrc = (v: Video | null) => {
+        if (!v) return '';
+        const isLocal = Boolean(v.isLocal) || (v as any).isLocal === 1 || (v as any).isLocal === "1";
+        if (isLocal && v.videoUrl && !v.videoUrl.includes('action=stream')) {
+            return `api/index.php?action=stream&id=${v.id}`;
+        }
+        return v.videoUrl;
+    };
+
+    const videoSrc = getVideoSrc(video);
 
     return (
         <div className="max-w-7xl mx-auto p-4 lg:px-8 flex flex-col lg:flex-row gap-6 animate-in fade-in">
@@ -132,16 +143,19 @@ export default function Watch() {
             <div className="flex-1 min-w-0">
                 {/* Player Container */}
                 <div className={`relative bg-black rounded-2xl overflow-hidden shadow-2xl mb-4 group border border-slate-800 ${isUnlocked ? 'aspect-video' : 'min-h-[450px] md:min-h-0 md:aspect-video'}`}>
-                    {isUnlocked ? (
+                    {isUnlocked && video ? (
                         <video 
-                            src={video.videoUrl} 
+                            src={videoSrc} 
                             poster={video.thumbnailUrl} 
                             controls 
                             autoPlay 
+                            playsInline
                             className="w-full h-full"
+                            crossOrigin="anonymous"
                             onEnded={() => {
                                 if(user && !interaction?.isWatched) {
-                                    db.markWatched(user.id, video.id);
+                                    // Use silent catch for analytics to prevent offline crash
+                                    db.markWatched(user.id, video.id).catch(() => {});
                                     setInteraction(prev => prev ? {...prev, isWatched: true} : null);
                                 }
                             }}
@@ -150,62 +164,68 @@ export default function Watch() {
                         <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
                             {/* Background Image */}
                             <div className="absolute inset-0 z-0">
-                                <img 
-                                    src={video.thumbnailUrl} 
-                                    className="w-full h-full object-cover blur-md scale-110 opacity-50"
-                                    alt="Locked Content"
-                                />
+                                {video && (
+                                    <img 
+                                        src={video.thumbnailUrl} 
+                                        className="w-full h-full object-cover blur-md scale-110 opacity-50"
+                                        alt="Locked Content"
+                                    />
+                                )}
                                 <div className="absolute inset-0 bg-black/60"></div>
                             </div>
                             
                             {/* Compact Lock Card */}
-                            <div className="relative z-20 bg-slate-900/90 backdrop-blur-md p-6 md:p-8 rounded-2xl border border-slate-700 text-center max-w-sm mx-4 shadow-2xl flex flex-col items-center">
-                                <Lock className="mb-3 text-amber-400" size={40}/>
-                                <h2 className="text-xl md:text-2xl font-bold text-white mb-2">Contenido Premium</h2>
-                                <p className="text-slate-400 mb-4 text-xs md:text-sm">Este video requiere acceso para visualizarlo.</p>
-                                <div className="text-3xl md:text-4xl font-black text-amber-400 mb-6">{video.price} $</div>
-                                <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm md:text-base">
-                                    Desbloquear Ahora
-                                </button>
-                            </div>
+                            {video && (
+                                <div className="relative z-20 bg-slate-900/90 backdrop-blur-md p-6 md:p-8 rounded-2xl border border-slate-700 text-center max-w-sm mx-4 shadow-2xl flex flex-col items-center">
+                                    <Lock className="mb-3 text-amber-400" size={40}/>
+                                    <h2 className="text-xl md:text-2xl font-bold text-white mb-2">Contenido Premium</h2>
+                                    <p className="text-slate-400 mb-4 text-xs md:text-sm">Este video requiere acceso para visualizarlo.</p>
+                                    <div className="text-3xl md:text-4xl font-black text-amber-400 mb-6">{video.price} $</div>
+                                    <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm md:text-base">
+                                        Desbloquear Ahora
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
 
                 {/* Info */}
-                <div className="mb-6">
-                    <h1 className="text-xl md:text-2xl font-bold text-white mb-2">{video.title}</h1>
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-                        <div className="flex items-center gap-3">
-                            <Link to={`/channel/${video.creatorId}`}>
-                                <div className="w-10 h-10 rounded-full bg-slate-700 overflow-hidden border border-slate-600">
-                                    {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-400">{video.creatorName[0]}</div>}
+                {video && (
+                    <div className="mb-6">
+                        <h1 className="text-xl md:text-2xl font-bold text-white mb-2">{video.title}</h1>
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                            <div className="flex items-center gap-3">
+                                <Link to={`/channel/${video.creatorId}`}>
+                                    <div className="w-10 h-10 rounded-full bg-slate-700 overflow-hidden border border-slate-600">
+                                        {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-400">{video.creatorName[0]}</div>}
+                                    </div>
+                                </Link>
+                                <div>
+                                    <Link to={`/channel/${video.creatorId}`} className="font-bold text-white hover:underline">{video.creatorName}</Link>
+                                    <div className="text-xs text-slate-500">{new Date(video.createdAt * 1000).toLocaleDateString()}</div>
                                 </div>
-                            </Link>
-                            <div>
-                                <Link to={`/channel/${video.creatorId}`} className="font-bold text-white hover:underline">{video.creatorName}</Link>
-                                <div className="text-xs text-slate-500">{new Date(video.createdAt * 1000).toLocaleDateString()}</div>
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.liked ? 'text-indigo-400 border-indigo-500/50' : 'text-slate-400'}`}>
+                                    <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"}/>
+                                    <span className="text-sm font-bold">{video.likes}</span>
+                                </button>
+                                <button onClick={() => handleRate('dislike')} className={`px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.disliked ? 'text-red-400 border-red-500/50' : 'text-slate-400'}`}>
+                                    <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
+                                </button>
+                                <button className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors text-slate-400">
+                                    <Share2 size={18}/> <span className="hidden md:inline text-sm font-bold">Compartir</span>
+                                </button>
                             </div>
                         </div>
                         
-                        <div className="flex items-center gap-2">
-                            <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.liked ? 'text-indigo-400 border-indigo-500/50' : 'text-slate-400'}`}>
-                                <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"}/>
-                                <span className="text-sm font-bold">{video.likes}</span>
-                            </button>
-                            <button onClick={() => handleRate('dislike')} className={`px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.disliked ? 'text-red-400 border-red-500/50' : 'text-slate-400'}`}>
-                                <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
-                            </button>
-                            <button className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors text-slate-400">
-                                <Share2 size={18}/> <span className="hidden md:inline text-sm font-bold">Compartir</span>
-                            </button>
+                        <div className="bg-slate-900/50 rounded-xl p-4 mt-4 text-sm text-slate-300 whitespace-pre-wrap">
+                            {video.description || "Sin descripción."}
                         </div>
                     </div>
-                    
-                    <div className="bg-slate-900/50 rounded-xl p-4 mt-4 text-sm text-slate-300 whitespace-pre-wrap">
-                        {video.description || "Sin descripción."}
-                    </div>
-                </div>
+                )}
 
                 {/* Comments */}
                 <div className="mb-8">

@@ -178,6 +178,12 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
       );
   }
 
+  // --- CRITICAL PATH FIX ---
+  const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
+  const videoSrc = (isLocal && video.videoUrl && !video.videoUrl.includes('action=stream')) 
+        ? `api/index.php?action=stream&id=${video.id}` 
+        : video.videoUrl;
+
   return (
     <div className="relative w-full h-[100dvh] md:h-full snap-start snap-always shrink-0 flex items-center justify-center bg-black overflow-hidden video-container">
       
@@ -187,7 +193,7 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
           <>
             <video
                 ref={videoRef}
-                src={video.videoUrl}
+                src={videoSrc}
                 poster={video.thumbnailUrl}
                 className="w-full h-full object-cover"
                 loop
@@ -197,6 +203,7 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
                 onClick={toggleMute}
                 onWaiting={() => setIsBuffering(true)}
                 onPlaying={() => setIsBuffering(false)}
+                crossOrigin="anonymous"
                 onTimeUpdate={(e) => { 
                     if (e.currentTarget.currentTime / e.currentTarget.duration > 0.30 && interaction && !interaction.isWatched && user) { 
                         db.markWatched(user.id, video.id); 

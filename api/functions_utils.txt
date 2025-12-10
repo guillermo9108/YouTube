@@ -258,7 +258,8 @@ function smartParseFilename($fullPath, $detectedType = null) {
 }
 
 function streamVideo($filePath, $pdo) {
-    // AGGRESSIVE BUFFER CLEANING
+    // AGGRESSIVE BUFFER CLEANING - CRITICAL FOR VIDEO STREAMS
+    // Must clear all existing output buffers (whitespace, includes)
     if (function_exists('ini_set')) {
         ini_set('zlib.output_compression', 'Off');
     }
