@@ -160,4 +160,22 @@ export default function AdminConfig() {
                 
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pixabay API Key <InfoTooltip text="Alternativa stock gratuita" /></label>
-                    <input type="password" value={settings.pixabayKey || ''}
+                    <input type="password" value={settings.pixabayKey || ''} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                </div>
+
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">YouTube (yt-dlp)</label>
+                    <div className="flex items-center gap-2 p-3 bg-slate-950 rounded-lg border border-slate-700">
+                        <input 
+                            type="checkbox" 
+                            checked={settings.enableYoutube || false} 
+                            onChange={e => setSettings({...settings, enableYoutube: e.target.checked})} 
+                            className="accent-indigo-500 w-4 h-4 cursor-pointer"
+                        />
+                        <span className="text-sm text-slate-300">Habilitar descargas de YouTube</span>
+                    </div>
+                </div>
+            </ConfigSection>
+        </div>
+    );
+}
