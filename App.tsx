@@ -16,6 +16,7 @@ import MarketplaceItem from './components/pages/MarketplaceItem';
 import MarketplaceCreate from './components/pages/MarketplaceCreate';
 import MarketplaceEdit from './components/pages/MarketplaceEdit';
 import Cart from './components/pages/Cart';
+import VipStore from './components/pages/VipStore';
 
 // Components & Context
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
@@ -132,6 +133,7 @@ export default function App() {
                                 <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
                                 
                                 <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />

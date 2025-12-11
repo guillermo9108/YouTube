@@ -35,7 +35,88 @@ function user_request_balance($pdo, $input) {
 // Admin Action: Get Requests
 function admin_get_balance_requests($pdo) {
     $stmt = $pdo->query("SELECT br.*, u.username FROM balance_requests br LEFT JOIN users u ON br.userId = u.id WHERE br.status = 'PENDING' ORDER BY br.createdAt ASC");
-    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    $balanceReqs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Also fetch VIP requests
+    // Need to ensure table exists in case of update
+    try {
+        $stmtVip = $pdo->query("SELECT vr.*, u.username FROM vip_requests vr LEFT JOIN users u ON vr.userId = u.id WHERE vr.status = 'PENDING' ORDER BY vr.createdAt ASC");
+        $vipReqs = $stmtVip->fetchAll(PDO::FETCH_ASSOC);
+    } catch(Exception $e) { $vipReqs = []; }
+
+    respond(true, ['balance' => $balanceReqs, 'vip' => $vipReqs]);
+}
+
+function admin_handle_vip_request($pdo, $input) {
+    $reqId = $input['requestId'];
+    $action = $input['action']; // APPROVED or REJECTED
+    $adminId = $input['adminId'];
+    
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT userId, planSnapshot FROM vip_requests WHERE id = ? FOR UPDATE");
+        $stmt->execute([$reqId]);
+        $req = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$req) throw new Exception("Request not found");
+        
+        $plan = json_decode($req['planSnapshot'], true);
+        
+        $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$action, $reqId]);
+        
+        if ($action === 'APPROVED') {
+            if ($plan['type'] === 'BALANCE') {
+                // Balance Bonus Logic
+                $baseAmount = floatval($plan['price']);
+                $bonus = floatval($plan['bonusPercent'] ?? 0);
+                $total = $baseAmount + ($baseAmount * ($bonus / 100));
+                
+                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $req['userId']]);
+                
+                // Transaction Log
+                $tid = uniqid('tx_vip_');
+                $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP')")
+                    ->execute([$tid, $req['userId'], $total, time()]);
+                    
+                $msg = "Tu recarga VIP de {$total} Saldo ha sido aprobada.";
+                
+            } else {
+                // Access Logic (Time based)
+                $days = intval($plan['durationDays']);
+                $seconds = $days * 86400;
+                $now = time();
+                
+                // Get current expiry
+                $stmtUser = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
+                $stmtUser->execute([$req['userId']]);
+                $currentExpiry = intval($stmtUser->fetchColumn());
+                
+                // Extend if already active, else start from now
+                $newStart = ($currentExpiry > $now) ? $currentExpiry : $now;
+                $newExpiry = $newStart + $seconds;
+                
+                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $req['userId']]);
+                
+                $msg = "Tu Membresía VIP '{$plan['name']}' está activa hasta " . date('d/m/Y', $newExpiry);
+            }
+            
+            // Notify User
+            $nid = uniqid('n_');
+            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
+                ->execute([$nid, $req['userId'], $msg, time()]);
+        } else {
+             // Notify Rejection
+            $nid = uniqid('n_');
+            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
+                ->execute([$nid, $req['userId'], "Tu solicitud VIP fue rechazada.", time()]);
+        }
+
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        respond(false, null, $e->getMessage());
+    }
 }
 
 function admin_get_global_transactions($pdo) {
@@ -356,8 +437,22 @@ function admin_get_settings($pdo) {
         'localLibraryPath' => $s['localLibraryPath'] ?? '',
         'ftpSettings' => json_decode($s['ftpSettings'] ?? '{}', true) ?: [],
         'videoCommission' => intval($s['videoCommission'] ?? 20),
-        'marketCommission' => intval($s['marketCommission'] ?? 25)
+        'marketCommission' => intval($s['marketCommission'] ?? 25),
+        'vipPlans' => json_decode($s['vipPlans'] ?? '[]', true) ?: [],
+        'paymentInstructions' => $s['paymentInstructions'] ?? ''
     ];
+    
+    // DEFAULT VIP PLANS IF EMPTY
+    if (empty($settings['vipPlans'])) {
+        $settings['vipPlans'] = [
+            ['id' => 'v1', 'name' => 'VIP Mensual', 'price' => 1000, 'type' => 'ACCESS', 'durationDays' => 30, 'description' => 'Acceso total a todos los videos por 30 días.'],
+            ['id' => 'v2', 'name' => 'VIP Quincenal', 'price' => 800, 'type' => 'ACCESS', 'durationDays' => 15, 'description' => 'Acceso total por 15 días.'],
+            ['id' => 'v3', 'name' => 'VIP Semanal', 'price' => 500, 'type' => 'ACCESS', 'durationDays' => 7, 'description' => 'Acceso total por 7 días.'],
+            ['id' => 'r1', 'name' => 'Recarga +20%', 'price' => 300, 'type' => 'BALANCE', 'bonusPercent' => 20, 'description' => 'Recibes 360 de Saldo.'],
+            ['id' => 'r2', 'name' => 'Recarga +10%', 'price' => 200, 'type' => 'BALANCE', 'bonusPercent' => 10, 'description' => 'Recibes 220 de Saldo.'],
+            ['id' => 'r3', 'name' => 'Recarga +5%', 'price' => 100, 'type' => 'BALANCE', 'bonusPercent' => 5, 'description' => 'Recibes 105 de Saldo.']
+        ];
+    }
 
     respond(true, $settings);
 }
@@ -365,7 +460,10 @@ function admin_get_settings($pdo) {
 function admin_update_settings($pdo, $input) {
     $s = $input['settings'];
     
-    // ROBUST DATA EXTRACTION: Default to existing or safe values if keys are missing
+    // Ensure table has vipPlans column
+    require_once 'functions_schema.php';
+    syncTable($pdo, 'system_settings', getAppSchema()['system_settings']);
+
     $sql = "UPDATE system_settings SET 
             downloadStartTime = ?, 
             downloadEndTime = ?, 
@@ -382,7 +480,9 @@ function admin_update_settings($pdo, $input) {
             localLibraryPath = ?,
             ftpSettings = ?,
             videoCommission = ?,
-            marketCommission = ?
+            marketCommission = ?,
+            vipPlans = ?,
+            paymentInstructions = ?
             WHERE id = 1";
             
     $pdo->prepare($sql)->execute([
@@ -401,7 +501,9 @@ function admin_update_settings($pdo, $input) {
         $s['localLibraryPath'] ?? '',
         json_encode($s['ftpSettings'] ?? []),
         intval($s['videoCommission'] ?? 20),
-        intval($s['marketCommission'] ?? 25)
+        intval($s['marketCommission'] ?? 25),
+        json_encode($s['vipPlans'] ?? []),
+        $s['paymentInstructions'] ?? ''
     ]);
     respond(true);
 }

@@ -18,7 +18,8 @@ function getAppSchema() {
                 'lastActive' => 'BIGINT DEFAULT 0',
                 'avatarUrl' => 'VARCHAR(255) DEFAULT NULL',
                 'defaultPrices' => 'JSON DEFAULT NULL',
-                'shippingDetails' => 'JSON DEFAULT NULL'
+                'shippingDetails' => 'JSON DEFAULT NULL',
+                'vipExpiry' => 'BIGINT DEFAULT 0'
             ]
         ],
         'videos' => [
@@ -91,6 +92,16 @@ function getAppSchema() {
                 'createdAt' => 'BIGINT'
             ]
         ],
+        'vip_requests' => [
+            'cols' => [
+                'id' => 'VARCHAR(50) PRIMARY KEY',
+                'userId' => 'VARCHAR(50)',
+                'planSnapshot' => 'JSON',
+                'status' => "ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING'",
+                'createdAt' => 'BIGINT',
+                'paymentRef' => 'VARCHAR(255) DEFAULT NULL'
+            ]
+        ],
         'comments' => [
             'cols' => [
                 'id' => 'VARCHAR(50) PRIMARY KEY',
@@ -138,7 +149,9 @@ function getAppSchema() {
                 'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
                 'ftpSettings' => 'JSON DEFAULT NULL',
                 'videoCommission' => 'INT DEFAULT 20',
-                'marketCommission' => 'INT DEFAULT 25'
+                'marketCommission' => 'INT DEFAULT 25',
+                'vipPlans' => 'JSON DEFAULT NULL',
+                'paymentInstructions' => 'TEXT DEFAULT NULL'
             ]
         ],
         'subscriptions' => [

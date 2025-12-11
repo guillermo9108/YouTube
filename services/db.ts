@@ -4,7 +4,7 @@ import {
     SystemSettings, VideoCategory, MarketplaceItem, 
     MarketplaceReview, CartItem, SaleRecord, ContentRequest, 
     BalanceRequest, SmartCleanerResult, VideoResult, FtpFile, Notification,
-    OrganizeResult
+    OrganizeResult, VipPlan, VipRequest
 } from '../types';
 
 export class DBService {
@@ -181,7 +181,7 @@ export class DBService {
         return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe`, { method: 'POST', body: JSON.stringify({subscriberId, creatorId})});
     }
     
-    // --- Commerce ---
+    // --- Commerce & VIP ---
 
     async hasPurchased(uid: string, vid: string): Promise<boolean> { 
         const res = await this.request<{hasPurchased: boolean}>(`action=has_purchased&userId=${uid}&videoId=${vid}`); 
@@ -194,6 +194,10 @@ export class DBService {
 
     async getUserTransactions(uid: string): Promise<Transaction[]> { 
         return this.request<Transaction[]>(`action=get_transactions&userId=${uid}`); 
+    }
+
+    async requestVip(userId: string, plan: VipPlan, paymentRef?: string): Promise<void> {
+        return this.request(`action=request_vip`, { method: 'POST', body: JSON.stringify({userId, plan, paymentRef})});
     }
     
     // --- Upload ---
@@ -345,12 +349,16 @@ export class DBService {
         return this.request(`action=request_balance`, { method: 'POST', body: JSON.stringify({userId: uid, amount})});
     }
 
-    async getBalanceRequests(): Promise<BalanceRequest[]> { 
-        return this.request<BalanceRequest[]>(`action=admin_get_balance_requests`); 
+    async getBalanceRequests(): Promise<{balance: BalanceRequest[], vip: VipRequest[]}> { 
+        return this.request<{balance: BalanceRequest[], vip: VipRequest[]}>(`action=admin_get_balance_requests`); 
     }
 
     async handleBalanceRequest(adminId: string, reqId: string, status: string): Promise<void> {
         return this.request(`action=admin_handle_balance_request`, { method: 'POST', body: JSON.stringify({adminId, requestId: reqId, action: status})});
+    }
+
+    async handleVipRequest(adminId: string, reqId: string, status: string): Promise<void> {
+        return this.request(`action=admin_handle_vip_request`, { method: 'POST', body: JSON.stringify({adminId, requestId: reqId, action: status})});
     }
 
     // --- FTP ---

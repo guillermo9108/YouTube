@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
-import { SystemSettings, VideoCategory } from '../../../types';
+import { SystemSettings, VideoCategory, VipPlan } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2 } from 'lucide-react';
+import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
@@ -55,6 +55,32 @@ export default function AdminConfig() {
         });
     };
 
+    const addVipPlan = () => {
+        if (!settings) return;
+        const newPlan: VipPlan = {
+            id: 'v_' + Date.now(),
+            name: 'Nuevo Plan',
+            price: 100,
+            type: 'ACCESS',
+            durationDays: 30,
+            description: ''
+        };
+        setSettings({...settings, vipPlans: [...(settings.vipPlans || []), newPlan]});
+    };
+
+    const removeVipPlan = (id: string) => {
+        if (!settings) return;
+        setSettings({...settings, vipPlans: (settings.vipPlans || []).filter(p => p.id !== id)});
+    };
+
+    const updateVipPlan = (id: string, field: keyof VipPlan, value: any) => {
+        if (!settings) return;
+        setSettings({
+            ...settings,
+            vipPlans: (settings.vipPlans || []).map(p => p.id === id ? {...p, [field]: value} : p)
+        });
+    };
+
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500"/></div>;
     if (!settings) return <div className="p-10 text-center text-red-400">Error cargando configuración.</div>;
 
@@ -89,7 +115,87 @@ export default function AdminConfig() {
                 </div>
             </ConfigSection>
 
-            {/* NEW SECTION: CATEGORY PRICES */}
+            {/* VIP PLANS EDITOR */}
+            <ConfigSection 
+                title="Planes VIP & Recargas" 
+                icon={Crown} 
+                isOpen={openSection === 'VIP'} 
+                onToggle={() => setOpenSection(openSection === 'VIP' ? '' : 'VIP')}
+            >
+                <div className="space-y-4">
+                    {settings.vipPlans && settings.vipPlans.map((plan) => (
+                        <div key={plan.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative">
+                            <button onClick={() => removeVipPlan(plan.id)} className="absolute top-2 right-2 text-slate-600 hover:text-red-500 p-1"><Trash2 size={16}/></button>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500">Nombre</label>
+                                    <input type="text" value={plan.name} onChange={e => updateVipPlan(plan.id, 'name', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-white"/>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500">Precio (CUP)</label>
+                                    <input type="number" value={plan.price} onChange={e => updateVipPlan(plan.id, 'price', parseInt(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-emerald-400 font-bold"/>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4 mb-3">
+                                <div>
+                                    <label className="text-[10px] uppercase font-bold text-slate-500">Tipo</label>
+                                    <select value={plan.type} onChange={e => updateVipPlan(plan.id, 'type', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-white">
+                                        <option value="ACCESS">Acceso Total</option>
+                                        <option value="BALANCE">Recarga Saldo</option>
+                                    </select>
+                                </div>
+                                {plan.type === 'ACCESS' ? (
+                                    <div className="col-span-2">
+                                        <label className="text-[10px] uppercase font-bold text-slate-500">Días de Duración</label>
+                                        <input type="number" value={plan.durationDays} onChange={e => updateVipPlan(plan.id, 'durationDays', parseInt(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-white"/>
+                                    </div>
+                                ) : (
+                                    <div className="col-span-2">
+                                        <label className="text-[10px] uppercase font-bold text-slate-500">% Bono Extra</label>
+                                        <input type="number" value={plan.bonusPercent} onChange={e => updateVipPlan(plan.id, 'bonusPercent', parseInt(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-white"/>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <div>
+                                <label className="text-[10px] uppercase font-bold text-slate-500">Descripción</label>
+                                <input type="text" value={plan.description} onChange={e => updateVipPlan(plan.id, 'description', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-slate-300"/>
+                            </div>
+                        </div>
+                    ))}
+                    
+                    <button onClick={addVipPlan} className="w-full py-2 border border-dashed border-slate-700 text-slate-400 rounded-xl hover:bg-slate-800 hover:text-white flex items-center justify-center gap-2 text-sm font-bold">
+                        <Plus size={16}/> Agregar Plan
+                    </button>
+                </div>
+            </ConfigSection>
+
+            {/* PAYMENT INSTRUCTIONS */}
+            <ConfigSection 
+                title="Métodos de Pago" 
+                icon={CreditCard} 
+                isOpen={openSection === 'PAYMENT'} 
+                onToggle={() => setOpenSection(openSection === 'PAYMENT' ? '' : 'PAYMENT')}
+            >
+                <div className="space-y-4">
+                    <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800">
+                        Escribe aquí las instrucciones que verán los usuarios al solicitar un plan VIP o una recarga. Puedes incluir enlaces de pago (Tropipay, QvaPay), números de cuenta o instrucciones de transferencia.
+                    </p>
+                    <textarea 
+                        rows={6} 
+                        value={settings.paymentInstructions || ''} 
+                        onChange={e => setSettings({...settings, paymentInstructions: e.target.value})} 
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-sm text-white focus:border-indigo-500 outline-none leading-relaxed font-mono"
+                        placeholder="Ejemplo:
+1. Envía el pago a Tropipay: user@example.com
+2. Usa QvaPay: https://qvapay.com/pay/me
+3. Envía el comprobante en el siguiente paso."
+                    />
+                </div>
+            </ConfigSection>
+
             <ConfigSection 
                 title="Precios Automáticos por Categoría" 
                 icon={Tag} 

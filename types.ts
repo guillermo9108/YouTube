@@ -1,5 +1,4 @@
 
-
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -14,6 +13,27 @@ export enum VideoCategory {
   MOVIE = 'PELICULA',
   EDUCATION = 'EDUCACION',
   OTHER = 'OTRO'
+}
+
+export interface VipPlan {
+    id: string;
+    name: string;
+    price: number;
+    type: 'ACCESS' | 'BALANCE'; // ACCESS = Dias ilimitados, BALANCE = Saldo extra
+    durationDays?: number; // Solo para ACCESS
+    bonusPercent?: number; // Solo para BALANCE
+    description?: string;
+    highlight?: boolean;
+}
+
+export interface VipRequest {
+    id: string;
+    userId: string;
+    username: string;
+    planSnapshot: VipPlan;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    createdAt: number;
+    paymentRef?: string; // ID de transacción externa
 }
 
 export interface MarketplaceItem {
@@ -63,6 +83,7 @@ export interface User {
   sessionToken?: string; 
   avatarUrl?: string; 
   lastActive?: number;
+  vipExpiry?: number; // Timestamp de expiración VIP (0 o null si no es VIP)
   defaultPrices?: Record<string, number>; 
   shippingDetails?: {
       fullName: string;
@@ -103,7 +124,7 @@ export interface Transaction {
   amount: number;
   adminFee?: number; // Nueva: Comisión cobrada
   timestamp: number;
-  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE';
+  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP';
   shippingData?: {
       fullName: string;
       address: string;
@@ -185,6 +206,8 @@ export interface SystemSettings {
   ftpSettings?: FtpSettings;
   videoCommission: number; // Percentage (0-100)
   marketCommission: number; // Percentage (0-100)
+  vipPlans?: VipPlan[];
+  paymentInstructions?: string; // Instrucciones de pago (Markdown/Text)
 }
 
 export interface OrganizeResult {

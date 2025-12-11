@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight, Crown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useCart } from '../context/CartContext';
@@ -274,6 +274,10 @@ export default function Layout() {
                     {/* Acciones de Usuario */}
                     <p className="px-3 text-[10px] uppercase font-bold text-slate-500 mt-2 mb-1">Tu Cuenta</p>
 
+                    <Link to="/vip" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-amber-300 bg-amber-900/20 hover:bg-amber-900/40 border border-amber-500/20 rounded-xl transition-colors mb-2">
+                        <Crown size={20}/> Membresías VIP
+                    </Link>
+
                     <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
                         <Upload size={20} className="text-blue-400"/> Subir Video
                     </Link>
@@ -319,6 +323,9 @@ export default function Layout() {
           )}
 
           {user && <NotificationBell />}
+          <Link to="/vip" className="text-sm font-bold text-amber-400 hover:text-amber-300 bg-amber-900/20 px-3 py-1 rounded-full border border-amber-500/30">
+             VIP
+          </Link>
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">
              {Number(user?.balance || 0).toFixed(2)} Saldo
           </span>

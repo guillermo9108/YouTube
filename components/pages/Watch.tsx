@@ -3,14 +3,15 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
-import { useParams, Link } from '../Router';
-import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send } from 'lucide-react';
+import { useParams, Link, useNavigate } from '../Router';
+import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
 export default function Watch() {
     const { id } = useParams();
     const { user, refreshUser } = useAuth();
+    const navigate = useNavigate();
     const toast = useToast();
     
     const [video, setVideo] = useState<Video | null>(null);
@@ -95,7 +96,7 @@ export default function Watch() {
     const handlePurchase = async () => {
         if (!user || !video) return;
         if (user.balance < video.price) {
-            toast.error("Saldo insuficiente");
+            // Show VIP Upsell instead of just error
             return;
         }
 
@@ -140,6 +141,22 @@ export default function Watch() {
         return v.videoUrl;
     };
 
+    // --- EXTERNAL PLAYER HELPERS ---
+    const openExternal = (type: 'vlc' | 'intent') => {
+        if (!video) return;
+        const relativeSrc = getVideoSrc(video);
+        // Convert relative API URL to Absolute URL for external apps
+        const absoluteUrl = new URL(relativeSrc, window.location.href).href;
+        
+        if (type === 'vlc') {
+            window.location.href = `vlc://${absoluteUrl}`;
+        } else {
+            // Android Intent to open video/*
+            const intent = `intent:${absoluteUrl}#Intent;action=android.intent.action.VIEW;type=video/*;end`;
+            window.location.href = intent;
+        }
+    };
+
     const videoSrc = getVideoSrc(video);
 
     return (
@@ -153,21 +170,33 @@ export default function Watch() {
             <div className="w-full bg-black z-40 shadow-2xl border-b border-slate-800 transition-all duration-300 portrait:sticky portrait:top-0 landscape:relative md:sticky md:top-[74px]">
                 <div className={`relative w-full mx-auto max-w-[2000px] ${isUnlocked ? 'aspect-video' : 'aspect-video md:aspect-[21/9] lg:aspect-video'}`}>
                     {isUnlocked && video ? (
-                        <video 
-                            src={videoSrc} 
-                            poster={video.thumbnailUrl} 
-                            controls 
-                            autoPlay 
-                            playsInline
-                            className="w-full h-full object-contain bg-black"
-                            crossOrigin="anonymous"
-                            onEnded={() => {
-                                if(user && !interaction?.isWatched) {
-                                    db.markWatched(user.id, video.id).catch(() => {});
-                                    setInteraction(prev => prev ? {...prev, isWatched: true} : null);
-                                }
-                            }}
-                        />
+                        <>
+                            <video 
+                                src={videoSrc} 
+                                poster={video.thumbnailUrl} 
+                                controls 
+                                autoPlay 
+                                playsInline
+                                className="w-full h-full object-contain bg-black"
+                                crossOrigin="anonymous"
+                                onEnded={() => {
+                                    if(user && !interaction?.isWatched) {
+                                        db.markWatched(user.id, video.id).catch(() => {});
+                                        setInteraction(prev => prev ? {...prev, isWatched: true} : null);
+                                    }
+                                }}
+                            />
+                            {/* External Player Prompt (Subtle) */}
+                            <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-300">
+                                <button 
+                                    onClick={() => openExternal('intent')} 
+                                    className="bg-black/60 text-white p-2 rounded-full backdrop-blur-md hover:bg-indigo-600 border border-white/20"
+                                    title="Abrir en reproductor externo"
+                                >
+                                    <ExternalLink size={20} />
+                                </button>
+                            </div>
+                        </>
                     ) : (
                         <div className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden">
                             {/* Background Image */}
@@ -189,15 +218,48 @@ export default function Watch() {
                                     <h2 className="text-xl md:text-2xl font-bold text-white mb-2">Contenido Premium</h2>
                                     <p className="text-slate-400 mb-4 text-xs md:text-sm">Este video requiere acceso para visualizarlo.</p>
                                     <div className="text-3xl md:text-4xl font-black text-amber-400 mb-6">{video.price} $</div>
-                                    <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm md:text-base">
-                                        Desbloquear Ahora
-                                    </button>
+                                    
+                                    {user && user.balance < video.price ? (
+                                        <div className="w-full space-y-2">
+                                            <div className="bg-red-900/20 border border-red-500/30 text-red-300 text-xs py-2 px-3 rounded-lg mb-2">
+                                                Saldo insuficiente ({user.balance.toFixed(2)} $)
+                                            </div>
+                                            <button 
+                                                onClick={() => navigate('/vip')} 
+                                                className="w-full bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm"
+                                            >
+                                                <Crown size={16}/> Obtener VIP / Recargar
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm md:text-base">
+                                            Desbloquear Ahora
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>
                     )}
                 </div>
             </div>
+
+            {/* Troubleshooting Bar for Codec Issues */}
+            {isUnlocked && (
+                <div className="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs md:text-sm">
+                    <span className="text-slate-400 flex items-center gap-2">
+                        <AlertCircle className="text-amber-500" size={14} /> 
+                        ¿Problemas de audio/video?
+                    </span>
+                    <div className="flex gap-2">
+                        <button onClick={() => openExternal('intent')} className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg border border-slate-700 transition-colors">
+                            <MonitorPlay size={14} /> <span className="font-bold">App Externa</span>
+                        </button>
+                        <button onClick={() => openExternal('vlc')} className="hidden md:flex items-center gap-1 bg-orange-600/20 hover:bg-orange-600/40 text-orange-400 px-3 py-1.5 rounded-lg border border-orange-600/30 transition-colors">
+                            <ExternalLink size={14} /> <span className="font-bold">VLC</span>
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Main Content Area (Constrained Width) */}
             <div className="w-full max-w-7xl mx-auto p-4 lg:px-8 flex flex-col lg:flex-row gap-6 mt-4">
@@ -308,3 +370,5 @@ export default function Watch() {
         </div>
     );
 }
+// Helper import needed for new icon
+import { AlertCircle } from 'lucide-react';

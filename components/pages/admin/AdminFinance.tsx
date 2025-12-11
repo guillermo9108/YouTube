@@ -1,19 +1,19 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
-import { BalanceRequest, Transaction } from '../../../types';
+import { BalanceRequest, VipRequest } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, ShoppingBag } from 'lucide-react';
+import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
-    const [balanceRequests, setBalanceRequests] = useState<BalanceRequest[]>([]);
+    const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({balance: [], vip: []});
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
 
     const loadData = () => {
-        db.getBalanceRequests().then(setBalanceRequests);
+        db.getBalanceRequests().then(setRequests);
         db.getGlobalTransactions().then(setGlobalTransactions);
     };
 
@@ -21,7 +21,7 @@ export default function AdminFinance() {
         loadData();
     }, []);
 
-    const handleHandleRequest = async (reqId: string, action: 'APPROVED' | 'REJECTED') => {
+    const handleBalanceReq = async (reqId: string, action: 'APPROVED' | 'REJECTED') => {
         if (!currentUser) return;
         try {
             await db.handleBalanceRequest(currentUser.id, reqId, action);
@@ -32,11 +32,22 @@ export default function AdminFinance() {
         }
     };
 
+    const handleVipReq = async (reqId: string, action: 'APPROVED' | 'REJECTED') => {
+        if (!currentUser) return;
+        try {
+            await db.handleVipRequest(currentUser.id, reqId, action);
+            toast.success(`VIP ${action === 'APPROVED' ? 'Activado' : 'Rechazado'}`);
+            loadData();
+        } catch (e: any) {
+            toast.error("Error: " + e.message);
+        }
+    };
+
     const stats = useMemo(() => {
-        const pendingCount = balanceRequests.length;
-        const totalPendingAmount = balanceRequests.reduce((acc, r) => acc + Number(r.amount), 0);
+        const pendingCount = requests.balance.length + requests.vip.length;
+        const totalPendingAmount = requests.balance.reduce((acc, r) => acc + Number(r.amount), 0);
         return { pendingCount, totalPendingAmount };
-    }, [balanceRequests]);
+    }, [requests]);
 
     return (
         <div className="space-y-6 animate-in fade-in">
@@ -53,7 +64,7 @@ export default function AdminFinance() {
                 </div>
                 <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
                     <div>
-                        <p className="text-slate-500 text-xs font-bold uppercase mb-1">Monto Total Pendiente</p>
+                        <p className="text-slate-500 text-xs font-bold uppercase mb-1">Monto Saldo Pendiente</p>
                         <h3 className="text-2xl font-bold text-white">{stats.totalPendingAmount.toFixed(2)} $</h3>
                     </div>
                     <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
@@ -62,17 +73,68 @@ export default function AdminFinance() {
                 </div>
             </div>
 
-            {/* Requests Table */}
+            {/* VIP Requests Table */}
+            {requests.vip.length > 0 && (
+                <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm mb-6">
+                    <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
+                        <Crown size={18} className="text-amber-400"/>
+                        <h3 className="font-bold text-white">Solicitudes VIP / Recargas</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-slate-500 uppercase bg-slate-950/50 border-b border-slate-800">
+                                <tr>
+                                    <th className="px-6 py-3">Usuario</th>
+                                    <th className="px-6 py-3">Plan</th>
+                                    <th className="px-6 py-3">Referencia Pago</th>
+                                    <th className="px-6 py-3 text-right">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800">
+                                {requests.vip.map(req => {
+                                    const plan = typeof req.planSnapshot === 'string' ? JSON.parse(req.planSnapshot) : req.planSnapshot;
+                                    return (
+                                        <tr key={req.id} className="hover:bg-slate-800/30 transition-colors">
+                                            <td className="px-6 py-4 font-bold text-white">{req.username}</td>
+                                            <td className="px-6 py-4">
+                                                <div className="text-white font-medium">{plan.name}</div>
+                                                <div className="text-[10px] text-slate-500">{plan.type === 'ACCESS' ? `${plan.durationDays} Días` : `+${plan.bonusPercent}% Bono`} - <span className="text-amber-400 font-bold">{plan.price} CUP</span></div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {req.paymentRef ? (
+                                                    <div className="flex items-center gap-1 text-slate-300 bg-slate-800 px-2 py-1 rounded w-fit">
+                                                        <FileText size={14}/> <span className="font-mono text-xs">{req.paymentRef}</span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-slate-600 italic text-xs">Sin referencia</span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex justify-end gap-2">
+                                                    <button onClick={() => handleVipReq(req.id, 'APPROVED')} className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-lg" title="Confirmar Pago y Aprobar"><Check size={16}/></button>
+                                                    <button onClick={() => handleVipReq(req.id, 'REJECTED')} className="bg-slate-800 hover:bg-red-600 text-white p-2 rounded-lg" title="Rechazar"><X size={16}/></button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Balance Requests Table */}
             <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
                 <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
                     <Wallet size={18} className="text-indigo-400"/>
-                    <h3 className="font-bold text-white">Cola de Aprobación</h3>
+                    <h3 className="font-bold text-white">Solicitudes de Saldo (Legacy)</h3>
                 </div>
                 
-                {balanceRequests.length === 0 ? (
+                {requests.balance.length === 0 ? (
                     <div className="p-10 text-center text-slate-500 flex flex-col items-center gap-2">
                         <Check size={32} className="text-emerald-500/50"/>
-                        <p>Todo al día. No hay solicitudes pendientes.</p>
+                        <p>No hay solicitudes de saldo pendientes.</p>
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
@@ -86,7 +148,7 @@ export default function AdminFinance() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800">
-                                {balanceRequests.map(req => (
+                                {requests.balance.map(req => (
                                     <tr key={req.id} className="hover:bg-slate-800/30 transition-colors">
                                         <td className="px-6 py-4">
                                             <div className="font-bold text-white">{req.username}</div>
@@ -102,14 +164,14 @@ export default function AdminFinance() {
                                         <td className="px-6 py-4">
                                             <div className="flex justify-end gap-2">
                                                 <button 
-                                                    onClick={() => handleHandleRequest(req.id, 'APPROVED')} 
+                                                    onClick={() => handleBalanceReq(req.id, 'APPROVED')} 
                                                     className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold"
                                                     title="Aprobar"
                                                 >
                                                     <Check size={16}/> <span className="hidden md:inline">Aprobar</span>
                                                 </button>
                                                 <button 
-                                                    onClick={() => handleHandleRequest(req.id, 'REJECTED')} 
+                                                    onClick={() => handleBalanceReq(req.id, 'REJECTED')} 
                                                     className="bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold"
                                                     title="Rechazar"
                                                 >
@@ -148,16 +210,17 @@ export default function AdminFinance() {
                             ) : (
                                 globalTransactions.map(t => {
                                     const isDeposit = t.type === 'DEPOSIT';
+                                    const isVip = t.type === 'VIP';
                                     const isMarket = t.type === 'MARKETPLACE';
                                     return (
                                         <tr key={t.id} className="hover:bg-slate-800/30">
                                             <td className="px-4 py-3">
-                                                <span className={`px-2 py-1 rounded text-[10px] font-bold ${isDeposit ? 'bg-emerald-500/20 text-emerald-400' : (isMarket ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400')}`}>
+                                                <span className={`px-2 py-1 rounded text-[10px] font-bold ${isDeposit ? 'bg-emerald-500/20 text-emerald-400' : (isVip ? 'bg-amber-500/20 text-amber-400' : (isMarket ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'))}`}>
                                                     {t.type}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3">
-                                                {isDeposit ? (
+                                                {isDeposit || isVip ? (
                                                     <div className="flex items-center gap-1 text-slate-300">
                                                         <ArrowDownLeft size={14} className="text-emerald-500"/> Recarga de {t.buyerName}
                                                     </div>

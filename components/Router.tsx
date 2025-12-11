@@ -9,8 +9,12 @@ export function useLocation() {
 }
 
 export function useNavigate() {
-  return (to: string, options?: { replace?: boolean }) => {
-    window.location.hash = to;
+  return (to: string | number, options?: { replace?: boolean }) => {
+    if (typeof to === 'number') {
+      window.history.go(to);
+    } else {
+      window.location.hash = to;
+    }
   };
 }
 

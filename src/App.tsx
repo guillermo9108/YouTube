@@ -1,22 +1,28 @@
+
 import React, { Suspense, useState, useEffect } from 'react';
-import Login from './pages/Login';
-import Home from './pages/Home';
-import Watch from './pages/Watch';
-import Upload from './pages/Upload';
-import Profile from './pages/Profile';
-import Admin from './pages/Admin';
-import Shorts from './pages/Shorts';
-import Setup from './pages/Setup';
-import Requests from './pages/Requests';
-import Channel from './pages/Channel';
-import Marketplace from './pages/Marketplace';
-import MarketplaceItem from './pages/MarketplaceItem';
-import MarketplaceCreate from './pages/MarketplaceCreate';
-import Cart from './pages/Cart';
+import Login from './components/pages/Login';
+import Home from './components/pages/Home';
+import Watch from './components/pages/Watch';
+import Upload from './components/pages/Upload';
+import Profile from './components/pages/Profile';
+import Admin from './components/pages/Admin';
+import Shorts from './components/pages/Shorts';
+import Setup from './components/pages/Setup';
+import Requests from './components/pages/Requests';
+import Channel from './components/pages/Channel';
+import Marketplace from './components/pages/Marketplace';
+import MarketplaceItem from './components/pages/MarketplaceItem';
+import MarketplaceCreate from './components/pages/MarketplaceCreate';
+import MarketplaceEdit from './components/pages/MarketplaceEdit';
+import Cart from './components/pages/Cart';
+import VipStore from './components/pages/VipStore';
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UploadProvider } from './context/UploadContext';
 import { CartProvider } from './context/CartContext';
+import { ServerTaskProvider } from './context/ServerTaskContext';
+import { ToastProvider } from './context/ToastContext';
+import { GridProvider } from './context/GridContext';
 import { db } from './services/db';
 import { Loader2, WifiOff } from 'lucide-react';
 
@@ -40,7 +46,7 @@ const OfflineBanner = () => {
 
     return (
         <div className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-red-600/90 text-white text-center py-2 z-[100] text-xs font-bold flex items-center justify-center gap-2 backdrop-blur-sm">
-            <WifiOff size={14} /> You are offline. Showing cached content.
+            <WifiOff size={14} /> Estás desconectado. Mostrando contenido caché.
         </div>
     );
 };
@@ -61,24 +67,29 @@ const ProtectedRoute = ({ children }: { children?: React.ReactNode }) => {
 const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   if (isLoading) return null;
-  if (!user || user.role !== 'ADMIN') return <Navigate to="/" replace />;
+  // Case-insensitive check for ADMIN role with strict trimming
+  if (!user || user.role?.trim().toUpperCase() !== 'ADMIN') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
 const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
   const [checkDone, setCheckDone] = useState(false);
-  const [needs, setNeeds] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
-    db.checkInstallation().then(() => {
-       setNeeds(db.needsSetup());
+    db.checkInstallation().then((res) => {
+       // Only force setup if we are explicitly told "not_installed".
+       // If "error" (offline/network issue), we assume installed to let offline cache work.
+       if (res.status === 'not_installed') {
+           setNeedsSetup(true);
+       }
        setCheckDone(true);
     });
   }, []);
 
-  if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Connecting...</div>;
+  if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Conectando...</div>;
 
-  if (needs) {
+  if (needsSetup) {
     return <Navigate to="/setup" replace />;
   }
   return <>{children}</>;
@@ -89,44 +100,53 @@ const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
 export default function App() {
   return (
     <AuthProvider>
-      <UploadProvider>
-        <CartProvider>
-            <HashRouter>
-            <OfflineBanner />
-            <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>
-                <Routes>
-                <Route path="/setup" element={<Setup />} />
-                
-                <Route path="/login" element={
-                    <SetupGuard>
-                    <Login />
-                    </SetupGuard>
-                } />
-                
-                <Route element={<Layout />}>
-                    <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
-                    
-                    {/* Marketplace Routes */}
-                    <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
-                    <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
-                    
-                    <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
-                </Route>
+      <ToastProvider>
+        <UploadProvider>
+            <ServerTaskProvider>
+                <CartProvider>
+                    <GridProvider>
+                        <HashRouter>
+                        <OfflineBanner />
+                        <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>}>
+                            <Routes>
+                            <Route path="/setup" element={<Setup />} />
+                            
+                            <Route path="/login" element={
+                                <SetupGuard>
+                                <Login />
+                                </SetupGuard>
+                            } />
+                            
+                            <Route element={<Layout />}>
+                                <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
+                                
+                                {/* Marketplace Routes - Specific routes MUST come before generic :id routes */}
+                                <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
+                                
+                                <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
+                                
+                                <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                            </Route>
 
-                <Route path="*" element={<Navigate to="/" />} />
-                </Routes>
-            </Suspense>
-            </HashRouter>
-        </CartProvider>
-      </UploadProvider>
+                            <Route path="*" element={<Navigate to="/" />} />
+                            </Routes>
+                        </Suspense>
+                        </HashRouter>
+                    </GridProvider>
+                </CartProvider>
+            </ServerTaskProvider>
+        </UploadProvider>
+      </ToastProvider>
     </AuthProvider>
   );
 }

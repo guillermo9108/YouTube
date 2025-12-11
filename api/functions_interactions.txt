@@ -1,19 +1,40 @@
+
 <?php
 function interact_has_purchased($pdo, $userId, $videoId) {
     // 1. Check if user is ADMIN. Admins have global access.
-    $stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT role, vipExpiry FROM users WHERE id = ?");
     $stmt->execute([$userId]);
-    $role = $stmt->fetchColumn();
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    if ($role === 'ADMIN') {
-        respond(true, ['hasPurchased' => true]);
-        return;
+    if ($user) {
+        // ADMIN check
+        if ($user['role'] === 'ADMIN') {
+            respond(true, ['hasPurchased' => true]);
+            return;
+        }
+        // VIP Access check
+        if ($user['vipExpiry'] && intval($user['vipExpiry']) > time()) {
+            respond(true, ['hasPurchased' => true]);
+            return;
+        }
     }
 
     // 2. Check if owned or purchased
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
     $stmt->execute([$userId, $videoId]);
     respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);
+}
+
+function request_vip($pdo, $input) {
+    $id = uniqid('vip_req_');
+    $userId = $input['userId'];
+    $plan = $input['plan'];
+    $paymentRef = $input['paymentRef'] ?? '';
+    
+    $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, paymentRef) VALUES (?, ?, ?, 'PENDING', ?, ?)")
+        ->execute([$id, $userId, json_encode($plan), time(), $paymentRef]);
+        
+    respond(true, ['id' => $id]);
 }
 
 function interact_purchase($pdo, $input) {
