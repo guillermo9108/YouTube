@@ -1,62 +1,95 @@
 
-import React, { createContext, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { db } from '../services/db';
-import { generateThumbnail } from '../utils/videoGenerator';
+import { Video } from '../types';
 
-const GridContext = createContext<null>(null);
+interface GridContextType {
+    activeTask: Video | null;
+    completeTask: (duration: number, thumbnail: File | null) => Promise<void>;
+    skipTask: () => void;
+    isIdle: boolean;
+}
+
+const GridContext = createContext<GridContextType | null>(null);
+
+export const useGrid = () => {
+    const context = useContext(GridContext);
+    if (!context) throw new Error("useGrid must be used within GridProvider");
+    return context;
+};
 
 export const GridProvider = ({ children }: { children?: React.ReactNode }) => {
     const { user } = useAuth();
+    const [activeTask, setActiveTask] = useState<Video | null>(null);
+    const [isIdle, setIsIdle] = useState(true);
     const intervalRef = useRef<number | null>(null);
-    const isProcessingRef = useRef(false);
+    const processingRef = useRef(false);
 
-    const processNextTask = async () => {
-        if (isProcessingRef.current) return;
+    const fetchNextTask = async () => {
+        // Don't fetch if already have a task or currently processing logic
+        if (activeTask || processingRef.current) return;
         
         try {
-            // Use standardized DB service method
+            // Get 1 random pending video
             const pending = await db.getUnprocessedVideos(1, 'random');
             
-            if (!pending || pending.length === 0) return;
-
-            const video = pending[0];
-            isProcessingRef.current = true;
-
-            const { thumbnail, duration } = await generateThumbnail(video.videoUrl);
-
-            if (duration > 0) {
-                await db.updateVideoMetadata(video.id, duration, thumbnail);
+            if (pending && pending.length > 0) {
+                processingRef.current = true;
+                setIsIdle(false);
+                setActiveTask(pending[0]);
+            } else {
+                setIsIdle(true);
             }
-
         } catch (e) {
-            console.warn("StreamPay Grid Task Error", e);
-        } finally {
-            isProcessingRef.current = false;
+            console.warn("Grid Fetch Error", e);
+            setIsIdle(true);
         }
     };
 
+    const completeTask = async (duration: number, thumbnail: File | null) => {
+        if (!activeTask) return;
+        
+        try {
+            await db.updateVideoMetadata(activeTask.id, duration, thumbnail);
+            // Short delay before next task to allow UI to show "Done" state
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (e) {
+            console.error("Task submission failed", e);
+        } finally {
+            setActiveTask(null);
+            processingRef.current = false;
+            // Try to fetch next immediately
+            fetchNextTask();
+        }
+    };
+
+    const skipTask = () => {
+        setActiveTask(null);
+        processingRef.current = false;
+    };
+
+    // Poll for tasks
     useEffect(() => {
         if (user) {
-            // Run initially
-            processNextTask();
+            // Initial check
+            fetchNextTask();
 
-            // Run periodically (every 15 seconds) if user is logged in
+            // Periodic check (every 10 seconds)
             intervalRef.current = window.setInterval(() => {
-                // Only run if tab is visible to avoid killing battery in background background
-                if (!document.hidden) {
-                    processNextTask();
+                if (!document.hidden && !activeTask) {
+                    fetchNextTask();
                 }
-            }, 15000);
+            }, 10000);
         }
 
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
         };
-    }, [user]);
+    }, [user, activeTask]);
 
     return (
-        <GridContext.Provider value={null}>
+        <GridContext.Provider value={{ activeTask, completeTask, skipTask, isIdle }}>
             {children}
         </GridContext.Provider>
     );

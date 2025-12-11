@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -7,6 +8,7 @@ import { useServerTask } from '../context/ServerTaskContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
 import { db } from '../services/db';
 import { Notification as AppNotification } from '../types';
+import GridProcessor from './GridProcessor';
 
 const UploadIndicator = () => {
   const { isUploading, progress, currentFileIndex, totalFiles, uploadSpeed } = useUpload();
@@ -333,8 +335,10 @@ export default function Layout() {
         <Outlet />
       </main>
       
+      {/* GLOBAL INDICATORS */}
       <UploadIndicator />
       <ServerTaskIndicator />
+      <GridProcessor />
 
       {/* Bottom Nav (Mobile) */}
       {!isShortsMode && (

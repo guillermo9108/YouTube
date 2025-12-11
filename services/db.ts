@@ -117,6 +117,14 @@ export class DBService {
             return false; 
         }
     }
+
+    async getUserActivity(userId: string): Promise<{liked: string[], watched: string[]}> {
+        return this.request<{liked: string[], watched: string[]}>(`action=get_user_activity&userId=${userId}`);
+    }
+
+    async getSubscriptions(userId: string): Promise<string[]> {
+        return this.request<string[]>(`action=get_subscriptions&userId=${userId}`);
+    }
     
     // --- Videos ---
 

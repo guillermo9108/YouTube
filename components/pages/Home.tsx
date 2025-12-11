@@ -4,87 +4,226 @@ import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, VideoCategory } from '../../types';
-import { RefreshCw, Search, Filter, X, ArrowDown } from 'lucide-react';
+import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, Heart, ChevronRight } from 'lucide-react';
 import { Link } from '../Router';
+
+// --- COMPONENTS ---
+
+const SectionHeader = ({ title, icon: Icon, link }: { title: string, icon: any, link?: string }) => (
+    <div className="flex items-center justify-between mb-3 px-4 md:px-0">
+        <div className="flex items-center gap-2">
+            <Icon size={20} className="text-indigo-400" />
+            <h2 className="text-lg md:text-xl font-bold text-white tracking-tight">{title}</h2>
+        </div>
+        {link && (
+            <Link to={link} className="text-xs font-bold text-slate-500 hover:text-white flex items-center gap-1 transition-colors">
+                Ver todo <ChevronRight size={14}/>
+            </Link>
+        )}
+    </div>
+);
+
+const HorizontalScroll = ({ children }: { children?: React.ReactNode }) => (
+    <div className="flex overflow-x-auto pb-6 -mx-4 px-4 md:mx-0 md:px-0 gap-4 snap-x snap-mandatory scrollbar-hide">
+        {children}
+    </div>
+);
 
 export default function Home() {
   const { user } = useAuth();
-  const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string>('ALL');
+  
+  // Data
+  const [allVideos, setAllVideos] = useState<Video[]>([]);
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
   
+  // Smart Feed State
+  const [feed, setFeed] = useState<{
+      tasteNew: Video[],      // 1. Nuevos por gusto
+      generalNew: Video[],    // 2. Nuevos generales
+      tasteGeneral: Video[],  // 3. Gustos generales
+      trending: Video[],      // 4. Mas vistos
+      subs: Video[],          // 5. Suscripciones
+      discovery: Video[]      // 6. Aleatorios (Grid final)
+  } | null>(null);
+
+  // Discovery Pagination
+  const [visibleDiscovery, setVisibleDiscovery] = useState(12);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+
   // Custom categories state
   const [categories, setCategories] = useState<string[]>(['ALL', ...Object.values(VideoCategory) as string[]]);
 
-  // Pagination / Infinite Scroll
-  const [visibleCount, setVisibleCount] = useState(12);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
+  // --- ALGORITHM: SMART FEED GENERATOR ---
+  const generateSmartFeed = async (videos: Video[], userId: string | undefined) => {
+      // 1. Prepare Pools
+      let availableVideos = [...videos];
+      const usedIds = new Set<string>();
+      
+      const addToUsed = (vids: Video[]) => vids.forEach(v => usedIds.add(v.id));
+      const getUnused = (pool: Video[]) => pool.filter(v => !usedIds.has(v.id));
 
+      // 2. Get User Profile (Tastes & Subs)
+      let topCategories: string[] = [];
+      let subCreatorIds: string[] = [];
+
+      if (userId) {
+          try {
+              // Fetch activity parallel
+              const [activity, subs] = await Promise.all([
+                  db.getUserActivity(userId),
+                  db.getSubscriptions(userId)
+              ]);
+
+              subCreatorIds = subs || [];
+
+              // Calculate Affinity Score
+              const categoryScores: Record<string, number> = {};
+              const interactIds = [...(activity.liked || []), ...(activity.watched || [])];
+              
+              // Map IDs back to full video objects to get categories
+              interactIds.forEach(id => {
+                  const vid = videos.find(v => v.id === id);
+                  if (vid) {
+                      const score = (activity.liked?.includes(id) ? 3 : 1); // Likes weigh more than views
+                      categoryScores[vid.category] = (categoryScores[vid.category] || 0) + score;
+                  }
+              });
+
+              // Sort categories by score
+              topCategories = Object.entries(categoryScores)
+                  .sort(([,a], [,b]) => b - a)
+                  .map(([cat]) => cat);
+          } catch(e) { console.error("Error building profile", e); }
+      }
+
+      // If no history, pick 2 random categories as "tastes" to start
+      if (topCategories.length === 0) {
+          const allCats = Object.values(VideoCategory) as string[];
+          topCategories = allCats.sort(() => 0.5 - Math.random()).slice(0, 2);
+      }
+
+      // 3. BUILD SECTIONS (Waterfall Logic)
+      
+      // SECTION 5: SUSCRIPCIONES (Priority: High connection)
+      // Filter subs first to ensure they get seen
+      const subs = getUnused(availableVideos.filter(v => subCreatorIds.includes(v.creatorId)))
+                   .sort((a,b) => b.createdAt - a.createdAt)
+                   .slice(0, 10);
+      addToUsed(subs);
+
+      // SECTION 1: NUEVOS BASADO EN GUSTOS (Recency + Affinity)
+      // Last 7 days + Matching Top 3 Categories
+      const oneWeekAgo = Date.now()/1000 - (7 * 86400);
+      const tasteNew = getUnused(availableVideos.filter(v => 
+          v.createdAt > oneWeekAgo && topCategories.includes(v.category)
+      )).sort((a,b) => b.createdAt - a.createdAt).slice(0, 10);
+      addToUsed(tasteNew);
+
+      // SECTION 2: NUEVOS GENERALES (Pure Recency)
+      const generalNew = getUnused(availableVideos.filter(v => v.createdAt > oneWeekAgo))
+                         .sort((a,b) => b.createdAt - a.createdAt)
+                         .slice(0, 10);
+      addToUsed(generalNew);
+
+      // SECTION 4: MAS VISTOS (Trending)
+      const trending = getUnused(availableVideos)
+                       .sort((a,b) => b.views - a.views)
+                       .slice(0, 10);
+      addToUsed(trending);
+
+      // SECTION 3: BASADO EN GUSTOS (General Affinity)
+      // Shuffle to keep it fresh
+      const tasteGeneral = getUnused(availableVideos.filter(v => topCategories.includes(v.category)))
+                           .sort(() => 0.5 - Math.random())
+                           .slice(0, 12);
+      addToUsed(tasteGeneral);
+
+      // SECTION 6: DESCUBRIMIENTO / ALEATORIOS (The rest)
+      const discovery = getUnused(availableVideos).sort(() => 0.5 - Math.random());
+
+      return { tasteNew, generalNew, tasteGeneral, trending, subs, discovery };
+  };
+
+  // --- INITIAL LOAD ---
   useEffect(() => {
     const loadData = async () => {
         setLoading(true);
         try {
-            const allVideos = await db.getAllVideos();
-            setVideos(allVideos.sort((a: Video, b: Video) => b.createdAt - a.createdAt));
+            const all = await db.getAllVideos();
             
-            // Load custom categories
+            // Filter invalid
+            const validVideos = all.filter(v => v.category !== 'PENDING' && v.category !== 'PROCESSING');
+            setAllVideos(validVideos);
+
+            // Fetch watched status for UI
+            if (user) {
+                const act = await db.getUserActivity(user.id);
+                setWatchedIds(act.watched || []);
+            }
+
+            // Generate Feed
+            const smartData = await generateSmartFeed(validVideos, user?.id);
+            setFeed(smartData);
+
+            // Load config
             const settings = await db.getSystemSettings();
             if (settings && settings.customCategories) {
                 setCategories(['ALL', ...Object.values(VideoCategory) as string[], ...settings.customCategories]);
             }
         } catch (e) {
-            console.error("Failed to load home data", e);
+            console.error("Home Load Error", e);
         } finally {
             setLoading(false);
         }
     };
     loadData();
-  }, [user]);
+  }, [user]); // Re-run when user changes (login/logout) to refresh tastes
 
-  const processedList = useMemo(() => {
-      return videos.filter(v => {
+  // --- FILTERING LOGIC (For Search or Manual Category) ---
+  // When user types or selects a specific category, we bypass the Smart Feed
+  const isFilteredMode = searchQuery.trim() !== '' || activeCategory !== 'ALL';
+  
+  const filteredList = useMemo(() => {
+      if (!isFilteredMode) return [];
+      return allVideos.filter(v => {
           const matchCat = activeCategory === 'ALL' || v.category === activeCategory;
           const matchSearch = v.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                               v.creatorName.toLowerCase().includes(searchQuery.toLowerCase());
           return matchCat && matchSearch;
-      });
-  }, [videos, activeCategory, searchQuery]);
+      }).sort((a,b) => b.createdAt - a.createdAt);
+  }, [allVideos, activeCategory, searchQuery]);
 
-  // Infinite Scroll Observer
+  // Infinite Scroll for Discovery/Filtered
   useEffect(() => {
-      // If we already show everything, stop observing
-      if (visibleCount >= processedList.length) return;
+      const currentListLength = isFilteredMode ? filteredList.length : (feed?.discovery.length || 0);
+      if (visibleDiscovery >= currentListLength) return;
 
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
-              setVisibleCount(prev => prev + 12);
+              setVisibleDiscovery(prev => prev + 12);
           }
       }, { threshold: 0.1 });
 
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
-      
       return () => observer.disconnect();
-  }, [processedList.length, visibleCount]); // Ensure re-observation when counts change
+  }, [isFilteredMode, filteredList.length, feed, visibleDiscovery]);
 
   // Reset pagination on filter change
-  useEffect(() => {
-      setVisibleCount(12);
-  }, [activeCategory, searchQuery]);
-
-  const displayList = processedList.slice(0, visibleCount);
+  useEffect(() => { setVisibleDiscovery(12); }, [activeCategory, searchQuery]);
 
   // Helper for Card
   const isUnlocked = (videoId: string, creatorId: string) => {
       if (!user) return false;
       if (user.role === 'ADMIN' || user.id === creatorId) return true;
-      return false; 
+      return false; // Actually checked inside Card logic or Watch page more robustly
   };
 
   return (
     <div className="pb-20">
-      {/* Search & Filter Header */}
+      {/* Search & Filter Header (Sticky) */}
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-md py-4 -mx-4 px-4 md:-mx-0 md:px-0 mb-6 border-b border-slate-800/50">
           <div className="flex gap-2 mb-4">
               <div className="relative flex-1">
@@ -93,7 +232,7 @@ export default function Home() {
                       type="text" 
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search videos, creators..." 
+                      placeholder="Buscar videos, creadores..." 
                       className="w-full bg-slate-900 border border-slate-800 rounded-full pl-10 pr-4 py-2 text-sm text-white focus:border-indigo-500 outline-none transition-all"
                   />
                   {searchQuery && (
@@ -125,17 +264,21 @@ export default function Home() {
           <div className="flex justify-center py-20">
               <RefreshCw className="animate-spin text-indigo-500" size={32} />
           </div>
-      ) : (
-          <>
-             {displayList.length === 0 ? (
+      ) : isFilteredMode ? (
+          // --- FILTERED GRID VIEW (Standard) ---
+          <div className="animate-in fade-in">
+             <div className="mb-4 text-slate-400 text-sm font-bold flex items-center gap-2">
+                 <Filter size={16}/> Resultados de búsqueda
+             </div>
+             {filteredList.length === 0 ? (
                  <div className="text-center py-20 text-slate-500 flex flex-col items-center">
                      <Search size={48} className="mb-4 opacity-20" />
-                     <p>No videos found.</p>
-                     <button onClick={() => {setActiveCategory('ALL'); setSearchQuery('');}} className="text-indigo-400 text-sm mt-2 hover:underline">Clear filters</button>
+                     <p>No se encontraron videos.</p>
+                     <button onClick={() => {setActiveCategory('ALL'); setSearchQuery('');}} className="text-indigo-400 text-sm mt-2 hover:underline">Limpiar filtros</button>
                  </div>
              ) : (
                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-8 gap-x-4">
-                    {displayList.map(video => (
+                    {filteredList.slice(0, visibleDiscovery).map(video => (
                       <VideoCard 
                         key={video.id} 
                         video={video} 
@@ -146,31 +289,129 @@ export default function Home() {
                     ))}
                  </div>
              )}
-             
-             {/* Load More Trigger */}
-             {visibleCount < processedList.length && (
-                <div className="py-12 flex flex-col items-center gap-4">
-                    <div ref={loadMoreRef} className="h-4 w-4"></div> {/* Invisible trigger target */}
-                    
-                    <RefreshCw className="animate-spin text-slate-600" />
-                    
-                    {/* Manual Fallback Button if observer fails */}
-                    <button 
-                        onClick={() => setVisibleCount(prev => prev + 12)}
-                        className="text-xs text-indigo-400 hover:text-white underline"
-                    >
-                        Cargar más videos manualmente
-                    </button>
-                </div>
-             )}
-             
-             {/* End of List Message */}
-             {visibleCount >= processedList.length && processedList.length > 0 && (
-                 <div className="py-12 text-center text-slate-600 text-xs">
-                     Has llegado al final de la lista.
-                 </div>
-             )}
-          </>
+             <div ref={loadMoreRef} className="h-10"></div>
+          </div>
+      ) : (
+          // --- SMART FEED VIEW (6 Sections) ---
+          <div className="space-y-10 animate-in fade-in">
+              
+              {/* 1. Nuevos Basado en Gustos (Highlight) */}
+              {feed?.tasteNew && feed.tasteNew.length > 0 && (
+                  <section>
+                      <SectionHeader title="Nuevos para ti" icon={Sparkles} />
+                      <HorizontalScroll>
+                          {feed.tasteNew.map(video => (
+                              <div key={video.id} className="w-72 md:w-80 flex-shrink-0 snap-start">
+                                  <VideoCard 
+                                      video={video} 
+                                      isUnlocked={isUnlocked(video.id, video.creatorId)}
+                                      isWatched={watchedIds.includes(video.id)}
+                                  />
+                              </div>
+                          ))}
+                      </HorizontalScroll>
+                  </section>
+              )}
+
+              {/* 5. Suscripciones (If logged in and has subs) */}
+              {user && feed?.subs && feed.subs.length > 0 && (
+                  <section className="bg-slate-900/30 -mx-4 px-4 py-6 border-y border-slate-800/50">
+                      <SectionHeader title="De tus suscripciones" icon={UserCheck} />
+                      <HorizontalScroll>
+                          {feed.subs.map(video => (
+                              <div key={video.id} className="w-64 md:w-72 flex-shrink-0 snap-start">
+                                  <VideoCard 
+                                      video={video} 
+                                      isUnlocked={isUnlocked(video.id, video.creatorId)}
+                                      isWatched={watchedIds.includes(video.id)}
+                                  />
+                              </div>
+                          ))}
+                      </HorizontalScroll>
+                  </section>
+              )}
+
+              {/* 4. Tendencias (Most Viewed) */}
+              {feed?.trending && feed.trending.length > 0 && (
+                  <section>
+                      <SectionHeader title="Tendencias" icon={Flame} />
+                      <HorizontalScroll>
+                          {feed.trending.map((video, idx) => (
+                              <div key={video.id} className="w-72 md:w-80 flex-shrink-0 snap-start relative">
+                                  <div className="absolute -left-2 -top-4 text-[100px] font-black text-slate-800/50 z-0 pointer-events-none select-none drop-shadow-lg font-serif">
+                                      {idx + 1}
+                                  </div>
+                                  <div className="relative z-10 pl-4">
+                                    <VideoCard 
+                                        video={video} 
+                                        isUnlocked={isUnlocked(video.id, video.creatorId)}
+                                        isWatched={watchedIds.includes(video.id)}
+                                    />
+                                  </div>
+                              </div>
+                          ))}
+                      </HorizontalScroll>
+                  </section>
+              )}
+
+              {/* 2. Nuevos Generales */}
+              {feed?.generalNew && feed.generalNew.length > 0 && (
+                  <section>
+                      <SectionHeader title="Recién llegados" icon={Clock} />
+                      <HorizontalScroll>
+                          {feed.generalNew.map(video => (
+                              <div key={video.id} className="w-60 md:w-64 flex-shrink-0 snap-start">
+                                  <VideoCard 
+                                      video={video} 
+                                      isUnlocked={isUnlocked(video.id, video.creatorId)}
+                                      isWatched={watchedIds.includes(video.id)}
+                                  />
+                              </div>
+                          ))}
+                      </HorizontalScroll>
+                  </section>
+              )}
+
+              {/* 3. Basado en Gustos (General) */}
+              {feed?.tasteGeneral && feed.tasteGeneral.length > 0 && (
+                  <section>
+                      <SectionHeader title="Porque te gusta..." icon={Heart} />
+                      <HorizontalScroll>
+                          {feed.tasteGeneral.map(video => (
+                              <div key={video.id} className="w-72 md:w-80 flex-shrink-0 snap-start">
+                                  <VideoCard 
+                                      video={video} 
+                                      isUnlocked={isUnlocked(video.id, video.creatorId)}
+                                      isWatched={watchedIds.includes(video.id)}
+                                  />
+                              </div>
+                          ))}
+                      </HorizontalScroll>
+                  </section>
+              )}
+
+              {/* 6. Descubrimiento (Grid Final) */}
+              <section className="pt-4 border-t border-slate-800">
+                  <SectionHeader title="Descubrimiento" icon={Shuffle} />
+                  {feed?.discovery && feed.discovery.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-8 gap-x-4">
+                          {feed.discovery.slice(0, visibleDiscovery).map(video => (
+                              <VideoCard 
+                                  key={video.id} 
+                                  video={video} 
+                                  isUnlocked={isUnlocked(video.id, video.creatorId)}
+                                  isWatched={watchedIds.includes(video.id)}
+                              />
+                          ))}
+                      </div>
+                  ) : (
+                      <div className="text-center py-10 text-slate-500">No hay más videos para descubrir.</div>
+                  )}
+                  <div ref={loadMoreRef} className="h-20 flex items-center justify-center">
+                      {visibleDiscovery < (feed?.discovery.length || 0) && <RefreshCw className="animate-spin text-slate-600"/>}
+                  </div>
+              </section>
+          </div>
       )}
     </div>
   );

@@ -26,6 +26,11 @@ export default function Watch() {
     // Comment Form
     const [newComment, setNewComment] = useState('');
 
+    // Scroll to top on load
+    useEffect(() => {
+        window.scrollTo(0, 0);
+    }, [id]);
+
     // Load Video Metadata (Only runs on ID change)
     useEffect(() => {
         if (!id) return;
@@ -138,11 +143,17 @@ export default function Watch() {
     const videoSrc = getVideoSrc(video);
 
     return (
-        <div className="max-w-7xl mx-auto p-4 lg:px-8 flex flex-col lg:flex-row gap-6 animate-in fade-in">
-            {/* Main Content */}
-            <div className="flex-1 min-w-0">
-                {/* Player Container */}
-                <div className={`relative bg-black rounded-2xl overflow-hidden shadow-2xl mb-4 group border border-slate-800 ${isUnlocked ? 'aspect-video' : 'min-h-[450px] md:min-h-0 md:aspect-video'}`}>
+        <div className="flex flex-col animate-in fade-in min-h-screen bg-slate-950">
+            
+            {/* 
+                FULL WIDTH STICKY PLAYER 
+                - w-full: Full width
+                - sticky top-0: Sticks to top on scroll
+                - z-40: High z-index to stay above content
+                - md:top-[70px]: On desktop, account for the sticky header height
+            */}
+            <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-slate-800 transition-all duration-300">
+                <div className={`relative w-full mx-auto max-w-[2000px] ${isUnlocked ? 'aspect-video' : 'aspect-video md:aspect-[21/9] lg:aspect-video'}`}>
                     {isUnlocked && video ? (
                         <video 
                             src={videoSrc} 
@@ -150,18 +161,17 @@ export default function Watch() {
                             controls 
                             autoPlay 
                             playsInline
-                            className="w-full h-full"
+                            className="w-full h-full object-contain bg-black"
                             crossOrigin="anonymous"
                             onEnded={() => {
                                 if(user && !interaction?.isWatched) {
-                                    // Use silent catch for analytics to prevent offline crash
                                     db.markWatched(user.id, video.id).catch(() => {});
                                     setInteraction(prev => prev ? {...prev, isWatched: true} : null);
                                 }
                             }}
                         />
                     ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
+                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden">
                             {/* Background Image */}
                             <div className="absolute inset-0 z-0">
                                 {video && (
@@ -189,105 +199,112 @@ export default function Watch() {
                         </div>
                     )}
                 </div>
+            </div>
 
-                {/* Info */}
-                {video && (
-                    <div className="mb-6">
-                        <h1 className="text-xl md:text-2xl font-bold text-white mb-2">{video.title}</h1>
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-                            <div className="flex items-center gap-3">
-                                <Link to={`/channel/${video.creatorId}`}>
-                                    <div className="w-10 h-10 rounded-full bg-slate-700 overflow-hidden border border-slate-600">
-                                        {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-400">{video.creatorName[0]}</div>}
+            {/* Main Content Area (Constrained Width) */}
+            <div className="w-full max-w-7xl mx-auto p-4 lg:px-8 flex flex-col lg:flex-row gap-6 mt-4">
+                
+                {/* Info & Comments */}
+                <div className="flex-1 min-w-0">
+                    {/* Info */}
+                    {video && (
+                        <div className="mb-6">
+                            <h1 className="text-xl md:text-2xl font-bold text-white mb-2 leading-tight">{video.title}</h1>
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                                <div className="flex items-center gap-3">
+                                    <Link to={`/channel/${video.creatorId}`}>
+                                        <div className="w-10 h-10 rounded-full bg-slate-700 overflow-hidden border border-slate-600">
+                                            {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-400">{video.creatorName[0]}</div>}
+                                        </div>
+                                    </Link>
+                                    <div>
+                                        <Link to={`/channel/${video.creatorId}`} className="font-bold text-white hover:underline block">{video.creatorName}</Link>
+                                        <div className="text-xs text-slate-500">{new Date(video.createdAt * 1000).toLocaleDateString()}</div>
                                     </div>
-                                </Link>
-                                <div>
-                                    <Link to={`/channel/${video.creatorId}`} className="font-bold text-white hover:underline">{video.creatorName}</Link>
-                                    <div className="text-xs text-slate-500">{new Date(video.createdAt * 1000).toLocaleDateString()}</div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+                                    <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.liked ? 'text-indigo-400 border-indigo-500/50' : 'text-slate-400'}`}>
+                                        <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"}/>
+                                        <span className="text-sm font-bold">{video.likes}</span>
+                                    </button>
+                                    <button onClick={() => handleRate('dislike')} className={`px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.disliked ? 'text-red-400 border-red-500/50' : 'text-slate-400'}`}>
+                                        <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
+                                    </button>
+                                    <button className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors text-slate-400">
+                                        <Share2 size={18}/> <span className="hidden md:inline text-sm font-bold">Compartir</span>
+                                    </button>
                                 </div>
                             </div>
                             
-                            <div className="flex items-center gap-2">
-                                <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.liked ? 'text-indigo-400 border-indigo-500/50' : 'text-slate-400'}`}>
-                                    <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"}/>
-                                    <span className="text-sm font-bold">{video.likes}</span>
-                                </button>
-                                <button onClick={() => handleRate('dislike')} className={`px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.disliked ? 'text-red-400 border-red-500/50' : 'text-slate-400'}`}>
-                                    <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
-                                </button>
-                                <button className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors text-slate-400">
-                                    <Share2 size={18}/> <span className="hidden md:inline text-sm font-bold">Compartir</span>
-                                </button>
+                            <div className="bg-slate-900/50 rounded-xl p-4 mt-4 text-sm text-slate-300 whitespace-pre-wrap">
+                                {video.description || "Sin descripción."}
                             </div>
                         </div>
-                        
-                        <div className="bg-slate-900/50 rounded-xl p-4 mt-4 text-sm text-slate-300 whitespace-pre-wrap">
-                            {video.description || "Sin descripción."}
-                        </div>
-                    </div>
-                )}
-
-                {/* Comments */}
-                <div className="mb-8">
-                    <h3 className="font-bold text-white mb-4 flex items-center gap-2"><MessageCircle size={18}/> Comentarios ({comments.length})</h3>
-                    
-                    {user && (
-                        <form onSubmit={handlePostComment} className="flex gap-3 mb-6">
-                            <div className="w-8 h-8 rounded-full bg-slate-700 shrink-0 overflow-hidden border border-slate-600">
-                                {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : null}
-                            </div>
-                            <div className="flex-1">
-                                <input 
-                                    type="text" 
-                                    value={newComment} 
-                                    onChange={e => setNewComment(e.target.value)} 
-                                    className="w-full bg-transparent border-b border-slate-700 text-white pb-2 focus:border-indigo-500 outline-none transition-colors placeholder-slate-600"
-                                    placeholder="Añade un comentario..."
-                                />
-                                <div className="flex justify-end mt-2">
-                                    <button disabled={!newComment.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-full text-sm font-bold transition-colors">Comentar</button>
-                                </div>
-                            </div>
-                        </form>
                     )}
 
-                    <div className="space-y-4">
-                        {comments.map((c: Comment) => (
-                            <div key={c.id} className="flex gap-3 animate-in fade-in">
-                                <Link to={`/channel/${c.userId}`} className="w-8 h-8 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-slate-700">
-                                    {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-xs text-slate-500">{c.username[0]}</div>}
-                                </Link>
-                                <div>
-                                    <div className="flex items-baseline gap-2">
-                                        <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-white hover:underline">{c.username}</Link>
-                                        <span className="text-[10px] text-slate-600">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
-                                    </div>
-                                    <p className="text-sm text-slate-300 mt-0.5">{c.text}</p>
+                    {/* Comments */}
+                    <div className="mb-8">
+                        <h3 className="font-bold text-white mb-4 flex items-center gap-2"><MessageCircle size={18}/> Comentarios ({comments.length})</h3>
+                        
+                        {user && (
+                            <form onSubmit={handlePostComment} className="flex gap-3 mb-6">
+                                <div className="w-8 h-8 rounded-full bg-slate-700 shrink-0 overflow-hidden border border-slate-600">
+                                    {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : null}
                                 </div>
-                            </div>
-                        ))}
+                                <div className="flex-1">
+                                    <input 
+                                        type="text" 
+                                        value={newComment} 
+                                        onChange={e => setNewComment(e.target.value)} 
+                                        className="w-full bg-transparent border-b border-slate-700 text-white pb-2 focus:border-indigo-500 outline-none transition-colors placeholder-slate-600"
+                                        placeholder="Añade un comentario..."
+                                    />
+                                    <div className="flex justify-end mt-2">
+                                        <button disabled={!newComment.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-full text-sm font-bold transition-colors">Comentar</button>
+                                    </div>
+                                </div>
+                            </form>
+                        )}
+
+                        <div className="space-y-4">
+                            {comments.map((c: Comment) => (
+                                <div key={c.id} className="flex gap-3 animate-in fade-in">
+                                    <Link to={`/channel/${c.userId}`} className="w-8 h-8 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-slate-700">
+                                        {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-xs text-slate-500">{c.username[0]}</div>}
+                                    </Link>
+                                    <div>
+                                        <div className="flex items-baseline gap-2">
+                                            <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-white hover:underline">{c.username}</Link>
+                                            <span className="text-[10px] text-slate-600">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
+                                        </div>
+                                        <p className="text-sm text-slate-300 mt-0.5">{c.text}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            {/* Sidebar: Related */}
-            <div className="w-full lg:w-80 shrink-0">
-                <h3 className="font-bold text-white mb-4">A continuación</h3>
-                <div className="flex flex-col gap-3">
-                    {loadingRelated ? (
-                        <div className="text-center py-10 flex flex-col items-center">
-                            <Loader2 className="animate-spin text-indigo-500 mb-2" />
-                            <span className="text-slate-500 text-sm italic">Buscando sugerencias...</span>
-                        </div>
-                    ) : relatedVideos.length > 0 ? (
-                        relatedVideos.map((v: Video) => (
-                            <VideoCard key={v.id} video={v} isUnlocked={false} isWatched={false} />
-                        ))
-                    ) : (
-                        <div className="text-slate-500 text-sm text-center py-10 italic border border-slate-800 rounded-xl bg-slate-900/50">
-                            No hay videos relacionados.
-                        </div>
-                    )}
+                {/* Sidebar: Related */}
+                <div className="w-full lg:w-80 shrink-0">
+                    <h3 className="font-bold text-white mb-4">A continuación</h3>
+                    <div className="flex flex-col gap-3">
+                        {loadingRelated ? (
+                            <div className="text-center py-10 flex flex-col items-center">
+                                <Loader2 className="animate-spin text-indigo-500 mb-2" />
+                                <span className="text-slate-500 text-sm italic">Buscando sugerencias...</span>
+                            </div>
+                        ) : relatedVideos.length > 0 ? (
+                            relatedVideos.map((v: Video) => (
+                                <VideoCard key={v.id} video={v} isUnlocked={false} isWatched={false} />
+                            ))
+                        ) : (
+                            <div className="text-slate-500 text-sm text-center py-10 italic border border-slate-800 rounded-xl bg-slate-900/50">
+                                No hay videos relacionados.
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
