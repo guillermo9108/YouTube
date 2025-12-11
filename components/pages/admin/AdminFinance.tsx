@@ -9,13 +9,26 @@ import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUp
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
-    // Explicitly type the state to match db.getBalanceRequests() return type
-    const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({balance: [], vip: []});
+    
+    // CORRECTED STATE TYPE: Must match the object returned by db.getBalanceRequests()
+    const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({
+        balance: [], 
+        vip: []
+    });
+    
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
 
     const loadData = () => {
         db.getBalanceRequests()
-            .then(data => setRequests(data))
+            .then(data => {
+                // Ensure data structure matches expected state before setting
+                if (data && typeof data === 'object' && 'balance' in data && 'vip' in data) {
+                    setRequests(data);
+                } else {
+                    // Fallback for empty/malformed response
+                    setRequests({ balance: [], vip: [] });
+                }
+            })
             .catch(e => console.error("Failed to load requests", e));
             
         db.getGlobalTransactions()
@@ -50,8 +63,12 @@ export default function AdminFinance() {
     };
 
     const stats = useMemo(() => {
-        const pendingCount = requests.balance.length + requests.vip.length;
-        const totalPendingAmount = requests.balance.reduce((acc, r) => acc + Number(r.amount), 0);
+        // Safe access in case state is somehow malformed
+        const bal = requests.balance || [];
+        const vip = requests.vip || [];
+        
+        const pendingCount = bal.length + vip.length;
+        const totalPendingAmount = bal.reduce((acc, r) => acc + Number(r.amount), 0);
         return { pendingCount, totalPendingAmount };
     }, [requests]);
 
@@ -80,7 +97,7 @@ export default function AdminFinance() {
             </div>
 
             {/* VIP Requests Table */}
-            {requests.vip.length > 0 && (
+            {requests.vip && requests.vip.length > 0 && (
                 <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm mb-6">
                     <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
                         <Crown size={18} className="text-amber-400"/>
@@ -100,9 +117,10 @@ export default function AdminFinance() {
                                 {requests.vip.map(req => {
                                     // Handle potential string format from DB JSON column with safe casting
                                     const rawSnapshot = req.planSnapshot as any;
-                                    const plan = typeof rawSnapshot === 'string' 
-                                        ? JSON.parse(rawSnapshot) 
-                                        : rawSnapshot;
+                                    let plan: any = {};
+                                    try {
+                                        plan = typeof rawSnapshot === 'string' ? JSON.parse(rawSnapshot) : rawSnapshot;
+                                    } catch (e) { plan = { name: 'Error Plan', price: 0 }; }
                                         
                                     return (
                                         <tr key={req.id} className="hover:bg-slate-800/30 transition-colors">
@@ -142,7 +160,7 @@ export default function AdminFinance() {
                     <h3 className="font-bold text-white">Solicitudes de Saldo (Legacy)</h3>
                 </div>
                 
-                {requests.balance.length === 0 ? (
+                {(!requests.balance || requests.balance.length === 0) ? (
                     <div className="p-10 text-center text-slate-500 flex flex-col items-center gap-2">
                         <Check size={32} className="text-emerald-500/50"/>
                         <p>No hay solicitudes de saldo pendientes.</p>
