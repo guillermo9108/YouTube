@@ -1,4 +1,3 @@
-
 <?php
 ob_start();
 ini_set('display_errors', 0);
@@ -145,6 +144,7 @@ try {
         case 'admin_get_balance_requests': admin_get_balance_requests($pdo); break;
         case 'admin_get_global_transactions': admin_get_global_transactions($pdo); break;
         case 'admin_handle_balance_request': admin_handle_balance_request($pdo, $input); break;
+        case 'admin_handle_vip_request': admin_handle_vip_request($pdo, $input); break; // ADDED THIS LINE
         case 'admin_cleanup_videos': admin_cleanup_videos($pdo); break;
         case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;

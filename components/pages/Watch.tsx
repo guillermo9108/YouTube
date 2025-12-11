@@ -4,7 +4,7 @@ import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
-import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown } from 'lucide-react';
+import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
@@ -211,29 +211,30 @@ export default function Watch() {
                                 <div className="absolute inset-0 bg-black/60"></div>
                             </div>
                             
-                            {/* Compact Lock Card */}
+                            {/* Compact Lock Card - Optimized for Small Screens */}
                             {video && (
-                                <div className="relative z-20 bg-slate-900/90 backdrop-blur-md p-6 md:p-8 rounded-2xl border border-slate-700 text-center max-w-sm mx-4 shadow-2xl flex flex-col items-center">
-                                    <Lock className="mb-3 text-amber-400" size={40}/>
-                                    <h2 className="text-xl md:text-2xl font-bold text-white mb-2">Contenido Premium</h2>
-                                    <p className="text-slate-400 mb-4 text-xs md:text-sm">Este video requiere acceso para visualizarlo.</p>
-                                    <div className="text-3xl md:text-4xl font-black text-amber-400 mb-6">{video.price} $</div>
+                                <div className="relative z-20 bg-slate-900/95 backdrop-blur-xl p-4 md:p-8 rounded-xl border border-slate-700 text-center w-[90%] max-w-sm mx-auto shadow-2xl flex flex-col items-center">
+                                    <Lock className="mb-2 text-amber-400" size={32}/>
+                                    <h2 className="text-lg md:text-2xl font-bold text-white mb-1 leading-tight">Contenido Premium</h2>
+                                    <p className="text-slate-400 mb-3 text-[10px] md:text-sm">Necesitas desbloquear este video.</p>
+                                    
+                                    <div className="text-3xl md:text-4xl font-black text-amber-400 mb-4">{video.price} $</div>
                                     
                                     {user && user.balance < video.price ? (
                                         <div className="w-full space-y-2">
-                                            <div className="bg-red-900/20 border border-red-500/30 text-red-300 text-xs py-2 px-3 rounded-lg mb-2">
-                                                Saldo insuficiente ({user.balance.toFixed(2)} $)
+                                            <div className="bg-red-900/20 border border-red-500/30 text-red-300 text-[10px] py-1.5 px-2 rounded mb-1 font-mono">
+                                                Saldo: {user.balance.toFixed(2)} $
                                             </div>
                                             <button 
                                                 onClick={() => navigate('/vip')} 
-                                                className="w-full bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm"
+                                                className="w-full bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black font-bold py-2.5 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-xs md:text-sm"
                                             >
-                                                <Crown size={16}/> Obtener VIP / Recargar
+                                                <Crown size={14}/> Recargar / VIP
                                             </button>
                                         </div>
                                     ) : (
-                                        <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm md:text-base">
-                                            Desbloquear Ahora
+                                        <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm">
+                                            Desbloquear
                                         </button>
                                     )}
                                 </div>
@@ -248,14 +249,11 @@ export default function Watch() {
                 <div className="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs md:text-sm">
                     <span className="text-slate-400 flex items-center gap-2">
                         <AlertCircle className="text-amber-500" size={14} /> 
-                        ¿Problemas de audio/video?
+                        ¿Problemas?
                     </span>
                     <div className="flex gap-2">
                         <button onClick={() => openExternal('intent')} className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg border border-slate-700 transition-colors">
                             <MonitorPlay size={14} /> <span className="font-bold">App Externa</span>
-                        </button>
-                        <button onClick={() => openExternal('vlc')} className="hidden md:flex items-center gap-1 bg-orange-600/20 hover:bg-orange-600/40 text-orange-400 px-3 py-1.5 rounded-lg border border-orange-600/30 transition-colors">
-                            <ExternalLink size={14} /> <span className="font-bold">VLC</span>
                         </button>
                     </div>
                 </div>
@@ -370,5 +368,3 @@ export default function Watch() {
         </div>
     );
 }
-// Helper import needed for new icon
-import { AlertCircle } from 'lucide-react';
