@@ -13,8 +13,8 @@ export default function AdminFinance() {
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
 
     const loadData = () => {
-        db.getBalanceRequests().then(setRequests);
-        db.getGlobalTransactions().then(setGlobalTransactions);
+        db.getBalanceRequests().then(data => setRequests(data));
+        db.getGlobalTransactions().then(data => setGlobalTransactions(data));
     };
 
     useEffect(() => {
