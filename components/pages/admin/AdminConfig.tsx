@@ -193,7 +193,7 @@ export default function AdminConfig() {
                                 <input type="password" value={settings.tropipayClientSecret || ''} onChange={e => setSettings({...settings, tropipayClientSecret: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
                             </div>
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tasa Cambio (CUP -> 1 EUR)</label>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tasa Cambio (CUP &rarr; 1 EUR)</label>
                                 <div className="flex items-center gap-2">
                                     <span className="text-sm text-slate-400">1 EUR = </span>
                                     <input type="number" min="1" value={settings.currencyConversion || 1} onChange={e => setSettings({...settings, currencyConversion: parseFloat(e.target.value)})} className="w-24 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none text-center font-bold"/>
