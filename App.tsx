@@ -72,18 +72,22 @@ const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
 
 const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
   const [checkDone, setCheckDone] = useState(false);
-  const [needs, setNeeds] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
-    db.checkInstallation().then(() => {
-       setNeeds(db.needsSetup());
+    db.checkInstallation().then((res) => {
+       // Only force setup if we are explicitly told "not_installed".
+       // If "error" (offline/network issue), we assume installed to let offline cache work.
+       if (res.status === 'not_installed') {
+           setNeedsSetup(true);
+       }
        setCheckDone(true);
     });
   }, []);
 
   if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Conectando...</div>;
 
-  if (needs) {
+  if (needsSetup) {
     return <Navigate to="/setup" replace />;
   }
   return <>{children}</>;

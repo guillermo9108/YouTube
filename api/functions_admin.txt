@@ -98,6 +98,11 @@ function admin_handle_balance_request($pdo, $input) {
 
 // Database Cleanup: Removes DB rows if file is missing (Safe logic)
 function admin_cleanup_videos($pdo) {
+    // SECURITY: Ensure the upload directory is actually accessible before deleting DB records
+    if (!is_dir(UPLOAD_DIR) || !is_readable(UPLOAD_DIR)) {
+        respond(false, null, 'Error crítico: El directorio de videos no es accesible. Operación abortada para prevenir pérdida de datos.');
+    }
+
     $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE isLocal = 0");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $deleted = 0;
@@ -122,8 +127,6 @@ function admin_cleanup_system_files($pdo) {
     $stats = ['videos' => 0, 'thumbnails' => 0, 'avatars' => 0, 'market' => 0];
     
     // Helper to extract clean filename from DB path
-    // DB: "api/uploads/videos/file.mp4" -> "file.mp4"
-    // DB: "uploads/videos/file.mp4" -> "file.mp4"
     $cleanName = function($path) {
         return basename($path);
     };
@@ -135,7 +138,7 @@ function admin_cleanup_system_files($pdo) {
         $validVideos[] = $cleanName($path);
     }
     
-    if (is_dir(UPLOAD_DIR)) {
+    if (is_dir(UPLOAD_DIR) && is_readable(UPLOAD_DIR)) {
         $files = scandir(UPLOAD_DIR);
         foreach ($files as $f) {
             if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
@@ -152,10 +155,10 @@ function admin_cleanup_system_files($pdo) {
         $validThumbs[] = $cleanName($path);
     }
     
-    if (is_dir(THUMB_DIR)) {
+    if (is_dir(THUMB_DIR) && is_readable(THUMB_DIR)) {
         $files = scandir(THUMB_DIR);
         foreach ($files as $f) {
-            if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
+            if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess' || $f === 'default.jpg') continue;
             // Thumbnails usually have IDs, but let's be strict
             if (!in_array($f, $validThumbs)) {
                 if (unlink(THUMB_DIR . $f)) $stats['thumbnails']++;
@@ -171,7 +174,7 @@ function admin_cleanup_system_files($pdo) {
     }
     // Also include marketplace buyer/seller avatars cache if any (usually linked to users, but check notifications/messages if implemented)
     
-    if (is_dir(AVATAR_DIR)) {
+    if (is_dir(AVATAR_DIR) && is_readable(AVATAR_DIR)) {
         $files = scandir(AVATAR_DIR);
         foreach ($files as $f) {
             if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
@@ -193,7 +196,7 @@ function admin_cleanup_system_files($pdo) {
         }
     }
     
-    if (is_dir(MARKET_DIR)) {
+    if (is_dir(MARKET_DIR) && is_readable(MARKET_DIR)) {
         $files = scandir(MARKET_DIR);
         foreach ($files as $f) {
             if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;

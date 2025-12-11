@@ -59,12 +59,16 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   return (
     <div className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
       {/* Thumbnail Container */}
-      <Link to={`/watch/${video.id}`} onClick={handleClick} className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm group-hover:rounded-none transition-all duration-200 block">
+      <Link 
+        to={`/watch/${video.id}`} 
+        onClick={handleClick} 
+        className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm hover:shadow-xl hover:shadow-indigo-500/10 hover:scale-[1.02] transition-all duration-300 block ring-1 ring-white/5 hover:ring-indigo-500/30"
+      >
         {!imgError ? (
             <img 
               src={video.thumbnailUrl} 
               alt={video.title} 
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
               loading="lazy"
               decoding="async"
               onError={() => setImgError(true)}
@@ -109,7 +113,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         {/* Avatar -> Channel Link */}
         <Link to={`/channel/${video.creatorId}`} className="shrink-0 mt-0.5">
             {video.creatorAvatarUrl ? (
-                <img src={video.creatorAvatarUrl} className="w-9 h-9 rounded-full object-cover bg-slate-800" alt={video.creatorName} />
+                <img src={video.creatorAvatarUrl} className="w-9 h-9 rounded-full object-cover bg-slate-800 border border-slate-800 group-hover:border-indigo-500/50 transition-colors" alt={video.creatorName} />
             ) : (
                 <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white shadow-inner">
                     {video.creatorName[0]}

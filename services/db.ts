@@ -1,3 +1,4 @@
+
 import { 
     User, Video, Transaction, Comment, UserInteraction, 
     SystemSettings, VideoCategory, MarketplaceItem, 
@@ -62,7 +63,6 @@ export class DBService {
          const token = localStorage.getItem('sp_session_token');
          if (token) headers['Authorization'] = `Bearer ${token}`;
 
-         // FIX: Action name was 'update_video_meta' but backend expects 'update_video_metadata'
          const res = await fetch(`${this.baseUrl}?action=update_video_metadata`, { 
              method: 'POST', 
              body: formData,
@@ -242,7 +242,6 @@ export class DBService {
     }
 
     async adminAddBalance(adminId: string, targetId: string, amount: number): Promise<void> {
-        // Backend expects 'targetUserId'
         return this.request(`action=admin_add_balance`, { method: 'POST', body: JSON.stringify({adminId, targetUserId: targetId, amount})});
     }
     
@@ -259,8 +258,6 @@ export class DBService {
     // --- Requests ---
 
     async searchExternal(q: string, src: string): Promise<VideoResult[]> { 
-        // Must be POST if using body, or GET with query params. Backend expects $input for query/source?
-        // functions_admin.txt: admin_search_external uses $input['query']. $input comes from JSON body usually.
         return this.request<VideoResult[]>(`action=search_external`, { method: 'POST', body: JSON.stringify({query: q, source: src}) }); 
     }
 
@@ -285,8 +282,14 @@ export class DBService {
     invalidateCache(key: string) { localStorage.removeItem('sp_cache_' + key); }
     setHomeDirty() { this.invalidateCache('get_videos'); }
     
-    async checkInstallation(): Promise<any> { 
-        try { return await this.request('action=check'); } catch(e) { return { installed: false }; } 
+    // Improved Check Installation handling Offline mode
+    async checkInstallation(): Promise<{status: 'installed' | 'not_installed' | 'error'}> { 
+        try { 
+            const res = await this.request<any>('action=check'); 
+            return { status: res.installed ? 'installed' : 'not_installed' };
+        } catch(e) { 
+            return { status: 'error' }; 
+        } 
     }
     
     needsSetup(): boolean { return false; } 
@@ -294,8 +297,6 @@ export class DBService {
     // --- Admin Library ---
 
     async scanLocalLibrary(path: string): Promise<any> { 
-        // FIX: Action was 'scan_library', backend has 'scan_local_library'
-        // FIX: Path via POST body is safer for paths with weird chars
         return this.request(`action=scan_local_library`, { method: 'POST', body: JSON.stringify({path}) }); 
     }
 
@@ -341,7 +342,6 @@ export class DBService {
     }
 
     async handleBalanceRequest(adminId: string, reqId: string, status: string): Promise<void> {
-        // FIX: Backend expects 'requestId' and 'action'
         return this.request(`action=admin_handle_balance_request`, { method: 'POST', body: JSON.stringify({adminId, requestId: reqId, action: status})});
     }
 
@@ -403,7 +403,6 @@ export class DBService {
     }
 
     async adminGetMarketplaceItems(): Promise<MarketplaceItem[]> { 
-        // FIX: Backend has 'market_admin_get_items' bound to 'admin_get_marketplace_items'
         return this.request<MarketplaceItem[]>(`action=admin_get_marketplace_items`); 
     }
 
@@ -414,7 +413,6 @@ export class DBService {
     // --- Admin Tools ---
 
     async adminCleanupSystemFiles(): Promise<any> { 
-        // FIX: Action is 'admin_cleanup_system_files'
         return this.request(`action=admin_cleanup_system_files`); 
     }
 
@@ -423,7 +421,6 @@ export class DBService {
     }
 
     async getSmartCleanerPreview(cat: string, pct: number, days: number): Promise<SmartCleanerResult> {
-        // FIX: Must be POST because backend reads from $input
         return this.request<SmartCleanerResult>(`action=admin_smart_cleaner_preview`, {
             method: 'POST',
             body: JSON.stringify({ category: cat, percentage: pct, safeHarborDays: days })
@@ -431,7 +428,6 @@ export class DBService {
     }
 
     async executeSmartCleaner(ids: string[]): Promise<any> {
-        // FIX: Backend expects 'videoIds' not 'ids'
         return this.request(`action=admin_smart_cleaner_execute`, { method: 'POST', body: JSON.stringify({videoIds: ids})});
     }
 

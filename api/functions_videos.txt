@@ -166,7 +166,29 @@ function video_upload($pdo, $post, $files) {
     $category = $post['category'];
     $desc = $post['description'] ?? '';
 
-    if (!isset($files['video']) || $files['video']['error'] !== UPLOAD_ERR_OK) respond(false, null, 'Video file missing');
+    // Robust error handling for PHP limits
+    if (!isset($files['video']) || $files['video']['error'] !== UPLOAD_ERR_OK) {
+        $err = isset($files['video']) ? $files['video']['error'] : 'No File Sent';
+        $msg = 'Video file upload failed';
+        
+        // PHP Limit Errors
+        if ($err == UPLOAD_ERR_INI_SIZE || $err == UPLOAD_ERR_FORM_SIZE) {
+            $max = ini_get('upload_max_filesize');
+            $msg = "File too large for server limits (Max: $max). Check php.ini upload_max_filesize.";
+        } else if ($err == UPLOAD_ERR_PARTIAL) {
+            $msg = "Upload interrupted/partial.";
+        } else if ($err == UPLOAD_ERR_NO_TMP_DIR) {
+            $msg = "Server missing temp folder.";
+        } else if ($err == 'No File Sent') {
+            // Check if POST size limit was hit globally
+            $pMax = ini_get('post_max_size');
+            if (empty($_POST) && empty($_FILES) && $_SERVER['CONTENT_LENGTH'] > 0) {
+                $msg = "Upload exceeded POST limit (Max: $pMax). Check php.ini post_max_size.";
+            }
+        }
+        
+        respond(false, null, $msg);
+    }
 
     $vidId = 'v_' . uniqid();
     $vidExt = strtolower(pathinfo($files['video']['name'], PATHINFO_EXTENSION));
@@ -175,7 +197,9 @@ function video_upload($pdo, $post, $files) {
     // Ensure directory exists
     if (!is_dir(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
     
-    move_uploaded_file($files['video']['tmp_name'], UPLOAD_DIR . $vidName);
+    if (!move_uploaded_file($files['video']['tmp_name'], UPLOAD_DIR . $vidName)) {
+        respond(false, null, 'Failed to move uploaded file. Check permissions.');
+    }
 
     // FIX: Use local placeholder if no thumb uploaded, for offline support
     $thumbPath = "api/uploads/thumbnails/default.jpg";
@@ -371,7 +395,7 @@ function video_ftp_scan_recursive($pdo, $input) {
                 $thumbPath = "api/uploads/thumbnails/default.jpg";
                 
                 $stmtInsert->execute([$vidId, $filename, "FTP Stream", $thumbPath, $path, $adminId, time()]);
-                $added++;
+                $addedCount++;
             }
         }
         
@@ -529,9 +553,14 @@ function video_get_unprocessed($pdo) {
     // Only get videos marked PENDING.
     // CRITICAL: Must select isLocal to allow video_process_rows to transform paths!
     $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 10000;
-    if ($limit <= 0) $limit = 10000; // Unlimited effectively
+    if ($limit <= 0) $limit = 10000; 
     
-    $sql = "SELECT id, videoUrl, title, thumbnailUrl, isLocal FROM videos WHERE category = 'PENDING' LIMIT $limit";
+    // SUPPORT GRID MODE (RANDOM)
+    // If 'mode' is 'random', we pick random entries so concurrent clients don't process the same file.
+    $mode = isset($_GET['mode']) ? $_GET['mode'] : 'normal';
+    $orderBy = ($mode === 'random') ? 'RAND()' : 'id ASC';
+    
+    $sql = "SELECT id, videoUrl, title, thumbnailUrl, isLocal FROM videos WHERE category = 'PENDING' ORDER BY $orderBy LIMIT $limit";
     $stmt = $pdo->query($sql);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);

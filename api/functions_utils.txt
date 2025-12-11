@@ -276,7 +276,8 @@ function streamVideo($filePath, $pdo) {
     
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(0); }
 
-    // Check FTP
+    // Check FTP (Redundant query here but safe for integrity, assumes $pdo is passed)
+    // To optimize, index_code.txt could pass $isLocal, but maintaining function signature is safer for now.
     $stmt = $pdo->prepare("SELECT isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
     $stmt->execute([$filePath, "api/" . $filePath]);
     $isLocal = $stmt->fetchColumn();
@@ -296,7 +297,11 @@ function streamVideo($filePath, $pdo) {
         if (!$resource) { http_response_code(404); exit; }
         
         header('Content-Type: video/mp4');
-        fpassthru($resource);
+        while (!feof($resource)) {
+            echo fread($resource, 8192);
+            flush();
+            if (connection_aborted()) { fclose($resource); exit; }
+        }
         fclose($resource);
         exit;
     } else {
@@ -314,8 +319,9 @@ function streamVideo($filePath, $pdo) {
         $fileSize = sprintf("%u", filesize($realPath));
         $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
         $mimeTypes = [
-            'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/mp4', 
-            'mov' => 'video/quicktime', 'avi' => 'video/x-msvideo', 'mp3' => 'audio/mpeg'
+            'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/x-matroska', 
+            'mov' => 'video/quicktime', 'avi' => 'video/x-msvideo', 'mp3' => 'audio/mpeg',
+            'm4v' => 'video/mp4', 'mpg' => 'video/mpeg', 'mpeg' => 'video/mpeg'
         ];
         $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'video/mp4';
         
@@ -347,11 +353,16 @@ function streamVideo($filePath, $pdo) {
         $fp = fopen($realPath, 'rb');
         if ($offset > 0) fseek($fp, $offset);
         
-        $buffer = 1024 * 256; 
+        $buffer = 1024 * 256; // 256KB buffer chunks
         while (!feof($fp) && ($p = ftell($fp)) <= $offset + $length) {
             if ($p + $buffer > $offset + $length) $buffer = $offset + $length - $p + 1;
             echo fread($fp, $buffer);
             flush();
+            // CRITICAL: Stop script if client disconnects to prevent server CPU hang
+            if (connection_aborted()) {
+                fclose($fp);
+                exit;
+            }
         }
         fclose($fp);
         exit;
