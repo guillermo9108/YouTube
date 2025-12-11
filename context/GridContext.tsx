@@ -19,16 +19,25 @@ export const useGrid = () => {
     return context;
 };
 
+// Configurable pause between tasks (in ms)
+const TIMEOUT_BETWEEN_TASKS = 10000; // 10 seconds pause between "ads"
+
 export const GridProvider = ({ children }: { children?: React.ReactNode }) => {
     const { user } = useAuth();
     const [activeTask, setActiveTask] = useState<Video | null>(null);
     const [isIdle, setIsIdle] = useState(true);
+    
+    // Refs to manage intervals and pauses
     const intervalRef = useRef<number | null>(null);
     const processingRef = useRef(false);
+    const nextFetchTimeRef = useRef<number>(0);
 
     const fetchNextTask = async () => {
-        // Don't fetch if already have a task or currently processing logic
-        if (activeTask || processingRef.current) return;
+        // Conditions to NOT fetch:
+        // 1. Already have a task
+        // 2. Currently processing logic
+        // 3. We are in the "pause" period (cooldown)
+        if (activeTask || processingRef.current || Date.now() < nextFetchTimeRef.current) return;
         
         try {
             // Get 1 random pending video
@@ -52,35 +61,38 @@ export const GridProvider = ({ children }: { children?: React.ReactNode }) => {
         
         try {
             await db.updateVideoMetadata(activeTask.id, duration, thumbnail);
-            // Short delay before next task to allow UI to show "Done" state
+            // Visual delay to show "Done" state in UI
             await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (e) {
             console.error("Task submission failed", e);
         } finally {
             setActiveTask(null);
             processingRef.current = false;
-            // Try to fetch next immediately
-            fetchNextTask();
+            
+            // Set cooldown timer
+            nextFetchTimeRef.current = Date.now() + TIMEOUT_BETWEEN_TASKS;
+            setIsIdle(true);
         }
     };
 
     const skipTask = () => {
         setActiveTask(null);
         processingRef.current = false;
+        // If skipped (error or closed), wait a bit shorter time (e.g. 5s)
+        nextFetchTimeRef.current = Date.now() + 5000; 
+        setIsIdle(true);
     };
 
     // Poll for tasks
     useEffect(() => {
         if (user) {
-            // Initial check
-            fetchNextTask();
-
-            // Periodic check (every 10 seconds)
+            // Periodic check loop
             intervalRef.current = window.setInterval(() => {
+                // Only fetch if tab is active and we don't have a task
                 if (!document.hidden && !activeTask) {
                     fetchNextTask();
                 }
-            }, 10000);
+            }, 5000); // Check every 5 seconds (but fetchNextTask respects the cooldown)
         }
 
         return () => {

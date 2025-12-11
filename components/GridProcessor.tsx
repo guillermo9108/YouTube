@@ -1,159 +1,163 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import { useGrid } from '../context/GridContext';
-import { Loader2, CheckCircle2, Film, X } from 'lucide-react';
+import { Loader2, Check, X, Sparkles } from 'lucide-react';
 
 export default function GridProcessor() {
     const { activeTask, completeTask, skipTask } = useGrid();
     const videoRef = useRef<HTMLVideoElement>(null);
-    const [status, setStatus] = useState<'LOADING' | 'PROCESSING' | 'DONE' | 'ERROR'>('LOADING');
-    const [progress, setProgress] = useState(0);
+    const [status, setStatus] = useState<'INIT' | 'CAPTURING' | 'DONE' | 'ERROR'>('INIT');
+    const processedRef = useRef(false);
 
     // Reset state when task changes
     useEffect(() => {
         if (activeTask) {
-            setStatus('LOADING');
-            setProgress(0);
+            setStatus('INIT');
+            processedRef.current = false;
         }
     }, [activeTask]);
 
-    // Handle Processing Logic
+    // --- STEP 2 LOGIC (Robust Streaming & Capture) ---
     useEffect(() => {
         const vid = videoRef.current;
         if (!activeTask || !vid) return;
 
-        // Ensure we use the stream URL to avoid CORS issues
-        let src = activeTask.videoUrl;
-        const isLocal = Boolean(activeTask.isLocal) || (activeTask as any).isLocal === 1;
-        if (isLocal && !src.includes('action=stream')) {
-            src = `api/index.php?action=stream&id=${activeTask.id}`;
+        // 1. URL Transformation (Critical for Local Files)
+        let streamSrc = activeTask.videoUrl;
+        const isLocal = Boolean(activeTask.isLocal) || (activeTask as any).isLocal === 1 || (activeTask as any).isLocal === "1";
+        if (isLocal && !streamSrc.includes('action=stream')) {
+            streamSrc = `api/index.php?action=stream&id=${activeTask.id}`;
         }
-        vid.src = src;
-        vid.load();
 
-        const handleCanPlay = () => {
-            // Seek to a random point (between 10% and 30%) to avoid black frames at start
-            if (status === 'LOADING') {
-                const targetTime = Math.max(2, vid.duration * 0.15); // At least 2 seconds in
-                vid.currentTime = targetTime;
-                setStatus('PROCESSING');
+        // 2. Setup Video
+        vid.src = streamSrc;
+        vid.currentTime = 0;
+        vid.muted = true; // Required for autoplay
+        
+        // 3. Attempt Play
+        const startPlay = async () => {
+            try {
+                await vid.play();
+                setStatus('CAPTURING');
+            } catch (e) {
+                console.warn("Autoplay blocked, waiting for interaction or retry", e);
+                // Even if blocked, sometimes loading metadata is enough for a black frame, 
+                // but we really want playback for a valid thumb.
+                // We'll try to capture anyway after a timeout if play fails.
             }
         };
+        startPlay();
 
-        const handleSeeked = () => {
-            if (status === 'PROCESSING') {
-                captureAndSubmit();
+        // Safety Timeout: If nothing happens in 15s, skip to avoid getting stuck
+        const safetyTimer = setTimeout(() => {
+            if (!processedRef.current) {
+                console.warn("GridProcessor timeout for:", activeTask.title);
+                skipTask();
             }
-        };
-
-        const handleError = () => {
-            console.warn("GridProcessor: Error loading video", activeTask.title);
-            setStatus('ERROR');
-            setTimeout(skipTask, 1000);
-        };
-
-        vid.addEventListener('loadeddata', handleCanPlay);
-        vid.addEventListener('seeked', handleSeeked);
-        vid.addEventListener('error', handleError);
+        }, 15000);
 
         return () => {
-            vid.removeEventListener('loadeddata', handleCanPlay);
-            vid.removeEventListener('seeked', handleSeeked);
-            vid.removeEventListener('error', handleError);
-            vid.removeAttribute('src'); // Cleanup
+            clearTimeout(safetyTimer);
+            vid.removeAttribute('src');
+            vid.load();
         };
-    }, [activeTask, status]);
+    }, [activeTask]);
 
-    const captureAndSubmit = async () => {
-        const vid = videoRef.current;
-        if (!vid) return;
+    const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+        const vid = e.currentTarget;
+        if (!activeTask || processedRef.current) return;
 
-        try {
-            const canvas = document.createElement('canvas');
-            canvas.width = 640;
-            canvas.height = 360;
-            const ctx = canvas.getContext('2d');
+        // --- CAPTURE LOGIC (From AdminLibrary Step 2) ---
+        // Wait for > 1.0s to ensure we aren't getting a black starting frame
+        if (vid.currentTime > 1.0) {
+            vid.pause();
+            processedRef.current = true;
             
-            if (ctx) {
-                ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+            try {
+                const canvas = document.createElement('canvas');
+                // Use actual dimensions if available, else 640x360 default
+                canvas.width = vid.videoWidth || 640;
+                canvas.height = vid.videoHeight || 360;
+                const ctx = canvas.getContext('2d');
                 
-                canvas.toBlob(async (blob) => {
-                    if (blob) {
+                if (ctx) {
+                    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+                    canvas.toBlob(async (blob) => {
                         setStatus('DONE');
-                        const file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
-                        await completeTask(vid.duration, file);
-                    } else {
-                        // Failed to blob, submit just duration
-                        await completeTask(vid.duration, null);
-                    }
-                }, 'image/jpeg', 0.7);
+                        if (blob) {
+                            const file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
+                            await completeTask(vid.duration || 0, file);
+                        } else {
+                            await completeTask(vid.duration || 0, null);
+                        }
+                    }, 'image/jpeg', 0.7);
+                } else {
+                    completeTask(vid.duration || 0, null);
+                }
+            } catch (err) {
+                console.error("Canvas error", err);
+                completeTask(vid.duration || 0, null);
             }
-        } catch (e) {
-            // CORS error likely, submit duration only
-            await completeTask(vid.duration, null);
+        }
+    };
+
+    const handleError = () => {
+        if (!processedRef.current) {
+            setStatus('ERROR');
+            setTimeout(skipTask, 1000);
         }
     };
 
     if (!activeTask) return null;
 
+    // --- COMPACT UI ---
     return (
-        <div className="fixed bottom-20 right-4 md:bottom-4 md:right-4 z-50 animate-in slide-in-from-bottom-10 fade-in duration-500">
-            <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden w-72 flex flex-col">
-                {/* Header */}
-                <div className="bg-slate-950 p-3 border-b border-slate-800 flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                        {status === 'DONE' ? (
-                            <CheckCircle2 size={16} className="text-emerald-400" />
-                        ) : (
-                            <Loader2 size={16} className="text-indigo-400 animate-spin" />
-                        )}
-                        <span className="text-xs font-bold text-white uppercase tracking-wider">
-                            {status === 'DONE' ? 'Completado' : 'Analizando Contenido'}
-                        </span>
-                    </div>
-                    {status !== 'DONE' && (
-                        <button onClick={skipTask} className="text-slate-500 hover:text-white"><X size={14}/></button>
+        <div className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-50 animate-in slide-in-from-right fade-in duration-500">
+            <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-lg shadow-2xl flex items-center p-2 gap-3 w-64 overflow-hidden relative">
+                
+                {/* Close Button */}
+                <button 
+                    onClick={skipTask} 
+                    className="absolute top-1 right-1 text-slate-500 hover:text-white bg-slate-900/50 rounded-full p-0.5 z-20"
+                >
+                    <X size={12} />
+                </button>
+
+                {/* Mini Player / Thumbnail Preview */}
+                <div className="w-16 h-10 bg-black rounded overflow-hidden shrink-0 border border-slate-800 relative">
+                    <video 
+                        ref={videoRef}
+                        className={`w-full h-full object-cover ${status === 'DONE' ? 'opacity-50' : 'opacity-100'}`}
+                        muted
+                        playsInline
+                        crossOrigin="anonymous"
+                        onTimeUpdate={handleTimeUpdate}
+                        onError={handleError}
+                    />
+                    {status === 'DONE' && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                            <Check size={16} className="text-emerald-400" />
+                        </div>
                     )}
                 </div>
 
-                {/* Content */}
-                <div className="p-3 flex gap-3 items-center relative bg-slate-900/80 backdrop-blur-md">
-                    {/* Mini Player */}
-                    <div className="w-20 h-12 bg-black rounded-lg overflow-hidden shrink-0 border border-slate-700 relative">
-                        <video 
-                            ref={videoRef}
-                            className={`w-full h-full object-cover ${status === 'DONE' ? 'opacity-50' : 'opacity-100'}`}
-                            muted
-                            crossOrigin="anonymous"
-                            playsInline
-                        />
-                        {status === 'DONE' && (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                                <CheckCircle2 size={20} className="text-emerald-400 drop-shadow-md"/>
-                            </div>
-                        )}
+                {/* Compact Info */}
+                <div className="flex-1 min-w-0 flex flex-col justify-center h-full">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                        <Sparkles size={10} className="text-amber-400" />
+                        <span className="text-[10px] font-black text-amber-400 uppercase tracking-wide">
+                            {status === 'DONE' ? '¡AGREGADO!' : 'NUEVO'}
+                        </span>
                     </div>
-
-                    {/* Text */}
-                    <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold text-white truncate mb-1">
-                            {activeTask.title}
-                        </div>
-                        <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                            {status === 'LOADING' && 'Cargando stream...'}
-                            {status === 'PROCESSING' && 'Generando vista previa...'}
-                            {status === 'DONE' && '¡Video agregado a la librería!'}
-                            {status === 'ERROR' && 'Error al procesar.'}
-                        </div>
+                    <div className="text-xs font-bold text-white truncate w-full" title={activeTask.title}>
+                        {activeTask.title}
                     </div>
+                    {status === 'CAPTURING' && (
+                        <div className="w-full h-0.5 bg-slate-800 rounded-full mt-1 overflow-hidden">
+                            <div className="h-full bg-indigo-500 animate-progress-indeterminate"></div>
+                        </div>
+                    )}
                 </div>
-
-                {/* Progress Bar (Fake but visual feedback) */}
-                {status !== 'DONE' && (
-                    <div className="h-1 bg-slate-800 w-full">
-                        <div className="h-full bg-indigo-500 animate-progress-indeterminate"></div>
-                    </div>
-                )}
             </div>
         </div>
     );
