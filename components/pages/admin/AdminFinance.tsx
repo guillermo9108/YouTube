@@ -21,6 +21,7 @@ export default function AdminFinance() {
         db.getBalanceRequests()
             .then(data => {
                 if (data && typeof data === 'object') {
+                    // Safe set ensuring arrays exist
                     setRequests({
                         balance: Array.isArray(data.balance) ? data.balance : [],
                         vip: Array.isArray(data.vip) ? data.vip : []
