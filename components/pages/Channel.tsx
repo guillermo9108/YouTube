@@ -1,9 +1,10 @@
+
 import React, { useEffect, useState } from 'react';
-import { useParams } from '../components/Router';
-import { db } from '../services/db';
-import { User, Video } from '../types';
-import VideoCard from '../components/VideoCard';
-import { useAuth } from '../context/AuthContext';
+import { useParams } from '../Router';
+import { db } from '../../services/db';
+import { User, Video } from '../../types';
+import VideoCard from '../VideoCard';
+import { useAuth } from '../../context/AuthContext';
 import { User as UserIcon, Bell, Loader2, Check, Trash2 } from 'lucide-react';
 
 export default function Channel() {
@@ -36,14 +37,14 @@ export default function Channel() {
             setVideos(vids);
 
             // 3. Calc Stats
-            const totalViews = vids.reduce((acc, curr) => acc + Number(curr.views), 0);
+            const totalViews = vids.reduce((acc: number, curr: Video) => acc + Number(curr.views), 0);
             setStats({ views: totalViews, uploads: vids.length });
 
             // 4. Check purchases & Subscription
             if (currentUser) {
-                const checks = vids.map(v => db.hasPurchased(currentUser.id, v.id));
+                const checks = vids.map((v: Video) => db.hasPurchased(currentUser.id, v.id));
                 const results = await Promise.all(checks);
-                const p = vids.filter((_, i) => results[i]).map(v => v.id);
+                const p = vids.filter((_: Video, i: number) => results[i]).map((v: Video) => v.id);
                 setPurchases(p);
                 
                 const subStatus = await db.checkSubscription(currentUser.id, userId);

@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import VideoCard from '../components/VideoCard';
-import { useAuth } from '../context/AuthContext';
-import { db } from '../services/db';
-import { Video, VideoCategory } from '../types';
+import VideoCard from '../VideoCard';
+import { useAuth } from '../../context/AuthContext';
+import { db } from '../../services/db';
+import { Video, VideoCategory } from '../../types';
 import { RefreshCw, Search, Filter, X, ArrowDown } from 'lucide-react';
-import { Link } from '../components/Router';
+import { Link } from '../Router';
 
 export default function Home() {
   const { user } = useAuth();
@@ -27,7 +27,7 @@ export default function Home() {
         setLoading(true);
         try {
             const allVideos = await db.getAllVideos();
-            setVideos(allVideos.sort((a, b) => b.createdAt - a.createdAt));
+            setVideos(allVideos.sort((a: Video, b: Video) => b.createdAt - a.createdAt));
             
             // Load custom categories
             const settings = await db.getSystemSettings();

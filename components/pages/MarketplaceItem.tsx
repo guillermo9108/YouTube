@@ -1,9 +1,10 @@
+
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from '../components/Router';
-import { db } from '../services/db';
-import { MarketplaceItem, MarketplaceReview } from '../types';
-import { useCart } from '../context/CartContext';
-import { useAuth } from '../context/AuthContext';
+import { useParams, useNavigate } from '../Router';
+import { db } from '../../services/db';
+import { MarketplaceItem, MarketplaceReview, CartItem } from '../../types';
+import { useCart } from '../../context/CartContext';
+import { useAuth } from '../../context/AuthContext';
 import { ShoppingBag, ChevronLeft, User, Tag, ShieldCheck, ShoppingCart, Star, Edit3, Send, AlertTriangle, Check } from 'lucide-react';
 
 export default function MarketplaceItemView() {
@@ -24,7 +25,7 @@ export default function MarketplaceItemView() {
 
     useEffect(() => {
         if(id) {
-            db.getMarketplaceItem(id).then(data => {
+            db.getMarketplaceItem(id).then((data: MarketplaceItem | null) => {
                 if (data) setItem(data);
                 setLoading(false);
             });
@@ -49,7 +50,7 @@ export default function MarketplaceItemView() {
     if (loading) return <div className="text-center p-10 text-slate-500">Cargando...</div>;
     if (!item) return <div className="text-center p-10 text-slate-500">Artículo no encontrado</div>;
 
-    const isInCart = cart.some(c => c.id === item.id);
+    const isInCart = cart.some((c: CartItem) => c.id === item.id);
     const isSeller = user?.id === item.sellerId;
 
     return (
@@ -82,7 +83,7 @@ export default function MarketplaceItemView() {
                     </div>
                     {item.images && item.images.length > 1 && (
                         <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                            {item.images.map((img, i) => (
+                            {item.images.map((img: string, i: number) => (
                                 <button key={i} onClick={() => setActiveImg(i)} className={`w-16 h-16 rounded-lg overflow-hidden border-2 shrink-0 ${activeImg === i ? 'border-indigo-500' : 'border-slate-800 opacity-60'}`}>
                                     <img src={img} className="w-full h-full object-cover" />
                                 </button>

@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../../services/db';
-import { User } from '../../types';
-import { useAuth } from '../../context/AuthContext';
-import { useToast } from '../../context/ToastContext';
+import { db } from '../../../services/db';
+import { User } from '../../../types';
+import { useAuth } from '../../../context/AuthContext';
+import { useToast } from '../../../context/ToastContext';
 import { PlusCircle, Search, Users, Wallet, Shield, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const StatCard = ({ label, value, icon: Icon, color }: any) => (

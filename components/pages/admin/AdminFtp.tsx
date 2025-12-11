@@ -1,13 +1,10 @@
 
-
-
-
 import React, { useState, useEffect } from 'react';
-import { db } from '../../services/db';
-import { useToast } from '../../context/ToastContext';
+import { db } from '../../../services/db';
+import { useToast } from '../../../context/ToastContext';
 import { Network, Save, RefreshCw, Download, Folder, FileVideo, HardDrive, FilePlus, Layers, ArrowRight } from 'lucide-react';
-import { useNavigate } from '../../components/Router';
-import { FtpFile } from '../../types';
+import { useNavigate } from '../../../components/Router';
+import { FtpFile } from '../../../types';
 
 export default function AdminFtp() {
     const toast = useToast();

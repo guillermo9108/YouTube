@@ -1,10 +1,10 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft } from 'lucide-react';
-import { db } from '../services/db';
-import { Video, Comment, UserInteraction } from '../types';
-import { useAuth } from '../context/AuthContext';
-import { Link } from '../components/Router';
+import { db } from '../../services/db';
+import { Video, Comment, UserInteraction } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+import { Link } from '../Router';
 
 // --- Individual Short Component ---
 
@@ -205,7 +205,7 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
                 onWaiting={() => setIsBuffering(true)}
                 onPlaying={() => setIsBuffering(false)}
                 crossOrigin="anonymous"
-                onTimeUpdate={(e) => { 
+                onTimeUpdate={(e: React.SyntheticEvent<HTMLVideoElement>) => { 
                     if (e.currentTarget.currentTime / e.currentTarget.duration > 0.30 && interaction && !interaction.isWatched && user) { 
                         db.markWatched(user.id, video.id); 
                         setInteraction({...interaction, isWatched: true}); 
@@ -378,13 +378,13 @@ export default function Shorts() {
         try {
             const parsed = JSON.parse(cached);
             if (parsed.data) {
-                 const shorts = (parsed.data as Video[]).filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
+                 const shorts = (parsed.data as Video[]).filter((v: Video) => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
                  setVideos(shorts);
             }
         } catch(e) {}
     }
 
-    db.getAllVideos().then(all => {
+    db.getAllVideos().then((all: Video[]) => {
         const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
         // Only update if significantly different to prevent reset
         setVideos(prev => (prev.length === 0 ? shorts : prev));

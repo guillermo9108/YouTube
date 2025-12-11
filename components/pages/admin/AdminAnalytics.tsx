@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../../services/db';
+import { db } from '../../../services/db';
+import { User, SystemSettings } from '../../../types';
 import { Calculator } from 'lucide-react';
 
 export default function AdminAnalytics() {
@@ -16,8 +17,8 @@ export default function AdminAnalytics() {
     const [simVelocity, setSimVelocity] = useState(50);
 
     useEffect(() => {
-        db.getAllUsers().then(users => setUserCount(users.length || 20));
-        db.getSystemSettings().then(setSettings);
+        db.getAllUsers().then((users: User[]) => setUserCount(users.length || 20));
+        db.getSystemSettings().then((s: SystemSettings) => setSettings(s));
     }, []);
 
     // --- ADVANCED PROJECTION ALGORITHM ---

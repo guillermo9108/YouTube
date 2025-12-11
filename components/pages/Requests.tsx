@@ -1,12 +1,12 @@
+
 import React, { useState } from 'react';
 import { DownloadCloud, Search, Check, Loader2, Server, Globe, Clock, Trash2, Youtube, Image as ImageIcon, Layers } from 'lucide-react';
-import { db } from '../services/db';
-import { VideoResult } from '../types';
-import { ContentRequest, VideoCategory } from '../types';
-import { useAuth } from '../context/AuthContext';
-import { useNavigate } from '../components/Router';
-import { generateThumbnail } from '../utils/videoGenerator';
-import { useUpload } from '../context/UploadContext';
+import { db } from '../../services/db';
+import { VideoResult, ContentRequest, VideoCategory } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+import { useNavigate } from '../Router';
+import { generateThumbnail } from '../../utils/videoGenerator';
+import { useUpload } from '../../context/UploadContext';
 
 export default function Requests() {
   const { user } = useAuth();
@@ -61,7 +61,7 @@ export default function Requests() {
         const uploadQueue = [];
 
         for (const id of selectedVideos) {
-            const videoData = results.find(r => r.id === id);
+            const videoData = results.find((r: VideoResult) => r.id === id);
             if (!videoData) continue;
 
             // YOUTUBE SERVER SIDE IMPORT (Direct Trigger)
@@ -121,7 +121,7 @@ export default function Requests() {
       setLoadingQueue(true);
       try {
           const all = await db.getRequests();
-          if (user) setMyRequests(all.filter(r => r.userId === user.id));
+          if (user) setMyRequests(all.filter((r: ContentRequest) => r.userId === user.id));
       } finally { setLoadingQueue(false); }
   };
 
@@ -236,7 +236,7 @@ export default function Requests() {
               {loadingQueue ? <Loader2 className="animate-spin text-indigo-500" /> : (
                   myRequests.length === 0 ? <div className="text-center p-8 bg-slate-900/30 rounded-xl border border-dashed border-slate-800 text-slate-500">No pending requests.</div> : (
                       <div className="space-y-3">
-                          {myRequests.map(req => (
+                          {myRequests.map((req: ContentRequest) => (
                               <div key={req.id} className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between items-center">
                                   <div>
                                       <h4 className="font-bold text-white text-lg">{req.query}</h4>

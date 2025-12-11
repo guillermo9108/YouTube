@@ -1,12 +1,12 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Video, Comment, UserInteraction } from '../types';
-import { db } from '../services/db';
-import { useAuth } from '../context/AuthContext';
-import { useParams, Link } from '../components/Router';
+import { Video, Comment, UserInteraction } from '../../types';
+import { db } from '../../services/db';
+import { useAuth } from '../../context/AuthContext';
+import { useParams, Link } from '../Router';
 import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send } from 'lucide-react';
-import VideoCard from '../components/VideoCard';
-import { useToast } from '../context/ToastContext';
+import VideoCard from '../VideoCard';
+import { useToast } from '../../context/ToastContext';
 
 export default function Watch() {
     const { id } = useParams();
@@ -43,7 +43,7 @@ export default function Watch() {
                     
                     // Load related
                     db.getRelatedVideos(v.id)
-                      .then(res => setRelatedVideos(res))
+                      .then((res: Video[]) => setRelatedVideos(res))
                       .catch(err => console.error("Related error", err))
                       .finally(() => setLoadingRelated(false));
 
@@ -252,7 +252,7 @@ export default function Watch() {
                     )}
 
                     <div className="space-y-4">
-                        {comments.map(c => (
+                        {comments.map((c: Comment) => (
                             <div key={c.id} className="flex gap-3 animate-in fade-in">
                                 <Link to={`/channel/${c.userId}`} className="w-8 h-8 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-slate-700">
                                     {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-xs text-slate-500">{c.username[0]}</div>}
@@ -280,7 +280,7 @@ export default function Watch() {
                             <span className="text-slate-500 text-sm italic">Buscando sugerencias...</span>
                         </div>
                     ) : relatedVideos.length > 0 ? (
-                        relatedVideos.map(v => (
+                        relatedVideos.map((v: Video) => (
                             <VideoCard key={v.id} video={v} isUnlocked={false} isWatched={false} />
                         ))
                     ) : (

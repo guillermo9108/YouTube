@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { db } from '../../services/db';
-import { Video } from '../../types';
-import { useToast } from '../../context/ToastContext';
+import { db } from '../../../services/db';
+import { Video } from '../../../types';
+import { useToast } from '../../../context/ToastContext';
 import { FolderSearch, Loader2, Terminal, Film, Play, AlertCircle, Wand2, Database, Edit3 } from 'lucide-react';
 
 interface ScannerPlayerProps {

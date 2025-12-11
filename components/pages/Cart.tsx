@@ -1,11 +1,12 @@
 
 import React, { useState, useMemo } from 'react';
-import { useCart } from '../context/CartContext';
-import { useAuth } from '../context/AuthContext';
-import { useToast } from '../context/ToastContext';
-import { db } from '../services/db';
-import { useNavigate } from '../components/Router';
+import { useCart } from '../../context/CartContext';
+import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
+import { db } from '../../services/db';
+import { useNavigate } from '../Router';
 import { Trash2, ShoppingBag, Truck, CheckCircle, AlertCircle, Loader2, Minus, Plus, Tag, ArrowRight, Wallet, MapPin } from 'lucide-react';
+import { CartItem } from '../../types';
 
 export default function Cart() {
     const { cart, removeFromCart, updateQuantity, clearCart } = useCart();
@@ -26,7 +27,7 @@ export default function Cart() {
 
     // Advanced Calculations
     const totals = useMemo(() => {
-        return cart.reduce((acc, item) => {
+        return cart.reduce((acc: { subtotal: number, total: number, itemCount: number }, item: CartItem) => {
             const qty = item.quantity;
             const price = Number(item.price);
             // Fallback to price if originalPrice is missing or 0
@@ -93,7 +94,7 @@ export default function Cart() {
                 {/* Left Column: Items */}
                 <div className="lg:col-span-2 space-y-4">
                     <div className="bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
-                        {cart.map((item, index) => {
+                        {cart.map((item: CartItem, index: number) => {
                             const original = (item.originalPrice && item.originalPrice > 0) ? item.originalPrice : item.price;
                             const hasDiscount = original > item.price;
 

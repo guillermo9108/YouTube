@@ -1,13 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-import { useUpload } from '../context/UploadContext';
-import { useNavigate } from '../components/Router';
-import { VideoCategory } from '../types';
-import { db } from '../services/db';
-import { useToast } from '../context/ToastContext';
-import { generateThumbnail } from '../utils/videoGenerator';
+import { useAuth } from '../../context/AuthContext';
+import { useUpload } from '../../context/UploadContext';
+import { useNavigate } from '../Router';
+import { VideoCategory } from '../../types';
+import { db } from '../../services/db';
+import { useToast } from '../../context/ToastContext';
+import { generateThumbnail } from '../../utils/videoGenerator';
 
 // Helper component to manage object URL lifecycle
 const ThumbnailPreview = ({ file }: { file: File }) => {

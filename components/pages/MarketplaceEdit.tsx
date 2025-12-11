@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { useToast } from '../context/ToastContext';
-import { db } from '../services/db';
-import { useNavigate, useParams } from '../components/Router';
+import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
+import { db } from '../../services/db';
+import { useNavigate, useParams } from '../Router';
 import { Save, Tag, Percent, Archive, ArrowLeft, AlertCircle, ShoppingBag } from 'lucide-react';
-import { MarketplaceItem } from '../types';
+import { MarketplaceItem } from '../../types';
 
 export default function MarketplaceEdit() {
     const { id } = useParams();
@@ -24,7 +24,7 @@ export default function MarketplaceEdit() {
 
     useEffect(() => {
         if (id) {
-            db.getMarketplaceItem(id).then(data => {
+            db.getMarketplaceItem(id).then((data: MarketplaceItem | null) => {
                 if (data) {
                     setItem(data);
                     // Use originalPrice if set (showing discount logic was used), else price

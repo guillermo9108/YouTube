@@ -1,19 +1,23 @@
+
 import React, { Suspense, useState, useEffect } from 'react';
-import Login from './pages/Login';
-import Home from './pages/Home';
-import Watch from './pages/Watch';
-import Upload from './pages/Upload';
-import Profile from './pages/Profile';
-import Admin from './pages/Admin';
-import Shorts from './pages/Shorts';
-import Setup from './pages/Setup';
-import Requests from './pages/Requests';
-import Channel from './pages/Channel';
-import Marketplace from './pages/Marketplace';
-import MarketplaceItem from './pages/MarketplaceItem';
-import MarketplaceCreate from './pages/MarketplaceCreate';
-import MarketplaceEdit from './pages/MarketplaceEdit';
-import Cart from './pages/Cart';
+// Page Imports
+import Login from './components/pages/Login';
+import Home from './components/pages/Home';
+import Watch from './components/pages/Watch';
+import Upload from './components/pages/Upload';
+import Profile from './components/pages/Profile';
+import Admin from './components/pages/Admin';
+import Shorts from './components/pages/Shorts';
+import Setup from './components/pages/Setup';
+import Requests from './components/pages/Requests';
+import Channel from './components/pages/Channel';
+import Marketplace from './components/pages/Marketplace';
+import MarketplaceItem from './components/pages/MarketplaceItem';
+import MarketplaceCreate from './components/pages/MarketplaceCreate';
+import MarketplaceEdit from './components/pages/MarketplaceEdit';
+import Cart from './components/pages/Cart';
+
+// Components & Context
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UploadProvider } from './context/UploadContext';

@@ -1,13 +1,11 @@
 
-
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { Link } from '../components/Router';
-import { db } from '../services/db';
-import { SaleRecord } from '../types';
+import { useAuth } from '../../context/AuthContext';
+import { Link } from '../Router';
+import { db } from '../../services/db';
+import { SaleRecord, Video, Transaction, VideoCategory } from '../../types';
 import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck, PlusCircle, Package, MapPin, Phone, TrendingUp } from 'lucide-react';
-import { Video, Transaction, VideoCategory } from '../types';
-import { useToast } from '../context/ToastContext';
+import { useToast } from '../../context/ToastContext';
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
@@ -54,7 +52,7 @@ export default function Profile() {
       setDefaultPrices(user.defaultPrices || {});
       if (user.shippingDetails) setShipping(user.shippingDetails);
       
-      Promise.all(user.watchLater.map(id => db.getVideo(id))).then(res => {
+      Promise.all(user.watchLater.map((id: string) => db.getVideo(id))).then(res => {
           setWatchLaterVideos(res.filter(v => !!v) as Video[]);
       });
 
@@ -305,7 +303,7 @@ export default function Profile() {
                 <div className="p-6 text-center text-slate-500 text-sm">Sin transacciones.</div>
             ) : (
                 <div className="divide-y divide-slate-800">
-                {transactions.map(tx => {
+                {transactions.map((tx: Transaction) => {
                     const isIncoming = tx.type === 'DEPOSIT' || tx.creatorId === user.id;
                     const isSystem = tx.type === 'DEPOSIT';
                     const isMarket = tx.type === 'MARKETPLACE';
@@ -342,7 +340,7 @@ export default function Profile() {
                   </div>
               ) : (
                   <div className="space-y-4">
-                      {sales.map(sale => {
+                      {sales.map((sale: SaleRecord) => {
                           const gross = Number(sale.amount);
                           const fee = Number(sale.adminFee || 0);
                           const net = gross - fee;

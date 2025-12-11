@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
-import { db } from '../../services/db';
-import { VideoCategory, SmartCleanerResult } from '../../types';
-import { useToast } from '../../context/ToastContext';
+import { db } from '../../../services/db';
+import { VideoCategory, SmartCleanerResult } from '../../../types';
+import { useToast } from '../../../context/ToastContext';
 import { Wrench, Trash2, Database, Brush, Activity, Server, HardDrive, CheckCircle, Percent, Clock } from 'lucide-react';
 
 const SystemHealthCard = ({ icon: Icon, label, status, color }: any) => (

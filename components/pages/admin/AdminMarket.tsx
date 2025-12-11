@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../../services/db';
-import { MarketplaceItem } from '../../types';
-import { useToast } from '../../context/ToastContext';
+import { db } from '../../../services/db';
+import { MarketplaceItem } from '../../../types';
+import { useToast } from '../../../context/ToastContext';
 import { Trash2, Search, Filter, Package, Tag, AlertCircle } from 'lucide-react';
 
 export default function AdminMarket() {

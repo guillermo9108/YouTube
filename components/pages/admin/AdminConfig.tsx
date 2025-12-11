@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../../services/db';
-import { SystemSettings, VideoCategory } from '../../types';
-import { useToast } from '../../context/ToastContext';
+import { db } from '../../../services/db';
+import { SystemSettings, VideoCategory } from '../../../types';
+import { useToast } from '../../../context/ToastContext';
 import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -28,7 +28,7 @@ export default function AdminConfig() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        db.getSystemSettings().then(s => {
+        db.getSystemSettings().then((s: SystemSettings) => {
             setSettings(s);
             setLoading(false);
         }).catch(() => setLoading(false));
@@ -160,14 +160,4 @@ export default function AdminConfig() {
                 
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pixabay API Key <InfoTooltip text="Alternativa stock gratuita" /></label>
-                    <input type="password" value={settings.pixabayKey || ''} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                </div>
-
-                <div className="flex items-center gap-3 py-2 bg-slate-950 p-3 rounded-lg border border-slate-800">
-                    <input type="checkbox" checked={settings.enableYoutube} onChange={e => setSettings({...settings, enableYoutube: e.target.checked})} className="accent-indigo-500 w-5 h-5"/>
-                    <span className="text-sm text-slate-300 font-bold">Habilitar Descargas de YouTube</span>
-                </div>
-            </ConfigSection>
-        </div>
-    );
-}
+                    <input type="password" value={settings.pixabayKey || ''}

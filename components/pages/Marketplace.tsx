@@ -1,9 +1,9 @@
 
 import React, { useEffect, useState } from 'react';
-import { db } from '../services/db';
-import { MarketplaceItem } from '../types';
-import { Link, useNavigate } from '../components/Router';
-import { useCart } from '../context/CartContext';
+import { db } from '../../services/db';
+import { MarketplaceItem } from '../../types';
+import { Link, useNavigate } from '../Router';
+import { useCart } from '../../context/CartContext';
 import { ShoppingBag, Tag, Loader2, Search, Star, Filter, ShoppingCart, X, ArrowDownUp, SlidersHorizontal } from 'lucide-react';
 
 export default function Marketplace() {
@@ -22,7 +22,7 @@ export default function Marketplace() {
     const [condition, setCondition] = useState('TODOS');
 
     useEffect(() => {
-        db.getMarketplaceItems().then(data => {
+        db.getMarketplaceItems().then((data: MarketplaceItem[]) => {
             setItems(data);
             setLoading(false);
         });
@@ -38,7 +38,7 @@ export default function Marketplace() {
         // Ensure type safety comparison for price
         const matchesPrice = Number(item.price) >= priceRange.min && Number(item.price) <= priceRange.max;
         return matchesSearch && matchesCategory && matchesCondition && matchesPrice;
-    }).sort((a, b) => {
+    }).sort((a: MarketplaceItem, b: MarketplaceItem) => {
         if (sortOrder === 'PRICE_ASC') return a.price - b.price;
         if (sortOrder === 'PRICE_DESC') return b.price - a.price;
         return b.createdAt - a.createdAt; // NEWEST

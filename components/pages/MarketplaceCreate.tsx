@@ -1,7 +1,8 @@
+
 import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { db } from '../services/db';
-import { useNavigate } from '../components/Router';
+import { useAuth } from '../../context/AuthContext';
+import { db } from '../../services/db';
+import { useNavigate } from '../Router';
 import { Upload, X, Tag, DollarSign, Image as ImageIcon, Loader2, Archive } from 'lucide-react';
 
 export default function MarketplaceCreate() {

@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../../services/db';
-import { ContentRequest } from '../../types';
-import { useToast } from '../../context/ToastContext';
+import { db } from '../../../services/db';
+import { ContentRequest } from '../../../types';
+import { useToast } from '../../../context/ToastContext';
 import { DownloadCloud, Check, X, Clock, Trash2, RefreshCw } from 'lucide-react';
 
 export default function AdminRequests() {

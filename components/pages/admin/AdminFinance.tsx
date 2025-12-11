@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../../services/db';
-import { BalanceRequest, Transaction } from '../../types';
-import { useAuth } from '../../context/AuthContext';
-import { useToast } from '../../context/ToastContext';
+import { db } from '../../../services/db';
+import { BalanceRequest, Transaction } from '../../../types';
+import { useAuth } from '../../../context/AuthContext';
+import { useToast } from '../../../context/ToastContext';
 import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, ShoppingBag } from 'lucide-react';
 
 export default function AdminFinance() {
