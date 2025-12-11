@@ -9,6 +9,7 @@ import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUp
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
+    // Explicitly type the state to match db.getBalanceRequests() return type
     const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({balance: [], vip: []});
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
 
@@ -92,7 +93,11 @@ export default function AdminFinance() {
                             </thead>
                             <tbody className="divide-y divide-slate-800">
                                 {requests.vip.map(req => {
-                                    const plan = typeof req.planSnapshot === 'string' ? JSON.parse(req.planSnapshot) : req.planSnapshot;
+                                    // Handle potential string format from DB JSON column
+                                    const plan = typeof req.planSnapshot === 'string' 
+                                        ? JSON.parse(req.planSnapshot as unknown as string) 
+                                        : req.planSnapshot;
+                                        
                                     return (
                                         <tr key={req.id} className="hover:bg-slate-800/30 transition-colors">
                                             <td className="px-6 py-4 font-bold text-white">{req.username}</td>
