@@ -144,7 +144,7 @@ try {
         case 'admin_get_balance_requests': admin_get_balance_requests($pdo); break;
         case 'admin_get_global_transactions': admin_get_global_transactions($pdo); break;
         case 'admin_handle_balance_request': admin_handle_balance_request($pdo, $input); break;
-        case 'admin_handle_vip_request': admin_handle_vip_request($pdo, $input); break; // ADDED THIS LINE
+        case 'admin_handle_vip_request': admin_handle_vip_request($pdo, $input); break;
         case 'admin_cleanup_videos': admin_cleanup_videos($pdo); break;
         case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
@@ -158,6 +158,7 @@ try {
         case 'get_system_settings': admin_get_settings($pdo); break;
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
         case 'search_external': admin_search_external($pdo, $input); break;
+        case 'admin_get_real_stats': admin_get_real_stats($pdo); break; // ADDED THIS
 
         case 'get_marketplace_items': market_get_items($pdo); break;
         case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;

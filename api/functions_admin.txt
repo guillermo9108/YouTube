@@ -38,13 +38,23 @@ function admin_get_balance_requests($pdo) {
     $balanceReqs = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     // Also fetch VIP requests
-    // Need to ensure table exists in case of update
     try {
         $stmtVip = $pdo->query("SELECT vr.*, u.username FROM vip_requests vr LEFT JOIN users u ON vr.userId = u.id WHERE vr.status = 'PENDING' ORDER BY vr.createdAt ASC");
         $vipReqs = $stmtVip->fetchAll(PDO::FETCH_ASSOC);
     } catch(Exception $e) { $vipReqs = []; }
 
-    respond(true, ['balance' => $balanceReqs, 'vip' => $vipReqs]);
+    // Fetch Active VIPs
+    $activeVip = [];
+    try {
+        $now = time();
+        $stmtActive = $pdo->query("SELECT id, username, avatarUrl, vipExpiry FROM users WHERE vipExpiry > $now ORDER BY vipExpiry ASC");
+        $activeVip = $stmtActive->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($activeVip as &$u) {
+            $u['avatarUrl'] = fix_url($u['avatarUrl']);
+        }
+    } catch(Exception $e) {}
+
+    respond(true, ['balance' => $balanceReqs, 'vip' => $vipReqs, 'activeVip' => $activeVip]);
 }
 
 function admin_handle_vip_request($pdo, $input) {
@@ -65,6 +75,14 @@ function admin_handle_vip_request($pdo, $input) {
         $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$action, $reqId]);
         
         if ($action === 'APPROVED') {
+            // Log Revenue for System
+            // Since this is an approved payment (from Tropipay or Manual), we consider the Plan Price as System Income
+            $revenue = floatval($plan['price']);
+            $tid = uniqid('rev_');
+            // 'creatorId' null means system.
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP_REVENUE')")
+                ->execute([$tid, $req['userId'], $revenue, time()]);
+
             if ($plan['type'] === 'BALANCE') {
                 // Balance Bonus Logic
                 $baseAmount = floatval($plan['price']);
@@ -73,10 +91,11 @@ function admin_handle_vip_request($pdo, $input) {
                 
                 $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $req['userId']]);
                 
-                // Transaction Log
-                $tid = uniqid('tx_vip_');
+                // Transaction Log for user credit (Not revenue, but 'VIP' type usually means bonus credit in this context, or we can use 'DEPOSIT')
+                // Let's keep existing logic:
+                $tid2 = uniqid('tx_vip_');
                 $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP')")
-                    ->execute([$tid, $req['userId'], $total, time()]);
+                    ->execute([$tid2, $req['userId'], $total, time()]);
                     
                 $msg = "Tu recarga VIP de {$total} Saldo ha sido aprobada.";
                 
@@ -130,7 +149,16 @@ function admin_get_global_transactions($pdo) {
             ORDER BY t.timestamp DESC LIMIT 100";
     $stmt = $pdo->query($sql);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    respond(true, $rows);
+
+    // Calculate Total System Revenue
+    // 1. Commissions from interactions/sales (adminFee column)
+    $commissions = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn();
+    // 2. Direct revenue from VIP/Recharges (type = VIP_REVENUE)
+    $vipRevenue = $pdo->query("SELECT SUM(amount) FROM transactions WHERE type='VIP_REVENUE'")->fetchColumn();
+    
+    $totalRevenue = floatval($commissions) + floatval($vipRevenue);
+
+    respond(true, ['history' => $rows, 'systemRevenue' => $totalRevenue]);
 }
 
 // Admin Action: Handle Request
@@ -556,9 +584,24 @@ function admin_search_external($pdo, $input) {
 }
 
 function admin_process_queue($pdo) {
-    // This is a stub for manual trigger. 
-    // In a real env, this would invoke the background worker script.
-    // We return success to the UI.
     respond(true, ['processed' => 0, 'message' => 'Queue triggered (Simulation)']);
+}
+
+function admin_get_real_stats($pdo) {
+    $stats = [];
+    $stats['userCount'] = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
+    
+    // Admin ID
+    $stmt = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1");
+    $adminId = $stmt->fetchColumn();
+    
+    // Admin Sales last 30 days
+    $monthAgo = time() - (30*24*60*60);
+    $stats['adminVideoSales'] = $pdo->query("SELECT COUNT(*) FROM transactions WHERE creatorId = '$adminId' AND type='PURCHASE' AND timestamp > $monthAgo")->fetchColumn();
+    
+    // Avg Deposit (DEPOSIT and VIP_REVENUE are cash in)
+    $stats['avgDeposit'] = $pdo->query("SELECT AVG(amount) FROM transactions WHERE type IN ('DEPOSIT', 'VIP_REVENUE')")->fetchColumn() ?: 0;
+    
+    respond(true, $stats);
 }
 ?>

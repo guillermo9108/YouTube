@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, VideoCategory, VipPlan } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard } from 'lucide-react';
+import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
@@ -26,6 +26,7 @@ export default function AdminConfig() {
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [openSection, setOpenSection] = useState<string>('SYSTEM');
     const [loading, setLoading] = useState(true);
+    const [newCatName, setNewCatName] = useState('');
 
     useEffect(() => {
         db.getSystemSettings().then((s: SystemSettings) => {
@@ -52,6 +53,44 @@ export default function AdminConfig() {
                 ...(settings.categoryPrices || {}), 
                 [cat]: price
             }
+        });
+    };
+
+    const handleAddCategory = () => {
+        if (!settings || !newCatName.trim()) return;
+        
+        const catKey = newCatName.trim().toUpperCase().replace(/\s+/g, '_');
+        const standardCats = Object.values(VideoCategory) as string[];
+        const currentCustom = settings.customCategories || [];
+
+        if (standardCats.includes(catKey) || currentCustom.includes(catKey)) {
+            toast.error("Esta categoría ya existe");
+            return;
+        }
+
+        setSettings({
+            ...settings,
+            customCategories: [...currentCustom, catKey],
+            categoryPrices: {
+                ...(settings.categoryPrices || {}),
+                [catKey]: 0 // Init price
+            }
+        });
+        setNewCatName('');
+        toast.success("Categoría añadida (Recuerda Guardar)");
+    };
+
+    const handleRemoveCategory = (catToRemove: string) => {
+        if (!settings) return;
+        
+        const updatedCustom = (settings.customCategories || []).filter(c => c !== catToRemove);
+        const updatedPrices = { ...settings.categoryPrices };
+        delete updatedPrices[catToRemove];
+
+        setSettings({
+            ...settings,
+            customCategories: updatedCustom,
+            categoryPrices: updatedPrices
         });
     };
 
@@ -83,6 +122,12 @@ export default function AdminConfig() {
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500"/></div>;
     if (!settings) return <div className="p-10 text-center text-red-400">Error cargando configuración.</div>;
+
+    // Combine standard and custom categories for rendering
+    const allCategories = [
+        ...Object.values(VideoCategory),
+        ...(settings.customCategories || [])
+    ];
 
     return (
         <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in pb-20">
@@ -154,7 +199,7 @@ export default function AdminConfig() {
                                 ) : (
                                     <div className="col-span-2">
                                         <label className="text-[10px] uppercase font-bold text-slate-500">% Bono Extra</label>
-                                        <input type="number" value={plan.bonusPercent} onChange={e => updateVipPlan(plan.id, 'bonusPercent', parseInt(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-white"/>
+                                        <input type="number" value={plan.bonusPercent} onChange={e => updateVipPlan(plan.id, 'bonusPercent', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-sm text-white"/>
                                     </div>
                                 )}
                             </div>
@@ -227,27 +272,60 @@ export default function AdminConfig() {
                 isOpen={openSection === 'PRICES'} 
                 onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}
             >
-                <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800 mb-2">
+                <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800 mb-4">
                     Estos precios se aplicarán automáticamente a los videos durante el <strong>Paso 3: Organización Inteligente</strong> basándose en su categoría detectada.
                 </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {(Object.values(VideoCategory) as string[]).map(cat => (
-                        <div key={cat} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800">
-                            <span className="text-xs font-bold text-slate-300 uppercase flex items-center gap-2">
-                                {cat.replace('_', ' ')}
-                            </span>
-                            <div className="relative w-24">
-                                <DollarSign size={12} className="absolute left-2 top-2.5 text-slate-500"/>
-                                <input 
-                                    type="number" 
-                                    min="0"
-                                    value={settings.categoryPrices?.[cat] || 0}
-                                    onChange={(e) => updateCategoryPrice(cat, parseFloat(e.target.value))}
-                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-6 pr-2 py-1.5 text-sm text-amber-400 font-bold outline-none focus:border-indigo-500 text-right"
-                                />
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    {allCategories.map(cat => {
+                        const isCustom = !Object.values(VideoCategory).includes(cat as any);
+                        return (
+                            <div key={cat} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800 group">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-slate-300 uppercase">
+                                        {cat.replace('_', ' ')}
+                                    </span>
+                                    {isCustom && (
+                                        <button 
+                                            onClick={() => handleRemoveCategory(cat)} 
+                                            className="text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                                            title="Eliminar categoría"
+                                        >
+                                            <X size={12}/>
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="relative w-24">
+                                    <DollarSign size={12} className="absolute left-2 top-2.5 text-slate-500"/>
+                                    <input 
+                                        type="number" 
+                                        min="0"
+                                        value={settings.categoryPrices?.[cat] !== undefined ? settings.categoryPrices[cat] : 0}
+                                        onChange={(e) => updateCategoryPrice(cat, parseFloat(e.target.value))}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-6 pr-2 py-1.5 text-sm text-amber-400 font-bold outline-none focus:border-indigo-500 text-right"
+                                    />
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })}
+                </div>
+
+                {/* Add New Category */}
+                <div className="flex gap-2 items-center bg-slate-950 p-3 rounded-lg border border-slate-800/50 border-dashed">
+                    <input 
+                        type="text" 
+                        value={newCatName}
+                        onChange={(e) => setNewCatName(e.target.value)}
+                        placeholder="Nueva Categoría (Ej: RETRO)"
+                        className="flex-1 bg-transparent text-sm text-white placeholder-slate-600 outline-none uppercase font-bold"
+                    />
+                    <button 
+                        onClick={handleAddCategory}
+                        disabled={!newCatName.trim()}
+                        className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white p-2 rounded-lg transition-colors"
+                    >
+                        <Plus size={16}/>
+                    </button>
                 </div>
             </ConfigSection>
 

@@ -53,7 +53,7 @@ function getPriceForCategory($cat, $settings) {
     return isset($prices[$cat]) ? $prices[$cat] : 1; 
 }
 
-function smartParseFilename($fullPath, $detectedType = null) {
+function smartParseFilename($fullPath, $detectedType = null, $customCategories = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     
     // Normalizar separadores y dividir path
@@ -61,9 +61,37 @@ function smartParseFilename($fullPath, $detectedType = null) {
     $pathParts = explode('/', dirname($fullPathNormalized));
     
     // Carpetas genéricas que debemos ignorar como título de serie
-    $genericFolders = ['series', 'serie', 'season', 'temporada', 'downloads', 'descargas', 'anime', 'tv shows', 'completed', 'videos', 'uploads', 'torrents'];
+    $genericFolders = ['series', 'serie', 'season', 'temporada', 'downloads', 'descargas', 'anime', 'tv shows', 'completed', 'videos', 'uploads', 'torrents', 'storage', 'public', 'media'];
 
-    // 1. DETECCIÓN DE CATEGORÍA POR CARPETA
+    // 0. PRIORIDAD: CATEGORÍAS PERSONALIZADAS POR ANCESTROS
+    // Buscamos en las últimas 3 carpetas (Padre, Abuelo, Bisabuelo)
+    if (!empty($customCategories)) {
+        // Tomar las últimas 3 partes del path, invirtiendo para prioridad (Padre > Abuelo > Bisabuelo)
+        $ancestors = array_reverse(array_slice($pathParts, -3)); 
+        
+        foreach ($ancestors as $folder) {
+            $folderClean = mb_strtolower(trim($folder), 'UTF-8');
+            
+            foreach ($customCategories as $customCat) {
+                // Comparamos el nombre de la carpeta con el nombre de la categoría
+                // Ej: Carpeta "Retro Movies" encajará con Categoría "RETRO"
+                // Ej: Carpeta "Anime" encajará con Categoría "ANIME"
+                $catName = mb_strtolower($customCat, 'UTF-8');
+                
+                // Coincidencia exacta o parcial
+                if ($folderClean === $catName || strpos($folderClean, $catName) !== false) {
+                    // Si ya estaba detectado como PROCESSING u OTHER, o aún es null, asignamos la custom.
+                    // Si ya tenía algo más específico (ej: SERIES detectado por paso previo), decidimos aquí si sobreescribir.
+                    // Generalmente, la categoría custom (ej: "TERROR") es más específica que la genérica (ej: "PELICULA"), así que sobreescribimos.
+                    $detectedType = $customCat;
+                    break 2; // Salir de ambos bucles
+                }
+            }
+        }
+    }
+
+    // 1. DETECCIÓN DE CATEGORÍA POR CARPETA (ESTÁNDAR)
+    // Solo si no se detectó por custom categories
     if (!$detectedType || $detectedType === 'PROCESSING' || $detectedType === 'OTHER') {
         $categoryMap = [
             'SERIES' => ['series', 'serie', 'temporada', 'season', 'tv shows', 'capitulos', 'episodes', 'anime'],
@@ -142,7 +170,8 @@ function smartParseFilename($fullPath, $detectedType = null) {
         $episode = $info['e'];
         $episodeEnd = $info['e2'];
         $isEpisodic = true;
-        // Forzar categoría si encontramos patrón de episodio
+        // Forzar categoría si encontramos patrón de episodio Y no hemos detectado una categoría personalizada fuerte
+        // Si el usuario definió una categoría "ANIME", queremos mantenerla aunque parezca "SERIES"
         if (!$detectedType || $detectedType === 'OTHER' || $detectedType === 'PROCESSING' || $detectedType === 'MOVIE') {
             $detectedType = ($detectedType === 'NOVELAS') ? 'NOVELAS' : 'SERIES';
         }
@@ -172,7 +201,8 @@ function smartParseFilename($fullPath, $detectedType = null) {
     // 4. CONSTRUCCIÓN DE TÍTULO INTELIGENTE
     $finalTitle = $cleanName;
 
-    if ($detectedType === 'SERIES' || $detectedType === 'NOVELAS') {
+    // Lógica especial para Series/Novelas O si es una categoría custom que parece episódica (tiene Season/Ep info)
+    if ($detectedType === 'SERIES' || $detectedType === 'NOVELAS' || ($isEpisodic && $detectedType !== 'MOVIE')) {
         $grandParent = prev($pathParts); // Mover puntero atrás
 
         // Analizar Carpeta Padre para extraer nombre de serie

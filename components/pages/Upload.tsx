@@ -153,7 +153,10 @@ export default function Upload() {
           setQueueProgress(prev => ({ ...prev, current: prev.current + 1 }));
           
           try {
-              const { thumbnail, duration } = await generateThumbnail(task.file);
+              // Analyze
+              const result = await generateThumbnail(task.file);
+              const duration = result.duration || 0;
+              const thumbnail = result.thumbnail; // Can be null
               
               if (isMounted.current) {
                   // Intelligent Logic
@@ -178,15 +181,15 @@ export default function Upload() {
 
                   setPrices(prev => {
                       if (prev.length <= task.index) return prev;
-                      // Only update price if we updated category
                       const n = [...prev]; n[task.index] = price; return n;
                   });
               }
           } catch (e) {
-              console.error("Analysis failed", e);
+              console.error("Analysis failed for file:", task.file.name, e);
+              // Continue processing other files even if one fails
           }
 
-          await new Promise(r => setTimeout(r, 200)); // GC pause
+          await new Promise(r => setTimeout(r, 100)); // Small delay
           processQueue();
       }
   };
@@ -261,9 +264,9 @@ export default function Upload() {
         description: bulkDesc, // Use bulk description
         price: prices[i],
         category: categories[i] as VideoCategory,
-        duration: durations[i],
+        duration: durations[i] || 0, // Fallback to 0
         file: file,
-        thumbnail: thumbnails[i]
+        thumbnail: thumbnails[i] // Can be null, provider handles default
     }));
 
     addToQueue(queue, user);
@@ -410,12 +413,12 @@ export default function Upload() {
                          {thumbnails[idx] ? (
                            <ThumbnailPreview file={thumbnails[idx]!} />
                          ) : (
-                           <div className="w-full h-full flex flex-col items-center justify-center">
+                           <div className="w-full h-full flex items-center justify-center">
                                <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
                            </div>
                          )}
                          <div className="absolute bottom-0.5 right-0.5 bg-black/80 backdrop-blur text-[9px] px-1.5 py-0.5 rounded text-white font-mono font-bold">
-                            {Math.floor(durations[idx]/60)}:{(durations[idx]%60).toFixed(0).padStart(2,'0')}
+                            {Math.floor((durations[idx]||0)/60)}:{((durations[idx]||0)%60).toFixed(0).padStart(2,'0')}
                          </div>
                        </div>
 

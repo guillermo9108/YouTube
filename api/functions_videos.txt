@@ -160,9 +160,9 @@ function video_get_related($pdo, $id) {
 
 function video_upload($pdo, $post, $files) {
     $title = $post['title'];
-    $price = $post['price'];
+    $price = floatval($post['price']); // CAST TO FLOAT
     $creatorId = $post['creatorId'];
-    $duration = $post['duration'];
+    $duration = intval($post['duration']); // CAST TO INT
     $category = $post['category'];
     $desc = $post['description'] ?? '';
 
@@ -213,7 +213,9 @@ function video_upload($pdo, $post, $files) {
         move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
     }
 
-    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
+    // Ensure isLocal=1 to enable streaming proxy for uploaded files too.
+    // This avoids CORS issues on some browsers/setups.
+    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
     $stmt->execute([$vidId, $title, $desc, $price, $thumbPath, "api/" . UPLOAD_DIR . $vidName, $creatorId, time(), $category, $duration]);
     
     respond(true, ['id' => $vidId]);
@@ -395,7 +397,7 @@ function video_ftp_scan_recursive($pdo, $input) {
                 $thumbPath = "api/uploads/thumbnails/default.jpg";
                 
                 $stmtInsert->execute([$vidId, $filename, "FTP Stream", $thumbPath, $path, $adminId, time()]);
-                $addedCount++;
+                $added++;
             }
         }
         
@@ -611,6 +613,7 @@ function video_smart_organize($pdo) {
     
     $stmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    $customCategories = json_decode($settings['customCategories'] ?? '[]', true);
     
     // STEP 3: Only process videos that are in 'PROCESSING' state (Passed Step 2)
     // IMPORTANT: Include 'description' in SELECT to append to it
@@ -640,11 +643,12 @@ function video_smart_organize($pdo) {
 
         // 2. Parse Filename for Title
         $pathForParser = str_replace('api/', '', $v['videoUrl']);
-        $smart = smartParseFilename($pathForParser, null);
+        // Pass custom categories to parser
+        $smart = smartParseFilename($pathForParser, null, $customCategories);
         $newTitle = $smart['title'];
         $newCat = $smart['category']; // Can be SERIES if pattern matches
         
-        // 3. Refine Category by Duration if not already set by Name
+        // 3. Refine Category by Duration if not already set by Name or Custom Logic
         if (!$newCat || $newCat === 'OTHER' || $newCat === 'PROCESSING') {
             $newCat = detectCategoryFromDuration($v['duration']);
         }
@@ -684,6 +688,11 @@ function video_rectify_titles($pdo, $input) {
     $lastId = $input['lastId'] ?? '';
     $limit = 50;
 
+    // Get Custom Categories for re-categorization logic
+    $stmtS = $pdo->query("SELECT customCategories FROM system_settings LIMIT 1");
+    $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
+    $customCategories = json_decode($settings['customCategories'] ?? '[]', true);
+
     // Iterate over all valid videos (not PENDING) to re-apply logic
     $sql = "SELECT id, title, description, videoUrl, duration, category FROM videos WHERE id > ? AND category != 'PENDING' ORDER BY id ASC LIMIT $limit";
     $stmt = $pdo->prepare($sql);
@@ -697,16 +706,18 @@ function video_rectify_titles($pdo, $input) {
     $processedCount = 0;
     $newLastId = $lastId;
 
-    $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, description = ? WHERE id = ?");
+    $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, description = ?, category = ? WHERE id = ?");
 
     foreach ($videos as $v) {
         $processedCount++;
         $newLastId = $v['id'];
 
-        // 1. Calculate Smart Title
+        // 1. Calculate Smart Title & Category
         $pathForParser = str_replace('api/', '', $v['videoUrl']);
-        $smart = smartParseFilename($pathForParser, $v['category']);
+        // Pass current category as detectedType to preserve it if it's strong, BUT custom logic in smartParseFilename will check ancestry first
+        $smart = smartParseFilename($pathForParser, $v['category'], $customCategories);
         $newTitle = $smart['title'];
+        $newCat = $smart['category'];
 
         // 2. Handle Description Path
         $cleanPath = str_replace(['api/', 'uploads/videos/'], '', $v['videoUrl']);
@@ -724,7 +735,7 @@ function video_rectify_titles($pdo, $input) {
             $desc .= "\n\n📂 Ubicación: " . $displayPath;
         }
 
-        $updateStmt->execute([$newTitle, $desc, $v['id']]);
+        $updateStmt->execute([$newTitle, $desc, $newCat, $v['id']]);
     }
 
     respond(true, ['processed' => $processedCount, 'lastId' => $newLastId, 'completed' => false]);
