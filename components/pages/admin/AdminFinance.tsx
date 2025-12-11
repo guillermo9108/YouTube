@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { BalanceRequest, VipRequest } from '../../../types';
@@ -10,7 +9,7 @@ export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
     
-    // CORRECTED STATE TYPE: Must match the object returned by db.getBalanceRequests()
+    // Explicitly type the state to match the object returned by db.getBalanceRequests()
     const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({
         balance: [], 
         vip: []
@@ -21,11 +20,13 @@ export default function AdminFinance() {
     const loadData = () => {
         db.getBalanceRequests()
             .then(data => {
-                // Ensure data structure matches expected state before setting
-                if (data && typeof data === 'object' && 'balance' in data && 'vip' in data) {
-                    setRequests(data);
+                if (data && typeof data === 'object') {
+                    // Safe set ensuring arrays exist
+                    setRequests({
+                        balance: Array.isArray(data.balance) ? data.balance : [],
+                        vip: Array.isArray(data.vip) ? data.vip : []
+                    });
                 } else {
-                    // Fallback for empty/malformed response
                     setRequests({ balance: [], vip: [] });
                 }
             })
@@ -63,7 +64,6 @@ export default function AdminFinance() {
     };
 
     const stats = useMemo(() => {
-        // Safe access in case state is somehow malformed
         const bal = requests.balance || [];
         const vip = requests.vip || [];
         
