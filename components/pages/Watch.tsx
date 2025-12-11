@@ -146,13 +146,11 @@ export default function Watch() {
         <div className="flex flex-col animate-in fade-in min-h-screen bg-slate-950">
             
             {/* 
-                FULL WIDTH STICKY PLAYER 
-                - w-full: Full width
-                - sticky top-0: Sticks to top on scroll
-                - z-40: High z-index to stay above content
-                - md:top-[70px]: On desktop, account for the sticky header height
+                FULL WIDTH PLAYER 
+                - sticky top-0: Only for PORTRAIT (Vertical) and DESKTOP
+                - landscape:relative: Scrolls with page on mobile landscape to allow reading comments
             */}
-            <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-slate-800 transition-all duration-300">
+            <div className="w-full bg-black z-40 shadow-2xl border-b border-slate-800 transition-all duration-300 portrait:sticky portrait:top-0 landscape:relative md:sticky md:top-[74px]">
                 <div className={`relative w-full mx-auto max-w-[2000px] ${isUnlocked ? 'aspect-video' : 'aspect-video md:aspect-[21/9] lg:aspect-video'}`}>
                     {isUnlocked && video ? (
                         <video 

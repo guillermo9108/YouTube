@@ -196,20 +196,33 @@ export default function Home() {
       }).sort((a,b) => b.createdAt - a.createdAt);
   }, [allVideos, activeCategory, searchQuery]);
 
-  // Infinite Scroll for Discovery/Filtered
+  // Optimized Infinite Scroll with Pre-fetching
   useEffect(() => {
       const currentListLength = isFilteredMode ? filteredList.length : (feed?.discovery.length || 0);
+      
+      // Stop checking if we have displayed everything
       if (visibleDiscovery >= currentListLength) return;
 
       const observer = new IntersectionObserver((entries) => {
+          // Trigger if intersecting OR if we are close (handled by rootMargin)
           if (entries[0].isIntersecting) {
-              setVisibleDiscovery(prev => prev + 12);
+              setVisibleDiscovery(prev => {
+                  // Safety check to prevent infinite loop
+                  if (prev >= currentListLength) return prev;
+                  // Load next batch
+                  return prev + 12;
+              });
           }
-      }, { threshold: 0.1 });
+      }, { 
+          threshold: 0.1,
+          // CRITICAL FIX: Load when we are 1200px away from the bottom.
+          // This simulates loading "around the 7th video" (mid-list) instead of waiting for the end.
+          rootMargin: '1200px' 
+      });
 
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
-  }, [isFilteredMode, filteredList.length, feed, visibleDiscovery]);
+  }, [isFilteredMode, filteredList.length, feed?.discovery.length, visibleDiscovery]);
 
   // Reset pagination on filter change
   useEffect(() => { setVisibleDiscovery(12); }, [activeCategory, searchQuery]);
@@ -407,7 +420,8 @@ export default function Home() {
                   ) : (
                       <div className="text-center py-10 text-slate-500">No hay más videos para descubrir.</div>
                   )}
-                  <div ref={loadMoreRef} className="h-20 flex items-center justify-center">
+                  {/* Load More Trigger Area */}
+                  <div ref={loadMoreRef} className="h-20 flex items-center justify-center opacity-50">
                       {visibleDiscovery < (feed?.discovery.length || 0) && <RefreshCw className="animate-spin text-slate-600"/>}
                   </div>
               </section>
