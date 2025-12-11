@@ -53,61 +53,66 @@ function getPriceForCategory($cat, $settings) {
     return isset($prices[$cat]) ? $prices[$cat] : 1; 
 }
 
-function smartParseFilename($fullPath, $detectedType = null, $customCategories = []) {
+function smartParseFilename($fullPath, $existingCategory = null, $customCategories = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     
-    // Normalizar separadores y dividir path
+    // Normalizar separadores
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
+    // Obtener array de carpetas
     $pathParts = explode('/', dirname($fullPathNormalized));
     
-    // Carpetas genéricas que debemos ignorar como título de serie
-    $genericFolders = ['series', 'serie', 'season', 'temporada', 'downloads', 'descargas', 'anime', 'tv shows', 'completed', 'videos', 'uploads', 'torrents', 'storage', 'public', 'media'];
+    // Carpetas genéricas a ignorar al buscar nombres de series/títulos
+    $genericFolders = ['series', 'serie', 'season', 'temporada', 'downloads', 'descargas', 'anime', 'tv shows', 'completed', 'videos', 'uploads', 'torrents', 'storage', 'public', 'media', '4k', '1080p'];
 
-    // 0. PRIORIDAD: CATEGORÍAS PERSONALIZADAS POR ANCESTROS
-    // Buscamos en las últimas 3 carpetas (Padre, Abuelo, Bisabuelo)
+    $detectedCategory = null;
+    $categoryLocked = false; // Flag crucial: Si es true, nadie más puede cambiar la categoría
+
+    // --- PASO 1: PRIORIDAD ABSOLUTA - CATEGORÍAS PERSONALIZADAS EN ANCESTROS ---
+    // Analizamos Padre, Abuelo y Bisabuelo
     if (!empty($customCategories)) {
-        // Tomar las últimas 3 partes del path, invirtiendo para prioridad (Padre > Abuelo > Bisabuelo)
+        // Tomar las últimas 3 carpetas e invertirlas (Padre > Abuelo > Bisabuelo)
         $ancestors = array_reverse(array_slice($pathParts, -3)); 
         
         foreach ($ancestors as $folder) {
-            $folderClean = mb_strtolower(trim($folder), 'UTF-8');
+            // Normalizar nombre carpeta: "Ciencia_Ficcion" -> "ciencia ficcion"
+            $folderClean = mb_strtolower(str_replace(['_', '-', '.'], ' ', trim($folder)), 'UTF-8');
             
             foreach ($customCategories as $customCat) {
-                // Comparamos el nombre de la carpeta con el nombre de la categoría
-                // Ej: Carpeta "Retro Movies" encajará con Categoría "RETRO"
-                // Ej: Carpeta "Anime" encajará con Categoría "ANIME"
-                $catName = mb_strtolower($customCat, 'UTF-8');
+                // Normalizar categoría custom: "CIENCIA_FICCION" -> "ciencia ficcion"
+                $catName = mb_strtolower(str_replace(['_', '-'], ' ', trim($customCat)), 'UTF-8');
                 
-                // Coincidencia exacta o parcial
+                // Coincidencia: La carpeta CONTIENE el nombre de la categoría o es IGUAL
+                // Ej: Carpeta "Peliculas Retro" match con Categoría "RETRO"
                 if ($folderClean === $catName || strpos($folderClean, $catName) !== false) {
-                    // Si ya estaba detectado como PROCESSING u OTHER, o aún es null, asignamos la custom.
-                    // Si ya tenía algo más específico (ej: SERIES detectado por paso previo), decidimos aquí si sobreescribir.
-                    // Generalmente, la categoría custom (ej: "TERROR") es más específica que la genérica (ej: "PELICULA"), así que sobreescribimos.
-                    $detectedType = $customCat;
-                    break 2; // Salir de ambos bucles
+                    $detectedCategory = $customCat;
+                    $categoryLocked = true; // Bloquear cambios futuros
+                    break 2; // Éxito, salir de ambos bucles
                 }
             }
         }
     }
 
-    // 1. DETECCIÓN DE CATEGORÍA POR CARPETA (ESTÁNDAR)
-    // Solo si no se detectó por custom categories
-    if (!$detectedType || $detectedType === 'PROCESSING' || $detectedType === 'OTHER') {
+    // --- PASO 2: CATEGORÍAS ESTÁNDAR EN ANCESTROS (Solo si no está bloqueado) ---
+    if (!$categoryLocked) {
         $categoryMap = [
             'SERIES' => ['series', 'serie', 'temporada', 'season', 'tv shows', 'capitulos', 'episodes', 'anime'],
             'NOVELAS' => ['novelas', 'telenovelas', 'dramas', 'soap'],
             'MOVIE' => ['movies', 'movie', 'peliculas', 'pelicula', 'films', 'cine', '4k movies', 'hd movies'],
-            'SHORTS' => ['shorts', 'cortos', 'tiktok', 'reels'],
+            'SHORTS' => ['shorts', 'cortos', 'tiktok', 'reels', 'vertical'],
             'MUSIC' => ['music', 'musica', 'concerts', 'conciertos', 'videoclips'],
             'EDUCATION' => ['education', 'educacion', 'cursos', 'courses', 'tutoriales']
         ];
 
-        foreach (array_reverse($pathParts) as $part) {
-            $p = strtolower(trim($part));
+        // Revisar ancestros de nuevo para keywords estándar
+        $ancestors = array_reverse(array_slice($pathParts, -3));
+        foreach ($ancestors as $folder) {
+            $p = mb_strtolower(str_replace(['_', '-', '.'], ' ', trim($folder)), 'UTF-8');
             foreach ($categoryMap as $catKey => $keywords) {
                 foreach ($keywords as $kw) {
+                    // Match de palabra completa o contenido claro
                     if (strpos($p, $kw) !== false) {
-                        $detectedType = $catKey;
+                        $detectedCategory = $catKey;
+                        // No bloqueamos aquí ($categoryLocked = false) porque el análisis de episodio (Paso 3) podría ser más preciso (ej: detectar S01E01 en carpeta 'Descargas')
                         break 3; 
                     }
                 }
@@ -115,9 +120,7 @@ function smartParseFilename($fullPath, $detectedType = null, $customCategories =
         }
     }
 
-    // 2. EXTRACCIÓN DE INFORMACIÓN DE EPISODIO (Filename vs Foldername)
-    // A veces la info está en la carpeta: "One Piece 1050/video.mp4"
-    
+    // --- PASO 3: ANÁLISIS DE ARCHIVO/CARPETA (EPISODIOS) ---
     $season = '';
     $episode = '';
     $episodeEnd = ''; 
@@ -126,7 +129,6 @@ function smartParseFilename($fullPath, $detectedType = null, $customCategories =
     // Función auxiliar para buscar patrones S01E01
     $findEpisodeInfo = function($str) {
         $res = ['s'=>'', 'e'=>'', 'e2'=>'', 'found'=>false];
-        
         // S01E01
         if (preg_match('/S(\d+)\s*E(\d+)(?:-?E?(\d+))?/i', $str, $m)) {
             $res['s'] = (int)$m[1]; $res['e'] = (int)$m[2]; 
@@ -143,20 +145,16 @@ function smartParseFilename($fullPath, $detectedType = null, $customCategories =
         }
         // Anime absoluto (e.g. "One Piece - 1050" o " [1050] ")
         else if (preg_match('/[ \-\[\(](\d{2,4})[ \-\]\)]/', $str, $m)) {
-             // Solo si el número parece un episodio (>0) y no un año (contexto difícil, asumimos video reciente no es de año 1050)
-             // Evitamos 1990-2029
              $num = (int)$m[1];
-             if ($num < 1900 || $num > 2100) {
-                 $res['e'] = $num; $res['found'] = true;
-             }
+             if ($num < 1900 || $num > 2100) { $res['e'] = $num; $res['found'] = true; }
         }
         return $res;
     };
 
-    // Intentar buscar en Nombre de Archivo
+    // Buscar en archivo
     $info = $findEpisodeInfo($filename);
     
-    // Si no encontramos info en el archivo, o el archivo es muy genérico, buscar en la carpeta PADRE
+    // Si no, buscar en carpeta padre
     $parentFolder = end($pathParts);
     if (!$info['found']) {
         $parentInfo = $findEpisodeInfo($parentFolder);
@@ -170,14 +168,17 @@ function smartParseFilename($fullPath, $detectedType = null, $customCategories =
         $episode = $info['e'];
         $episodeEnd = $info['e2'];
         $isEpisodic = true;
-        // Forzar categoría si encontramos patrón de episodio Y no hemos detectado una categoría personalizada fuerte
-        // Si el usuario definió una categoría "ANIME", queremos mantenerla aunque parezca "SERIES"
-        if (!$detectedType || $detectedType === 'OTHER' || $detectedType === 'PROCESSING' || $detectedType === 'MOVIE') {
-            $detectedType = ($detectedType === 'NOVELAS') ? 'NOVELAS' : 'SERIES';
+
+        // IMPORTANTE: Si NO está bloqueado por una categoría personalizada, asignamos SERIES/NOVELAS
+        if (!$categoryLocked) {
+            // Si ya habíamos detectado algo genérico como 'OTHER' o 'PROCESSING' o nada, forzamos SERIES
+            if (!$detectedCategory || $detectedCategory === 'OTHER' || $detectedCategory === 'PROCESSING' || $detectedCategory === 'MOVIE') {
+                $detectedCategory = ($detectedCategory === 'NOVELAS') ? 'NOVELAS' : 'SERIES';
+            }
         }
     }
 
-    // 3. LIMPIEZA DE "BASURA"
+    // --- PASO 4: LIMPIEZA DE TÍTULO ---
     $junkPatterns = [
         '/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i',
         '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i',
@@ -187,7 +188,7 @@ function smartParseFilename($fullPath, $detectedType = null, $customCategories =
         '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i',
         '/\b(mkv|mp4|avi|mov)\b/i',
         '/www\.[a-z0-9-]+\.[a-z]+/i',
-        ($detectedType === 'SERIES' || $detectedType === 'NOVELAS') ? '/\b(19|20)\d{2}\b/' : ''
+        ($detectedCategory === 'SERIES' || $detectedCategory === 'NOVELAS' || $categoryLocked) ? '/\b(19|20)\d{2}\b/' : '' // Quitar año si es serie
     ];
 
     $cleanText = function($txt) use ($junkPatterns) {
@@ -197,46 +198,31 @@ function smartParseFilename($fullPath, $detectedType = null, $customCategories =
     };
 
     $cleanName = $cleanText($filename);
-
-    // 4. CONSTRUCCIÓN DE TÍTULO INTELIGENTE
     $finalTitle = $cleanName;
 
-    // Lógica especial para Series/Novelas O si es una categoría custom que parece episódica (tiene Season/Ep info)
-    if ($detectedType === 'SERIES' || $detectedType === 'NOVELAS' || ($isEpisodic && $detectedType !== 'MOVIE')) {
-        $grandParent = prev($pathParts); // Mover puntero atrás
+    // Lógica especial para Títulos de Series (incluso si la categoría es custom pero tiene estructura de episodios)
+    if ($detectedCategory === 'SERIES' || $detectedCategory === 'NOVELAS' || ($isEpisodic && $detectedCategory !== 'MOVIE')) {
+        $grandParent = prev($pathParts);
 
-        // Analizar Carpeta Padre para extraer nombre de serie
-        // Si la carpeta padre es "One Piece 1050", queremos "One Piece"
         $cleanParent = $cleanText($parentFolder);
-        
-        // Quitar también patrones de episodio del nombre de la carpeta
+        // Quitar también patrones de episodio del nombre de la carpeta padre
         $cleanParent = preg_replace('/S\d+\s*E\d+/i', '', $cleanParent);
         $cleanParent = preg_replace('/\d+x\d+/i', '', $cleanParent);
-        $cleanParent = preg_replace('/(Ep|Cap)\s*\d+/i', '', $cleanParent);
-        $cleanParent = preg_replace('/(Season|Temporada|Serie)\s*\d+/i', '', $cleanParent);
         
-        // Si después de limpiar quedan solo números (ej: "1050"), borrarlos
         if (is_numeric(trim($cleanParent))) $cleanParent = "";
-        
-        // Limpieza final de espacios
         $cleanParent = trim($cleanParent);
 
-        // DETERMINAR NOMBRE DE SERIE
         $seriesName = "";
-        
-        // 1. Si el padre limpio tiene texto sustancial, úsalo (Ej: "Breaking Bad")
         if (strlen($cleanParent) > 2 && !in_array(strtolower($cleanParent), $genericFolders)) {
             $seriesName = $cleanParent;
-        } 
-        // 2. Si el padre era genérico ("Temporada 1"), usa el abuelo
-        else if (!empty($grandParent)) {
+        } else if (!empty($grandParent)) {
             $cleanGrandParent = $cleanText($grandParent);
             if (!in_array(strtolower($cleanGrandParent), $genericFolders)) {
                 $seriesName = $cleanGrandParent;
             }
         }
 
-        // FORMATO DE EPISODIO
+        // Formato Episodio
         $epString = "";
         if ($season !== '' && $episode !== '') {
             $s = str_pad($season, 2, '0', STR_PAD_LEFT);
@@ -244,35 +230,27 @@ function smartParseFilename($fullPath, $detectedType = null, $customCategories =
             $epString = "S{$s}E{$e}";
             if ($episodeEnd) $epString .= "-E".str_pad($episodeEnd, 2, '0', STR_PAD_LEFT);
         } elseif ($episode !== '') {
-            // Si es numero alto (>100) suele ser Anime absoluto (Ep 1050)
             if ($episode > 99) $epString = "Ep {$episode}"; 
-            else $epString = ($detectedType === 'NOVELAS' ? 'Cap' : 'Ep') . " " . str_pad($episode, 2, '0', STR_PAD_LEFT);
+            else $epString = ($detectedCategory === 'NOVELAS' ? 'Cap' : 'Ep') . " " . str_pad($episode, 2, '0', STR_PAD_LEFT);
         }
 
-        // ENSAMBLAJE
         if ($seriesName) {
             if ($epString) {
-                // "One Piece - Ep 1050"
                 $finalTitle = "$seriesName - $epString";
-                
-                // Si el nombre del archivo tenía un título extra (ej: "S01E01 - Pilot"), agregarlo
-                // Pero verificar que no sea redundante
-                $nameWithoutEp = str_replace($epString, '', $cleanName); // Quitar S01E01 del nombre de archivo
-                // Limpieza agresiva de lo que queda
+                // Añadir nombre del capítulo si existe en el archivo
+                $nameWithoutEp = str_replace($epString, '', $cleanName);
                 $nameWithoutEp = trim(preg_replace('/[^a-zA-Z0-9\s]/', '', $nameWithoutEp));
                 
-                // Si queda texto real y no es igual a la serie, agregarlo
                 if (strlen($nameWithoutEp) > 3 && stripos($seriesName, $nameWithoutEp) === false) {
                     $finalTitle .= " - $nameWithoutEp";
                 }
             } else {
-                // Fallback si no detectamos episodio pero sí serie
                 $finalTitle = "$seriesName - $cleanName";
             }
         }
     }
 
-    // Capitalización (Title Case)
+    // Capitalización
     $finalTitle = ucwords(strtolower($finalTitle));
     $finalTitle = str_replace([' - - ', '  '], [' - ', ' '], $finalTitle);
     $finalTitle = trim($finalTitle, " -.");
@@ -281,9 +259,18 @@ function smartParseFilename($fullPath, $detectedType = null, $customCategories =
         $finalTitle = $filename;
     }
     
+    // Si no detectamos nada nuevo, mantener la existente si es válida, o 'OTHER'
+    if (!$detectedCategory) {
+        if ($existingCategory && $existingCategory !== 'PENDING' && $existingCategory !== 'PROCESSING') {
+            $detectedCategory = $existingCategory;
+        } else {
+            $detectedCategory = 'OTHER';
+        }
+    }
+    
     return [
         'title' => $finalTitle,
-        'category' => $detectedType ?: 'OTHER'
+        'category' => $detectedCategory
     ];
 }
 

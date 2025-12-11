@@ -642,13 +642,16 @@ function video_smart_organize($pdo) {
         }
 
         // 2. Parse Filename for Title
+        // Remove API prefix before analysis to match real folder structure
         $pathForParser = str_replace('api/', '', $v['videoUrl']);
+        
         // Pass custom categories to parser
         $smart = smartParseFilename($pathForParser, null, $customCategories);
         $newTitle = $smart['title'];
-        $newCat = $smart['category']; // Can be SERIES if pattern matches
+        $newCat = $smart['category']; 
         
-        // 3. Refine Category by Duration if not already set by Name or Custom Logic
+        // 3. Refine Category by Duration only if category is NOT locked by custom logic or strong detection
+        // smartParseFilename now returns a valid category if matched, otherwise OTHER
         if (!$newCat || $newCat === 'OTHER' || $newCat === 'PROCESSING') {
             $newCat = detectCategoryFromDuration($v['duration']);
         }
@@ -714,6 +717,7 @@ function video_rectify_titles($pdo, $input) {
 
         // 1. Calculate Smart Title & Category
         $pathForParser = str_replace('api/', '', $v['videoUrl']);
+        
         // Pass current category as detectedType to preserve it if it's strong, BUT custom logic in smartParseFilename will check ancestry first
         $smart = smartParseFilename($pathForParser, $v['category'], $customCategories);
         $newTitle = $smart['title'];
