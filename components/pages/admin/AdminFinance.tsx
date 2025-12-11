@@ -14,8 +14,13 @@ export default function AdminFinance() {
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
 
     const loadData = () => {
-        db.getBalanceRequests().then(data => setRequests(data));
-        db.getGlobalTransactions().then(data => setGlobalTransactions(data));
+        db.getBalanceRequests()
+            .then(data => setRequests(data))
+            .catch(e => console.error("Failed to load requests", e));
+            
+        db.getGlobalTransactions()
+            .then(data => setGlobalTransactions(data))
+            .catch(e => console.error("Failed to load transactions", e));
     };
 
     useEffect(() => {
@@ -93,10 +98,11 @@ export default function AdminFinance() {
                             </thead>
                             <tbody className="divide-y divide-slate-800">
                                 {requests.vip.map(req => {
-                                    // Handle potential string format from DB JSON column
-                                    const plan = typeof req.planSnapshot === 'string' 
-                                        ? JSON.parse(req.planSnapshot as unknown as string) 
-                                        : req.planSnapshot;
+                                    // Handle potential string format from DB JSON column with safe casting
+                                    const rawSnapshot = req.planSnapshot as any;
+                                    const plan = typeof rawSnapshot === 'string' 
+                                        ? JSON.parse(rawSnapshot) 
+                                        : rawSnapshot;
                                         
                                     return (
                                         <tr key={req.id} className="hover:bg-slate-800/30 transition-colors">
