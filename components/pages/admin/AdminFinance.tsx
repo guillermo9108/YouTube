@@ -1,39 +1,50 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { BalanceRequest, VipRequest } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText } from 'lucide-react';
+import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
     
-    // Explicitly type the state to match the object returned by db.getBalanceRequests()
     const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({
         balance: [], 
         vip: []
     });
     
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
+    const [systemRevenue, setSystemRevenue] = useState(0);
+    const [activeVips, setActiveVips] = useState<any[]>([]);
+    
+    // Countdown refresh trigger
+    const [now, setNow] = useState(Date.now());
+
+    useEffect(() => {
+        const interval = setInterval(() => setNow(Date.now()), 60000); // Update every minute
+        return () => clearInterval(interval);
+    }, []);
 
     const loadData = () => {
         db.getBalanceRequests()
-            .then(data => {
+            .then((data: any) => {
                 if (data && typeof data === 'object') {
-                    // Safe set ensuring arrays exist
                     setRequests({
                         balance: Array.isArray(data.balance) ? data.balance : [],
                         vip: Array.isArray(data.vip) ? data.vip : []
                     });
-                } else {
-                    setRequests({ balance: [], vip: [] });
+                    if (data.activeVip) setActiveVips(data.activeVip);
                 }
             })
             .catch(e => console.error("Failed to load requests", e));
             
         db.getGlobalTransactions()
-            .then(data => setGlobalTransactions(data))
+            .then((data: any) => {
+                if (data.history) setGlobalTransactions(data.history);
+                if (data.systemRevenue !== undefined) setSystemRevenue(data.systemRevenue);
+            })
             .catch(e => console.error("Failed to load transactions", e));
     };
 
@@ -63,6 +74,14 @@ export default function AdminFinance() {
         }
     };
 
+    const getRemainingTime = (expiry: number) => {
+        const diff = expiry * 1000 - now;
+        if (diff <= 0) return "Expirado";
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        return `${days}d ${hours}h`;
+    };
+
     const stats = useMemo(() => {
         const bal = requests.balance || [];
         const vip = requests.vip || [];
@@ -73,9 +92,20 @@ export default function AdminFinance() {
     }, [requests]);
 
     return (
-        <div className="space-y-6 animate-in fade-in">
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-6 animate-in fade-in pb-20">
+            {/* KPI Cards - REVENUE SEPARATED */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
+                    <div>
+                        <p className="text-slate-500 text-xs font-bold uppercase mb-1">Caja Chica (Ingresos)</p>
+                        <h3 className="text-2xl font-bold text-emerald-400">+{systemRevenue.toFixed(2)} $</h3>
+                        <p className="text-[10px] text-slate-500">Separado de tu saldo personal</p>
+                    </div>
+                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                        <TrendingUp size={24} />
+                    </div>
+                </div>
+                
                 <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
                     <div>
                         <p className="text-slate-500 text-xs font-bold uppercase mb-1">Solicitudes Pendientes</p>
@@ -85,23 +115,47 @@ export default function AdminFinance() {
                         <Clock size={24} />
                     </div>
                 </div>
+
                 <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
                     <div>
-                        <p className="text-slate-500 text-xs font-bold uppercase mb-1">Monto Saldo Pendiente</p>
-                        <h3 className="text-2xl font-bold text-white">{stats.totalPendingAmount.toFixed(2)} $</h3>
+                        <p className="text-slate-500 text-xs font-bold uppercase mb-1">VIPs Activos</p>
+                        <h3 className="text-2xl font-bold text-white">{activeVips.length}</h3>
                     </div>
-                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                        <DollarSign size={24} />
+                    <div className="w-12 h-12 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                        <Crown size={24} />
                     </div>
                 </div>
             </div>
+
+            {/* Active VIPs List */}
+            {activeVips.length > 0 && (
+                <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
+                    <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
+                        <Crown size={18} className="text-amber-400"/>
+                        <h3 className="font-bold text-white">Usuarios con Membresía Activa</h3>
+                    </div>
+                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        {activeVips.map(u => (
+                            <div key={u.id} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-slate-800 overflow-hidden shrink-0">
+                                    {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><User size={20}/></div>}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-bold text-white text-sm truncate">{u.username}</div>
+                                    <div className="text-xs text-amber-400 font-mono">Expira: {getRemainingTime(u.vipExpiry)}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* VIP Requests Table */}
             {requests.vip && requests.vip.length > 0 && (
                 <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm mb-6">
                     <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
-                        <Crown size={18} className="text-amber-400"/>
-                        <h3 className="font-bold text-white">Solicitudes VIP / Recargas</h3>
+                        <FileText size={18} className="text-blue-400"/>
+                        <h3 className="font-bold text-white">Solicitudes de Planes / Recargas</h3>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm text-left">
@@ -109,13 +163,12 @@ export default function AdminFinance() {
                                 <tr>
                                     <th className="px-6 py-3">Usuario</th>
                                     <th className="px-6 py-3">Plan</th>
-                                    <th className="px-6 py-3">Referencia Pago</th>
+                                    <th className="px-6 py-3">Ref. Pago</th>
                                     <th className="px-6 py-3 text-right">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800">
                                 {requests.vip.map(req => {
-                                    // Handle potential string format from DB JSON column with safe casting
                                     const rawSnapshot = req.planSnapshot as any;
                                     let plan: any = {};
                                     try {
@@ -132,7 +185,7 @@ export default function AdminFinance() {
                                             <td className="px-6 py-4">
                                                 {req.paymentRef ? (
                                                     <div className="flex items-center gap-1 text-slate-300 bg-slate-800 px-2 py-1 rounded w-fit">
-                                                        <FileText size={14}/> <span className="font-mono text-xs">{req.paymentRef}</span>
+                                                        <span className="font-mono text-xs">{req.paymentRef}</span>
                                                     </div>
                                                 ) : (
                                                     <span className="text-slate-600 italic text-xs">Sin referencia</span>
@@ -220,7 +273,7 @@ export default function AdminFinance() {
             <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
                 <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
                     <TrendingUp size={18} className="text-emerald-400"/>
-                    <h3 className="font-bold text-white">Actividad Reciente Global</h3>
+                    <h3 className="font-bold text-white">Historial de Transacciones Globales</h3>
                 </div>
                 <div className="overflow-x-auto max-h-96 overflow-y-auto">
                     <table className="w-full text-sm text-left">
@@ -239,19 +292,30 @@ export default function AdminFinance() {
                             ) : (
                                 globalTransactions.map(t => {
                                     const isDeposit = t.type === 'DEPOSIT';
+                                    const isVipRev = t.type === 'VIP_REVENUE';
                                     const isVip = t.type === 'VIP';
                                     const isMarket = t.type === 'MARKETPLACE';
+                                    
                                     return (
                                         <tr key={t.id} className="hover:bg-slate-800/30">
                                             <td className="px-4 py-3">
-                                                <span className={`px-2 py-1 rounded text-[10px] font-bold ${isDeposit ? 'bg-emerald-500/20 text-emerald-400' : (isVip ? 'bg-amber-500/20 text-amber-400' : (isMarket ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'))}`}>
+                                                <span className={`px-2 py-1 rounded text-[10px] font-bold ${
+                                                    isDeposit ? 'bg-emerald-500/20 text-emerald-400' : 
+                                                    (isVip ? 'bg-amber-500/20 text-amber-400' : 
+                                                    (isVipRev ? 'bg-indigo-500/20 text-indigo-400' : 
+                                                    (isMarket ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400')))
+                                                }`}>
                                                     {t.type}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3">
                                                 {isDeposit || isVip ? (
                                                     <div className="flex items-center gap-1 text-slate-300">
-                                                        <ArrowDownLeft size={14} className="text-emerald-500"/> Recarga de {t.buyerName}
+                                                        <ArrowDownLeft size={14} className="text-emerald-500"/> Usuario: {t.buyerName}
+                                                    </div>
+                                                ) : isVipRev ? (
+                                                    <div className="flex items-center gap-1 text-slate-300">
+                                                        <TrendingUp size={14} className="text-emerald-500"/> Ingreso por VIP/Recarga
                                                     </div>
                                                 ) : (
                                                     <div className="flex flex-col">

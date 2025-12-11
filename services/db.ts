@@ -462,6 +462,10 @@ export class DBService {
         return this.request<any[]>(`action=admin_get_global_transactions`); 
     }
 
+    async getRealStats(): Promise<any> {
+        return this.request<any>(`action=admin_get_real_stats`);
+    }
+
     // --- Setup ---
 
     async verifyDbConnection(config: any): Promise<boolean> { 

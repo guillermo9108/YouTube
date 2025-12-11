@@ -4,7 +4,7 @@ import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
-import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle, ShoppingCart } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
@@ -97,17 +97,20 @@ export default function Watch() {
         if (!user || !video) return;
         if (user.balance < video.price) {
             // Show VIP Upsell instead of just error
+            navigate('/vip');
             return;
         }
 
-        try {
-            await db.purchaseVideo(user.id, video.id);
-            // Optimistic Update
-            setIsUnlocked(true);
-            refreshUser(); // Update balance in background
-            toast.success("Video desbloqueado");
-        } catch (e: any) {
-            toast.error("Error al comprar: " + e.message);
+        if(confirm(`¿Desbloquear video por ${video.price} Saldo?`)) {
+            try {
+                await db.purchaseVideo(user.id, video.id);
+                // Optimistic Update
+                setIsUnlocked(true);
+                refreshUser(); // Update balance in background
+                toast.success("Video desbloqueado");
+            } catch (e: any) {
+                toast.error("Error al comprar: " + e.message);
+            }
         }
     };
 
@@ -129,9 +132,6 @@ export default function Watch() {
         } catch(e) { toast.error("Error posting comment"); }
     };
 
-    // --- CRITICAL PATH FIX ---
-    // Ensure local videos use the stream API, not raw filesystem paths.
-    // Handles cases where backend might send raw path or cache is stale.
     const getVideoSrc = (v: Video | null) => {
         if (!v) return '';
         const isLocal = Boolean(v.isLocal) || (v as any).isLocal === 1 || (v as any).isLocal === "1";
@@ -145,13 +145,11 @@ export default function Watch() {
     const openExternal = (type: 'vlc' | 'intent') => {
         if (!video) return;
         const relativeSrc = getVideoSrc(video);
-        // Convert relative API URL to Absolute URL for external apps
         const absoluteUrl = new URL(relativeSrc, window.location.href).href;
         
         if (type === 'vlc') {
             window.location.href = `vlc://${absoluteUrl}`;
         } else {
-            // Android Intent to open video/*
             const intent = `intent:${absoluteUrl}#Intent;action=android.intent.action.VIEW;type=video/*;end`;
             window.location.href = intent;
         }
@@ -162,11 +160,7 @@ export default function Watch() {
     return (
         <div className="flex flex-col animate-in fade-in min-h-screen bg-slate-950">
             
-            {/* 
-                FULL WIDTH PLAYER 
-                - sticky top-0: Only for PORTRAIT (Vertical) and DESKTOP
-                - landscape:relative: Scrolls with page on mobile landscape to allow reading comments
-            */}
+            {/* FULL WIDTH PLAYER */}
             <div className="w-full bg-black z-40 shadow-2xl border-b border-slate-800 transition-all duration-300 portrait:sticky portrait:top-0 landscape:relative md:sticky md:top-[74px]">
                 <div className={`relative w-full mx-auto max-w-[2000px] ${isUnlocked ? 'aspect-video' : 'aspect-video md:aspect-[21/9] lg:aspect-video'}`}>
                     {isUnlocked && video ? (
@@ -186,57 +180,53 @@ export default function Watch() {
                                     }
                                 }}
                             />
-                            {/* External Player Prompt (Subtle) */}
                             <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-300">
-                                <button 
-                                    onClick={() => openExternal('intent')} 
-                                    className="bg-black/60 text-white p-2 rounded-full backdrop-blur-md hover:bg-indigo-600 border border-white/20"
-                                    title="Abrir en reproductor externo"
-                                >
+                                <button onClick={() => openExternal('intent')} className="bg-black/60 text-white p-2 rounded-full backdrop-blur-md hover:bg-indigo-600 border border-white/20">
                                     <ExternalLink size={20} />
                                 </button>
                             </div>
                         </>
                     ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden">
+                        // LOCKED STATE - ENTIRE CONTAINER IS BUTTON
+                        <div 
+                            onClick={handlePurchase}
+                            className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden cursor-pointer group select-none"
+                        >
                             {/* Background Image */}
                             <div className="absolute inset-0 z-0">
                                 {video && (
                                     <img 
                                         src={video.thumbnailUrl} 
-                                        className="w-full h-full object-cover blur-md scale-110 opacity-50"
+                                        className="w-full h-full object-cover blur-sm scale-105 group-hover:scale-110 transition-transform duration-700 opacity-60"
                                         alt="Locked Content"
                                     />
                                 )}
-                                <div className="absolute inset-0 bg-black/60"></div>
+                                <div className="absolute inset-0 bg-black/60 group-hover:bg-black/50 transition-colors duration-500"></div>
                             </div>
                             
-                            {/* Compact Lock Card - Optimized for Small Screens */}
+                            {/* Tap to Unlock UI */}
                             {video && (
-                                <div className="relative z-20 bg-slate-900/95 backdrop-blur-xl p-4 md:p-8 rounded-xl border border-slate-700 text-center w-[90%] max-w-sm mx-auto shadow-2xl flex flex-col items-center">
-                                    <Lock className="mb-2 text-amber-400" size={32}/>
-                                    <h2 className="text-lg md:text-2xl font-bold text-white mb-1 leading-tight">Contenido Premium</h2>
-                                    <p className="text-slate-400 mb-3 text-[10px] md:text-sm">Necesitas desbloquear este video.</p>
+                                <div className="relative z-20 text-center flex flex-col items-center animate-in zoom-in duration-300">
+                                    <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20 mb-3 group-hover:scale-110 group-active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
+                                        <Lock className="text-white" size={32} />
+                                    </div>
                                     
-                                    <div className="text-3xl md:text-4xl font-black text-amber-400 mb-4">{video.price} $</div>
+                                    <h2 className="text-xl md:text-3xl font-black text-white mb-1 uppercase tracking-wider drop-shadow-lg">
+                                        Contenido Premium
+                                    </h2>
                                     
-                                    {user && user.balance < video.price ? (
-                                        <div className="w-full space-y-2">
-                                            <div className="bg-red-900/20 border border-red-500/30 text-red-300 text-[10px] py-1.5 px-2 rounded mb-1 font-mono">
-                                                Saldo: {user.balance.toFixed(2)} $
-                                            </div>
-                                            <button 
-                                                onClick={() => navigate('/vip')} 
-                                                className="w-full bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black font-bold py-2.5 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-xs md:text-sm"
-                                            >
-                                                <Crown size={14}/> Recargar / VIP
-                                            </button>
+                                    <div className="flex items-center gap-2 text-slate-300 text-xs md:text-sm font-medium bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm border border-white/10 mt-2">
+                                        <span>Desbloquear por</span>
+                                        <span className="text-amber-400 font-bold text-lg">{video.price} $</span>
+                                    </div>
+
+                                    {user && user.balance < video.price && (
+                                        <div className="mt-4 bg-red-600/90 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg animate-pulse">
+                                            <AlertCircle size={14}/> Saldo insuficiente ({user.balance.toFixed(2)} $)
                                         </div>
-                                    ) : (
-                                        <button onClick={handlePurchase} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm">
-                                            Desbloquear
-                                        </button>
                                     )}
+                                    
+                                    <p className="mt-4 text-[10px] text-white/50 uppercase tracking-widest font-bold">Toca para comprar</p>
                                 </div>
                             )}
                         </div>
