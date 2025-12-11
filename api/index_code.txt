@@ -85,6 +85,7 @@ require_once 'functions_videos.php';
 require_once 'functions_interactions.php';
 require_once 'functions_market.php';
 require_once 'functions_admin.php';
+require_once 'functions_payment.php'; // NEW
 
 $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
@@ -134,6 +135,11 @@ try {
         case 'mark_notification_read': interact_mark_notification_read($pdo, $input); break;
         case 'get_transactions': interact_get_transactions($pdo, $_GET['userId']); break;
         case 'request_balance': user_request_balance($pdo, $input); break;
+        
+        // PAYMENT ROUTES
+        case 'create_payment_link': payment_create_link($pdo, $input); break;
+        case 'verify_payment': payment_verify($pdo, $input); break;
+        case 'request_vip': request_vip($pdo, $input); break;
 
         case 'admin_add_balance': admin_add_balance($pdo, $input); break;
         case 'admin_get_balance_requests': admin_get_balance_requests($pdo); break;

@@ -141,7 +141,7 @@ export default function AdminConfig() {
                             <div className="grid grid-cols-3 gap-4 mb-3">
                                 <div>
                                     <label className="text-[10px] uppercase font-bold text-slate-500">Tipo</label>
-                                    <select value={plan.type} onChange={e => updateVipPlan(plan.id, 'type', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-white">
+                                    <select value={plan.type} onChange={e => updateVipPlan(plan.id, 'type', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-sm text-white">
                                         <option value="ACCESS">Acceso Total</option>
                                         <option value="BALANCE">Recarga Saldo</option>
                                     </select>
@@ -161,7 +161,7 @@ export default function AdminConfig() {
                             
                             <div>
                                 <label className="text-[10px] uppercase font-bold text-slate-500">Descripción</label>
-                                <input type="text" value={plan.description} onChange={e => updateVipPlan(plan.id, 'description', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-slate-300"/>
+                                <input type="text" value={plan.description} onChange={e => updateVipPlan(plan.id, 'description', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-xs text-slate-300"/>
                             </div>
                         </div>
                     ))}
@@ -172,27 +172,52 @@ export default function AdminConfig() {
                 </div>
             </ConfigSection>
 
-            {/* PAYMENT INSTRUCTIONS */}
+            {/* PAYMENT INSTRUCTIONS & GATEWAYS */}
             <ConfigSection 
-                title="Métodos de Pago" 
+                title="Pagos & Gateways" 
                 icon={CreditCard} 
                 isOpen={openSection === 'PAYMENT'} 
                 onToggle={() => setOpenSection(openSection === 'PAYMENT' ? '' : 'PAYMENT')}
             >
-                <div className="space-y-4">
-                    <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800">
-                        Escribe aquí las instrucciones que verán los usuarios al solicitar un plan VIP o una recarga. Puedes incluir enlaces de pago (Tropipay, QvaPay), números de cuenta o instrucciones de transferencia.
-                    </p>
-                    <textarea 
-                        rows={6} 
-                        value={settings.paymentInstructions || ''} 
-                        onChange={e => setSettings({...settings, paymentInstructions: e.target.value})} 
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-sm text-white focus:border-indigo-500 outline-none leading-relaxed font-mono"
-                        placeholder="Ejemplo:
+                <div className="space-y-6">
+                    {/* Tropipay Config */}
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2 text-indigo-300">Integración Tropipay</h4>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Client ID</label>
+                                <input type="text" value={settings.tropipayClientId || ''} onChange={e => setSettings({...settings, tropipayClientId: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Client Secret</label>
+                                <input type="password" value={settings.tropipayClientSecret || ''} onChange={e => setSettings({...settings, tropipayClientSecret: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tasa Cambio (CUP -> 1 EUR)</label>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm text-slate-400">1 EUR = </span>
+                                    <input type="number" min="1" value={settings.currencyConversion || 1} onChange={e => setSettings({...settings, currencyConversion: parseFloat(e.target.value)})} className="w-24 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none text-center font-bold"/>
+                                    <span className="text-sm text-slate-400">Saldo/CUP</span>
+                                </div>
+                                <p className="text-[10px] text-slate-500 mt-1">Si tus planes valen 1000 y la tasa es 300, el usuario pagará 3.33 EUR en Tropipay.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800">
+                            Escribe aquí las instrucciones MANUALES para usuarios que no usen la pasarela automática (ej: Transferencia QR).
+                        </p>
+                        <textarea 
+                            rows={4} 
+                            value={settings.paymentInstructions || ''} 
+                            onChange={e => setSettings({...settings, paymentInstructions: e.target.value})} 
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-sm text-white focus:border-indigo-500 outline-none leading-relaxed font-mono"
+                            placeholder="Ejemplo:
 1. Envía el pago a Tropipay: user@example.com
-2. Usa QvaPay: https://qvapay.com/pay/me
-3. Envía el comprobante en el siguiente paso."
-                    />
+2. Usa QvaPay: https://qvapay.com/pay/me"
+                        />
+                    </div>
                 </div>
             </ConfigSection>
 

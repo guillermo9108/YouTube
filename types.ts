@@ -207,7 +207,11 @@ export interface SystemSettings {
   videoCommission: number; // Percentage (0-100)
   marketCommission: number; // Percentage (0-100)
   vipPlans?: VipPlan[];
-  paymentInstructions?: string; // Instrucciones de pago (Markdown/Text)
+  paymentInstructions?: string;
+  // Gateways
+  tropipayClientId?: string;
+  tropipayClientSecret?: string;
+  currencyConversion?: number; // 1 USD/EUR = X Saldo
 }
 
 export interface OrganizeResult {

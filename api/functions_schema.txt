@@ -151,7 +151,10 @@ function getAppSchema() {
                 'videoCommission' => 'INT DEFAULT 20',
                 'marketCommission' => 'INT DEFAULT 25',
                 'vipPlans' => 'JSON DEFAULT NULL',
-                'paymentInstructions' => 'TEXT DEFAULT NULL'
+                'paymentInstructions' => 'TEXT DEFAULT NULL',
+                'tropipayClientId' => 'VARCHAR(255) DEFAULT NULL',
+                'tropipayClientSecret' => 'VARCHAR(255) DEFAULT NULL',
+                'currencyConversion' => 'DECIMAL(10, 2) DEFAULT 1.00'
             ]
         ],
         'subscriptions' => [

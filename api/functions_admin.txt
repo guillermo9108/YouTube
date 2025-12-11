@@ -439,7 +439,10 @@ function admin_get_settings($pdo) {
         'videoCommission' => intval($s['videoCommission'] ?? 20),
         'marketCommission' => intval($s['marketCommission'] ?? 25),
         'vipPlans' => json_decode($s['vipPlans'] ?? '[]', true) ?: [],
-        'paymentInstructions' => $s['paymentInstructions'] ?? ''
+        'paymentInstructions' => $s['paymentInstructions'] ?? '',
+        'tropipayClientId' => $s['tropipayClientId'] ?? '',
+        'tropipayClientSecret' => $s['tropipayClientSecret'] ?? '',
+        'currencyConversion' => floatval($s['currencyConversion']) ?? 1.00
     ];
     
     // DEFAULT VIP PLANS IF EMPTY
@@ -482,7 +485,10 @@ function admin_update_settings($pdo, $input) {
             videoCommission = ?,
             marketCommission = ?,
             vipPlans = ?,
-            paymentInstructions = ?
+            paymentInstructions = ?,
+            tropipayClientId = ?,
+            tropipayClientSecret = ?,
+            currencyConversion = ?
             WHERE id = 1";
             
     $pdo->prepare($sql)->execute([
@@ -503,7 +509,10 @@ function admin_update_settings($pdo, $input) {
         intval($s['videoCommission'] ?? 20),
         intval($s['marketCommission'] ?? 25),
         json_encode($s['vipPlans'] ?? []),
-        $s['paymentInstructions'] ?? ''
+        $s['paymentInstructions'] ?? '',
+        $s['tropipayClientId'] ?? '',
+        $s['tropipayClientSecret'] ?? '',
+        floatval($s['currencyConversion']) ?? 1.00
     ]);
     respond(true);
 }

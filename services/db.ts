@@ -199,6 +199,17 @@ export class DBService {
     async requestVip(userId: string, plan: VipPlan, paymentRef?: string): Promise<void> {
         return this.request(`action=request_vip`, { method: 'POST', body: JSON.stringify({userId, plan, paymentRef})});
     }
+
+    // --- Payments ---
+
+    async createPaymentLink(userId: string, plan: VipPlan): Promise<string> {
+        const res = await this.request<{paymentUrl: string}>(`action=create_payment_link`, { method: 'POST', body: JSON.stringify({userId, plan})});
+        return res.paymentUrl;
+    }
+
+    async verifyPayment(userId: string, reference: string): Promise<void> {
+        return this.request(`action=verify_payment`, { method: 'POST', body: JSON.stringify({userId, reference})});
+    }
     
     // --- Upload ---
 

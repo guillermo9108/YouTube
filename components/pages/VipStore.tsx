@@ -4,41 +4,87 @@ import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { VipPlan, SystemSettings } from '../../types';
-import { Crown, Check, Star, Zap, Loader2, ArrowLeft, X, Copy, CreditCard } from 'lucide-react';
-import { Link, useNavigate } from '../Router';
+import { Crown, Check, Star, Zap, Loader2, ArrowLeft, X, Copy, CreditCard, RefreshCw } from 'lucide-react';
+import { Link, useNavigate, useLocation } from '../Router';
 
 export default function VipStore() {
     const { user, refreshUser } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
     const toast = useToast();
     const [loading, setLoading] = useState(true);
     const [plans, setPlans] = useState<VipPlan[]>([]);
     const [instructions, setInstructions] = useState('');
+    const [conversionRate, setConversionRate] = useState(1);
     
     // Modal State
     const [selectedPlan, setSelectedPlan] = useState<VipPlan | null>(null);
     const [paymentRef, setPaymentRef] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const [verifying, setVerifying] = useState(false);
 
     useEffect(() => {
         db.getSystemSettings().then((s: SystemSettings) => {
             if (s.vipPlans) setPlans(s.vipPlans);
             if (s.paymentInstructions) setInstructions(s.paymentInstructions);
+            if (s.currencyConversion) setConversionRate(s.currencyConversion);
             setLoading(false);
         });
     }, []);
+
+    // Check for payment return URL
+    useEffect(() => {
+        // Parsing Hash URL: #/vip?status=success&ref=VP-xyz
+        // Simple manual parsing since it's a hash router
+        if (location.pathname === '/vip' && window.location.href.includes('status=success') && !verifying) {
+            const params = new URLSearchParams(window.location.href.split('?')[1]);
+            const ref = params.get('ref');
+            if (ref && user) {
+                verifyAutoPayment(ref);
+            }
+        }
+    }, [location, user]);
+
+    const verifyAutoPayment = async (ref: string) => {
+        if (!user) return;
+        setVerifying(true);
+        toast.info("Verificando pago con Tropipay...");
+        try {
+            await db.verifyPayment(user.id, ref);
+            toast.success("¡Pago confirmado! VIP Activado.");
+            refreshUser();
+            // Clear URL
+            window.location.hash = '/vip';
+        } catch (e: any) {
+            toast.error("Error verificando pago: " + e.message);
+        } finally {
+            setVerifying(false);
+        }
+    };
 
     const handleConfirmRequest = async () => {
         if (!user || !selectedPlan) return;
         setSubmitting(true);
         try {
             await db.requestVip(user.id, selectedPlan, paymentRef);
-            toast.success("Solicitud enviada. El admin verificará tu pago.");
+            toast.success("Solicitud manual enviada.");
             setSelectedPlan(null);
             setPaymentRef('');
         } catch (e: any) {
             toast.error(e.message);
         } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const handleTropipay = async () => {
+        if (!user || !selectedPlan) return;
+        setSubmitting(true);
+        try {
+            const url = await db.createPaymentLink(user.id, selectedPlan);
+            window.location.href = url; // Redirect to Payment Gateway
+        } catch (e: any) {
+            toast.error("Error creando link: " + e.message);
             setSubmitting(false);
         }
     };
@@ -62,8 +108,11 @@ export default function VipStore() {
                 )}
             </div>
 
-            {loading ? (
-                <div className="flex justify-center p-20"><Loader2 className="animate-spin text-amber-500" size={40}/></div>
+            {loading || verifying ? (
+                <div className="flex flex-col items-center justify-center p-20 gap-4">
+                    <Loader2 className="animate-spin text-amber-500" size={40}/>
+                    {verifying && <p className="text-amber-400 animate-pulse">Verificando transacción...</p>}
+                </div>
             ) : (
                 <>
                     {/* ACCESS PLANS */}
@@ -78,7 +127,7 @@ export default function VipStore() {
                                 )}
                                 <div className="mb-4">
                                     <h3 className="text-lg font-bold text-white group-hover:text-amber-400 transition-colors">{plan.name}</h3>
-                                    <div className="text-3xl font-black text-amber-400 mt-2">{plan.price} <span className="text-sm font-normal text-slate-500">CUP</span></div>
+                                    <div className="text-3xl font-black text-amber-400 mt-2">{plan.price} <span className="text-sm font-normal text-slate-500">Saldo</span></div>
                                 </div>
                                 
                                 <ul className="space-y-3 mb-8 flex-1">
@@ -120,7 +169,7 @@ export default function VipStore() {
                                 
                                 <div className="text-center py-6 bg-slate-950 rounded-xl mb-6 border border-slate-800">
                                     <div className="text-xs text-slate-500 uppercase font-bold mb-1">Pagas</div>
-                                    <div className="text-2xl font-bold text-white mb-2">{plan.price} CUP</div>
+                                    <div className="text-2xl font-bold text-white mb-2">{plan.price} Saldo</div>
                                     <div className="w-full h-px bg-slate-800 my-2"></div>
                                     <div className="text-xs text-slate-500 uppercase font-bold mb-1">Recibes</div>
                                     <div className="text-3xl font-black text-emerald-400">
@@ -146,47 +195,58 @@ export default function VipStore() {
                     <div className="bg-slate-900 w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950">
                             <h3 className="font-bold text-white flex items-center gap-2">
-                                <CreditCard size={20} className="text-emerald-400"/> Instrucciones de Pago
+                                <CreditCard size={20} className="text-emerald-400"/> Método de Pago
                             </h3>
                             <button onClick={() => setSelectedPlan(null)} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white"><X size={20}/></button>
                         </div>
                         
                         <div className="p-6 overflow-y-auto">
                             <div className="bg-indigo-900/20 p-4 rounded-xl border border-indigo-500/30 mb-6 text-center">
-                                <div className="text-sm text-indigo-300 uppercase font-bold mb-1">Monto a Pagar</div>
-                                <div className="text-4xl font-black text-white">{selectedPlan.price} CUP</div>
-                                <div className="text-xs text-slate-400 mt-1">Plan: {selectedPlan.name}</div>
+                                <div className="text-sm text-indigo-300 uppercase font-bold mb-1">Total a Pagar</div>
+                                <div className="text-4xl font-black text-white">{selectedPlan.price} <span className="text-sm">Saldo</span></div>
+                                <div className="text-xs text-slate-400 mt-2">Aprox: { (selectedPlan.price / conversionRate).toFixed(2) } EUR</div>
+                            </div>
+
+                            {/* Auto Payment Option */}
+                            <button 
+                                onClick={handleTropipay}
+                                disabled={submitting}
+                                className="w-full mb-6 py-4 bg-white hover:bg-slate-200 text-black font-bold rounded-xl flex items-center justify-center gap-2 shadow-xl transition-transform active:scale-95"
+                            >
+                                {submitting ? <Loader2 className="animate-spin"/> : <img src="https://www.tropipay.com/img/logos/tropipay-logo-color.svg" className="h-6" alt="Tropipay" onError={(e) => (e.currentTarget.style.display = 'none')} />}
+                                {submitting ? 'Creando Link...' : 'Pagar Ahora con Tropipay'}
+                            </button>
+
+                            <div className="relative flex py-5 items-center">
+                                <div className="flex-grow border-t border-slate-700"></div>
+                                <span className="flex-shrink-0 mx-4 text-slate-500 text-xs uppercase font-bold">O Pago Manual</span>
+                                <div className="flex-grow border-t border-slate-700"></div>
                             </div>
 
                             <div className="mb-6 space-y-2">
-                                <label className="text-xs font-bold text-slate-500 uppercase">Cómo Pagar:</label>
+                                <label className="text-xs font-bold text-slate-500 uppercase">Instrucciones:</label>
                                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 text-sm text-slate-300 whitespace-pre-wrap font-mono">
                                     {instructions || "El administrador no ha configurado instrucciones de pago aún. Contacta soporte."}
                                 </div>
                             </div>
 
                             <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Referencia de Pago / Nota</label>
+                                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Referencia de Pago Manual</label>
                                 <input 
                                     type="text" 
                                     className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white focus:border-indigo-500 outline-none transition-colors"
-                                    placeholder="Ej: Transferencia #123456 de Juan Perez"
+                                    placeholder="Ej: Transferencia #123456"
                                     value={paymentRef}
                                     onChange={e => setPaymentRef(e.target.value)}
                                 />
-                                <p className="text-[10px] text-slate-500 mt-1">Ayuda al administrador a identificar tu pago rápidamente.</p>
+                                <button 
+                                    onClick={handleConfirmRequest}
+                                    disabled={submitting || !paymentRef.trim()}
+                                    className="w-full mt-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-colors"
+                                >
+                                    Enviar Comprobante Manual
+                                </button>
                             </div>
-                        </div>
-
-                        <div className="p-4 border-t border-slate-800 bg-slate-950">
-                            <button 
-                                onClick={handleConfirmRequest}
-                                disabled={submitting || !paymentRef.trim()}
-                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
-                            >
-                                {submitting ? <Loader2 className="animate-spin"/> : <Check size={20}/>}
-                                {submitting ? 'Enviando...' : 'Confirmar Pago Enviado'}
-                            </button>
                         </div>
                     </div>
                 </div>
