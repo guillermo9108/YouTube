@@ -299,8 +299,8 @@ export default function Layout() {
                         </Link>
                     </div>
 
-                    {/* INSTALL BUTTON IN MENU (If installable and not installed) */}
-                    {installPrompt && !isStandalone && (
+                    {/* INSTALL BUTTON IN MENU (Shown if NOT Standalone, regardless of prompt availability) */}
+                    {!isStandalone && (
                         <button onClick={handleInstallClick} className="w-full flex items-center gap-3 px-4 py-3 text-white font-bold bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/30 mb-2 animate-in zoom-in">
                             <MobileIcon size={20} /> Instalar Aplicación
                         </button>
@@ -348,7 +348,7 @@ export default function Layout() {
           {user && <NotificationBell />}
           
           {/* Desktop Install Button */}
-          {installPrompt && !isStandalone && (
+          {!isStandalone && (
               <button onClick={handleInstallClick} className="text-sm font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1 animate-pulse hover:animate-none">
                   <MonitorDown size={14}/> Instalar App
               </button>
