@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight, Crown, Download } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight, Crown, Download, Smartphone as MobileIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useCart } from '../context/CartContext';
@@ -194,51 +194,61 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const { cart } = useCart();
   const [showSidebar, setShowSidebar] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  
+  // PWA State
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    // 1. Capture PWA Prompt
-    const handler = (e: any) => {
-        e.preventDefault();
-        setDeferredPrompt(e);
+    // 1. Check Standalone Status
+    const checkStandalone = () => {
+        const isApp = window.matchMedia('(display-mode: standalone)').matches || 
+                      (window.navigator as any).standalone === true;
+        setIsStandalone(isApp);
     };
+    checkStandalone();
+    window.matchMedia('(display-mode: standalone)').addEventListener('change', checkStandalone);
+
+    // 2. Capture Install Prompt
+    const handler = (e: any) => {
+        // Prevent Chrome 67+ from automatically showing the prompt
+        e.preventDefault();
+        // Stash the event so it can be triggered later.
+        setInstallPrompt(e);
+        
+        // Show banner if not installed and not dismissed recently
+        const lastDismissed = localStorage.getItem('sp_pwa_dismissed');
+        const COOLDOWN = 24 * 60 * 60 * 1000; // 24 Hours
+        
+        if (!isStandalone && (!lastDismissed || (Date.now() - parseInt(lastDismissed) > COOLDOWN))) {
+            setShowInstallBanner(true);
+        }
+    };
+
     window.addEventListener('beforeinstallprompt', handler);
 
-    // 2. Check if already installed
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    return () => {
+        window.removeEventListener('beforeinstallprompt', handler);
+        window.matchMedia('(display-mode: standalone)').removeEventListener('change', checkStandalone);
+    };
+  }, [isStandalone]);
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return;
     
-    // 3. Check periodic display logic (Only if NOT installed)
-    if (!isStandalone) {
-        const lastDismissed = localStorage.getItem('sp_pwa_dismissed');
-        const COOLDOWN = 24 * 60 * 60 * 1000; // 24 Hours in ms
-
-        if (!lastDismissed || (Date.now() - parseInt(lastDismissed)) > COOLDOWN) {
-            // Delay banner slightly to be less intrusive
-            const timer = setTimeout(() => setShowInstallBanner(true), 5000);
-            return () => {
-                clearTimeout(timer);
-                window.removeEventListener('beforeinstallprompt', handler);
-            };
-        }
-    }
-
-    return () => window.removeEventListener('beforeinstallprompt', handler);
-  }, []);
-
-  const handleInstallClick = () => {
-    if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then((choiceResult: any) => {
-            if (choiceResult.outcome === 'accepted') {
-                setDeferredPrompt(null);
-                setShowInstallBanner(false);
-            }
-        });
+    // Show the prompt
+    installPrompt.prompt();
+    
+    // Wait for the user to respond to the prompt
+    const { outcome } = await installPrompt.userChoice;
+    
+    if (outcome === 'accepted') {
+        console.log('User accepted the A2HS prompt');
+        setInstallPrompt(null);
+        setShowInstallBanner(false);
     } else {
-        // Fallback instructions for iOS or if prompt is missing
-        alert("Para instalar: \n1. Pulsa 'Compartir' (iOS) o Menú (Android)\n2. Selecciona 'Añadir a Pantalla de Inicio'");
-        dismissInstall();
+        console.log('User dismissed the A2HS prompt');
     }
   };
 
@@ -266,20 +276,11 @@ export default function Layout() {
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       
-      {/* 
-        ========================================
-        NUEVO SIDEBAR (MENÚ LATERAL) RECONSTRUIDO
-        ========================================
-      */}
+      {/* SIDEBAR MENU */}
       {showSidebar && (
         <div className="fixed inset-0 z-[150] flex font-sans">
-            {/* Backdrop */}
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setShowSidebar(false)}></div>
-            
-            {/* Drawer Content */}
             <div className="relative w-72 bg-slate-900 h-full shadow-2xl flex flex-col border-r border-slate-800 animate-in slide-in-from-left duration-300">
-                
-                {/* Drawer Header */}
                 <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
                     <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
                     <button onClick={() => setShowSidebar(false)} className="p-2 bg-slate-800 text-slate-300 rounded-full hover:text-white hover:bg-slate-700 transition-colors">
@@ -287,39 +288,24 @@ export default function Layout() {
                     </button>
                 </div>
                 
-                {/* Scrollable Links */}
                 <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                    
-                    {/* VIP - ALTA PRIORIDAD EN MENU */}
                     <div className="mb-2">
-                        <Link 
-                            to="/vip" 
-                            onClick={() => setShowSidebar(false)} 
-                            className="flex items-center gap-3 px-4 py-3 text-black font-bold bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 rounded-xl transition-colors shadow-lg shadow-amber-900/20"
-                        >
+                        <Link to="/vip" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-black font-bold bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 rounded-xl transition-colors shadow-lg shadow-amber-900/20">
                             <Crown size={20} className="text-black"/> VIP & Recargas
                         </Link>
                     </div>
 
-                    {/* INSTALL PWA BUTTON (If available in menu too) */}
-                    {deferredPrompt && (
-                        <button
-                            onClick={handleInstallClick}
-                            className="w-full flex items-center gap-3 px-4 py-3 text-white font-bold bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl transition-all shadow-lg hover:shadow-indigo-500/30 mb-2 animate-in zoom-in"
-                        >
-                            <Download size={20} /> Instalar App
+                    {/* INSTALL BUTTON IN MENU */}
+                    {installPrompt && !isStandalone && (
+                        <button onClick={handleInstallClick} className="w-full flex items-center gap-3 px-4 py-3 text-white font-bold bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/30 mb-2 animate-in zoom-in">
+                            <MobileIcon size={20} /> Instalar Aplicación
                         </button>
                     )}
 
-                    {/* ACCESO ADMINISTRACIÓN */}
                     {isAdmin && (
                         <div className="mb-4 pb-4 border-b border-slate-800">
                             <p className="px-3 text-[10px] uppercase font-bold text-slate-500 mb-2">Sistema</p>
-                            <Link 
-                                to="/admin" 
-                                onClick={() => setShowSidebar(false)} 
-                                className="flex items-center gap-3 px-4 py-3 bg-slate-800 text-indigo-300 border border-slate-700 rounded-xl hover:bg-slate-700 transition-colors group"
-                            >
+                            <Link to="/admin" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 bg-slate-800 text-indigo-300 border border-slate-700 rounded-xl hover:bg-slate-700 transition-colors group">
                                 <ShieldCheck size={20} className="group-hover:scale-110 transition-transform" />
                                 <span className="font-bold">Administración</span>
                                 <ChevronRight size={16} className="ml-auto opacity-50"/>
@@ -327,45 +313,19 @@ export default function Layout() {
                         </div>
                     )}
 
-                    {/* Navegación Principal */}
                     <p className="px-3 text-[10px] uppercase font-bold text-slate-500 mt-2 mb-1">Navegación</p>
-                    
-                    <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
-                        <Home size={20} className="text-indigo-400"/> Inicio
-                    </Link>
-                    
-                    <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
-                        <Smartphone size={20} className="text-pink-400"/> Shorts
-                    </Link>
-                    
-                    <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
-                        <ShoppingBag size={20} className="text-emerald-400"/> Tienda
-                    </Link>
-
+                    <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><Home size={20} className="text-indigo-400"/> Inicio</Link>
+                    <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><Smartphone size={20} className="text-pink-400"/> Shorts</Link>
+                    <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><ShoppingBag size={20} className="text-emerald-400"/> Tienda</Link>
                     <div className="h-px bg-slate-800 my-2 mx-2"></div>
-
-                    {/* Acciones de Usuario */}
                     <p className="px-3 text-[10px] uppercase font-bold text-slate-500 mt-2 mb-1">Tu Cuenta</p>
-
-                    <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
-                        <Upload size={20} className="text-blue-400"/> Subir Video
-                    </Link>
-
-                    <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
-                        <DownloadCloud size={20} className="text-purple-400"/> Peticiones
-                    </Link>
-
-                    <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors">
-                        <User size={20} className="text-slate-400"/> Mi Perfil
-                    </Link>
+                    <Link to="/upload" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><Upload size={20} className="text-blue-400"/> Subir Video</Link>
+                    <Link to="/requests" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><DownloadCloud size={20} className="text-purple-400"/> Peticiones</Link>
+                    <Link to="/profile" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><User size={20} className="text-slate-400"/> Mi Perfil</Link>
                 </div>
 
-                {/* Footer / Logout */}
                 <div className="p-4 border-t border-slate-800 bg-slate-950 pb-safe-area-bottom">
-                    <button 
-                        onClick={() => { logout(); setShowSidebar(false); }} 
-                        className="w-full flex items-center justify-center gap-2 px-4 py-3 text-red-400 bg-red-950/20 hover:bg-red-900/30 rounded-xl font-bold transition-colors border border-red-900/30"
-                    >
+                    <button onClick={() => { logout(); setShowSidebar(false); }} className="w-full flex items-center justify-center gap-2 px-4 py-3 text-red-400 bg-red-950/20 hover:bg-red-900/30 rounded-xl font-bold transition-colors border border-red-900/30">
                         <LogOut size={20}/> Cerrar Sesión
                     </button>
                 </div>
@@ -376,32 +336,25 @@ export default function Layout() {
       {/* HEADER (Desktop) */}
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
-            <Link to="/profile" className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
-                <Avatar size={32} />
-            </Link>
-            <Link to="/" className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
-            StreamPay
-            </Link>
+            <Link to="/profile" className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800"><Avatar size={32} /></Link>
+            <Link to="/" className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</Link>
         </div>
         <div className="flex items-center gap-6">
-          {/* Admin Link for Desktop */}
-          {isAdmin && (
-              <Link to="/admin" className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 text-sm bg-amber-950/40 px-4 py-2 rounded-full border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.2)] transition-all">
-                  <ShieldCheck size={16}/> Administración
-              </Link>
+          {isAdmin && <Link to="/admin" className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 text-sm bg-amber-950/40 px-4 py-2 rounded-full border border-amber-500/30 shadow-sm transition-all"><ShieldCheck size={16}/> Administración</Link>}
+          {user && <NotificationBell />}
+          
+          {/* Desktop Install Button */}
+          {installPrompt && !isStandalone && (
+              <button onClick={handleInstallClick} className="text-sm font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1 animate-pulse">
+                  <Download size={14}/> Instalar App
+              </button>
           )}
 
-          {user && <NotificationBell />}
-          <Link to="/vip" className="text-sm font-bold text-amber-400 hover:text-amber-300 bg-amber-900/20 px-3 py-1 rounded-full border border-amber-500/30">
-             VIP
-          </Link>
-          <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">
-             {Number(user?.balance || 0).toFixed(2)} Saldo
-          </span>
+          <Link to="/vip" className="text-sm font-bold text-amber-400 hover:text-amber-300 bg-amber-900/20 px-3 py-1 rounded-full border border-amber-500/30">VIP</Link>
+          <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">{Number(user?.balance || 0).toFixed(2)} Saldo</span>
           <Link to="/" className={isActive('/')}>Inicio</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>
           <Link to="/marketplace" className={isActive('/marketplace')}>Tienda</Link>
-          
           <Link to="/upload" className={isActive('/upload')}>Subir</Link>
         </div>
       </header>
@@ -411,32 +364,28 @@ export default function Layout() {
         <Outlet />
       </main>
       
-      {/* GLOBAL INDICATORS */}
       <UploadIndicator />
       <ServerTaskIndicator />
       <GridProcessor />
 
-      {/* PWA INSTALL BANNER (ANUNCIO PERIODICO) */}
-      {showInstallBanner && (
-          <div className="fixed bottom-0 left-0 right-0 z-[60] bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-900 border-t border-indigo-500/50 p-4 shadow-2xl animate-in slide-in-from-bottom duration-500 pb-safe">
-              <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-lg shrink-0 relative overflow-hidden">
-                          {/* Fallback Icon */}
-                          <span className="text-indigo-600 font-black text-xl">SP</span>
-                          <img src="/pwa-192x192.png" className="w-full h-full object-contain absolute inset-0" alt="" onError={(e) => e.currentTarget.style.display='none'}/>
-                      </div>
-                      <div>
-                          <h3 className="text-white font-bold text-lg leading-tight">Instala StreamPay</h3>
-                          <p className="text-indigo-200 text-sm">Mejor rendimiento y modo offline.</p>
-                      </div>
+      {/* PWA INSTALL BANNER (Floating Action) */}
+      {showInstallBanner && installPrompt && (
+          <div className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-auto md:right-4 z-[90] max-w-md ml-auto animate-in slide-in-from-bottom duration-500">
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-4 flex items-center gap-4 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-purple-500"></div>
+                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shrink-0 shadow-lg">
+                      <span className="text-indigo-900 font-black text-lg">SP</span>
                   </div>
-                  <div className="flex items-center gap-3 w-full md:w-auto">
-                      <button onClick={dismissInstall} className="flex-1 md:flex-none py-2 px-4 rounded-lg font-bold text-slate-400 hover:text-white transition-colors text-sm">
-                          Ahora no
+                  <div className="flex-1 min-w-0">
+                      <h4 className="font-bold text-white text-sm">Instalar StreamPay</h4>
+                      <p className="text-slate-400 text-xs">Acceso rápido y modo offline.</p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                      <button onClick={handleInstallClick} className="bg-white text-indigo-900 px-4 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-slate-100 transition-colors">
+                          Instalar
                       </button>
-                      <button onClick={handleInstallClick} className="flex-1 md:flex-none py-2.5 px-6 bg-white text-indigo-900 rounded-xl font-bold hover:bg-indigo-50 transition-transform active:scale-95 shadow-lg flex items-center justify-center gap-2">
-                          <Download size={18}/> Instalar App
+                      <button onClick={dismissInstall} className="text-slate-500 text-[10px] hover:text-white underline">
+                          Ahora no
                       </button>
                   </div>
               </div>
@@ -450,24 +399,19 @@ export default function Layout() {
             <Home size={22} />
             <span className="text-[10px]">Inicio</span>
           </Link>
-
           <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}>
             <Smartphone size={22} />
             <span className="text-[10px]">Shorts</span>
           </Link>
-          
           <div className="relative -top-5">
              <Link to="/upload" className="flex items-center justify-center w-14 h-14 rounded-full bg-indigo-600 text-white shadow-lg border-4 border-black">
                 <Upload size={24} />
              </Link>
           </div>
-
-          {/* Replaced Marketplace with VIP for better access in Mobile Portrait */}
           <Link to="/vip" className={`flex flex-col items-center gap-1 ${isActive('/vip')}`}>
              <Crown size={22} className={location.pathname === '/vip' ? 'text-amber-400' : 'text-slate-400'}/>
              <span className="text-[10px]">VIP</span>
           </Link>
-
           <div className="flex flex-col items-center gap-1 cursor-pointer" onClick={() => setShowSidebar(true)}>
              <Menu size={22} className="text-slate-400"/>
              <span className="text-[10px] text-slate-400">Menú</span>
