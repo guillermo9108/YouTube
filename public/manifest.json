@@ -18,13 +18,25 @@
       "src": "https://via.placeholder.com/192.png/0f172a/ffffff?text=SP",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "https://via.placeholder.com/192.png/0f172a/ffffff?text=SP",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "https://via.placeholder.com/512.png/0f172a/ffffff?text=StreamPay",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "https://via.placeholder.com/512.png/0f172a/ffffff?text=StreamPay",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "screenshots": [

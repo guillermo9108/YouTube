@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight, Crown, Download, Smartphone as MobileIcon } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight, Crown, Download, Smartphone as MobileIcon, MonitorDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useCart } from '../context/CartContext';
@@ -195,29 +195,30 @@ export default function Layout() {
   const { cart } = useCart();
   const [showSidebar, setShowSidebar] = useState(false);
   
-  // PWA State
+  // PWA & Install State
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    // 1. Check Standalone Status
+    // 1. Check if already installed (Standalone Mode)
     const checkStandalone = () => {
         const isApp = window.matchMedia('(display-mode: standalone)').matches || 
-                      (window.navigator as any).standalone === true;
+                      (window.navigator as any).standalone === true ||
+                      document.referrer.includes('android-app://');
         setIsStandalone(isApp);
     };
     checkStandalone();
     window.matchMedia('(display-mode: standalone)').addEventListener('change', checkStandalone);
 
-    // 2. Capture Install Prompt
+    // 2. Capture the 'beforeinstallprompt' event
     const handler = (e: any) => {
-        // Prevent Chrome 67+ from automatically showing the prompt
+        // Prevent Chrome from showing the mini-infobar immediately
         e.preventDefault();
         // Stash the event so it can be triggered later.
         setInstallPrompt(e);
         
-        // Show banner if not installed and not dismissed recently
+        // Check cooldown logic (Don't spam user if they closed it recently)
         const lastDismissed = localStorage.getItem('sp_pwa_dismissed');
         const COOLDOWN = 24 * 60 * 60 * 1000; // 24 Hours
         
@@ -235,20 +236,24 @@ export default function Layout() {
   }, [isStandalone]);
 
   const handleInstallClick = async () => {
-    if (!installPrompt) return;
+    if (!installPrompt) {
+        // Fallback for iOS or cases where prompt isn't supported/available
+        alert("Para instalar: \n1. Toca 'Compartir' (iOS) o Menú (Android)\n2. Selecciona 'Añadir a pantalla de inicio'");
+        return;
+    }
     
-    // Show the prompt
+    // Show the native prompt
     installPrompt.prompt();
     
     // Wait for the user to respond to the prompt
     const { outcome } = await installPrompt.userChoice;
     
     if (outcome === 'accepted') {
-        console.log('User accepted the A2HS prompt');
+        console.log('User accepted the PWA install');
         setInstallPrompt(null);
         setShowInstallBanner(false);
     } else {
-        console.log('User dismissed the A2HS prompt');
+        console.log('User dismissed the PWA install');
     }
   };
 
@@ -270,13 +275,12 @@ export default function Layout() {
       )
   );
 
-  // Robust check for Admin Role
   const isAdmin = user && user.role && user.role.trim().toUpperCase() === 'ADMIN';
 
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       
-      {/* SIDEBAR MENU */}
+      {/* SIDEBAR NAVIGATION */}
       {showSidebar && (
         <div className="fixed inset-0 z-[150] flex font-sans">
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setShowSidebar(false)}></div>
@@ -295,7 +299,7 @@ export default function Layout() {
                         </Link>
                     </div>
 
-                    {/* INSTALL BUTTON IN MENU */}
+                    {/* INSTALL BUTTON IN MENU (If installable and not installed) */}
                     {installPrompt && !isStandalone && (
                         <button onClick={handleInstallClick} className="w-full flex items-center gap-3 px-4 py-3 text-white font-bold bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/30 mb-2 animate-in zoom-in">
                             <MobileIcon size={20} /> Instalar Aplicación
@@ -345,8 +349,8 @@ export default function Layout() {
           
           {/* Desktop Install Button */}
           {installPrompt && !isStandalone && (
-              <button onClick={handleInstallClick} className="text-sm font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1 animate-pulse">
-                  <Download size={14}/> Instalar App
+              <button onClick={handleInstallClick} className="text-sm font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1 animate-pulse hover:animate-none">
+                  <MonitorDown size={14}/> Instalar App
               </button>
           )}
 
@@ -368,20 +372,24 @@ export default function Layout() {
       <ServerTaskIndicator />
       <GridProcessor />
 
-      {/* PWA INSTALL BANNER (Floating Action) */}
-      {showInstallBanner && installPrompt && (
+      {/* PWA INSTALL BANNER (Floating Modern Banner) */}
+      {showInstallBanner && installPrompt && !isStandalone && (
           <div className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-auto md:right-4 z-[90] max-w-md ml-auto animate-in slide-in-from-bottom duration-500">
-              <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-4 flex items-center gap-4 relative overflow-hidden">
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-4 flex items-center gap-4 relative overflow-hidden ring-1 ring-white/10">
                   <div className="absolute top-0 left-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-purple-500"></div>
-                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shrink-0 shadow-lg">
-                      <span className="text-indigo-900 font-black text-lg">SP</span>
+                  
+                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shrink-0 shadow-lg relative overflow-hidden">
+                      <img src="/pwa-192x192.png" alt="App Icon" className="w-full h-full object-cover" onError={(e) => e.currentTarget.style.display = 'none'} />
+                      <span className="text-indigo-900 font-black text-lg absolute">SP</span>
                   </div>
+                  
                   <div className="flex-1 min-w-0">
                       <h4 className="font-bold text-white text-sm">Instalar StreamPay</h4>
-                      <p className="text-slate-400 text-xs">Acceso rápido y modo offline.</p>
+                      <p className="text-slate-400 text-xs">Acceso rápido, notificaciones y modo offline.</p>
                   </div>
+                  
                   <div className="flex flex-col gap-2">
-                      <button onClick={handleInstallClick} className="bg-white text-indigo-900 px-4 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-slate-100 transition-colors">
+                      <button onClick={handleInstallClick} className="bg-white text-indigo-900 px-4 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-slate-100 transition-colors active:scale-95">
                           Instalar
                       </button>
                       <button onClick={dismissInstall} className="text-slate-500 text-[10px] hover:text-white underline">
@@ -404,7 +412,7 @@ export default function Layout() {
             <span className="text-[10px]">Shorts</span>
           </Link>
           <div className="relative -top-5">
-             <Link to="/upload" className="flex items-center justify-center w-14 h-14 rounded-full bg-indigo-600 text-white shadow-lg border-4 border-black">
+             <Link to="/upload" className="flex items-center justify-center w-14 h-14 rounded-full bg-indigo-600 text-white shadow-lg border-4 border-black active:scale-95 transition-transform">
                 <Upload size={24} />
              </Link>
           </div>
