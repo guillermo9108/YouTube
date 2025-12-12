@@ -10,52 +10,35 @@ import { db } from '../services/db';
 import { Notification as AppNotification } from '../types';
 import GridProcessor from './GridProcessor';
 
+// ... (Existing Indicator Components remain unchanged: UploadIndicator, ServerTaskIndicator, NotificationBell)
+// COPYING PREVIOUS INDICATORS TO KEEP FILE VALID
 const UploadIndicator = () => {
   const { isUploading, progress, currentFileIndex, totalFiles, uploadSpeed } = useUpload();
   if (!isUploading) return null;
   const radius = 18;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (progress / 100) * circumference;
-
   return (
     <div className="fixed bottom-24 md:bottom-8 right-4 z-[40] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom-6">
        <div className="relative w-12 h-12 flex items-center justify-center">
-          <svg className="transform -rotate-90 w-12 h-12">
-            <circle className="text-slate-700" strokeWidth="4" stroke="currentColor" fill="transparent" r={radius} cx="24" cy="24" />
-            <circle className="text-indigo-500 transition-all duration-300 ease-in-out" strokeWidth="4" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" stroke="currentColor" fill="transparent" r={radius} cx="24" cy="24" />
-          </svg>
+          <svg className="transform -rotate-90 w-12 h-12"><circle className="text-slate-700" strokeWidth="4" stroke="currentColor" fill="transparent" r={radius} cx="24" cy="24" /><circle className="text-indigo-500 transition-all duration-300 ease-in-out" strokeWidth="4" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" stroke="currentColor" fill="transparent" r={radius} cx="24" cy="24" /></svg>
           <span className="absolute text-[10px] font-bold text-white">{Math.round(progress)}%</span>
        </div>
-       <div className="flex flex-col min-w-[100px]">
-          <span className="text-xs font-bold text-white">Subiendo...</span>
-          <span className="text-[10px] text-slate-400">Archivo {currentFileIndex} de {totalFiles}</span>
-          <span className="text-[10px] text-indigo-400 font-mono">{uploadSpeed}</span>
-       </div>
+       <div className="flex flex-col min-w-[100px]"><span className="text-xs font-bold text-white">Subiendo...</span><span className="text-[10px] text-slate-400">Archivo {currentFileIndex} de {totalFiles}</span><span className="text-[10px] text-indigo-400 font-mono">{uploadSpeed}</span></div>
     </div>
   );
 };
-
 const ServerTaskIndicator = () => {
     const { isScanning, progress, currentFile } = useServerTask();
     const navigate = useNavigate();
     if (!isScanning) return null;
     return (
         <div onClick={() => navigate('/admin')} className="fixed bottom-24 md:bottom-28 right-4 z-[40] bg-slate-900 border border-emerald-900/50 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom-6 cursor-pointer hover:bg-slate-800 transition-colors">
-            <div className="relative w-12 h-12 flex items-center justify-center bg-emerald-900/20 rounded-full">
-                <Server size={24} className="text-emerald-500 animate-pulse" />
-            </div>
-            <div className="flex flex-col min-w-[120px]">
-                <span className="text-xs font-bold text-white flex items-center gap-1">Escaneando NAS...</span>
-                <span className="text-[10px] text-slate-400 truncate max-w-[120px]">{currentFile || 'Iniciando...'}</span>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden">
-                    <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${progress.percent}%` }}></div>
-                </div>
-                <span className="text-[9px] text-emerald-400 mt-0.5 text-right">{progress.current} / {progress.total}</span>
-            </div>
+            <div className="relative w-12 h-12 flex items-center justify-center bg-emerald-900/20 rounded-full"><Server size={24} className="text-emerald-500 animate-pulse" /></div>
+            <div className="flex flex-col min-w-[120px]"><span className="text-xs font-bold text-white flex items-center gap-1">Escaneando NAS...</span><span className="text-[10px] text-slate-400 truncate max-w-[120px]">{currentFile || 'Iniciando...'}</span><div className="w-full h-1.5 bg-slate-800 rounded-full mt-1 overflow-hidden"><div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${progress.percent}%` }}></div></div><span className="text-[9px] text-emerald-400 mt-0.5 text-right">{progress.current} / {progress.total}</span></div>
         </div>
     );
 };
-
 const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
     const { user } = useAuth();
     const navigate = useNavigate();
@@ -63,100 +46,18 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
     const [isOpen, setIsOpen] = useState(false);
     const lastNotifIdRef = useRef<string | null>(null);
     const hasUnread = notifs.some(n => !n.isRead);
-
-    useEffect(() => {
-        if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
-    }, []);
-
+    useEffect(() => { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }, []);
     const fetchNotifs = async () => {
-        if(user) {
-            try {
-                const list = await db.getNotifications(user.id);
-                setNotifs(list);
-                if (list.length > 0) {
-                    const latest = list[0];
-                    if (latest.id !== lastNotifIdRef.current && !latest.isRead) {
-                        lastNotifIdRef.current = latest.id;
-                        triggerSystemNotification(latest);
-                    }
-                }
-            } catch(e) {}
-        }
+        if(user) { try { const list = await db.getNotifications(user.id); setNotifs(list); if (list.length > 0) { const latest = list[0]; if (latest.id !== lastNotifIdRef.current && !latest.isRead) { lastNotifIdRef.current = latest.id; triggerSystemNotification(latest); } } } catch(e) {} }
     };
-
-    const triggerSystemNotification = async (n: AppNotification) => {
-        if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
-            try {
-                const registration = await navigator.serviceWorker.ready;
-                registration.showNotification("StreamPay", {
-                    body: n.text,
-                    icon: '/pwa-192x192.png',
-                    tag: n.id,
-                    data: { url: n.link }
-                });
-            } catch (e) { console.error(e); }
-        }
-    };
-
-    useEffect(() => {
-        if(user) fetchNotifs();
-        const interval = setInterval(() => { if(user) fetchNotifs(); }, 15000);
-        return () => clearInterval(interval);
-    }, [user]);
-
-    const handleClick = (n: AppNotification) => {
-        if(!n.isRead) db.markNotificationRead(n.id).catch(() => {});
-        navigate(n.link);
-        setIsOpen(false);
-        setNotifs(prev => prev.map(p => p.id === n.id ? {...p, isRead: true} : p));
-    };
-
+    const triggerSystemNotification = async (n: AppNotification) => { if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator) { try { const registration = await navigator.serviceWorker.ready; registration.showNotification("StreamPay", { body: n.text, icon: '/pwa-192x192.png', tag: n.id, data: { url: n.link } }); } catch (e) { console.error(e); } } };
+    useEffect(() => { if(user) fetchNotifs(); const interval = setInterval(() => { if(user) fetchNotifs(); }, 15000); return () => clearInterval(interval); }, [user]);
+    const handleClick = (n: AppNotification) => { if(!n.isRead) db.markNotificationRead(n.id).catch(() => {}); navigate(n.link); setIsOpen(false); setNotifs(prev => prev.map(p => p.id === n.id ? {...p, isRead: true} : p)); };
     if (!user) return null;
-
     return (
         <>
-            <button onClick={() => setIsOpen(!isOpen)} className={`relative p-2 rounded-full transition-colors ${isMobile ? 'text-slate-400 hover:text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-                <Bell size={isMobile ? 24 : 20} />
-                {hasUnread && <span className="absolute top-1 right-1.5 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-slate-900"></span>}
-            </button>
-            {isOpen && (
-                <>
-                    <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
-                    <div className={`fixed z-[100] bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl max-h-[75vh] animate-in slide-in-from-bottom' : 'top-16 right-4 w-80 rounded-xl max-h-[80vh] animate-in fade-in zoom-in-95 origin-top-right'}`}>
-                        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/90 backdrop-blur-md sticky top-0 z-10">
-                            <h3 className="font-bold text-white flex items-center gap-2"><Bell size={18} className="text-indigo-400"/> Notificaciones</h3>
-                            <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-slate-800 rounded-full bg-slate-900 border border-slate-800"><X size={18} className="text-slate-400 hover:text-white"/></button>
-                        </div>
-                        <div className="overflow-y-auto overscroll-contain flex-1 bg-slate-900">
-                            {notifs.length === 0 ? (
-                                <div className="p-12 text-center text-slate-500 text-sm flex flex-col items-center gap-3">
-                                    <Bell size={32} className="opacity-50"/>
-                                    <p>Sin notificaciones</p>
-                                </div>
-                            ) : (
-                                <div className="divide-y divide-slate-800/50 pb-8">
-                                    {notifs.map(n => (
-                                        <div key={n.id} onClick={() => handleClick(n)} className={`p-4 flex gap-4 hover:bg-slate-800/80 cursor-pointer transition-colors active:bg-slate-800 ${!n.isRead ? 'bg-indigo-900/10 border-l-2 border-indigo-500' : 'border-l-2 border-transparent'}`}>
-                                            <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-slate-700 mt-1">
-                                                {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><Bell size={16}/></div>}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className={`text-sm leading-snug ${!n.isRead ? 'text-white font-semibold' : 'text-slate-400'}`}>{n.text}</p>
-                                                <span className="text-[10px] text-slate-600 block mt-1.5 flex items-center gap-1"><Clock size={10}/> {new Date(n.timestamp).toLocaleString()}</span>
-                                            </div>
-                                            {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 shrink-0 animate-pulse"></div>}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                        {isMobile && <div className="h-safe-area-bottom bg-slate-900 h-6"></div>}
-                    </div>
-                </>
-            )}
-        </>
+            <button onClick={() => setIsOpen(!isOpen)} className={`relative p-2 rounded-full transition-colors ${isMobile ? 'text-slate-400 hover:text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><Bell size={isMobile ? 24 : 20} />{hasUnread && <span className="absolute top-1 right-1.5 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-slate-900"></span>}</button>
+            {isOpen && (<><div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div><div className={`fixed z-[100] bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl max-h-[75vh] animate-in slide-in-from-bottom' : 'top-16 right-4 w-80 rounded-xl max-h-[80vh] animate-in fade-in zoom-in-95 origin-top-right'}`}><div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/90 backdrop-blur-md sticky top-0 z-10"><h3 className="font-bold text-white flex items-center gap-2"><Bell size={18} className="text-indigo-400"/> Notificaciones</h3><button onClick={() => setIsOpen(false)} className="p-2 hover:bg-slate-800 rounded-full bg-slate-900 border border-slate-800"><X size={18} className="text-slate-400 hover:text-white"/></button></div><div className="overflow-y-auto overscroll-contain flex-1 bg-slate-900">{notifs.length === 0 ? (<div className="p-12 text-center text-slate-500 text-sm flex flex-col items-center gap-3"><Bell size={32} className="opacity-50"/><p>Sin notificaciones</p></div>) : (<div className="divide-y divide-slate-800/50 pb-8">{notifs.map(n => (<div key={n.id} onClick={() => handleClick(n)} className={`p-4 flex gap-4 hover:bg-slate-800/80 cursor-pointer transition-colors active:bg-slate-800 ${!n.isRead ? 'bg-indigo-900/10 border-l-2 border-indigo-500' : 'border-l-2 border-transparent'}`}><div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-slate-700 mt-1">{n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><Bell size={16}/></div>}</div><div className="flex-1 min-w-0"><p className={`text-sm leading-snug ${!n.isRead ? 'text-white font-semibold' : 'text-slate-400'}`}>{n.text}</p><span className="text-[10px] text-slate-600 block mt-1.5 flex items-center gap-1"><Clock size={10}/> {new Date(n.timestamp).toLocaleString()}</span></div>{!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 shrink-0 animate-pulse"></div>}</div>))}</div>)}</div>{isMobile && <div className="h-safe-area-bottom bg-slate-900 h-6"></div>}</div></>)}</>
     );
 };
 
@@ -173,11 +74,11 @@ export default function Layout() {
   const [isSecure, setIsSecure] = useState(true);
 
   useEffect(() => {
-    // 1. Check Protocol Security (Critical for PWA)
-    const secure = window.location.hostname === 'localhost' || window.location.protocol === 'https:';
+    // 1. Check Protocol Security
+    const secure = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.protocol === 'https:';
     setIsSecure(secure);
 
-    // 2. Check Standalone
+    // 2. Check Standalone Mode
     const checkStandalone = () => {
         const isApp = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
         setIsStandalone(isApp);
@@ -185,11 +86,20 @@ export default function Layout() {
     checkStandalone();
     window.matchMedia('(display-mode: standalone)').addEventListener('change', checkStandalone);
 
-    // 3. Capture Install Prompt
+    // 3. Capture Install Prompt (Including Early Capture from index.html)
+    // Check if the event already fired before React mounted
+    if ((window as any).deferredPrompt) {
+        console.log("Layout: Found deferred prompt from global scope");
+        setInstallPrompt((window as any).deferredPrompt);
+        setShowInstallBanner(true);
+    }
+
     const handler = (e: any) => {
         e.preventDefault();
+        console.log("Layout: Captured beforeinstallprompt event");
         setInstallPrompt(e);
-        // Show banner if not installed
+        // Save to global too just in case
+        (window as any).deferredPrompt = e;
         if (!isStandalone) setShowInstallBanner(true);
     };
 
@@ -201,15 +111,23 @@ export default function Layout() {
   }, [isStandalone]);
 
   const handleInstallClick = async () => {
-    if (!installPrompt) {
-        // iOS or Unsupported Instructions
-        alert("Para instalar en iOS/Android:\n1. Pulsa el botón 'Compartir' o Menú del navegador.\n2. Selecciona 'Añadir a pantalla de inicio'.");
+    // Prefer state prompt, fall back to global
+    const promptEvent = installPrompt || (window as any).deferredPrompt;
+
+    if (!promptEvent) {
+        alert("Para instalar:\n\n1. En Chrome: Menú (⋮) -> Instalar aplicación\n2. En iOS (Safari): Compartir -> Añadir a inicio");
         return;
     }
-    installPrompt.prompt();
-    const { outcome } = await installPrompt.userChoice;
+    
+    // Show the native prompt
+    promptEvent.prompt();
+    
+    // Wait for the user to respond to the prompt
+    const { outcome } = await promptEvent.userChoice;
+    
     if (outcome === 'accepted') {
         setInstallPrompt(null);
+        (window as any).deferredPrompt = null;
         setShowInstallBanner(false);
     }
   };
@@ -318,7 +236,7 @@ export default function Layout() {
       <ServerTaskIndicator />
       <GridProcessor />
 
-      {/* PWA INSTALL BOTTOM SHEET (Android Style) */}
+      {/* PWA INSTALL BOTTOM SHEET */}
       {!isStandalone && (showInstallBanner || !isSecure) && (
           <div className="fixed bottom-0 left-0 right-0 z-[100] bg-slate-900 border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom duration-500 pb-safe-area-bottom">
               <div className="p-4 flex items-center gap-4 max-w-lg mx-auto">
@@ -328,7 +246,7 @@ export default function Layout() {
                       {!isSecure ? (
                           <p className="text-red-400 text-xs flex items-center gap-1 font-bold mt-0.5"><AlertTriangle size={12}/> Requiere HTTPS o Localhost</p>
                       ) : (
-                          <p className="text-slate-400 text-xs mt-0.5">Acceso rápido, notificaciones y modo offline.</p>
+                          <p className="text-slate-400 text-xs mt-0.5">Acceso rápido y modo offline.</p>
                       )}
                   </div>
                   {isSecure ? (

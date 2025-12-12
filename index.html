@@ -15,9 +15,22 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="StreamPay">
-    <link rel="apple-touch-icon" href="https://via.placeholder.com/192.png/0f172a/ffffff?text=SP">
+    <link rel="apple-touch-icon" href="https://ui-avatars.com/api/?name=S+P&background=4f46e5&color=fff&size=192&rounded=true&length=2">
     
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    
+    <!-- Early PWA Capture -->
+    <script>
+      window.deferredPrompt = null;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        // Prevent the mini-infobar from appearing on mobile
+        e.preventDefault();
+        // Stash the event so it can be triggered later.
+        window.deferredPrompt = e;
+        console.log('StreamPay: PWA Install Event Captured Early');
+      });
+    </script>
+
   <script type="importmap">
 {
   "imports": {
