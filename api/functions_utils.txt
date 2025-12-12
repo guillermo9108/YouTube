@@ -67,22 +67,30 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     $detectedCategory = null;
     $categoryLocked = false; // Flag crucial: Si es true, nadie más puede cambiar la categoría
 
-    // --- PASO 1: PRIORIDAD ABSOLUTA - CATEGORÍAS PERSONALIZADAS EN ANCESTROS ---
+    // --- PASO 1: PRIORIDAD ABSOLUTA - ANÁLISIS DE ANCESTROS (CUSTOM Y ESTÁNDAR) ---
     // Analizamos Padre, Abuelo y Bisabuelo
-    if (!empty($customCategories)) {
-        // Tomar las últimas 3 carpetas e invertirlas (Padre > Abuelo > Bisabuelo)
-        $ancestors = array_reverse(array_slice($pathParts, -3)); 
+    $ancestors = array_reverse(array_slice($pathParts, -3)); 
+    
+    // Mapa Estándar
+    $categoryMap = [
+        'SERIES' => ['series', 'serie', 'temporada', 'season', 'tv shows', 'capitulos', 'episodes', 'anime'],
+        'NOVELAS' => ['novelas', 'telenovelas', 'dramas', 'soap'],
+        'MOVIE' => ['movies', 'movie', 'peliculas', 'pelicula', 'films', 'cine', '4k movies', 'hd movies'],
+        'SHORTS' => ['shorts', 'cortos', 'tiktok', 'reels', 'vertical'],
+        'MUSIC' => ['music', 'musica', 'concerts', 'conciertos', 'videoclips'],
+        'EDUCATION' => ['education', 'educacion', 'cursos', 'courses', 'tutoriales']
+    ];
+
+    foreach ($ancestors as $folder) {
+        // Normalizar nombre carpeta: "Ciencia_Ficcion" -> "ciencia ficcion"
+        $folderClean = mb_strtolower(str_replace(['_', '-', '.'], ' ', trim($folder)), 'UTF-8');
         
-        foreach ($ancestors as $folder) {
-            // Normalizar nombre carpeta: "Ciencia_Ficcion" -> "ciencia ficcion"
-            $folderClean = mb_strtolower(str_replace(['_', '-', '.'], ' ', trim($folder)), 'UTF-8');
-            
+        // 1. Revisar Categorías Personalizadas
+        if (!empty($customCategories)) {
             foreach ($customCategories as $customCat) {
                 // Normalizar categoría custom: "CIENCIA_FICCION" -> "ciencia ficcion"
                 $catName = mb_strtolower(str_replace(['_', '-'], ' ', trim($customCat)), 'UTF-8');
                 
-                // Coincidencia: La carpeta CONTIENE el nombre de la categoría o es IGUAL
-                // Ej: Carpeta "Peliculas Retro" match con Categoría "RETRO"
                 if ($folderClean === $catName || strpos($folderClean, $catName) !== false) {
                     $detectedCategory = $customCat;
                     $categoryLocked = true; // Bloquear cambios futuros
@@ -90,31 +98,15 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
                 }
             }
         }
-    }
 
-    // --- PASO 2: CATEGORÍAS ESTÁNDAR EN ANCESTROS (Solo si no está bloqueado) ---
-    if (!$categoryLocked) {
-        $categoryMap = [
-            'SERIES' => ['series', 'serie', 'temporada', 'season', 'tv shows', 'capitulos', 'episodes', 'anime'],
-            'NOVELAS' => ['novelas', 'telenovelas', 'dramas', 'soap'],
-            'MOVIE' => ['movies', 'movie', 'peliculas', 'pelicula', 'films', 'cine', '4k movies', 'hd movies'],
-            'SHORTS' => ['shorts', 'cortos', 'tiktok', 'reels', 'vertical'],
-            'MUSIC' => ['music', 'musica', 'concerts', 'conciertos', 'videoclips'],
-            'EDUCATION' => ['education', 'educacion', 'cursos', 'courses', 'tutoriales']
-        ];
-
-        // Revisar ancestros de nuevo para keywords estándar
-        $ancestors = array_reverse(array_slice($pathParts, -3));
-        foreach ($ancestors as $folder) {
-            $p = mb_strtolower(str_replace(['_', '-', '.'], ' ', trim($folder)), 'UTF-8');
-            foreach ($categoryMap as $catKey => $keywords) {
-                foreach ($keywords as $kw) {
-                    // Match de palabra completa o contenido claro
-                    if (strpos($p, $kw) !== false) {
-                        $detectedCategory = $catKey;
-                        // No bloqueamos aquí ($categoryLocked = false) porque el análisis de episodio (Paso 3) podría ser más preciso (ej: detectar S01E01 en carpeta 'Descargas')
-                        break 3; 
-                    }
+        // 2. Revisar Categorías Estándar
+        foreach ($categoryMap as $catKey => $keywords) {
+            foreach ($keywords as $kw) {
+                // Match de palabra completa o contenido claro
+                if (strpos($folderClean, $kw) !== false) {
+                    $detectedCategory = $catKey;
+                    $categoryLocked = true; // Bloquear cambios futuros también para estándar
+                    break 3; 
                 }
             }
         }
@@ -169,9 +161,9 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
         $episodeEnd = $info['e2'];
         $isEpisodic = true;
 
-        // IMPORTANTE: Si NO está bloqueado por una categoría personalizada, asignamos SERIES/NOVELAS
+        // IMPORTANTE: Si NO está bloqueado por una categoría (Custom o Estándar), asignamos SERIES/NOVELAS
         if (!$categoryLocked) {
-            // Si ya habíamos detectado algo genérico como 'OTHER' o 'PROCESSING' o nada, forzamos SERIES
+            // Si no hay categoría detectada o es genérica, asumimos serie por tener episodio
             if (!$detectedCategory || $detectedCategory === 'OTHER' || $detectedCategory === 'PROCESSING' || $detectedCategory === 'MOVIE') {
                 $detectedCategory = ($detectedCategory === 'NOVELAS') ? 'NOVELAS' : 'SERIES';
             }
@@ -200,7 +192,7 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     $cleanName = $cleanText($filename);
     $finalTitle = $cleanName;
 
-    // Lógica especial para Títulos de Series (incluso si la categoría es custom pero tiene estructura de episodios)
+    // Lógica especial para Títulos de Series (o si es una categoría custom que parece episódica)
     if ($detectedCategory === 'SERIES' || $detectedCategory === 'NOVELAS' || ($isEpisodic && $detectedCategory !== 'MOVIE')) {
         $grandParent = prev($pathParts);
 
