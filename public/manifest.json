@@ -1,22 +1,55 @@
+
 {
   "name": "StreamPay",
   "short_name": "StreamPay",
-  "description": "Plataforma de video Pay-Per-View Self-Hosted",
-  "start_url": "./",
+  "description": "Plataforma de video Pay-Per-View y Marketplace",
+  "id": "/?source=pwa",
+  "start_url": "./?source=pwa",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
   "orientation": "portrait",
+  "categories": ["entertainment", "shopping", "finance"],
   "icons": [
     {
-      "src": "https://via.placeholder.com/192.png?text=StreamPay",
+      "src": "https://via.placeholder.com/192.png?text=SP",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
       "src": "https://via.placeholder.com/512.png?text=StreamPay",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "https://via.placeholder.com/1280x720.png?text=StreamPay+Home",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
+    },
+    {
+      "src": "https://via.placeholder.com/720x1280.png?text=Mobile+Feed",
+      "sizes": "720x1280",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Ver Shorts",
+      "short_name": "Shorts",
+      "url": "./#/shorts",
+      "icons": [{ "src": "https://via.placeholder.com/96.png?text=S", "sizes": "96x96" }]
+    },
+    {
+      "name": "Mi Perfil",
+      "short_name": "Perfil",
+      "url": "./#/profile",
+      "icons": [{ "src": "https://via.placeholder.com/96.png?text=P", "sizes": "96x96" }]
     }
   ]
 }

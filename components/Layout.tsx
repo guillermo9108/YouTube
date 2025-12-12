@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight, Crown } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight, Crown, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useCart } from '../context/CartContext';
@@ -194,6 +194,58 @@ export default function Layout() {
   const { user, logout } = useAuth();
   const { cart } = useCart();
   const [showSidebar, setShowSidebar] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+
+  useEffect(() => {
+    // 1. Capture PWA Prompt
+    const handler = (e: any) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+
+    // 2. Check if already installed
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    
+    // 3. Check periodic display logic (Only if NOT installed)
+    if (!isStandalone) {
+        const lastDismissed = localStorage.getItem('sp_pwa_dismissed');
+        const COOLDOWN = 24 * 60 * 60 * 1000; // 24 Hours in ms
+
+        if (!lastDismissed || (Date.now() - parseInt(lastDismissed)) > COOLDOWN) {
+            // Delay banner slightly to be less intrusive
+            const timer = setTimeout(() => setShowInstallBanner(true), 5000);
+            return () => {
+                clearTimeout(timer);
+                window.removeEventListener('beforeinstallprompt', handler);
+            };
+        }
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then((choiceResult: any) => {
+            if (choiceResult.outcome === 'accepted') {
+                setDeferredPrompt(null);
+                setShowInstallBanner(false);
+            }
+        });
+    } else {
+        // Fallback instructions for iOS or if prompt is missing
+        alert("Para instalar: \n1. Pulsa 'Compartir' (iOS) o Menú (Android)\n2. Selecciona 'Añadir a Pantalla de Inicio'");
+        dismissInstall();
+    }
+  };
+
+  const dismissInstall = () => {
+      setShowInstallBanner(false);
+      localStorage.setItem('sp_pwa_dismissed', Date.now().toString());
+  };
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
   const isShortsMode = location.pathname === '/shorts';
@@ -248,6 +300,16 @@ export default function Layout() {
                             <Crown size={20} className="text-black"/> VIP & Recargas
                         </Link>
                     </div>
+
+                    {/* INSTALL PWA BUTTON (If available in menu too) */}
+                    {deferredPrompt && (
+                        <button
+                            onClick={handleInstallClick}
+                            className="w-full flex items-center gap-3 px-4 py-3 text-white font-bold bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl transition-all shadow-lg hover:shadow-indigo-500/30 mb-2 animate-in zoom-in"
+                        >
+                            <Download size={20} /> Instalar App
+                        </button>
+                    )}
 
                     {/* ACCESO ADMINISTRACIÓN */}
                     {isAdmin && (
@@ -353,6 +415,33 @@ export default function Layout() {
       <UploadIndicator />
       <ServerTaskIndicator />
       <GridProcessor />
+
+      {/* PWA INSTALL BANNER (ANUNCIO PERIODICO) */}
+      {showInstallBanner && (
+          <div className="fixed bottom-0 left-0 right-0 z-[60] bg-gradient-to-r from-indigo-900 via-slate-900 to-indigo-900 border-t border-indigo-500/50 p-4 shadow-2xl animate-in slide-in-from-bottom duration-500 pb-safe">
+              <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-lg shrink-0 relative overflow-hidden">
+                          {/* Fallback Icon */}
+                          <span className="text-indigo-600 font-black text-xl">SP</span>
+                          <img src="/pwa-192x192.png" className="w-full h-full object-contain absolute inset-0" alt="" onError={(e) => e.currentTarget.style.display='none'}/>
+                      </div>
+                      <div>
+                          <h3 className="text-white font-bold text-lg leading-tight">Instala StreamPay</h3>
+                          <p className="text-indigo-200 text-sm">Mejor rendimiento y modo offline.</p>
+                      </div>
+                  </div>
+                  <div className="flex items-center gap-3 w-full md:w-auto">
+                      <button onClick={dismissInstall} className="flex-1 md:flex-none py-2 px-4 rounded-lg font-bold text-slate-400 hover:text-white transition-colors text-sm">
+                          Ahora no
+                      </button>
+                      <button onClick={handleInstallClick} className="flex-1 md:flex-none py-2.5 px-6 bg-white text-indigo-900 rounded-xl font-bold hover:bg-indigo-50 transition-transform active:scale-95 shadow-lg flex items-center justify-center gap-2">
+                          <Download size={18}/> Instalar App
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {/* Bottom Nav (Mobile) */}
       {!isShortsMode && (

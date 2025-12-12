@@ -10,11 +10,46 @@ import {
 export class DBService {
     private baseUrl = 'api/index.php';
     private demoMode = false;
+    
+    // Offline DB Config
+    private dbName = 'sp_offline_db';
+    private dbVersion = 1;
+    private idb: IDBDatabase | null = null;
 
     constructor() {
         if (localStorage.getItem('sp_demo_mode') === 'true') {
             this.demoMode = true;
         }
+        this.initIDB();
+    }
+
+    private initIDB(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, this.dbVersion);
+            
+            request.onerror = () => console.error("IDB Error");
+            
+            request.onupgradeneeded = (event: any) => {
+                const db = event.target.result;
+                // Store video metadata
+                if (!db.objectStoreNames.contains('videos')) {
+                    db.createObjectStore('videos', { keyPath: 'id' });
+                }
+                // Store user history/interactions
+                if (!db.objectStoreNames.contains('history')) {
+                    db.createObjectStore('history', { keyPath: 'id' }); // id = userId_videoId
+                }
+                // Store download status mapping (VideoID -> Boolean)
+                if (!db.objectStoreNames.contains('downloads')) {
+                    db.createObjectStore('downloads', { keyPath: 'id' });
+                }
+            };
+
+            request.onsuccess = (event: any) => {
+                this.idb = event.target.result;
+                resolve();
+            };
+        });
     }
 
     enableDemoMode() {
@@ -27,27 +62,166 @@ export class DBService {
         const headers: any = options?.headers || {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
-        const response = await fetch(`${this.baseUrl}?${query}`, {
-            ...options,
-            headers: {
-                ...headers
-            }
-        });
-
-        if (!response.ok) throw new Error(`Network response was not ok: ${response.statusText}`);
-        
-        const text = await response.text();
         try {
-            const json = JSON.parse(text);
-            if (json.success === false) throw new Error(json.error || json.message || "API Error");
-            return json.data as T;
-        } catch (e: any) {
-            console.error("API Response Parse Error:", text);
-            throw new Error(e.message || "Invalid JSON response");
+            const response = await fetch(`${this.baseUrl}?${query}`, {
+                ...options,
+                headers: { ...headers }
+            });
+
+            if (!response.ok) throw new Error(`Network response was not ok: ${response.statusText}`);
+            
+            const text = await response.text();
+            try {
+                const json = JSON.parse(text);
+                if (json.success === false) throw new Error(json.error || json.message || "API Error");
+                return json.data as T;
+            } catch (e: any) {
+                throw new Error(e.message || "Invalid JSON response");
+            }
+        } catch (error) {
+            // NETWORK FAIL: If GET request, try to return offline data if relevant
+            if (!options || options.method === 'GET' || !options.method) {
+                // If fetching all videos
+                if (query.includes('action=get_videos')) {
+                    return this.getOfflineVideos() as any;
+                }
+                // If fetching single video
+                if (query.includes('action=get_video')) {
+                    const idMatch = query.match(/id=([^&]+)/);
+                    if (idMatch && idMatch[1]) {
+                        const vid = await this.getOfflineVideo(idMatch[1]);
+                        if (vid) return vid as any;
+                    }
+                }
+            }
+            throw error;
         }
     }
 
+    // --- IDB Helpers ---
+    
+    private async putIDB(storeName: string, data: any) {
+        if (!this.idb) await this.initIDB();
+        const tx = this.idb!.transaction(storeName, 'readwrite');
+        tx.objectStore(storeName).put(data);
+    }
+
+    private async getIDB(storeName: string, key: string): Promise<any> {
+        if (!this.idb) await this.initIDB();
+        return new Promise((resolve) => {
+            const tx = this.idb!.transaction(storeName, 'readonly');
+            const req = tx.objectStore(storeName).get(key);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => resolve(null);
+        });
+    }
+
+    private async getAllIDB(storeName: string): Promise<any[]> {
+        if (!this.idb) await this.initIDB();
+        return new Promise((resolve) => {
+            const tx = this.idb!.transaction(storeName, 'readonly');
+            const req = tx.objectStore(storeName).getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => resolve([]);
+        });
+    }
+
+    // --- Offline Data Sync ---
+
+    async getOfflineVideos(): Promise<Video[]> {
+        return this.getAllIDB('videos');
+    }
+
+    async getOfflineVideo(id: string): Promise<Video | null> {
+        return this.getIDB('videos', id);
+    }
+
     // --- Core Methods ---
+
+    async getAllVideos(): Promise<Video[]> { 
+        // Network First, Fallback to IDB is handled in request() catch block
+        const videos = await this.request<Video[]>(`action=get_videos`); 
+        
+        // Sync to Offline DB
+        if (videos && videos.length > 0) {
+            const tx = this.idb?.transaction('videos', 'readwrite');
+            if (tx) {
+                const store = tx.objectStore('videos');
+                videos.forEach(v => store.put(v));
+            }
+        }
+        return videos;
+    }
+
+    async getVideo(id: string): Promise<Video | null> { 
+        const video = await this.request<Video>(`action=get_video&id=${id}`); 
+        if (video) this.putIDB('videos', video);
+        return video;
+    }
+
+    // --- Background Fetch Download ---
+
+    async downloadVideoForOffline(video: Video): Promise<void> {
+        if (!('serviceWorker' in navigator)) throw new Error("Service Worker not supported");
+        
+        const registration = await navigator.serviceWorker.ready;
+        if (!(registration as any).backgroundFetch) throw new Error("Background Fetch not supported");
+
+        let downloadUrl = video.videoUrl;
+        const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
+        if (isLocal && !downloadUrl.includes('action=stream')) {
+            downloadUrl = `api/index.php?action=stream&id=${video.id}`;
+        }
+
+        try {
+            // Unique ID for the fetch group
+            const fetchId = `dl-${video.id}-${Date.now()}`;
+            const bgFetch = await (registration as any).backgroundFetch.fetch(fetchId, [downloadUrl], {
+                title: `Descargando: ${video.title}`,
+                icons: [{
+                    src: video.thumbnailUrl || '/pwa-192x192.png',
+                    sizes: '192x192',
+                    type: 'image/png'
+                }],
+                downloadTotal: 0 // Unknown size usually
+            });
+
+            // Mark as downloading in IDB
+            await this.putIDB('downloads', { id: video.id, status: 'downloading', fetchId });
+
+            bgFetch.addEventListener('progress', (e: any) => {
+                // Could broadcast progress via BroadcastChannel if needed
+            });
+
+        } catch (e: any) {
+            console.error("BG Fetch Error", e);
+            throw new Error("No se pudo iniciar la descarga.");
+        }
+    }
+
+    async checkDownloadStatus(videoId: string): Promise<boolean> {
+        // Check if file exists in Cache Storage 'streampay-videos-v1'
+        if ('caches' in window) {
+            const cache = await caches.open('streampay-videos-v1');
+            
+            // We need to guess the key. Usually it's the videoUrl or stream URL.
+            // Since getAllVideos syncs, we fetch the video object first
+            const video = await this.getOfflineVideo(videoId);
+            if (!video) return false;
+
+            let url = video.videoUrl;
+            if ((video.isLocal || (video as any).isLocal === 1) && !url.includes('action=stream')) {
+                url = `api/index.php?action=stream&id=${videoId}`;
+            }
+            
+            // Check absolute match or relative
+            const match = await cache.match(url, { ignoreSearch: true }); // ignore search for robust matching
+            return !!match;
+        }
+        return false;
+    }
+
+    // --- Other Methods (Standard) ---
 
     async getUnprocessedVideos(limit: number = 0, mode: 'normal' | 'random' = 'normal'): Promise<Video[]> {
         return this.request<Video[]>(`action=get_unprocessed_videos&limit=${limit}&mode=${mode}`);
@@ -127,14 +301,6 @@ export class DBService {
     }
     
     // --- Videos ---
-
-    async getAllVideos(): Promise<Video[]> { 
-        return this.request<Video[]>(`action=get_videos`); 
-    }
-
-    async getVideo(id: string): Promise<Video | null> { 
-        return this.request<Video>(`action=get_video&id=${id}`); 
-    }
 
     async getRelatedVideos(id: string): Promise<Video[]> { 
         return this.request<Video[]>(`action=get_related_videos&id=${id}`); 
@@ -221,7 +387,7 @@ export class DBService {
             formData.append('price', price.toString());
             formData.append('category', cat);
             formData.append('duration', dur.toString());
-            formData.append('creatorId', user.id); // Backend expects creatorId
+            formData.append('creatorId', user.id); 
             formData.append('video', file);
             if(thumb) formData.append('thumbnail', thumb);
 
@@ -305,7 +471,6 @@ export class DBService {
     invalidateCache(key: string) { localStorage.removeItem('sp_cache_' + key); }
     setHomeDirty() { this.invalidateCache('get_videos'); }
     
-    // Improved Check Installation handling Offline mode
     async checkInstallation(): Promise<{status: 'installed' | 'not_installed' | 'error'}> { 
         try { 
             const res = await this.request<any>('action=check'); 

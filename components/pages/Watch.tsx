@@ -4,7 +4,7 @@ import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
-import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle, ShoppingCart } from 'lucide-react';
+import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle, ShoppingCart, Download, WifiOff } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
@@ -19,6 +19,10 @@ export default function Watch() {
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [comments, setComments] = useState<Comment[]>([]);
+    
+    // Offline / Download State
+    const [isDownloaded, setIsDownloaded] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
     
     // Related Videos State
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
@@ -40,12 +44,17 @@ export default function Watch() {
         setIsUnlocked(false); // Reset lock state
         setRelatedVideos([]); // Reset related
         setLoadingRelated(true); // Start loading related
+        setIsDownloaded(false);
 
         const fetchMeta = async () => {
             try {
+                // Modified: Now gets from local IDB if offline
                 const v = await db.getVideo(id);
                 if (v) {
                     setVideo(v);
+                    
+                    // Check download status
+                    db.checkDownloadStatus(v.id).then(setIsDownloaded);
                     
                     // Load related
                     db.getRelatedVideos(v.id)
@@ -53,7 +62,7 @@ export default function Watch() {
                       .catch(err => console.error("Related error", err))
                       .finally(() => setLoadingRelated(false));
 
-                    // Load comments
+                    // Load comments (Likely network only, but safe to fail)
                     db.getComments(v.id).then(setComments).catch(() => {});
                 } else {
                     toast.error("Video no encontrado");
@@ -111,6 +120,23 @@ export default function Watch() {
             } catch (e: any) {
                 toast.error("Error al comprar: " + e.message);
             }
+        }
+    };
+
+    const handleDownload = async () => {
+        if (!video) return;
+        if (!isUnlocked) { toast.error("Debes desbloquear el video primero."); return; }
+        
+        setIsDownloading(true);
+        try {
+            await db.downloadVideoForOffline(video);
+            toast.info("Descarga iniciada en segundo plano.");
+            // We assume success via Background API, checking status later
+            setTimeout(() => db.checkDownloadStatus(video.id).then(setIsDownloaded), 2000);
+        } catch (e: any) {
+            toast.error(e.message);
+        } finally {
+            setIsDownloading(false);
         }
     };
 
@@ -180,7 +206,20 @@ export default function Watch() {
                                     }
                                 }}
                             />
-                            <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-300">
+                            <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-300 flex gap-2">
+                                {/* Download Button inside Player */}
+                                <button 
+                                    onClick={handleDownload} 
+                                    disabled={isDownloaded || isDownloading}
+                                    className={`p-2 rounded-full backdrop-blur-md border transition-colors ${
+                                        isDownloaded ? 'bg-emerald-600/80 text-white border-emerald-500' : 
+                                        'bg-black/60 text-white hover:bg-indigo-600 border-white/20'
+                                    }`}
+                                    title={isDownloaded ? "Disponible Offline" : "Descargar"}
+                                >
+                                    {isDownloading ? <Loader2 size={20} className="animate-spin"/> : (isDownloaded ? <WifiOff size={20}/> : <Download size={20}/>)}
+                                </button>
+                                
                                 <button onClick={() => openExternal('intent')} className="bg-black/60 text-white p-2 rounded-full backdrop-blur-md hover:bg-indigo-600 border border-white/20">
                                     <ExternalLink size={20} />
                                 </button>
@@ -279,8 +318,15 @@ export default function Watch() {
                                     <button onClick={() => handleRate('dislike')} className={`px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.disliked ? 'text-red-400 border-red-500/50' : 'text-slate-400'}`}>
                                         <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
                                     </button>
-                                    <button className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors text-slate-400">
-                                        <Share2 size={18}/> <span className="hidden md:inline text-sm font-bold">Compartir</span>
+                                    
+                                    {/* Mobile Download Button in Toolbar */}
+                                    <button 
+                                        onClick={handleDownload}
+                                        disabled={isDownloaded || isDownloading} 
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${isDownloaded ? 'text-emerald-400 border-emerald-500/50' : 'text-slate-400'}`}
+                                    >
+                                        {isDownloading ? <Loader2 size={18} className="animate-spin"/> : <Download size={18}/>}
+                                        <span className="hidden md:inline text-sm font-bold">{isDownloaded ? 'Offline' : 'Descargar'}</span>
                                     </button>
                                 </div>
                             </div>
