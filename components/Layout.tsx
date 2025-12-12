@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Check, Menu, DownloadCloud, LogOut, Compass, WifiOff, Clock, ShoppingBag, ShoppingCart, Server, ChevronRight, Crown, Download, Smartphone as MobileIcon, MonitorDown } from 'lucide-react';
+import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Menu, DownloadCloud, LogOut, ShoppingBag, Server, ChevronRight, Crown, Smartphone as MobileIcon, MonitorDown, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
 import { useCart } from '../context/CartContext';
@@ -12,9 +12,7 @@ import GridProcessor from './GridProcessor';
 
 const UploadIndicator = () => {
   const { isUploading, progress, currentFileIndex, totalFiles, uploadSpeed } = useUpload();
-  
   if (!isUploading) return null;
-
   const radius = 18;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (progress / 100) * circumference;
@@ -40,14 +38,9 @@ const UploadIndicator = () => {
 const ServerTaskIndicator = () => {
     const { isScanning, progress, currentFile } = useServerTask();
     const navigate = useNavigate();
-
     if (!isScanning) return null;
-
     return (
-        <div 
-            onClick={() => navigate('/admin')}
-            className="fixed bottom-24 md:bottom-28 right-4 z-[40] bg-slate-900 border border-emerald-900/50 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom-6 cursor-pointer hover:bg-slate-800 transition-colors"
-        >
+        <div onClick={() => navigate('/admin')} className="fixed bottom-24 md:bottom-28 right-4 z-[40] bg-slate-900 border border-emerald-900/50 rounded-2xl shadow-2xl p-3 flex items-center gap-3 animate-in slide-in-from-bottom-6 cursor-pointer hover:bg-slate-800 transition-colors">
             <div className="relative w-12 h-12 flex items-center justify-center bg-emerald-900/20 rounded-full">
                 <Server size={24} className="text-emerald-500 animate-pulse" />
             </div>
@@ -82,7 +75,6 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
             try {
                 const list = await db.getNotifications(user.id);
                 setNotifs(list);
-                
                 if (list.length > 0) {
                     const latest = list[0];
                     if (latest.id !== lastNotifIdRef.current && !latest.isRead) {
@@ -98,16 +90,12 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
         if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
             try {
                 const registration = await navigator.serviceWorker.ready;
-                const options: any = {
+                registration.showNotification("StreamPay", {
                     body: n.text,
-                    icon: n.avatarUrl || '/pwa-192x192.png',
-                    badge: '/pwa-192x192.png',
+                    icon: '/pwa-192x192.png',
                     tag: n.id,
-                    data: { url: n.link },
-                    vibrate: [200, 100, 200]
-                };
-                if ((n as any).thumbnailUrl) options.image = (n as any).thumbnailUrl;
-                registration.showNotification("StreamPay", options);
+                    data: { url: n.link }
+                });
             } catch (e) { console.error(e); }
         }
     };
@@ -133,47 +121,30 @@ const NotificationBell = ({ isMobile = false }: { isMobile?: boolean }) => {
                 <Bell size={isMobile ? 24 : 20} />
                 {hasUnread && <span className="absolute top-1 right-1.5 w-2.5 h-2.5 bg-red-600 rounded-full border-2 border-slate-900"></span>}
             </button>
-
             {isOpen && (
                 <>
                     <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
-                    
-                    <div className={`
-                        fixed z-[100] bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col
-                        ${isMobile 
-                            ? 'bottom-0 left-0 right-0 rounded-t-2xl max-h-[75vh] animate-in slide-in-from-bottom duration-300 border-t-2 border-t-indigo-500/50' 
-                            : 'top-16 right-4 w-80 rounded-xl max-h-[80vh] animate-in fade-in zoom-in-95 origin-top-right'
-                        }
-                    `}>
+                    <div className={`fixed z-[100] bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col ${isMobile ? 'bottom-0 left-0 right-0 rounded-t-2xl max-h-[75vh] animate-in slide-in-from-bottom' : 'top-16 right-4 w-80 rounded-xl max-h-[80vh] animate-in fade-in zoom-in-95 origin-top-right'}`}>
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/90 backdrop-blur-md sticky top-0 z-10">
                             <h3 className="font-bold text-white flex items-center gap-2"><Bell size={18} className="text-indigo-400"/> Notificaciones</h3>
                             <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-slate-800 rounded-full bg-slate-900 border border-slate-800"><X size={18} className="text-slate-400 hover:text-white"/></button>
                         </div>
-                        
                         <div className="overflow-y-auto overscroll-contain flex-1 bg-slate-900">
                             {notifs.length === 0 ? (
                                 <div className="p-12 text-center text-slate-500 text-sm flex flex-col items-center gap-3">
-                                    <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center opacity-50">
-                                        <Bell size={32}/>
-                                    </div>
+                                    <Bell size={32} className="opacity-50"/>
                                     <p>Sin notificaciones</p>
                                 </div>
                             ) : (
                                 <div className="divide-y divide-slate-800/50 pb-8">
                                     {notifs.map(n => (
-                                        <div 
-                                            key={n.id} 
-                                            onClick={() => handleClick(n)}
-                                            className={`p-4 flex gap-4 hover:bg-slate-800/80 cursor-pointer transition-colors active:bg-slate-800 ${!n.isRead ? 'bg-indigo-900/10 border-l-2 border-indigo-500' : 'border-l-2 border-transparent'}`}
-                                        >
+                                        <div key={n.id} onClick={() => handleClick(n)} className={`p-4 flex gap-4 hover:bg-slate-800/80 cursor-pointer transition-colors active:bg-slate-800 ${!n.isRead ? 'bg-indigo-900/10 border-l-2 border-indigo-500' : 'border-l-2 border-transparent'}`}>
                                             <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-slate-700 mt-1">
                                                 {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><Bell size={16}/></div>}
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <p className={`text-sm leading-snug ${!n.isRead ? 'text-white font-semibold' : 'text-slate-400'}`}>{n.text}</p>
-                                                <span className="text-[10px] text-slate-600 block mt-1.5 flex items-center gap-1">
-                                                    <Clock size={10}/> {new Date(n.timestamp).toLocaleString()}
-                                                </span>
+                                                <span className="text-[10px] text-slate-600 block mt-1.5 flex items-center gap-1"><Clock size={10}/> {new Date(n.timestamp).toLocaleString()}</span>
                                             </div>
                                             {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 shrink-0 animate-pulse"></div>}
                                         </div>
@@ -195,40 +166,34 @@ export default function Layout() {
   const { cart } = useCart();
   const [showSidebar, setShowSidebar] = useState(false);
   
-  // PWA & Install State
+  // PWA State
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [isSecure, setIsSecure] = useState(true);
 
   useEffect(() => {
-    // 1. Check if already installed (Standalone Mode)
+    // 1. Check Protocol Security (Critical for PWA)
+    const secure = window.location.hostname === 'localhost' || window.location.protocol === 'https:';
+    setIsSecure(secure);
+
+    // 2. Check Standalone
     const checkStandalone = () => {
-        const isApp = window.matchMedia('(display-mode: standalone)').matches || 
-                      (window.navigator as any).standalone === true ||
-                      document.referrer.includes('android-app://');
+        const isApp = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
         setIsStandalone(isApp);
     };
     checkStandalone();
     window.matchMedia('(display-mode: standalone)').addEventListener('change', checkStandalone);
 
-    // 2. Capture the 'beforeinstallprompt' event
+    // 3. Capture Install Prompt
     const handler = (e: any) => {
-        // Prevent Chrome from showing the mini-infobar immediately
         e.preventDefault();
-        // Stash the event so it can be triggered later.
         setInstallPrompt(e);
-        
-        // Check cooldown logic (Don't spam user if they closed it recently)
-        const lastDismissed = localStorage.getItem('sp_pwa_dismissed');
-        const COOLDOWN = 24 * 60 * 60 * 1000; // 24 Hours
-        
-        if (!isStandalone && (!lastDismissed || (Date.now() - parseInt(lastDismissed) > COOLDOWN))) {
-            setShowInstallBanner(true);
-        }
+        // Show banner if not installed
+        if (!isStandalone) setShowInstallBanner(true);
     };
 
     window.addEventListener('beforeinstallprompt', handler);
-
     return () => {
         window.removeEventListener('beforeinstallprompt', handler);
         window.matchMedia('(display-mode: standalone)').removeEventListener('change', checkStandalone);
@@ -237,30 +202,19 @@ export default function Layout() {
 
   const handleInstallClick = async () => {
     if (!installPrompt) {
-        // Fallback for iOS or cases where prompt isn't supported/available
-        alert("Para instalar: \n1. Toca 'Compartir' (iOS) o Menú (Android)\n2. Selecciona 'Añadir a pantalla de inicio'");
+        // iOS or Unsupported Instructions
+        alert("Para instalar en iOS/Android:\n1. Pulsa el botón 'Compartir' o Menú del navegador.\n2. Selecciona 'Añadir a pantalla de inicio'.");
         return;
     }
-    
-    // Show the native prompt
     installPrompt.prompt();
-    
-    // Wait for the user to respond to the prompt
     const { outcome } = await installPrompt.userChoice;
-    
     if (outcome === 'accepted') {
-        console.log('User accepted the PWA install');
         setInstallPrompt(null);
         setShowInstallBanner(false);
-    } else {
-        console.log('User dismissed the PWA install');
     }
   };
 
-  const dismissInstall = () => {
-      setShowInstallBanner(false);
-      localStorage.setItem('sp_pwa_dismissed', Date.now().toString());
-  };
+  const dismissInstall = () => setShowInstallBanner(false);
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
   const isShortsMode = location.pathname === '/shorts';
@@ -269,9 +223,7 @@ export default function Layout() {
       user?.avatarUrl ? (
           <img src={user.avatarUrl} alt={user.username} className={`rounded-full object-cover ${className}`} style={{width: size, height: size}} />
       ) : (
-          <div className={`rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold ${className}`} style={{width: size, height: size, fontSize: size*0.4}}>
-              {user?.username?.[0]}
-          </div>
+          <div className={`rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold ${className}`} style={{width: size, height: size, fontSize: size*0.4}}>{user?.username?.[0]}</div>
       )
   );
 
@@ -280,16 +232,14 @@ export default function Layout() {
   return (
     <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
       
-      {/* SIDEBAR NAVIGATION */}
+      {/* SIDEBAR */}
       {showSidebar && (
         <div className="fixed inset-0 z-[150] flex font-sans">
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setShowSidebar(false)}></div>
             <div className="relative w-72 bg-slate-900 h-full shadow-2xl flex flex-col border-r border-slate-800 animate-in slide-in-from-left duration-300">
                 <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
                     <span className="font-bold text-xl bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</span>
-                    <button onClick={() => setShowSidebar(false)} className="p-2 bg-slate-800 text-slate-300 rounded-full hover:text-white hover:bg-slate-700 transition-colors">
-                        <X size={20} />
-                    </button>
+                    <button onClick={() => setShowSidebar(false)} className="p-2 bg-slate-800 text-slate-300 rounded-full hover:text-white hover:bg-slate-700 transition-colors"><X size={20} /></button>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -299,7 +249,6 @@ export default function Layout() {
                         </Link>
                     </div>
 
-                    {/* INSTALL BUTTON IN MENU (Shown if NOT Standalone, regardless of prompt availability) */}
                     {!isStandalone && (
                         <button onClick={handleInstallClick} className="w-full flex items-center gap-3 px-4 py-3 text-white font-bold bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/30 mb-2 animate-in zoom-in">
                             <MobileIcon size={20} /> Instalar Aplicación
@@ -337,7 +286,7 @@ export default function Layout() {
         </div>
       )}
 
-      {/* HEADER (Desktop) */}
+      {/* HEADER */}
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
             <Link to="/profile" className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800"><Avatar size={32} /></Link>
@@ -346,14 +295,11 @@ export default function Layout() {
         <div className="flex items-center gap-6">
           {isAdmin && <Link to="/admin" className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 text-sm bg-amber-950/40 px-4 py-2 rounded-full border border-amber-500/30 shadow-sm transition-all"><ShieldCheck size={16}/> Administración</Link>}
           {user && <NotificationBell />}
-          
-          {/* Desktop Install Button */}
           {!isStandalone && (
               <button onClick={handleInstallClick} className="text-sm font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-900/20 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1 animate-pulse hover:animate-none">
                   <MonitorDown size={14}/> Instalar App
               </button>
           )}
-
           <Link to="/vip" className="text-sm font-bold text-amber-400 hover:text-amber-300 bg-amber-900/20 px-3 py-1 rounded-full border border-amber-500/30">VIP</Link>
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">{Number(user?.balance || 0).toFixed(2)} Saldo</span>
           <Link to="/" className={isActive('/')}>Inicio</Link>
@@ -372,30 +318,27 @@ export default function Layout() {
       <ServerTaskIndicator />
       <GridProcessor />
 
-      {/* PWA INSTALL BANNER (Floating Modern Banner) */}
-      {showInstallBanner && installPrompt && !isStandalone && (
-          <div className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-auto md:right-4 z-[90] max-w-md ml-auto animate-in slide-in-from-bottom duration-500">
-              <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-4 flex items-center gap-4 relative overflow-hidden ring-1 ring-white/10">
-                  <div className="absolute top-0 left-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-purple-500"></div>
-                  
-                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shrink-0 shadow-lg relative overflow-hidden">
-                      <img src="/pwa-192x192.png" alt="App Icon" className="w-full h-full object-cover" onError={(e) => e.currentTarget.style.display = 'none'} />
-                      <span className="text-indigo-900 font-black text-lg absolute">SP</span>
-                  </div>
-                  
+      {/* PWA INSTALL BOTTOM SHEET (Android Style) */}
+      {!isStandalone && (showInstallBanner || !isSecure) && (
+          <div className="fixed bottom-0 left-0 right-0 z-[100] bg-slate-900 border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom duration-500 pb-safe-area-bottom">
+              <div className="p-4 flex items-center gap-4 max-w-lg mx-auto">
+                  <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg text-white font-bold text-xl">SP</div>
                   <div className="flex-1 min-w-0">
                       <h4 className="font-bold text-white text-sm">Instalar StreamPay</h4>
-                      <p className="text-slate-400 text-xs">Acceso rápido, notificaciones y modo offline.</p>
+                      {!isSecure ? (
+                          <p className="text-red-400 text-xs flex items-center gap-1 font-bold mt-0.5"><AlertTriangle size={12}/> Requiere HTTPS o Localhost</p>
+                      ) : (
+                          <p className="text-slate-400 text-xs mt-0.5">Acceso rápido, notificaciones y modo offline.</p>
+                      )}
                   </div>
-                  
-                  <div className="flex flex-col gap-2">
-                      <button onClick={handleInstallClick} className="bg-white text-indigo-900 px-4 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-slate-100 transition-colors active:scale-95">
+                  {isSecure ? (
+                      <button onClick={handleInstallClick} className="bg-white text-indigo-900 px-5 py-2.5 rounded-full text-xs font-bold shadow hover:bg-slate-100 transition-colors active:scale-95">
                           Instalar
                       </button>
-                      <button onClick={dismissInstall} className="text-slate-500 text-[10px] hover:text-white underline">
-                          Ahora no
-                      </button>
-                  </div>
+                  ) : (
+                      <button onClick={() => setShowInstallBanner(false)} className="text-slate-500"><X size={20}/></button>
+                  )}
+                  {isSecure && <button onClick={dismissInstall} className="p-2 text-slate-500 hover:text-white rounded-full"><X size={20}/></button>}
               </div>
           </div>
       )}
@@ -403,27 +346,13 @@ export default function Layout() {
       {/* Bottom Nav (Mobile) */}
       {!isShortsMode && (
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex justify-around items-center py-3 z-50 safe-area-bottom">
-          <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/')}`}>
-            <Home size={22} />
-            <span className="text-[10px]">Inicio</span>
-          </Link>
-          <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}>
-            <Smartphone size={22} />
-            <span className="text-[10px]">Shorts</span>
-          </Link>
+          <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/')}`}><Home size={22} /><span className="text-[10px]">Inicio</span></Link>
+          <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}><Smartphone size={22} /><span className="text-[10px]">Shorts</span></Link>
           <div className="relative -top-5">
-             <Link to="/upload" className="flex items-center justify-center w-14 h-14 rounded-full bg-indigo-600 text-white shadow-lg border-4 border-black active:scale-95 transition-transform">
-                <Upload size={24} />
-             </Link>
+             <Link to="/upload" className="flex items-center justify-center w-14 h-14 rounded-full bg-indigo-600 text-white shadow-lg border-4 border-black active:scale-95 transition-transform"><Upload size={24} /></Link>
           </div>
-          <Link to="/vip" className={`flex flex-col items-center gap-1 ${isActive('/vip')}`}>
-             <Crown size={22} className={location.pathname === '/vip' ? 'text-amber-400' : 'text-slate-400'}/>
-             <span className="text-[10px]">VIP</span>
-          </Link>
-          <div className="flex flex-col items-center gap-1 cursor-pointer" onClick={() => setShowSidebar(true)}>
-             <Menu size={22} className="text-slate-400"/>
-             <span className="text-[10px] text-slate-400">Menú</span>
-          </div>
+          <Link to="/vip" className={`flex flex-col items-center gap-1 ${isActive('/vip')}`}><Crown size={22} className={location.pathname === '/vip' ? 'text-amber-400' : 'text-slate-400'}/><span className="text-[10px]">VIP</span></Link>
+          <div className="flex flex-col items-center gap-1 cursor-pointer" onClick={() => setShowSidebar(true)}><Menu size={22} className="text-slate-400"/><span className="text-[10px] text-slate-400">Menú</span></div>
         </nav>
       )}
     </div>
