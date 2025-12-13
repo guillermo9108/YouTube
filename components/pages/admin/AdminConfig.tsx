@@ -30,6 +30,10 @@ export default function AdminConfig() {
 
     useEffect(() => {
         db.getSystemSettings().then((s: SystemSettings) => {
+            // CRITICAL FIX: Ensure categoryPrices is an object, not an array (PHP empty array issue)
+            if (Array.isArray(s.categoryPrices) || !s.categoryPrices) {
+                s.categoryPrices = {};
+            }
             setSettings(s);
             setLoading(false);
         }).catch(() => setLoading(false));
@@ -45,78 +49,98 @@ export default function AdminConfig() {
         }
     };
 
+    // FIX: Use functional state update to prevent stale closure issues
     const updateCategoryPrice = (cat: string, price: number) => {
-        if (!settings) return;
-        setSettings({
-            ...settings,
-            categoryPrices: {
-                ...(settings.categoryPrices || {}), 
-                [cat]: price
-            }
+        setSettings(prev => {
+            if (!prev) return null;
+            // Ensure we are working with an object
+            const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
+            return {
+                ...prev,
+                categoryPrices: {
+                    ...currentPrices, 
+                    [cat]: price
+                }
+            };
         });
     };
 
     const handleAddCategory = () => {
-        if (!settings || !newCatName.trim()) return;
+        if (!newCatName.trim()) return;
         
         const catKey = newCatName.trim().toUpperCase().replace(/\s+/g, '_');
         const standardCats = Object.values(VideoCategory) as string[];
-        const currentCustom = settings.customCategories || [];
-
-        if (standardCats.includes(catKey) || currentCustom.includes(catKey)) {
-            toast.error("Esta categoría ya existe");
-            return;
-        }
-
-        setSettings({
-            ...settings,
-            customCategories: [...currentCustom, catKey],
-            categoryPrices: {
-                ...(settings.categoryPrices || {}),
-                [catKey]: 0 // Init price
+        
+        setSettings(prev => {
+            if (!prev) return null;
+            
+            const currentCustom = prev.customCategories || [];
+            if (standardCats.includes(catKey) || currentCustom.includes(catKey)) {
+                toast.error("Esta categoría ya existe");
+                return prev;
             }
+
+            const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
+
+            toast.success("Categoría añadida (Recuerda Guardar)");
+            return {
+                ...prev,
+                customCategories: [...currentCustom, catKey],
+                categoryPrices: {
+                    ...currentPrices,
+                    [catKey]: 0 // Init price
+                }
+            };
         });
         setNewCatName('');
-        toast.success("Categoría añadida (Recuerda Guardar)");
     };
 
     const handleRemoveCategory = (catToRemove: string) => {
-        if (!settings) return;
-        
-        const updatedCustom = (settings.customCategories || []).filter(c => c !== catToRemove);
-        const updatedPrices = { ...settings.categoryPrices };
-        delete updatedPrices[catToRemove];
+        setSettings(prev => {
+            if (!prev) return null;
+            const updatedCustom = (prev.customCategories || []).filter(c => c !== catToRemove);
+            
+            const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
+            const updatedPrices = { ...currentPrices };
+            delete updatedPrices[catToRemove];
 
-        setSettings({
-            ...settings,
-            customCategories: updatedCustom,
-            categoryPrices: updatedPrices
+            return {
+                ...prev,
+                customCategories: updatedCustom,
+                categoryPrices: updatedPrices
+            };
         });
     };
 
     const addVipPlan = () => {
-        if (!settings) return;
-        const newPlan: VipPlan = {
-            id: 'v_' + Date.now(),
-            name: 'Nuevo Plan',
-            price: 100,
-            type: 'ACCESS',
-            durationDays: 30,
-            description: ''
-        };
-        setSettings({...settings, vipPlans: [...(settings.vipPlans || []), newPlan]});
+        setSettings(prev => {
+            if (!prev) return null;
+            const newPlan: VipPlan = {
+                id: 'v_' + Date.now(),
+                name: 'Nuevo Plan',
+                price: 100,
+                type: 'ACCESS',
+                durationDays: 30,
+                description: ''
+            };
+            return {...prev, vipPlans: [...(prev.vipPlans || []), newPlan]};
+        });
     };
 
     const removeVipPlan = (id: string) => {
-        if (!settings) return;
-        setSettings({...settings, vipPlans: (settings.vipPlans || []).filter(p => p.id !== id)});
+        setSettings(prev => {
+            if (!prev) return null;
+            return {...prev, vipPlans: (prev.vipPlans || []).filter(p => p.id !== id)};
+        });
     };
 
     const updateVipPlan = (id: string, field: keyof VipPlan, value: any) => {
-        if (!settings) return;
-        setSettings({
-            ...settings,
-            vipPlans: (settings.vipPlans || []).map(p => p.id === id ? {...p, [field]: value} : p)
+        setSettings(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                vipPlans: (prev.vipPlans || []).map(p => p.id === id ? {...p, [field]: value} : p)
+            };
         });
     };
 
@@ -147,16 +171,16 @@ export default function AdminConfig() {
                 <div className="grid grid-cols-2 gap-6">
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Inicio Descarga</label>
-                        <input type="time" value={settings.downloadStartTime} onChange={e => setSettings({...settings, downloadStartTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                        <input type="time" value={settings.downloadStartTime} onChange={e => setSettings(p => p ? {...p, downloadStartTime: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Fin Descarga</label>
-                        <input type="time" value={settings.downloadEndTime} onChange={e => setSettings({...settings, downloadEndTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                        <input type="time" value={settings.downloadEndTime} onChange={e => setSettings(p => p ? {...p, downloadEndTime: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
                     </div>
                 </div>
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Ruta yt-dlp <InfoTooltip text="Ruta absoluta al binario en servidor" example="/usr/local/bin/yt-dlp" /></label>
-                    <input type="text" value={settings.ytDlpPath || ''} onChange={e => setSettings({...settings, ytDlpPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs outline-none focus:border-indigo-500"/>
+                    <input type="text" value={settings.ytDlpPath || ''} onChange={e => setSettings(p => p ? {...p, ytDlpPath: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs outline-none focus:border-indigo-500"/>
                 </div>
             </ConfigSection>
 
@@ -231,17 +255,17 @@ export default function AdminConfig() {
                         <div className="space-y-3">
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Client ID</label>
-                                <input type="text" value={settings.tropipayClientId || ''} onChange={e => setSettings({...settings, tropipayClientId: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
+                                <input type="text" value={settings.tropipayClientId || ''} onChange={e => setSettings(p => p ? {...p, tropipayClientId: e.target.value} : null)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Client Secret</label>
-                                <input type="password" value={settings.tropipayClientSecret || ''} onChange={e => setSettings({...settings, tropipayClientSecret: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
+                                <input type="password" value={settings.tropipayClientSecret || ''} onChange={e => setSettings(p => p ? {...p, tropipayClientSecret: e.target.value} : null)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tasa Cambio (CUP &rarr; 1 EUR)</label>
                                 <div className="flex items-center gap-2">
                                     <span className="text-sm text-slate-400">1 EUR = </span>
-                                    <input type="number" min="1" value={settings.currencyConversion || 1} onChange={e => setSettings({...settings, currencyConversion: parseFloat(e.target.value)})} className="w-24 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none text-center font-bold"/>
+                                    <input type="number" min="1" value={settings.currencyConversion || 1} onChange={e => setSettings(p => p ? {...p, currencyConversion: parseFloat(e.target.value)} : null)} className="w-24 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none text-center font-bold"/>
                                     <span className="text-sm text-slate-400">Saldo/CUP</span>
                                 </div>
                                 <p className="text-[10px] text-slate-500 mt-1">Si tus planes valen 1000 y la tasa es 300, el usuario pagará 3.33 EUR en Tropipay.</p>
@@ -256,7 +280,7 @@ export default function AdminConfig() {
                         <textarea 
                             rows={4} 
                             value={settings.paymentInstructions || ''} 
-                            onChange={e => setSettings({...settings, paymentInstructions: e.target.value})} 
+                            onChange={e => setSettings(p => p ? {...p, paymentInstructions: e.target.value} : null)} 
                             className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-sm text-white focus:border-indigo-500 outline-none leading-relaxed font-mono"
                             placeholder="Ejemplo:
 1. Envía el pago a Tropipay: user@example.com
@@ -279,6 +303,9 @@ export default function AdminConfig() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     {allCategories.map(cat => {
                         const isCustom = !Object.values(VideoCategory).includes(cat as any);
+                        // Safely access price, default to 0 if undefined
+                        const currentPrice = settings.categoryPrices?.[cat] ?? 0;
+                        
                         return (
                             <div key={cat} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800 group">
                                 <div className="flex items-center gap-2">
@@ -300,8 +327,8 @@ export default function AdminConfig() {
                                     <input 
                                         type="number" 
                                         min="0"
-                                        value={settings.categoryPrices?.[cat] !== undefined ? settings.categoryPrices[cat] : 0}
-                                        onChange={(e) => updateCategoryPrice(cat, parseFloat(e.target.value))}
+                                        value={currentPrice}
+                                        onChange={(e) => updateCategoryPrice(cat, parseFloat(e.target.value) || 0)}
                                         className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-6 pr-2 py-1.5 text-sm text-amber-400 font-bold outline-none focus:border-indigo-500 text-right"
                                     />
                                 </div>
@@ -339,7 +366,7 @@ export default function AdminConfig() {
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Videos (%)</label>
                         <div className="relative">
-                            <input type="number" value={settings.videoCommission ?? 20} onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
+                            <input type="number" value={settings.videoCommission ?? 20} onChange={e => setSettings(p => p ? {...p, videoCommission: parseInt(e.target.value) || 0} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
                             <span className="absolute right-3 top-2.5 text-slate-500 font-bold">%</span>
                         </div>
                         <p className="text-[10px] text-slate-500 mt-1">Retenido por el sistema en cada venta de video.</p>
@@ -348,7 +375,7 @@ export default function AdminConfig() {
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Marketplace (%)</label>
                         <div className="relative">
-                            <input type="number" value={settings.marketCommission ?? 25} onChange={e => setSettings({...settings, marketCommission: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
+                            <input type="number" value={settings.marketCommission ?? 25} onChange={e => setSettings(p => p ? {...p, marketCommission: parseInt(e.target.value) || 0} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
                             <span className="absolute right-3 top-2.5 text-slate-500 font-bold">%</span>
                         </div>
                         <p className="text-[10px] text-slate-500 mt-1">Retenido en ventas de productos físicos.</p>
@@ -364,12 +391,12 @@ export default function AdminConfig() {
             >
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pexels API Key <InfoTooltip text="Para búsqueda de stock videos" /></label>
-                    <input type="password" value={settings.pexelsKey || ''} onChange={e => setSettings({...settings, pexelsKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                    <input type="password" value={settings.pexelsKey || ''} onChange={e => setSettings(p => p ? {...p, pexelsKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
                 </div>
                 
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pixabay API Key <InfoTooltip text="Alternativa stock gratuita" /></label>
-                    <input type="password" value={settings.pixabayKey || ''} onChange={e => setSettings({...settings, pixabayKey: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                    <input type="password" value={settings.pixabayKey || ''} onChange={e => setSettings(p => p ? {...p, pixabayKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
                 </div>
 
                 <div>
@@ -378,7 +405,7 @@ export default function AdminConfig() {
                         <input 
                             type="checkbox" 
                             checked={settings.enableYoutube || false} 
-                            onChange={e => setSettings({...settings, enableYoutube: e.target.checked})} 
+                            onChange={e => setSettings(p => p ? {...p, enableYoutube: e.target.checked} : null)} 
                             className="accent-indigo-500 w-4 h-4 cursor-pointer"
                         />
                         <span className="text-sm text-slate-300">Habilitar descargas de YouTube</span>

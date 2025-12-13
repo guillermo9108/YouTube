@@ -168,10 +168,14 @@ export default function Home() {
             const smartData = await generateSmartFeed(validVideos, user?.id);
             setFeed(smartData);
 
-            // Load config
+            // Load config and merge categories safely
             const settings = await db.getSystemSettings();
-            if (settings && settings.customCategories) {
-                setCategories(['ALL', ...Object.values(VideoCategory) as string[], ...settings.customCategories]);
+            if (settings) {
+                const standard = Object.values(VideoCategory) as string[];
+                const custom = settings.customCategories || [];
+                // Use Set to remove duplicates between standard/custom and ensure unique list
+                const uniqueCats = Array.from(new Set(['ALL', ...standard, ...custom]));
+                setCategories(uniqueCats);
             }
         } catch (e) {
             console.error("Home Load Error", e);
