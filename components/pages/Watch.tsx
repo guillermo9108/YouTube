@@ -1,10 +1,10 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
-import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle, ShoppingCart, Download, WifiOff } from 'lucide-react';
+import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle, ShoppingCart, Download, WifiOff, SkipForward } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
@@ -32,7 +32,7 @@ export default function Watch() {
     const [isDownloading, setIsDownloading] = useState(false);
     
     // Related Videos State
-    const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
+    const [rawRelatedVideos, setRawRelatedVideos] = useState<Video[]>([]);
     const [loadingRelated, setLoadingRelated] = useState(false);
     
     // Comment Form
@@ -50,7 +50,7 @@ export default function Watch() {
         setCheckingAccess(true); // Reset access check
         setVideo(null); // Reset to prevent stale state
         setIsUnlocked(false); // Reset lock state
-        setRelatedVideos([]); // Reset related
+        setRawRelatedVideos([]); // Reset related
         setLoadingRelated(true); // Start loading related
         setIsDownloaded(false);
         isPurchasingRef.current = false; // Reset lock
@@ -67,7 +67,7 @@ export default function Watch() {
                     
                     // Load related
                     db.getRelatedVideos(v.id)
-                      .then((res: Video[]) => setRelatedVideos(res))
+                      .then((res: Video[]) => setRawRelatedVideos(res))
                       .catch(err => console.error("Related error", err))
                       .finally(() => setLoadingRelated(false));
 
@@ -119,6 +119,45 @@ export default function Watch() {
 
         checkAccess();
     }, [id, user?.id, video?.id]); 
+
+    // --- SORTING LOGIC: NEXT EPISODES & ALPHABETICAL ---
+    const sortedRelatedVideos = useMemo(() => {
+        if (!video || rawRelatedVideos.length === 0) return [];
+
+        // 1. Filter out already watched videos AND current video
+        let filtered = rawRelatedVideos.filter(v => 
+            v.id !== video.id && 
+            !watchedHistory.includes(v.id)
+        );
+
+        // 2. Natural Sort (Alphanumeric: "Ep 2" comes before "Ep 10")
+        filtered.sort((a, b) => 
+            a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' })
+        );
+
+        // 3. Re-order to put "Next Episodes" first
+        // We compare the current video title with the list to find the split point
+        // Everything alphabetically "after" current title goes to top.
+        // Everything "before" goes to bottom (wrapped around).
+        const currentTitle = video.title;
+        
+        const nextEpisodes: Video[] = [];
+        const prevEpisodes: Video[] = [];
+
+        filtered.forEach(v => {
+            // Using localeCompare to check order
+            // 1 means v.title comes AFTER currentTitle
+            if (v.title.localeCompare(currentTitle, undefined, { numeric: true, sensitivity: 'base' }) > 0) {
+                nextEpisodes.push(v);
+            } else {
+                prevEpisodes.push(v);
+            }
+        });
+
+        return [...nextEpisodes, ...prevEpisodes];
+
+    }, [rawRelatedVideos, watchedHistory, video]);
+
 
     // AUTO-PURCHASE EFFECT
     useEffect(() => {
@@ -223,25 +262,25 @@ export default function Watch() {
         const updatedHistory = [...watchedHistory, video.id];
         setWatchedHistory(updatedHistory);
 
-        // 3. Find Next Video
-        // Filter criteria: Not the current one AND Not in watched history
-        const candidates = relatedVideos.filter(v => 
-            v.id !== video.id && !updatedHistory.includes(v.id)
-        );
-
-        if (candidates.length > 0) {
-            const nextVideo = candidates[0];
+        // 3. Find Next Video from the ALREADY SORTED list
+        // Since sortedRelatedVideos already filters out 'watchedHistory' (via useMemo dependencies),
+        // the first item in the array is typically the next logical episode.
+        if (sortedRelatedVideos.length > 0) {
+            const nextVideo = sortedRelatedVideos[0];
             toast.info(`Siguiente: ${nextVideo.title} en 3s...`);
             setTimeout(() => {
                 navigate(`/watch/${nextVideo.id}`);
             }, 3000);
-        } else if (relatedVideos.length > 0) {
-            // Fallback: If all related are watched, loop but avoid immediate repeat
-            const fallback = relatedVideos.find(v => v.id !== video.id) || relatedVideos[0];
-            if (fallback.id !== video.id) {
-                toast.info(`Replay: ${fallback.title} en 5s...`);
-                setTimeout(() => navigate(`/watch/${fallback.id}`), 5000);
-            }
+        } else {
+            // Fallback if list is empty (e.g. all watched)
+            // Try fetching fresh related just in case
+            db.getRelatedVideos(video.id).then(res => {
+               const freshCandidates = res.filter(v => v.id !== video.id);
+               if (freshCandidates.length > 0) {
+                   toast.info(`Reproduciendo sugerencia en 5s...`);
+                   setTimeout(() => navigate(`/watch/${freshCandidates[0].id}`), 5000);
+               }
+            });
         }
     };
 
@@ -459,28 +498,30 @@ export default function Watch() {
                     </div>
                 </div>
 
-                {/* Sidebar: Related */}
+                {/* Sidebar: Related - SORTED ALPHABETICALLY */}
                 <div className="w-full lg:w-80 shrink-0">
-                    <h3 className="font-bold text-white mb-4">A continuación</h3>
+                    <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                        <SkipForward size={18} className="text-indigo-400"/> A continuación
+                    </h3>
                     <div className="flex flex-col gap-3">
                         {loadingRelated ? (
                             <div className="text-center py-10 flex flex-col items-center">
                                 <Loader2 className="animate-spin text-indigo-500 mb-2" />
                                 <span className="text-slate-500 text-sm italic">Buscando sugerencias...</span>
                             </div>
-                        ) : relatedVideos.length > 0 ? (
-                            relatedVideos.map((v: Video) => {
-                                // Visual fade for already watched videos if they appear in list (though we filter them out for auto-play)
-                                const isAlreadyWatched = watchedHistory.includes(v.id);
+                        ) : sortedRelatedVideos.length > 0 ? (
+                            sortedRelatedVideos.map((v: Video) => {
+                                // Videos in watched history shouldn't appear due to sortedRelatedVideos filter,
+                                // but we double check visually just in case logic changes
                                 return (
-                                    <div key={v.id} className={isAlreadyWatched ? 'opacity-50' : ''}>
-                                        <VideoCard video={v} isUnlocked={false} isWatched={isAlreadyWatched} />
+                                    <div key={v.id}>
+                                        <VideoCard video={v} isUnlocked={false} isWatched={false} />
                                     </div>
                                 );
                             })
                         ) : (
                             <div className="text-slate-500 text-sm text-center py-10 italic border border-slate-800 rounded-xl bg-slate-900/50">
-                                No hay videos relacionados.
+                                No hay más videos en esta secuencia.
                             </div>
                         )}
                     </div>

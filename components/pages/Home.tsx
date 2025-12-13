@@ -4,7 +4,7 @@ import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, VideoCategory } from '../../types';
-import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, Heart, ChevronRight } from 'lucide-react';
+import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, Heart, ChevronRight, ArrowDown } from 'lucide-react';
 import { Link } from '../Router';
 
 // --- COMPONENTS ---
@@ -224,36 +224,32 @@ export default function Home() {
       }).sort((a,b) => b.createdAt - a.createdAt);
   }, [allVideos, activeCategory, searchQuery]);
 
-  // Optimized Infinite Scroll with Pre-fetching
+  // Robust Infinite Scroll with Fallback
   useEffect(() => {
       const currentListLength = isFilteredMode ? filteredList.length : (feed?.discovery.length || 0);
       
-      // Stop checking if we have displayed everything
-      if (visibleDiscovery >= currentListLength) return;
-
       const observer = new IntersectionObserver((entries) => {
-          // Trigger if intersecting OR if we are close (handled by rootMargin)
           if (entries[0].isIntersecting) {
               setVisibleDiscovery(prev => {
-                  // Safety check to prevent infinite loop
                   if (prev >= currentListLength) return prev;
-                  // Load next batch
                   return prev + 12;
               });
           }
       }, { 
           threshold: 0.1,
-          // CRITICAL FIX: Load when we are 1200px away from the bottom.
-          // This simulates loading "around the 7th video" (mid-list) instead of waiting for the end.
           rootMargin: '1200px' 
       });
 
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
-  }, [isFilteredMode, filteredList.length, feed?.discovery.length, visibleDiscovery]);
+  }, [isFilteredMode, filteredList.length, feed?.discovery.length]); // Dependencies must trigger reset
 
   // Reset pagination on filter change
   useEffect(() => { setVisibleDiscovery(12); }, [activeCategory, searchQuery]);
+
+  // Determine current effective list count
+  const effectiveCount = isFilteredMode ? filteredList.length : (feed?.discovery.length || 0);
+  const showLoadMoreButton = visibleDiscovery < effectiveCount;
 
   // Helper for Card
   const isUnlocked = (videoId: string, creatorId: string) => {
@@ -330,7 +326,18 @@ export default function Home() {
                     ))}
                  </div>
              )}
-             <div ref={loadMoreRef} className="h-10"></div>
+             
+             {/* Pagination Triggers */}
+             <div ref={loadMoreRef} className="h-10 mt-8 flex justify-center items-center">
+                 {showLoadMoreButton && (
+                     <button 
+                        onClick={() => setVisibleDiscovery(prev => prev + 12)}
+                        className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-white px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2"
+                     >
+                         <ArrowDown size={16}/> Cargar Más Resultados
+                     </button>
+                 )}
+             </div>
           </div>
       ) : (
           // --- SMART FEED VIEW (6 Sections) ---
@@ -448,9 +455,23 @@ export default function Home() {
                   ) : (
                       <div className="text-center py-10 text-slate-500">No hay más videos para descubrir.</div>
                   )}
-                  {/* Load More Trigger Area */}
-                  <div ref={loadMoreRef} className="h-20 flex items-center justify-center opacity-50">
-                      {visibleDiscovery < (feed?.discovery.length || 0) && <RefreshCw className="animate-spin text-slate-600"/>}
+                  
+                  {/* Load More Area */}
+                  <div ref={loadMoreRef} className="h-24 mt-4 flex flex-col justify-center items-center opacity-80">
+                      {showLoadMoreButton ? (
+                          <>
+                            <RefreshCw className="animate-spin text-slate-600 mb-2"/>
+                            {/* Fallback button if observer fails or stuck */}
+                            <button 
+                                onClick={() => setVisibleDiscovery(prev => prev + 12)}
+                                className="text-xs text-indigo-400 hover:text-white underline"
+                            >
+                                Cargar más
+                            </button>
+                          </>
+                      ) : (
+                          <div className="text-xs text-slate-600">Has llegado al final.</div>
+                      )}
                   </div>
               </section>
           </div>
