@@ -106,7 +106,8 @@ self.addEventListener('fetch', (event) => {
   if (event.request.headers.get('Range') || url.searchParams.get('action') === 'stream') {
       event.respondWith(
           caches.open(VIDEO_CACHE_NAME).then(async (cache) => {
-              const cachedResponse = await cache.match(event.request.url, { ignoreSearch: true }); // Ignore search to match video ID base
+              // CRITICAL FIX: Removed { ignoreSearch: true } so we distinguish between different video IDs (id=1 vs id=2)
+              const cachedResponse = await cache.match(event.request); 
               
               if (cachedResponse) {
                   // We have the full video blob, but browser wants a Range
@@ -153,7 +154,6 @@ self.addEventListener('backgroundfetchsuccess', async (event) => {
                 const response = await record.responseReady;
                 if (response && response.ok) {
                     // Use the ID (URL) as the key
-                    // We strip query params to make matching easier or ensure consistency
                     await cache.put(record.request.url, response);
                 }
             });

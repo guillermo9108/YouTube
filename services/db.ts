@@ -214,8 +214,9 @@ export class DBService {
                 url = `api/index.php?action=stream&id=${videoId}`;
             }
             
-            // Check absolute match or relative
-            const match = await cache.match(url, { ignoreSearch: true }); // ignore search for robust matching
+            // CRITICAL FIX: Removed strict ignoreSearch: true to ensure we match the specific video ID
+            // Since we use the exact generated URL above, exact matching is better.
+            const match = await cache.match(url);
             return !!match;
         }
         return false;
@@ -239,7 +240,7 @@ export class DBService {
 
          const res = await fetch(`${this.baseUrl}?action=update_video_metadata`, { 
              method: 'POST', 
-             body: formData,
+             body: formData, 
              headers
          });
          
