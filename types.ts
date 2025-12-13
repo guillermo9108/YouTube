@@ -1,18 +1,14 @@
 
+
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
 }
 
+// Categorías limpias. El administrador agregará las suyas.
 export enum VideoCategory {
-  SHORTS = 'SHORTS',
-  MUSIC = 'MUSICA',
-  SHORT_FILM = 'CORTOMETRAJE',
-  SERIES = 'SERIES',
-  NOVELAS = 'NOVELAS',
-  MOVIE = 'PELICULA',
-  EDUCATION = 'EDUCACION',
-  OTHER = 'OTRO'
+  GENERAL = 'GENERAL',
+  OTHER = 'OTHER'
 }
 
 export interface VipPlan {

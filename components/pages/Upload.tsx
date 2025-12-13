@@ -95,15 +95,6 @@ export default function Upload() {
       return 1;
   };
 
-  const detectCategory = (duration: number): string => {
-      if (duration <= 180) return VideoCategory.SHORTS;
-      if (duration <= 300) return VideoCategory.MUSIC;
-      if (duration <= 1500) return VideoCategory.SHORT_FILM;
-      if (duration <= 2700) return VideoCategory.SERIES;
-      if (duration > 2700) return VideoCategory.MOVIE;
-      return VideoCategory.OTHER;
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles = Array.from(e.target.files) as File[];
@@ -117,8 +108,8 @@ export default function Upload() {
       setThumbnails(prev => [...prev, ...new Array(newFiles.length).fill(null)]);
       setDurations(prev => [...prev, ...new Array(newFiles.length).fill(0)]);
       
-      // Default initial state (will be refined by processor)
-      const defaultCat = VideoCategory.OTHER;
+      // Default initial state
+      const defaultCat = VideoCategory.GENERAL;
       const defaultPrice = getPriceForCategory(defaultCat);
 
       setCategories(prev => [...prev, ...new Array(newFiles.length).fill(defaultCat)]);
@@ -159,8 +150,8 @@ export default function Upload() {
               const thumbnail = result.thumbnail; // Can be null
               
               if (isMounted.current) {
-                  // Intelligent Logic
-                  const cat = detectCategory(duration);
+                  // Only use GENERAL since we removed auto-detection logic
+                  const cat = VideoCategory.GENERAL;
                   const price = getPriceForCategory(cat);
 
                   setThumbnails(prev => {
@@ -172,10 +163,9 @@ export default function Upload() {
                       const n = [...prev]; n[task.index] = duration; return n;
                   });
                   
-                  // Only auto-update if user hasn't touched it (still 'OTHER')
+                  // Only auto-update if still generic
                   setCategories(prev => {
                       if (prev.length <= task.index) return prev;
-                      if (prev[task.index] !== VideoCategory.OTHER) return prev;
                       const n = [...prev]; n[task.index] = cat; return n;
                   });
 
@@ -186,7 +176,6 @@ export default function Upload() {
               }
           } catch (e) {
               console.error("Analysis failed for file:", task.file.name, e);
-              // Continue processing other files even if one fails
           }
 
           await new Promise(r => setTimeout(r, 100)); // Small delay
@@ -263,10 +252,10 @@ export default function Upload() {
         title: titles[i],
         description: bulkDesc, // Use bulk description
         price: prices[i],
-        category: categories[i] as VideoCategory,
-        duration: durations[i] || 0, // Fallback to 0
+        category: categories[i] as VideoCategory, // Cast generic string
+        duration: durations[i] || 0,
         file: file,
-        thumbnail: thumbnails[i] // Can be null, provider handles default
+        thumbnail: thumbnails[i]
     }));
 
     addToQueue(queue, user);
@@ -492,7 +481,7 @@ export default function Upload() {
                     <button onClick={() => setShowPriceConfig(false)} className="text-slate-500 hover:text-white p-1 rounded-full hover:bg-slate-800"><X size={20}/></button>
                 </div>
                 <div className="p-4 max-h-[60vh] overflow-y-auto space-y-3 bg-slate-900">
-                    <p className="text-xs text-slate-400 mb-4 bg-slate-950 p-3 rounded-lg border border-slate-800">Define tus precios base por categoría. Estos valores se aplicarán automáticamente al detectar la categoría del video.</p>
+                    <p className="text-xs text-slate-400 mb-4 bg-slate-950 p-3 rounded-lg border border-slate-800">Define tus precios base por categoría.</p>
                     {availableCategories.map(cat => (
                         <div key={cat} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors">
                              <span className="text-xs font-bold text-slate-300 uppercase flex items-center gap-2">
