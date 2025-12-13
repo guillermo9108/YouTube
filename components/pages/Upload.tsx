@@ -62,7 +62,8 @@ export default function Upload() {
               if (isMounted.current) {
                 const standard = Object.values(VideoCategory) as string[];
                 const custom = settings.customCategories || [];
-                setAvailableCategories([...standard, ...custom]);
+                const unique = Array.from(new Set([...standard, ...custom]));
+                setAvailableCategories(unique);
                 setSystemCategoryPrices(settings.categoryPrices || {});
               }
           } catch(e) { console.error(e); }
@@ -150,7 +151,7 @@ export default function Upload() {
               const thumbnail = result.thumbnail; // Can be null
               
               if (isMounted.current) {
-                  // Only use GENERAL since we removed auto-detection logic
+                  // Only use GENERAL since we removed auto-detection logic to avoid using deprecated categories
                   const cat = VideoCategory.GENERAL;
                   const price = getPriceForCategory(cat);
 
