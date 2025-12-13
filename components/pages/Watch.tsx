@@ -16,10 +16,16 @@ export default function Watch() {
     
     const [video, setVideo] = useState<Video | null>(null);
     const [loading, setLoading] = useState(true);
-    const [checkingAccess, setCheckingAccess] = useState(true); // NEW: Prevent race conditions
+    const [checkingAccess, setCheckingAccess] = useState(true); 
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [comments, setComments] = useState<Comment[]>([]);
+    
+    // Historial para evitar bucles
+    const [watchedHistory, setWatchedHistory] = useState<string[]>([]);
+    
+    // Refs para control de concurrencia
+    const isPurchasingRef = useRef(false);
     
     // Offline / Download State
     const [isDownloaded, setIsDownloaded] = useState(false);
@@ -47,6 +53,7 @@ export default function Watch() {
         setRelatedVideos([]); // Reset related
         setLoadingRelated(true); // Start loading related
         setIsDownloaded(false);
+        isPurchasingRef.current = false; // Reset lock
 
         const fetchMeta = async () => {
             try {
@@ -79,13 +86,17 @@ export default function Watch() {
         fetchMeta();
     }, [id]);
 
-    // Check Permissions & User Interaction (Runs on ID or User ID Change)
+    // Check Permissions, User Interaction & History
     useEffect(() => {
         if (!id || !user || !video) return;
 
         const checkAccess = async () => {
             setCheckingAccess(true);
             try {
+                // 0. Load User History (Watched IDs) to prevent loops
+                const activity = await db.getUserActivity(user.id);
+                setWatchedHistory(activity.watched || []);
+
                 // 1. Permissions (Admin or Creator)
                 if (user.role === 'ADMIN' || user.id === video.creatorId) {
                     setIsUnlocked(true);
@@ -112,12 +123,13 @@ export default function Watch() {
     // AUTO-PURCHASE EFFECT
     useEffect(() => {
         // CRITICAL: Run only if metadata loaded AND access check finished AND still locked
-        if (user && video && !loading && !checkingAccess && !isUnlocked) {
+        if (user && video && !loading && !checkingAccess && !isUnlocked && !isPurchasingRef.current) {
             const price = Number(video.price);
             const limit = Number(user.autoPurchaseLimit || 0);
             const balance = Number(user.balance);
             
-            // Logic: Price > 0 (not free/broken), Price <= Limit, User has balance
+            // Logic: Price > 0, Price <= Limit, User has balance
+            // AND IMPORTANT: Double check we aren't already unlocked to avoid race conditions
             if (price > 0 && price <= limit && balance >= price) {
                 console.log("Auto-purchasing video:", video.title);
                 handlePurchase(true); // Skip confirmation
@@ -126,14 +138,16 @@ export default function Watch() {
     }, [user, video, isUnlocked, loading, checkingAccess]);
 
     const handlePurchase = async (skipConfirm = false) => {
-        if (!user || !video) return;
+        if (!user || !video || isPurchasingRef.current) return;
+        if (isUnlocked) return; // Safety check
+
         if (user.balance < video.price) {
-            // Show VIP Upsell instead of just error
             navigate('/vip');
             return;
         }
 
         if(skipConfirm || confirm(`¿Desbloquear video por ${video.price} Saldo?`)) {
+            isPurchasingRef.current = true;
             try {
                 await db.purchaseVideo(user.id, video.id);
                 // Optimistic Update
@@ -143,6 +157,7 @@ export default function Watch() {
                 else toast.info(`Auto-compra: -${video.price} Saldo`);
             } catch (e: any) {
                 toast.error("Error al comprar: " + e.message);
+                isPurchasingRef.current = false;
             }
         }
     };
@@ -194,20 +209,39 @@ export default function Watch() {
         return v.videoUrl;
     };
 
-    // --- CONTINUOUS PLAYBACK LOGIC ---
+    // --- CONTINUOUS PLAYBACK LOGIC (SMART QUEUE) ---
     const handleVideoEnded = () => {
-        if (user && !interaction?.isWatched && video) {
+        if (!user || !video) return;
+
+        // 1. Mark current as watched in DB
+        if (!interaction?.isWatched) {
             db.markWatched(user.id, video.id).catch(() => {});
             setInteraction(prev => prev ? {...prev, isWatched: true} : null);
         }
 
-        // Auto-play next related video
-        if (relatedVideos.length > 0) {
-            const nextVideo = relatedVideos[0];
+        // 2. Add current video to local exclusion list immediately
+        const updatedHistory = [...watchedHistory, video.id];
+        setWatchedHistory(updatedHistory);
+
+        // 3. Find Next Video
+        // Filter criteria: Not the current one AND Not in watched history
+        const candidates = relatedVideos.filter(v => 
+            v.id !== video.id && !updatedHistory.includes(v.id)
+        );
+
+        if (candidates.length > 0) {
+            const nextVideo = candidates[0];
             toast.info(`Siguiente: ${nextVideo.title} en 3s...`);
             setTimeout(() => {
                 navigate(`/watch/${nextVideo.id}`);
             }, 3000);
+        } else if (relatedVideos.length > 0) {
+            // Fallback: If all related are watched, loop but avoid immediate repeat
+            const fallback = relatedVideos.find(v => v.id !== video.id) || relatedVideos[0];
+            if (fallback.id !== video.id) {
+                toast.info(`Replay: ${fallback.title} en 5s...`);
+                setTimeout(() => navigate(`/watch/${fallback.id}`), 5000);
+            }
         }
     };
 
@@ -435,9 +469,15 @@ export default function Watch() {
                                 <span className="text-slate-500 text-sm italic">Buscando sugerencias...</span>
                             </div>
                         ) : relatedVideos.length > 0 ? (
-                            relatedVideos.map((v: Video) => (
-                                <VideoCard key={v.id} video={v} isUnlocked={false} isWatched={false} />
-                            ))
+                            relatedVideos.map((v: Video) => {
+                                // Visual fade for already watched videos if they appear in list (though we filter them out for auto-play)
+                                const isAlreadyWatched = watchedHistory.includes(v.id);
+                                return (
+                                    <div key={v.id} className={isAlreadyWatched ? 'opacity-50' : ''}>
+                                        <VideoCard video={v} isUnlocked={false} isWatched={isAlreadyWatched} />
+                                    </div>
+                                );
+                            })
                         ) : (
                             <div className="text-slate-500 text-sm text-center py-10 italic border border-slate-800 rounded-xl bg-slate-900/50">
                                 No hay videos relacionados.
