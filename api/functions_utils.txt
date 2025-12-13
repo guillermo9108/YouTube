@@ -208,13 +208,33 @@ function streamVideo($filePath, $pdo) {
         fclose($resource);
         exit;
     } else {
-        // LOCAL FILE
-        $realPath = $filePath;
-        if (!file_exists($realPath)) {
-            $realPath = rawurldecode($filePath);
+        // LOCAL FILE - PATH SANITIZATION LOGIC
+        // We try multiple path variations because DB might store relative paths like "api/uploads/..." 
+        // while the script runs inside /api/, making "api/" prefix incorrect.
+        
+        $candidates = [
+            $filePath, // As stored in DB
+            str_replace('api/', '', $filePath), // Remove api/ prefix
+            '../' . $filePath, // Try going up (rare)
+            basename($filePath) // Just filename (fallback)
+        ];
+
+        $realPath = null;
+        foreach ($candidates as $c) {
+            // Check original
+            if (file_exists($c) && !is_dir($c)) {
+                $realPath = $c;
+                break;
+            }
+            // Check decoded (for spaces/special chars)
+            $decoded = rawurldecode($c);
+            if (file_exists($decoded) && !is_dir($decoded)) {
+                $realPath = $decoded;
+                break;
+            }
         }
 
-        if (!file_exists($realPath)) {
+        if (!$realPath) {
             header("HTTP/1.0 404 Not Found");
             exit;
         }

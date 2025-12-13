@@ -102,7 +102,22 @@ export default function Watch() {
         checkAccess();
     }, [id, user?.id, video?.id]); 
 
-    const handlePurchase = async () => {
+    // AUTO-PURCHASE EFFECT
+    useEffect(() => {
+        // Run only if we have everything loaded, video is locked, and user exists
+        if (user && video && !isUnlocked && !loading) {
+            const price = Number(video.price);
+            const limit = Number(user.autoPurchaseLimit || 0);
+            
+            // Logic: Price > 0 (not free/broken), Price <= Limit, User has balance
+            if (price > 0 && price <= limit && user.balance >= price) {
+                console.log("Auto-purchasing video:", video.title);
+                handlePurchase(true); // Skip confirmation
+            }
+        }
+    }, [user, video, isUnlocked, loading]);
+
+    const handlePurchase = async (skipConfirm = false) => {
         if (!user || !video) return;
         if (user.balance < video.price) {
             // Show VIP Upsell instead of just error
@@ -110,13 +125,14 @@ export default function Watch() {
             return;
         }
 
-        if(confirm(`¿Desbloquear video por ${video.price} Saldo?`)) {
+        if(skipConfirm || confirm(`¿Desbloquear video por ${video.price} Saldo?`)) {
             try {
                 await db.purchaseVideo(user.id, video.id);
                 // Optimistic Update
                 setIsUnlocked(true);
                 refreshUser(); // Update balance in background
-                toast.success("Video desbloqueado");
+                if (!skipConfirm) toast.success("Video desbloqueado");
+                else toast.success(`Auto-desbloqueado (${video.price} $)`);
             } catch (e: any) {
                 toast.error("Error al comprar: " + e.message);
             }
@@ -160,11 +176,31 @@ export default function Watch() {
 
     const getVideoSrc = (v: Video | null) => {
         if (!v) return '';
-        const isLocal = Boolean(v.isLocal) || (v as any).isLocal === 1 || (v as any).isLocal === "1";
-        if (isLocal && v.videoUrl && !v.videoUrl.includes('action=stream')) {
+        // FIX: Aggressively treat anything without a protocol as a local file requiring stream proxy
+        const hasProtocol = v.videoUrl.startsWith('http://') || v.videoUrl.startsWith('https://') || v.videoUrl.startsWith('//');
+        const isAlreadyStream = v.videoUrl.includes('action=stream');
+        
+        if (!hasProtocol && !isAlreadyStream) {
             return `api/index.php?action=stream&id=${v.id}`;
         }
         return v.videoUrl;
+    };
+
+    // --- CONTINUOUS PLAYBACK LOGIC ---
+    const handleVideoEnded = () => {
+        if (user && !interaction?.isWatched && video) {
+            db.markWatched(user.id, video.id).catch(() => {});
+            setInteraction(prev => prev ? {...prev, isWatched: true} : null);
+        }
+
+        // Auto-play next related video
+        if (relatedVideos.length > 0) {
+            const nextVideo = relatedVideos[0];
+            toast.info(`Siguiente: ${nextVideo.title} en 2s...`);
+            setTimeout(() => {
+                navigate(`/watch/${nextVideo.id}`);
+            }, 1500);
+        }
     };
 
     // --- EXTERNAL PLAYER HELPERS ---
@@ -199,12 +235,7 @@ export default function Watch() {
                                 playsInline
                                 className="w-full h-full object-contain bg-black"
                                 crossOrigin="anonymous"
-                                onEnded={() => {
-                                    if(user && !interaction?.isWatched) {
-                                        db.markWatched(user.id, video.id).catch(() => {});
-                                        setInteraction(prev => prev ? {...prev, isWatched: true} : null);
-                                    }
-                                }}
+                                onEnded={handleVideoEnded}
                             />
                             <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-300 flex gap-2">
                                 {/* Download Button inside Player */}
@@ -228,7 +259,7 @@ export default function Watch() {
                     ) : (
                         // LOCKED STATE - ENTIRE CONTAINER IS BUTTON
                         <div 
-                            onClick={handlePurchase}
+                            onClick={() => handlePurchase(false)}
                             className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden cursor-pointer group select-none"
                         >
                             {/* Background Image */}
