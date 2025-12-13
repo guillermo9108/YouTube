@@ -101,17 +101,44 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
         $finalTitle = "$cleanName - $cleanParent";
     }
 
-    // 4. Custom Category Detection (Strict Match Only)
+    // 4. Custom Category Detection (Fuzzy Match: Accents & Plurals)
     $detectedCategory = null;
     $ancestors = array_reverse(array_slice($pathParts, -3)); 
 
+    // Helper: Normalize for categorization (Lowercase, No Accents, No trailing 's')
+    $normalizeForCat = function($str) {
+        // Lowercase
+        $str = mb_strtolower($str, 'UTF-8');
+        // Remove accents/diacritics
+        $unwanted = [
+            'á'=>'a', 'é'=>'e', 'í'=>'i', 'ó'=>'o', 'ú'=>'u',
+            'à'=>'a', 'è'=>'e', 'ì'=>'i', 'ò'=>'o', 'ù'=>'u',
+            'ä'=>'a', 'ë'=>'e', 'ï'=>'i', 'ö'=>'o', 'ü'=>'u',
+            'ñ'=>'n'
+        ];
+        $str = strtr($str, $unwanted);
+        // Clean non-alphanumeric (keep spaces)
+        $str = preg_replace('/[^a-z0-9 ]/', '', $str);
+        $str = trim($str);
+        
+        // Remove trailing 's' for singularization (only if word > 3 chars to avoid stripping 'bus', 'gas', etc aggressively)
+        if (strlen($str) > 3 && substr($str, -1) === 's') {
+            $str = substr($str, 0, -1);
+        }
+        return $str;
+    };
+
     if (!empty($customCategories)) {
         foreach ($ancestors as $folder) {
-            $folderClean = mb_strtolower(str_replace(['_', '-', '.'], ' ', trim($folder)), 'UTF-8');
+            $folderBase = $normalizeForCat($folder);
+            
             foreach ($customCategories as $customCat) {
-                $catName = mb_strtolower(str_replace(['_', '-'], ' ', trim($customCat)), 'UTF-8');
-                if ($folderClean === $catName || strpos($folderClean, $catName) !== false) {
-                    $detectedCategory = $customCat;
+                // Compare normalized folder against normalized category setting
+                $catBase = $normalizeForCat($customCat);
+                
+                // Match if stems are equal OR if one is contained in the other
+                if ($folderBase === $catBase || (strlen($folderBase) > 3 && strpos($folderBase, $catBase) !== false)) {
+                    $detectedCategory = $customCat; // Return the official configuration name
                     break 2;
                 }
             }
