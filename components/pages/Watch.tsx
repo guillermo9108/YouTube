@@ -16,6 +16,7 @@ export default function Watch() {
     
     const [video, setVideo] = useState<Video | null>(null);
     const [loading, setLoading] = useState(true);
+    const [checkingAccess, setCheckingAccess] = useState(true); // NEW: Prevent race conditions
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [comments, setComments] = useState<Comment[]>([]);
@@ -40,6 +41,7 @@ export default function Watch() {
     useEffect(() => {
         if (!id) return;
         setLoading(true);
+        setCheckingAccess(true); // Reset access check
         setVideo(null); // Reset to prevent stale state
         setIsUnlocked(false); // Reset lock state
         setRelatedVideos([]); // Reset related
@@ -82,21 +84,26 @@ export default function Watch() {
         if (!id || !user || !video) return;
 
         const checkAccess = async () => {
-            // Permissions
-            if (user.role === 'ADMIN' || user.id === video.creatorId) {
-                setIsUnlocked(true);
-            } else {
-                try {
-                    // Check if already unlocked locally to prevent flicker
-                    if (!isUnlocked) {
-                        const purchased = await db.hasPurchased(user.id, video.id);
-                        if (purchased) setIsUnlocked(true);
-                    }
-                } catch (e) {}
-            }
+            setCheckingAccess(true);
+            try {
+                // 1. Permissions (Admin or Creator)
+                if (user.role === 'ADMIN' || user.id === video.creatorId) {
+                    setIsUnlocked(true);
+                } else {
+                    // 2. Check DB (Purchase or VIP)
+                    // Note: db.hasPurchased handles VIP check on backend
+                    const status = await db.hasPurchased(user.id, video.id);
+                    if (status) setIsUnlocked(true);
+                }
 
-            // Interactions
-            db.getInteraction(user.id, video.id).then(setInteraction).catch(() => {});
+                // 3. Interactions
+                const interact = await db.getInteraction(user.id, video.id);
+                setInteraction(interact);
+            } catch (e) {
+                console.error("Access Check Error", e);
+            } finally {
+                setCheckingAccess(false); // Signal that check is complete
+            }
         };
 
         checkAccess();
@@ -104,18 +111,19 @@ export default function Watch() {
 
     // AUTO-PURCHASE EFFECT
     useEffect(() => {
-        // Run only if we have everything loaded, video is locked, and user exists
-        if (user && video && !isUnlocked && !loading) {
+        // CRITICAL: Run only if metadata loaded AND access check finished AND still locked
+        if (user && video && !loading && !checkingAccess && !isUnlocked) {
             const price = Number(video.price);
             const limit = Number(user.autoPurchaseLimit || 0);
+            const balance = Number(user.balance);
             
             // Logic: Price > 0 (not free/broken), Price <= Limit, User has balance
-            if (price > 0 && price <= limit && user.balance >= price) {
+            if (price > 0 && price <= limit && balance >= price) {
                 console.log("Auto-purchasing video:", video.title);
                 handlePurchase(true); // Skip confirmation
             }
         }
-    }, [user, video, isUnlocked, loading]);
+    }, [user, video, isUnlocked, loading, checkingAccess]);
 
     const handlePurchase = async (skipConfirm = false) => {
         if (!user || !video) return;
@@ -132,7 +140,7 @@ export default function Watch() {
                 setIsUnlocked(true);
                 refreshUser(); // Update balance in background
                 if (!skipConfirm) toast.success("Video desbloqueado");
-                else toast.success(`Auto-desbloqueado (${video.price} $)`);
+                else toast.info(`Auto-compra: -${video.price} Saldo`);
             } catch (e: any) {
                 toast.error("Error al comprar: " + e.message);
             }
@@ -196,10 +204,10 @@ export default function Watch() {
         // Auto-play next related video
         if (relatedVideos.length > 0) {
             const nextVideo = relatedVideos[0];
-            toast.info(`Siguiente: ${nextVideo.title} en 2s...`);
+            toast.info(`Siguiente: ${nextVideo.title} en 3s...`);
             setTimeout(() => {
                 navigate(`/watch/${nextVideo.id}`);
-            }, 1500);
+            }, 3000);
         }
     };
 
@@ -259,7 +267,7 @@ export default function Watch() {
                     ) : (
                         // LOCKED STATE - ENTIRE CONTAINER IS BUTTON
                         <div 
-                            onClick={() => handlePurchase(false)}
+                            onClick={() => !checkingAccess && handlePurchase(false)}
                             className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden cursor-pointer group select-none"
                         >
                             {/* Background Image */}
@@ -277,26 +285,32 @@ export default function Watch() {
                             {/* Tap to Unlock UI */}
                             {video && (
                                 <div className="relative z-20 text-center flex flex-col items-center animate-in zoom-in duration-300">
-                                    <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20 mb-3 group-hover:scale-110 group-active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
-                                        <Lock className="text-white" size={32} />
-                                    </div>
-                                    
-                                    <h2 className="text-xl md:text-3xl font-black text-white mb-1 uppercase tracking-wider drop-shadow-lg">
-                                        Contenido Premium
-                                    </h2>
-                                    
-                                    <div className="flex items-center gap-2 text-slate-300 text-xs md:text-sm font-medium bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm border border-white/10 mt-2">
-                                        <span>Desbloquear por</span>
-                                        <span className="text-amber-400 font-bold text-lg">{video.price} $</span>
-                                    </div>
+                                    {checkingAccess ? (
+                                        <Loader2 className="text-indigo-400 animate-spin mb-4" size={48} />
+                                    ) : (
+                                        <>
+                                            <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20 mb-3 group-hover:scale-110 group-active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
+                                                <Lock className="text-white" size={32} />
+                                            </div>
+                                            
+                                            <h2 className="text-xl md:text-3xl font-black text-white mb-1 uppercase tracking-wider drop-shadow-lg">
+                                                Contenido Premium
+                                            </h2>
+                                            
+                                            <div className="flex items-center gap-2 text-slate-300 text-xs md:text-sm font-medium bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm border border-white/10 mt-2">
+                                                <span>Desbloquear por</span>
+                                                <span className="text-amber-400 font-bold text-lg">{video.price} $</span>
+                                            </div>
 
-                                    {user && user.balance < video.price && (
-                                        <div className="mt-4 bg-red-600/90 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg animate-pulse">
-                                            <AlertCircle size={14}/> Saldo insuficiente ({user.balance.toFixed(2)} $)
-                                        </div>
+                                            {user && user.balance < video.price && (
+                                                <div className="mt-4 bg-red-600/90 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg animate-pulse">
+                                                    <AlertCircle size={14}/> Saldo insuficiente ({user.balance.toFixed(2)} $)
+                                                </div>
+                                            )}
+                                            
+                                            <p className="mt-4 text-[10px] text-white/50 uppercase tracking-widest font-bold">Toca para comprar</p>
+                                        </>
                                     )}
-                                    
-                                    <p className="mt-4 text-[10px] text-white/50 uppercase tracking-widest font-bold">Toca para comprar</p>
                                 </div>
                             )}
                         </div>
