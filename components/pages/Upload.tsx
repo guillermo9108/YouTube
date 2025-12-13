@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2 } from 'lucide-react';
+import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2, Clock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useUpload } from '../../context/UploadContext';
 import { useNavigate } from '../Router';
@@ -212,6 +212,10 @@ export default function Upload() {
     setPrices(prev => { const next = [...prev]; next[index] = val; return next; });
   };
 
+  const updateDuration = (index: number, val: number) => {
+    setDurations(prev => { const next = [...prev]; next[index] = val; return next; });
+  };
+
   // --- BULK ACTIONS ---
 
   const applyBulkChanges = () => {
@@ -248,6 +252,14 @@ export default function Upload() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || files.length === 0) return;
+
+    // Check for zero duration
+    const zeroDurationCount = durations.filter(d => d === 0).length;
+    if (zeroDurationCount > 0) {
+        if (!confirm(`Advertencia: ${zeroDurationCount} videos tienen 0 segundos de duración. ¿Subir de todos modos?`)) {
+            return;
+        }
+    }
 
     const queue = files.map((file, i) => ({
         title: titles[i],
@@ -413,21 +425,21 @@ export default function Upload() {
                        </div>
 
                        {/* Inputs */}
-                       <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                          <div className="md:col-span-6">
+                       <div className="flex-1 min-w-0 space-y-2">
+                          <div className="flex items-center gap-2">
                               <input 
                                 type="text" 
                                 value={titles[idx]} 
                                 onChange={(e) => updateTitle(idx, e.target.value)} 
-                                className="w-full bg-transparent border-b border-transparent hover:border-slate-600 focus:border-indigo-500 outline-none text-sm font-bold text-white p-1 transition-colors placeholder-slate-600" 
+                                className="flex-1 bg-transparent border-b border-transparent hover:border-slate-600 focus:border-indigo-500 outline-none text-sm font-bold text-white p-1 transition-colors placeholder-slate-600" 
                                 placeholder="Título del video" 
                                 required 
                               />
-                              <div className="text-[10px] text-slate-500 mt-0.5 pl-1">{(file.size / 1024 / 1024).toFixed(1)} MB</div>
+                              <div className="text-[10px] text-slate-500 whitespace-nowrap">{(file.size / 1024 / 1024).toFixed(1)} MB</div>
                           </div>
                           
-                          <div className="md:col-span-3">
-                                <div className="relative">
+                          <div className="grid grid-cols-3 gap-2">
+                              <div className="relative">
                                     <Tag size={10} className="absolute left-2 top-2.5 text-slate-500 pointer-events-none"/>
                                     <select 
                                         value={categories[idx]} 
@@ -436,11 +448,9 @@ export default function Upload() {
                                     >
                                         {availableCategories.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
                                     </select>
-                                </div>
-                          </div>
+                              </div>
 
-                          <div className="md:col-span-3">
-                                <div className="relative">
+                              <div className="relative">
                                     <DollarSign size={10} className="absolute left-2 top-2.5 text-amber-500 pointer-events-none"/>
                                     <input 
                                         type="number" 
@@ -450,7 +460,20 @@ export default function Upload() {
                                         onChange={(e) => updatePrice(idx, parseFloat(e.target.value))}
                                         className="w-full bg-slate-950 border border-slate-700 rounded-lg text-[11px] text-amber-400 font-bold py-1.5 pl-6 pr-2 outline-none focus:border-indigo-500"
                                     />
-                                </div>
+                              </div>
+
+                              <div className="relative">
+                                    <Clock size={10} className="absolute left-2 top-2.5 text-slate-500 pointer-events-none"/>
+                                    <input 
+                                        type="number" 
+                                        min="0"
+                                        title="Duración en segundos"
+                                        value={durations[idx]}
+                                        onChange={(e) => updateDuration(idx, parseInt(e.target.value) || 0)}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg text-[11px] text-slate-300 font-mono py-1.5 pl-6 pr-2 outline-none focus:border-indigo-500"
+                                        placeholder="Seg"
+                                    />
+                              </div>
                           </div>
                        </div>
 

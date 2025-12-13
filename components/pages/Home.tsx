@@ -54,7 +54,7 @@ export default function Home() {
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // Custom categories state
-  const [categories, setCategories] = useState<string[]>(['ALL', ...Object.values(VideoCategory) as string[]]);
+  const [categories, setCategories] = useState<string[]>(['ALL']);
 
   // --- ALGORITHM: SMART FEED GENERATOR ---
   const generateSmartFeed = async (videos: Video[], userId: string | undefined) => {
@@ -168,15 +168,39 @@ export default function Home() {
             const smartData = await generateSmartFeed(validVideos, user?.id);
             setFeed(smartData);
 
-            // Load config and merge categories safely
+            // --- SMART CATEGORY GENERATION ---
             const settings = await db.getSystemSettings();
-            if (settings) {
-                const standard = Object.values(VideoCategory) as string[];
-                const custom = settings.customCategories || [];
-                // Use Set to remove duplicates between standard/custom and ensure unique list
-                const uniqueCats = Array.from(new Set(['ALL', ...standard, ...custom]));
-                setCategories(uniqueCats);
+            
+            // 1. Calculate Stats (Video Count & Total Views per Category)
+            const catStats: Record<string, { count: number, views: number }> = {};
+            validVideos.forEach(v => {
+                const c = v.category;
+                if (!catStats[c]) catStats[c] = { count: 0, views: 0 };
+                catStats[c].count++;
+                catStats[c].views += Number(v.views || 0);
+            });
+
+            // 2. Merge System Categories
+            let allConfiguredCats = Object.values(VideoCategory) as string[];
+            if (settings && settings.customCategories) {
+                allConfiguredCats = [...allConfiguredCats, ...settings.customCategories];
             }
+            // De-duplicate
+            allConfiguredCats = Array.from(new Set(allConfiguredCats));
+
+            // 3. Filter & Sort
+            // Hide categories with 0 videos. Sort by Total Views (descending).
+            const sortedCats = allConfiguredCats
+                .filter(cat => catStats[cat] && catStats[cat].count > 0)
+                .sort((a, b) => {
+                    // Sort by total views first, then by video count
+                    const viewsA = catStats[a]?.views || 0;
+                    const viewsB = catStats[b]?.views || 0;
+                    return viewsB - viewsA;
+                });
+
+            setCategories(['ALL', ...sortedCats]);
+
         } catch (e) {
             console.error("Home Load Error", e);
         } finally {
