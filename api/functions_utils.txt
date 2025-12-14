@@ -23,9 +23,10 @@ function get_youtube_video($query, $config) {
     $rootDir = dirname(__DIR__);
     $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
     
+    // Lista de candidatos
     $candidates = [
         $config['ytDlpPath'] ?? '',
-        $apiDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'),
+        $apiDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'), // Prioridad: El binario que descargamos en GitHub Actions
         $rootDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'),
         $isWin ? 'yt-dlp.exe' : '/usr/local/bin/yt-dlp',
         $isWin ? 'yt-dlp' : '/usr/bin/yt-dlp'
@@ -39,11 +40,11 @@ function get_youtube_video($query, $config) {
         }
     }
 
-    // Fallback: si no encontramos archivo, confiamos en que está en el PATH global
+    // Fallback path
     if (!$bin && !empty($config['ytDlpPath'])) $bin = $config['ytDlpPath'];
     if (!$bin) $bin = $isWin ? 'yt-dlp.exe' : 'yt-dlp';
 
-    // Asegurar permisos en Linux si es un archivo local
+    // Asegurar permisos de ejecución si es local
     if (!$isWin && file_exists($bin) && !is_dir($bin)) {
         if (!is_executable($bin)) @chmod($bin, 0755); 
     }
@@ -58,69 +59,56 @@ function get_youtube_video($query, $config) {
     // 4. Estrategias de Ejecución
     $strategies = [];
     
-    // A) Ejecución Directa
+    // ESTRATEGIA A (Prioridad Absoluta): Ejecución Directa
+    // Esto es vital para el binario standalone en Synology/Linux viejos.
+    // Al ejecutarlo directamente, usa su Python interno y ignora el Python 3.5 del sistema.
     $strategies[] = "\"$bin\" $searchArg $flags 2>&1";
     
-    // B) Ejecución vía Python explícito
-    if ($isWin) {
-        $pythonPaths = ['python', 'py', 'python3'];
+    // ESTRATEGIA B: Fallback a Python del sistema
+    // Solo si la ejecución directa falla (ej: no es un binario standalone, sino un script .py)
+    if (!$isWin) {
+        // Intentar detectar un python moderno
+        $pythonCandidates = ['python3', '/usr/local/bin/python3', '/usr/bin/python3'];
+        
+        // Verificar versiones disponibles
+        foreach ($pythonCandidates as $py) {
+            $ver = shell_exec("$py --version 2>&1");
+            // Solo usar si es >= 3.7
+            if (preg_match('/Python (\d+\.\d+)/', $ver, $matches) && version_compare($matches[1], '3.7', '>=')) {
+                $strategies[] = "$py \"$bin\" $searchArg $flags 2>&1";
+            }
+        }
     } else {
-        $pythonPaths = [
-            'python3',                          
-            '/usr/bin/python3',                 
-            '/usr/local/bin/python3',           
-            '/usr/local/bin/python3.5',                         // Synology DSM 6 standard link
-            '/var/packages/py3k/target/usr/local/bin/python3',  // Synology DSM 6 package path
-            '/var/packages/python3/target/bin/python3',         // Synology DSM 7
-            '/volume1/@appstore/py3k/usr/local/bin/python3',    // Synology Volume 1
-            '/opt/bin/python3'                                  // Entware
-        ];
-        
-        // Intentar detectar via shell
-        $detected = trim(shell_exec('which python3 2>/dev/null'));
-        if ($detected) array_unshift($pythonPaths, $detected);
-        
-        $detected35 = trim(shell_exec('which python3.5 2>/dev/null'));
-        if ($detected35) array_unshift($pythonPaths, $detected35);
+        $strategies[] = "python \"$bin\" $searchArg $flags 2>&1";
     }
 
-    $uniquePaths = array_unique($pythonPaths);
-    foreach ($uniquePaths as $py) {
-        if ($py[0] === '/' && !file_exists($py)) continue;
-        $strategies[] = "$py \"$bin\" $searchArg $flags 2>&1";
-    }
-
-    // 5. Intentar ejecutar
+    // 5. Ejecutar
     $output = [];
     $returnVar = -1;
     $errors = [];
     $success = false;
 
     foreach ($strategies as $cmd) {
-        $output = []; // Limpiar buffer
+        $output = [];
         exec($cmd, $output, $returnVar);
         
-        if ($returnVar === 0) {
-            // Verificar JSON
-            if (!empty($output) && (strpos(trim($output[0]), '{') === 0)) {
-                $success = true;
-                break;
-            }
+        // Verificar éxito: Exit code 0 y salida JSON válida
+        if ($returnVar === 0 && !empty($output) && strpos(trim($output[0]), '{') === 0) {
+            $success = true;
+            break;
         }
         
-        // Guardar error (limitado)
-        $errLine = !empty($output) ? substr(implode(" | ", array_slice($output, -2)), 0, 250) : "Exit Code $returnVar";
-        // Ocultar ruta completa del binario para limpieza visual
+        $errLine = !empty($output) ? substr(implode(" | ", array_slice($output, -2)), 0, 150) : "Exit Code $returnVar";
         $simpleCmd = (strpos($cmd, $bin) !== false) ? str_replace($bin, 'yt-dlp', $cmd) : $cmd;
         $errors[] = "[$simpleCmd] -> $errLine";
     }
 
     if (!$success) {
-        // Devolver lista de errores para depuración
-        throw new Exception("yt-dlp falló. Detalles:\n" . implode("\n", array_slice($errors, 0, 4)));
+        $debugMsg = implode("\n", $errors);
+        throw new Exception("Error buscando videos. Detalles técnicos:\n$debugMsg\n\nNota: Se intentó usar el binario standalone. Verifica permisos.");
     }
     
-    // 6. Procesar Salida
+    // 6. Procesar Resultados
     $results = [];
     foreach ($output as $line) {
         $data = json_decode($line, true);
