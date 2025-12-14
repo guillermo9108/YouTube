@@ -38,8 +38,15 @@ export default function Requests() {
     
     try {
         const hits = await db.searchExternal(query, source);
-        if (hits && hits.length > 0) setResults(hits);
-        else setError("No results found. Please check Admin API Keys configuration.");
+        if (hits && hits.length > 0) {
+            setResults(hits);
+        } else {
+            if (source === 'YOUTUBE') {
+                setError("No results found. Verify yt-dlp is installed in root or server path.");
+            } else {
+                setError("No results found. Please check Admin API Keys configuration.");
+            }
+        }
     } catch (e: any) {
         setError("Search failed: " + e.message);
     } finally {

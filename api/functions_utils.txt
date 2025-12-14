@@ -15,27 +15,89 @@ function fix_url($url) {
 }
 
 function get_youtube_video($query, $config) {
-    if (empty($config['enableYoutube']) || empty($config['ytDlpPath'])) return [];
+    // 1. Configurar Entorno
+    putenv("LC_ALL=C.UTF-8"); // Asegurar UTF8 para títulos
     
+    // 2. Resolver Ruta del Binario (Smart Path Resolution)
     $bin = $config['ytDlpPath'];
-    $cmd = "$bin \"ytsearch10:$query\" --dump-json --flat-playlist --no-warnings 2>&1";
+    
+    // Si la configuración está vacía o el archivo no existe en la ruta absoluta dada
+    if (empty($bin) || !file_exists($bin)) {
+        // Buscar en ubicaciones comunes relativas al script PHP (que corre en /api/)
+        $candidates = [
+            '../yt-dlp',           // Raíz del proyecto (Linux/Mac)
+            '../yt-dlp.exe',       // Raíz del proyecto (Windows)
+            './yt-dlp',            // Carpeta api (Linux/Mac)
+            './yt-dlp.exe',        // Carpeta api (Windows)
+            '/usr/local/bin/yt-dlp', // Sistema global
+            '/usr/bin/yt-dlp'
+        ];
+        
+        foreach ($candidates as $c) {
+            if (file_exists($c)) {
+                $bin = realpath($c); // Obtener ruta absoluta real
+                break;
+            }
+        }
+    }
+
+    // Si aún no lo encontramos, fallamos
+    if (empty($bin) || !file_exists($bin)) {
+        error_log("StreamPay Error: yt-dlp binary not found. Configured: " . $config['ytDlpPath']);
+        return [];
+    }
+
+    // 3. Permisos de Ejecución (Solo Linux/Mac)
+    if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+        if (!is_executable($bin)) {
+            @chmod($bin, 0755); // Intentar dar permisos
+        }
+    }
+
+    // 4. Construir Comando
+    // Usamos escapeshellarg para seguridad
+    // --dump-json: Obtiene metadatos
+    // --default-search ytsearch10: Busca 10 videos si no es URL
+    // --no-playlist: Evita descargar listas enteras si se pega un link
+    // --ignore-config: Ignora configs locales que puedan romper el json
+    // --no-check-certificate: Evita errores SSL en servidores locales antiguos
+    $safeQuery = escapeshellarg($query);
+    
+    // Si el query parece una URL directa, no usamos prefijo de búsqueda
+    $isUrl = filter_var($query, FILTER_VALIDATE_URL) && strpos($query, 'youtube.com') !== false;
+    $searchArg = $isUrl ? $safeQuery : escapeshellarg("ytsearch12:$query");
+
+    $cmd = "$bin $searchArg --dump-json --no-warnings --ignore-config --no-check-certificate --compat-options no-youtube-unavailable-videos 2>&1";
+    
+    // 5. Ejecutar
     exec($cmd, $output, $ret);
     
+    // 6. Procesar Salida
     $results = [];
     foreach ($output as $line) {
+        // yt-dlp a veces escupe advertencias antes del JSON. Intentamos decodificar cada línea.
         $data = json_decode($line, true);
-        if ($data) {
+        
+        if ($data && isset($data['id']) && isset($data['title'])) {
+            // Preferir miniaturas de alta calidad
+            $thumb = $data['thumbnail'] ?? '';
+            if (isset($data['thumbnails']) && is_array($data['thumbnails'])) {
+                $last = end($data['thumbnails']);
+                if (isset($last['url'])) $thumb = $last['url'];
+            }
+
             $results[] = [
                 'id' => $data['id'],
                 'source' => 'YouTube',
-                'thumbnail' => "https://i.ytimg.com/vi/{$data['id']}/hqdefault.jpg",
+                'thumbnail' => $thumb,
                 'title' => $data['title'],
                 'duration' => $data['duration'] ?? 0,
-                'downloadUrl' => "https://www.youtube.com/watch?v={$data['id']}",
-                'author' => $data['uploader'] ?? 'Unknown'
+                'downloadUrl' => $data['webpage_url'] ?? "https://www.youtube.com/watch?v={$data['id']}",
+                'author' => $data['uploader'] ?? 'YouTube'
             ];
         }
     }
+    
     return $results;
 }
 
