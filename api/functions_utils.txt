@@ -18,18 +18,18 @@ function get_youtube_video($query, $config) {
     // 1. Configurar Entorno
     putenv("LC_ALL=C.UTF-8"); 
     
-    // 2. Definir Candidatos de Ruta (Rutas Absolutas son más seguras)
-    $apiDir = __DIR__; // Carpeta donde está este script (/api)
-    $rootDir = dirname(__DIR__); // Carpeta raíz del proyecto
+    // 2. Definir Candidatos de Ruta para yt-dlp
+    $apiDir = __DIR__;
+    $rootDir = dirname(__DIR__);
     
     $candidates = [
-        $config['ytDlpPath'] ?? '', // Configuración manual
-        $apiDir . '/yt-dlp',        // ./api/yt-dlp (Linux/Mac)
-        $apiDir . '/yt-dlp.exe',    // ./api/yt-dlp.exe (Windows)
-        $rootDir . '/yt-dlp',       // ./yt-dlp (Linux/Mac)
-        $rootDir . '/yt-dlp.exe',   // ./yt-dlp.exe (Windows)
-        '/usr/local/bin/yt-dlp',    // Global
-        '/usr/bin/yt-dlp'           // Global
+        $config['ytDlpPath'] ?? '',
+        $apiDir . '/yt-dlp',
+        $apiDir . '/yt-dlp.exe',
+        $rootDir . '/yt-dlp',
+        $rootDir . '/yt-dlp.exe',
+        '/usr/local/bin/yt-dlp',
+        '/usr/bin/yt-dlp'
     ];
 
     $bin = null;
@@ -41,33 +41,71 @@ function get_youtube_video($query, $config) {
     }
 
     if (!$bin) {
-        // Fallar ruidosamente para que el usuario sepa qué pasa
         throw new Exception("yt-dlp binary not found. Buscado en: " . implode(", ", $candidates));
     }
 
-    // 3. Permisos de Ejecución (Solo Linux/Mac)
+    // Asegurar permisos en Linux
     if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
-        if (!is_executable($bin)) {
-            @chmod($bin, 0755); 
-        }
+        if (!is_executable($bin)) @chmod($bin, 0755); 
     }
 
-    // 4. Construir Comando
+    // 3. Preparar Argumentos
     $safeQuery = escapeshellarg($query);
     $isUrl = filter_var($query, FILTER_VALIDATE_URL) && strpos($query, 'youtube.com') !== false;
     $searchArg = $isUrl ? $safeQuery : escapeshellarg("ytsearch12:$query");
+    
+    // Flags comunes
+    $flags = "--dump-json --no-warnings --ignore-config --no-check-certificate --compat-options no-youtube-unavailable-videos";
 
-    // Agregamos path al binario para asegurar que Python lo encuentre si es script
-    $cmd = "\"$bin\" $searchArg --dump-json --no-warnings --ignore-config --no-check-certificate --compat-options no-youtube-unavailable-videos 2>&1";
+    // 4. Estrategias de Ejecución
+    // Muchos servidores NAS tienen python instalado pero no en el PATH de PHP.
+    // Probamos ejecución directa y luego invocando python explícitamente.
     
-    // 5. Ejecutar y Capturar Estado
-    exec($cmd, $output, $returnVar);
+    $strategies = [];
     
-    // Si falla la ejecución (ej: falta python, permisos, etc)
-    if ($returnVar !== 0) {
-        $errorMsg = implode("\n", array_slice($output, -3)); // Últimas 3 líneas del error
-        if (empty($errorMsg)) $errorMsg = "Unknown error (Exit Code: $returnVar)";
-        throw new Exception("yt-dlp execution failed: " . $errorMsg);
+    // A) Ejecución Directa (Ideal)
+    $strategies[] = "\"$bin\" $searchArg $flags 2>&1";
+    
+    // B) Ejecución vía Python explícito (Si falla el shebang /usr/bin/env)
+    $pythonPaths = [
+        'python3',                          // PATH del sistema
+        '/usr/bin/python3',                 // Linux Estándar
+        '/usr/local/bin/python3',           // Linux Local
+        '/usr/bin/python',                  // Legacy
+        '/var/packages/python3/target/bin/python3',       // Synology DSM 7
+        '/var/packages/py3k/target/usr/local/bin/python3', // Synology DSM 6
+        '/opt/bin/python3'                  // Entware
+    ];
+
+    foreach ($pythonPaths as $py) {
+        // Solo intentamos rutas absolutas si existen
+        if ($py[0] === '/' && !file_exists($py)) continue;
+        $strategies[] = "$py \"$bin\" $searchArg $flags 2>&1";
+    }
+
+    // 5. Intentar ejecutar
+    $output = [];
+    $returnVar = -1;
+    $lastError = "";
+    $success = false;
+
+    foreach ($strategies as $cmd) {
+        $output = []; // Limpiar buffer
+        exec($cmd, $output, $returnVar);
+        
+        if ($returnVar === 0) {
+            $success = true;
+            break; // ¡Funcionó!
+        } else {
+            // Guardamos el error para reporte
+            $errLines = array_slice($output, -2);
+            $lastError = implode(" | ", $errLines);
+            // Si el error NO es sobre "not found", puede ser otro problema, pero seguimos intentando
+        }
+    }
+
+    if (!$success) {
+        throw new Exception("yt-dlp execution failed. Python issue? Last error: " . $lastError);
     }
     
     // 6. Procesar Salida
