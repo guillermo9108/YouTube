@@ -21,15 +21,14 @@ function get_youtube_video($query, $config) {
     // 2. Definir Candidatos de Ruta para yt-dlp
     $apiDir = __DIR__;
     $rootDir = dirname(__DIR__);
+    $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
     
     $candidates = [
         $config['ytDlpPath'] ?? '',
-        $apiDir . '/yt-dlp',
-        $apiDir . '/yt-dlp.exe',
-        $rootDir . '/yt-dlp',
-        $rootDir . '/yt-dlp.exe',
-        '/usr/local/bin/yt-dlp',
-        '/usr/bin/yt-dlp'
+        $apiDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'),
+        $rootDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'),
+        $isWin ? 'yt-dlp.exe' : '/usr/local/bin/yt-dlp',
+        $isWin ? 'yt-dlp' : '/usr/bin/yt-dlp'
     ];
 
     $bin = null;
@@ -40,12 +39,18 @@ function get_youtube_video($query, $config) {
         }
     }
 
-    if (!$bin) {
-        throw new Exception("yt-dlp binary not found. Buscado en: " . implode(", ", $candidates));
+    // Fallback: si no encontramos archivo, confiamos en que está en el PATH global si se configuró algo
+    if (!$bin && !empty($config['ytDlpPath'])) {
+        $bin = $config['ytDlpPath'];
     }
 
-    // Asegurar permisos en Linux
-    if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+    if (!$bin) {
+        // Último intento: asumir que está en el PATH del sistema
+        $bin = $isWin ? 'yt-dlp.exe' : 'yt-dlp';
+    }
+
+    // Asegurar permisos en Linux si es un archivo local
+    if (!$isWin && file_exists($bin)) {
         if (!is_executable($bin)) @chmod($bin, 0755); 
     }
 
@@ -54,28 +59,30 @@ function get_youtube_video($query, $config) {
     $isUrl = filter_var($query, FILTER_VALIDATE_URL) && strpos($query, 'youtube.com') !== false;
     $searchArg = $isUrl ? $safeQuery : escapeshellarg("ytsearch12:$query");
     
-    // Flags comunes
     $flags = "--dump-json --no-warnings --ignore-config --no-check-certificate --compat-options no-youtube-unavailable-videos";
 
     // 4. Estrategias de Ejecución
-    // Muchos servidores NAS tienen python instalado pero no en el PATH de PHP.
-    // Probamos ejecución directa y luego invocando python explícitamente.
-    
     $strategies = [];
     
     // A) Ejecución Directa (Ideal)
+    // En Windows necesitamos comillas si hay espacios, en Linux también
     $strategies[] = "\"$bin\" $searchArg $flags 2>&1";
     
-    // B) Ejecución vía Python explícito (Si falla el shebang /usr/bin/env)
-    $pythonPaths = [
-        'python3',                          // PATH del sistema
-        '/usr/bin/python3',                 // Linux Estándar
-        '/usr/local/bin/python3',           // Linux Local
-        '/usr/bin/python',                  // Legacy
-        '/var/packages/python3/target/bin/python3',       // Synology DSM 7
-        '/var/packages/py3k/target/usr/local/bin/python3', // Synology DSM 6
-        '/opt/bin/python3'                  // Entware
-    ];
+    // B) Ejecución vía Python explícito (Si falla el shebang o no es ejecutable directo)
+    // IMPORTANTE: En Linux evitamos 'python' genérico porque suele ser Python 2.7 y causa SyntaxError
+    if ($isWin) {
+        $pythonPaths = ['python', 'py', 'python3'];
+    } else {
+        $pythonPaths = [
+            'python3',                          // PATH
+            '/usr/bin/python3',                 // Estándar
+            '/usr/local/bin/python3',           // Local
+            '/var/packages/python3/target/bin/python3',       // Synology DSM 7
+            '/var/packages/py3k/target/usr/local/bin/python3', // Synology DSM 6
+            '/opt/bin/python3',                 // Entware
+            'python3.9', 'python3.10', 'python3.11' // Versiones específicas
+        ];
+    }
 
     foreach ($pythonPaths as $py) {
         // Solo intentamos rutas absolutas si existen
@@ -94,17 +101,21 @@ function get_youtube_video($query, $config) {
         exec($cmd, $output, $returnVar);
         
         if ($returnVar === 0) {
-            $success = true;
-            break; // ¡Funcionó!
-        } else {
-            // Guardamos el error para reporte
-            $errLines = array_slice($output, -2);
-            $lastError = implode(" | ", $errLines);
-            // Si el error NO es sobre "not found", puede ser otro problema, pero seguimos intentando
+            // Verificar que la salida parece JSON válido y no un error silencioso
+            if (!empty($output) && (strpos($output[0], '{') === 0 || strpos(end($output), '}') !== false)) {
+                $success = true;
+                break;
+            }
         }
+        
+        // Guardamos el error
+        $errLines = array_slice($output, -3);
+        $currError = implode(" | ", $errLines);
+        if (!empty($currError)) $lastError = $currError;
     }
 
     if (!$success) {
+        // Si falló, intentamos dar un mensaje útil
         throw new Exception("yt-dlp execution failed. Python issue? Last error: " . $lastError);
     }
     
@@ -115,6 +126,7 @@ function get_youtube_video($query, $config) {
         
         if ($data && isset($data['id']) && isset($data['title'])) {
             $thumb = $data['thumbnail'] ?? '';
+            // Intentar buscar thumbnail de mejor calidad
             if (isset($data['thumbnails']) && is_array($data['thumbnails'])) {
                 $last = end($data['thumbnails']);
                 if (isset($last['url'])) $thumb = $last['url'];
