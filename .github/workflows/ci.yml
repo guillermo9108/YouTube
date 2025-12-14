@@ -54,12 +54,6 @@ jobs:
         mkdir -p dist/api/uploads/avatars
         mkdir -p dist/api/uploads/market
         
-        # --- DOWNLOAD YT-DLP STANDALONE BINARY ---
-        # This binary bundles its own Python, so it works on Synology with old Python 3.5
-        echo "Downloading yt-dlp standalone binary..."
-        curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o dist/api/yt-dlp
-        chmod +x dist/api/yt-dlp
-        
         # Verify structure
         ls -R dist/api
 

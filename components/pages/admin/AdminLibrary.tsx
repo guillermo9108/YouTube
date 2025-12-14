@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, Play, AlertCircle, Wand2, Database, Edit3 } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, Play, AlertCircle, Wand2, Database, Edit3, Sparkles } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -15,13 +15,10 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const [status, setStatus] = useState('Cargando...');
     const processedRef = useRef(false);
 
-    // FIX: Ensure we use a web-accessible URL. 
-    // If isLocal is true, we MUST use the stream API, not the raw file path.
     let streamSrc = video.videoUrl;
     const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
 
     if (isLocal && !streamSrc.includes('action=stream')) {
-        // Fallback if backend didn't transform the URL
         streamSrc = `api/index.php?action=stream&id=${video.id}`;
         console.log("ScannerPlayer: Forcing stream URL for local video", video.id);
     }
@@ -30,16 +27,12 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const vid = videoRef.current;
         if (!vid) return;
         
-        console.log("ScannerPlayer: Loading", streamSrc);
-
-        // Reset state for new video
         processedRef.current = false;
         setStatus('Iniciando...');
         vid.currentTime = 0;
 
         const startPlay = async () => {
             try {
-                // Force mute to allow autoplay policy compliance
                 vid.muted = true;
                 await vid.play();
                 setStatus('Procesando...');
@@ -49,7 +42,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
             }
         };
         
-        // Small buffer delay to ensure DOM is ready
         const timer = setTimeout(startPlay, 250);
         return () => clearTimeout(timer);
     }, [video.id, streamSrc]); 
@@ -58,7 +50,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const vid = e.currentTarget;
         if (!vid || processedRef.current) return;
 
-        // Capture logic: Wait for 1.5s mark to ensure we have a valid frame (not black start)
         if (vid.currentTime > 1.5) {
             vid.pause();
             processedRef.current = true;
@@ -68,7 +59,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
             
             try {
                 const canvas = document.createElement('canvas');
-                // Use actual video dimensions for high quality thumb
                 canvas.width = vid.videoWidth || 640;
                 canvas.height = vid.videoHeight || 360;
                 const ctx = canvas.getContext('2d');
@@ -80,7 +70,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                             const file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
                             onComplete(duration, file);
                         } else {
-                            // Fallback if blob fails (rare)
                             onComplete(duration, null);
                         }
                     }, 'image/jpeg', 0.8);
@@ -89,7 +78,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                 }
             } catch (err) {
                 console.error("Canvas error", err);
-                // Usually happens due to CORS if crossOrigin isn't set
                 onComplete(duration, null);
             }
         }
@@ -100,7 +88,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         console.error("Video Load Error", streamSrc, e);
         setStatus("Error de Reproducción. Saltando...");
         
-        // Force skip after short delay
         setTimeout(() => {
             if (!processedRef.current) {
                 processedRef.current = true;
@@ -111,29 +98,23 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
     return (
         <div className="w-full max-w-lg mx-auto mb-4">
-            {/* 
-                VISUAL REPRODUCTION: 
-                Matches pages/Watch.tsx player container styles exactly 
-                (bg-black, rounded-2xl, shadow-2xl, border-slate-800)
-            */}
             <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 aspect-video group">
                 <video 
                     ref={videoRef} 
                     src={streamSrc}
                     poster={video.thumbnailUrl} 
                     className="w-full h-full object-contain" 
-                    controls={true} // Allow controls for debugging
+                    controls={true} 
                     playsInline
                     muted={true}
                     autoPlay
                     preload="auto"
-                    crossOrigin="anonymous" // CRITICAL: Required for canvas.toBlob to work on scanned files
+                    crossOrigin="anonymous" 
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
-                    key={video.id} // Force full DOM remount on ID change
+                    key={video.id} 
                 />
                 
-                {/* Overlay Status Badge */}
                 <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 z-20 pointer-events-none">
                     <div className="flex items-center gap-2">
                         {status === 'Procesando...' || status === 'Capturando...' ? (
@@ -145,7 +126,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                     </div>
                 </div>
             </div>
-            {/* Debug Info */}
             <div className="text-[10px] text-slate-600 font-mono mt-1 px-2 truncate">
                 Src: {streamSrc}
             </div>
@@ -158,13 +138,14 @@ export default function AdminLibrary() {
     
     // Config
     const [localPath, setLocalPath] = useState('');
-    const [step2Limit, setStep2Limit] = useState(''); // Empty = All
+    const [step2Limit, setStep2Limit] = useState(''); 
     
     // States
     const [isIndexing, setIsIndexing] = useState(false);
     const [activeScan, setActiveScan] = useState(false);
     const [isOrganizing, setIsOrganizing] = useState(false);
     const [isRectifying, setIsRectifying] = useState(false);
+    const [isAiProcessing, setIsAiProcessing] = useState(false);
     
     // Data
     const [scanLog, setScanLog] = useState<string[]>([]);
@@ -183,7 +164,6 @@ export default function AdminLibrary() {
         setScanLog(prev => [`> ${msg}`, ...prev].slice(0, 100));
     };
 
-    // --- STEP 1: INDEX ---
     const handleIndexLibrary = async () => {
         if (!localPath.trim()) return;
         setIsIndexing(true);
@@ -205,13 +185,11 @@ export default function AdminLibrary() {
         }
     };
 
-    // --- STEP 2: SCAN ---
     const startBrowserScan = async () => {
         addToLog("Cargando videos pendientes...");
         const limit = step2Limit ? parseInt(step2Limit) : 0; 
         
         try {
-            // Fetch queue
             const pending = await db.getUnprocessedVideos(limit);
 
             if (pending.length === 0) {
@@ -246,10 +224,9 @@ export default function AdminLibrary() {
         }
     };
 
-    // --- STEP 3: ORGANIZE ---
     const handleSmartOrganize = async () => {
         setIsOrganizing(true);
-        setOrganizeProgress({processed: 0, total: 100}); // Indeterminate start
+        setOrganizeProgress({processed: 0, total: 100}); 
         addToLog("Iniciando organización por lotes...");
         
         const processBatch = async () => {
@@ -258,7 +235,6 @@ export default function AdminLibrary() {
                 
                 if (res.details) res.details.forEach((d: string) => addToLog(d));
                 
-                // If remaining > 0, continue recursively
                 if (res.remaining && res.remaining > 0) {
                     addToLog(`Quedan ${res.remaining} videos. Continuando...`);
                     const remaining = res.remaining || 0;
@@ -266,7 +242,7 @@ export default function AdminLibrary() {
                         processed: prev.processed + res.processed, 
                         total: prev.processed + res.processed + remaining
                     }));
-                    setTimeout(processBatch, 500); // Small delay to prevent freeze
+                    setTimeout(processBatch, 500);
                 } else {
                     addToLog("Organización Finalizada.");
                     toast.success("Paso 3 Completado");
@@ -283,7 +259,6 @@ export default function AdminLibrary() {
         processBatch();
     };
 
-    // --- STEP 4: RECTIFY (FIX TITLES) ---
     const handleRectifyTitles = async () => {
         if (!confirm("Esto reanalizará TODOS los videos de la librería (no pendientes) para corregir sus nombres y descripciones basándose en la estructura de carpetas actual. ¿Continuar?")) return;
         
@@ -299,7 +274,6 @@ export default function AdminLibrary() {
                 
                 if (!res.completed) {
                     addToLog(`Procesados ${res.processed} videos...`);
-                    // Recursion with lastId cursor
                     setTimeout(() => processRectifyBatch(res.lastId), 200); 
                 } else {
                     addToLog("Rectificación completada.");
@@ -317,7 +291,34 @@ export default function AdminLibrary() {
         processRectifyBatch();
     };
 
-    // Helpers
+    // --- STEP 5: AI ORGANIZATION ---
+    const handleAiOrganize = async () => {
+        setIsAiProcessing(true);
+        addToLog("Contactando Google Gemini...");
+        
+        // Recursive batching logic handled by backend? No, backend handles one batch. We loop here.
+        const processAiBatch = async () => {
+            try {
+                const res = await db.organizeWithAi();
+                if (res.processed === 0) {
+                    addToLog("AI: " + res.message);
+                    setIsAiProcessing(false);
+                    toast.success("Organización IA Completada");
+                    return;
+                }
+
+                addToLog(`AI: Clasificados ${res.processed} videos.`);
+                // Recursion
+                setTimeout(processAiBatch, 1000); 
+            } catch (e: any) {
+                addToLog(`Error AI: ${e.message}`);
+                setIsAiProcessing(false);
+            }
+        };
+
+        processAiBatch();
+    };
+
     const getEstimatedTime = (count: number, secsPerItem: number) => {
         const totalSecs = count * secsPerItem;
         const mins = Math.floor(totalSecs / 60);
@@ -327,13 +328,11 @@ export default function AdminLibrary() {
 
     return (
         <div className="space-y-6 animate-in fade-in pb-20">
-            {/* Header */}
             <div className="flex items-center gap-3 mb-2">
                 <Database size={24} className="text-indigo-400"/>
                 <h2 className="text-2xl font-bold text-white">Gestión de Librería</h2>
             </div>
 
-            {/* STEP 1: INDEX */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden group">
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-blue-500"></div>
                 <div className="flex justify-between items-center mb-4">
@@ -354,7 +353,7 @@ export default function AdminLibrary() {
                     />
                     <button 
                         onClick={handleIndexLibrary} 
-                        disabled={isIndexing || activeScan || isOrganizing || isRectifying}
+                        disabled={isIndexing || activeScan || isOrganizing || isRectifying || isAiProcessing}
                         className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2"
                     >
                         <FolderSearch size={16}/> Escanear
@@ -363,7 +362,6 @@ export default function AdminLibrary() {
                 {isIndexing && <div className="mt-2 h-1 bg-blue-900/30 w-full overflow-hidden rounded"><div className="h-full bg-blue-500 w-1/3 animate-progress-indeterminate"></div></div>}
             </div>
 
-            {/* STEP 2: PROCESS */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-emerald-500"></div>
                 <div className="flex justify-between items-center mb-4">
@@ -388,7 +386,7 @@ export default function AdminLibrary() {
                         </div>
                         <button 
                             onClick={startBrowserScan} 
-                            disabled={isIndexing || isOrganizing || isRectifying}
+                            disabled={isIndexing || isOrganizing || isRectifying || isAiProcessing}
                             className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold px-6 py-2 rounded-lg text-sm flex items-center gap-2 h-[38px]"
                         >
                             <Film size={16}/> Iniciar Escáner
@@ -407,13 +405,12 @@ export default function AdminLibrary() {
                 )}
             </div>
 
-            {/* STEP 3: ORGANIZE */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-purple-500"></div>
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-lg text-white flex items-center gap-2">
                         <span className="bg-purple-500/20 text-purple-400 w-6 h-6 rounded flex items-center justify-center text-xs">3</span>
-                        Organización Inteligente
+                        Organización Básica
                     </h3>
                     {isOrganizing && <Loader2 className="animate-spin text-purple-500"/>}
                 </div>
@@ -421,10 +418,10 @@ export default function AdminLibrary() {
                 {!isOrganizing ? (
                     <button 
                         onClick={handleSmartOrganize} 
-                        disabled={isIndexing || activeScan || isRectifying}
+                        disabled={isIndexing || activeScan || isRectifying || isAiProcessing}
                         className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all"
                     >
-                        <Wand2 size={18}/> Organizar y Publicar Todos
+                        <Wand2 size={18}/> Organizar y Publicar
                     </button>
                 ) : (
                     <div className="space-y-2">
@@ -433,14 +430,13 @@ export default function AdminLibrary() {
                             <span>{organizeProgress.processed} completados</span>
                         </div>
                         <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                            {/* Indeterminate if total unknown, else determinate */}
                             <div className="h-full bg-purple-500 animate-pulse w-full"></div>
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* STEP 4: RECTIFY (FIX RENAMING) */}
+            {/* STEP 4: RECTIFY */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-amber-500"></div>
                 <div className="flex justify-between items-center mb-4">
@@ -452,17 +448,16 @@ export default function AdminLibrary() {
                 </div>
                 
                 <p className="text-xs text-slate-400 mb-4 bg-slate-950 p-2 rounded border border-slate-800/50">
-                    Usa esto si actualizaste la lógica de nombrado y quieres aplicarla a videos antiguos. 
-                    Reanalizará las carpetas originales y actualizará los títulos y descripciones de <strong>toda la librería</strong>.
+                    Reanalizará carpetas y actualizará nombres basándose en la estructura actual.
                 </p>
 
                 {!isRectifying ? (
                     <button 
                         onClick={handleRectifyTitles} 
-                        disabled={isIndexing || activeScan || isOrganizing}
+                        disabled={isIndexing || activeScan || isOrganizing || isAiProcessing}
                         className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all"
                     >
-                        <Edit3 size={18}/> Corregir Nombres (Batch Update)
+                        <Edit3 size={18}/> Corregir Nombres
                     </button>
                 ) : (
                     <div className="space-y-2">
@@ -477,6 +472,41 @@ export default function AdminLibrary() {
                 )}
             </div>
 
+            {/* STEP 5: AI ORGANIZATION */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-pink-500"></div>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                        <span className="bg-pink-500/20 text-pink-400 w-6 h-6 rounded flex items-center justify-center text-xs">5</span>
+                        Organizar con IA
+                    </h3>
+                    {isAiProcessing && <Loader2 className="animate-spin text-pink-500"/>}
+                </div>
+                
+                <p className="text-xs text-slate-400 mb-4 bg-slate-950 p-2 rounded border border-slate-800/50">
+                    Usa <strong>Google Gemini Flash</strong> (Gratis) para clasificar videos en categorías basándose en el nombre y la carpeta contenedora. Requiere API Key en Configuración.
+                </p>
+
+                {!isAiProcessing ? (
+                    <button 
+                        onClick={handleAiOrganize} 
+                        disabled={isIndexing || activeScan || isOrganizing || isRectifying}
+                        className="w-full bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-pink-900/20"
+                    >
+                        <Sparkles size={18}/> Clasificar con Inteligencia Artificial
+                    </button>
+                ) : (
+                    <div className="space-y-2">
+                        <div className="text-xs text-pink-400 font-bold animate-pulse text-center">
+                            Analizando con Gemini...
+                        </div>
+                        <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-pink-500 animate-progress-indeterminate"></div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* LOG CONSOLE */}
             <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-[10px] text-slate-300 h-48 overflow-y-auto shadow-inner relative">
                 <div className="absolute top-2 right-2 opacity-50"><Terminal size={14}/></div>
@@ -486,7 +516,6 @@ export default function AdminLibrary() {
                 ))}
             </div>
 
-            {/* OVERLAY SCANNER PLAYER (HIDDEN BUT ACTIVE) */}
             {activeScan && scanQueue.length > 0 && (
                 <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur flex flex-col items-center justify-center p-4">
                     <div className="w-full max-w-md bg-slate-900 rounded-xl border border-slate-700 p-6 shadow-2xl">

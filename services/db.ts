@@ -11,7 +11,6 @@ export class DBService {
     private baseUrl = 'api/index.php';
     private demoMode = false;
     
-    // Offline DB Config
     private dbName = 'sp_offline_db';
     private dbVersion = 1;
     private idb: IDBDatabase | null = null;
@@ -31,15 +30,12 @@ export class DBService {
             
             request.onupgradeneeded = (event: any) => {
                 const db = event.target.result;
-                // Store video metadata
                 if (!db.objectStoreNames.contains('videos')) {
                     db.createObjectStore('videos', { keyPath: 'id' });
                 }
-                // Store user history/interactions
                 if (!db.objectStoreNames.contains('history')) {
-                    db.createObjectStore('history', { keyPath: 'id' }); // id = userId_videoId
+                    db.createObjectStore('history', { keyPath: 'id' }); 
                 }
-                // Store download status mapping (VideoID -> Boolean)
                 if (!db.objectStoreNames.contains('downloads')) {
                     db.createObjectStore('downloads', { keyPath: 'id' });
                 }
@@ -79,13 +75,10 @@ export class DBService {
                 throw new Error(e.message || "Invalid JSON response");
             }
         } catch (error) {
-            // NETWORK FAIL: If GET request, try to return offline data if relevant
             if (!options || options.method === 'GET' || !options.method) {
-                // If fetching all videos
                 if (query.includes('action=get_videos')) {
                     return this.getOfflineVideos() as any;
                 }
-                // If fetching single video
                 if (query.includes('action=get_video')) {
                     const idMatch = query.match(/id=([^&]+)/);
                     if (idMatch && idMatch[1]) {
@@ -98,8 +91,6 @@ export class DBService {
         }
     }
 
-    // --- IDB Helpers ---
-    
     private async putIDB(storeName: string, data: any) {
         if (!this.idb) await this.initIDB();
         const tx = this.idb!.transaction(storeName, 'readwrite');
@@ -126,8 +117,6 @@ export class DBService {
         });
     }
 
-    // --- Offline Data Sync ---
-
     async getOfflineVideos(): Promise<Video[]> {
         return this.getAllIDB('videos');
     }
@@ -136,13 +125,9 @@ export class DBService {
         return this.getIDB('videos', id);
     }
 
-    // --- Core Methods ---
-
     async getAllVideos(): Promise<Video[]> { 
-        // Network First, Fallback to IDB is handled in request() catch block
         const videos = await this.request<Video[]>(`action=get_videos`); 
         
-        // Sync to Offline DB
         if (videos && videos.length > 0) {
             const tx = this.idb?.transaction('videos', 'readwrite');
             if (tx) {
@@ -159,8 +144,6 @@ export class DBService {
         return video;
     }
 
-    // --- Background Fetch Download ---
-
     async downloadVideoForOffline(video: Video): Promise<void> {
         if (!('serviceWorker' in navigator)) throw new Error("Service Worker not supported");
         
@@ -174,7 +157,6 @@ export class DBService {
         }
 
         try {
-            // Unique ID for the fetch group
             const fetchId = `dl-${video.id}-${Date.now()}`;
             const bgFetch = await (registration as any).backgroundFetch.fetch(fetchId, [downloadUrl], {
                 title: `Descargando: ${video.title}`,
@@ -183,14 +165,12 @@ export class DBService {
                     sizes: '192x192',
                     type: 'image/png'
                 }],
-                downloadTotal: 0 // Unknown size usually
+                downloadTotal: 0 
             });
 
-            // Mark as downloading in IDB
             await this.putIDB('downloads', { id: video.id, status: 'downloading', fetchId });
 
             bgFetch.addEventListener('progress', (e: any) => {
-                // Could broadcast progress via BroadcastChannel if needed
             });
 
         } catch (e: any) {
@@ -200,12 +180,8 @@ export class DBService {
     }
 
     async checkDownloadStatus(videoId: string): Promise<boolean> {
-        // Check if file exists in Cache Storage 'streampay-videos-v1'
         if ('caches' in window) {
             const cache = await caches.open('streampay-videos-v1');
-            
-            // We need to guess the key. Usually it's the videoUrl or stream URL.
-            // Since getAllVideos syncs, we fetch the video object first
             const video = await this.getOfflineVideo(videoId);
             if (!video) return false;
 
@@ -214,15 +190,11 @@ export class DBService {
                 url = `api/index.php?action=stream&id=${videoId}`;
             }
             
-            // CRITICAL FIX: Removed strict ignoreSearch: true to ensure we match the specific video ID
-            // Since we use the exact generated URL above, exact matching is better.
             const match = await cache.match(url);
             return !!match;
         }
         return false;
     }
-
-    // --- Other Methods (Standard) ---
 
     async getUnprocessedVideos(limit: number = 0, mode: 'normal' | 'random' = 'normal'): Promise<Video[]> {
         return this.request<Video[]>(`action=get_unprocessed_videos&limit=${limit}&mode=${mode}`);
@@ -249,8 +221,6 @@ export class DBService {
          if (!json.success) throw new Error(json.message || "Metadata update failed");
     }
 
-    // --- Auth & User ---
-    
     async login(u: string, p: string): Promise<User> { 
         return this.request<User>(`action=login`, { method: 'POST', body: JSON.stringify({username: u, password: p}) }); 
     }
@@ -301,8 +271,6 @@ export class DBService {
         return this.request<string[]>(`action=get_subscriptions&userId=${userId}`);
     }
     
-    // --- Videos ---
-
     async getRelatedVideos(id: string): Promise<Video[]> { 
         return this.request<Video[]>(`action=get_related_videos&id=${id}`); 
     }
@@ -315,8 +283,6 @@ export class DBService {
         return this.request(`action=delete_video`, { method: 'POST', body: JSON.stringify({ id, userId: uid }) }); 
     }
     
-    // --- Interactions ---
-
     async getComments(vid: string): Promise<Comment[]> { 
         return this.request<Comment[]>(`action=get_comments&videoId=${vid}`); 
     }
@@ -337,8 +303,6 @@ export class DBService {
         this.request(`action=mark_watched`, { method: 'POST', body: JSON.stringify({userId: uid, videoId: vid})}); 
     }
 
-    // --- Subscriptions ---
-
     async checkSubscription(subscriberId: string, creatorId: string): Promise<boolean> {
         const res = await this.request<{isSubscribed: boolean}>(`action=check_subscription&subscriberId=${subscriberId}&creatorId=${creatorId}`);
         return res.isSubscribed;
@@ -348,8 +312,6 @@ export class DBService {
         return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe`, { method: 'POST', body: JSON.stringify({subscriberId, creatorId})});
     }
     
-    // --- Commerce & VIP ---
-
     async hasPurchased(uid: string, vid: string): Promise<boolean> { 
         const res = await this.request<{hasPurchased: boolean}>(`action=has_purchased&userId=${uid}&videoId=${vid}`); 
         return res.hasPurchased;
@@ -367,8 +329,6 @@ export class DBService {
         return this.request(`action=request_vip`, { method: 'POST', body: JSON.stringify({userId, plan, paymentRef})});
     }
 
-    // --- Payments ---
-
     async createPaymentLink(userId: string, plan: VipPlan): Promise<string> {
         const res = await this.request<{paymentUrl: string}>(`action=create_payment_link`, { method: 'POST', body: JSON.stringify({userId, plan})});
         return res.paymentUrl;
@@ -378,8 +338,6 @@ export class DBService {
         return this.request(`action=verify_payment`, { method: 'POST', body: JSON.stringify({userId, reference})});
     }
     
-    // --- Upload ---
-
     async uploadVideo(title: string, desc: string, price: number, cat: string, dur: number, user: User, file: File, thumb: File|null, onProgress: (p:number, l:number, t:number)=>void): Promise<void> {
         return new Promise((resolve, reject) => {
             const formData = new FormData();
@@ -415,8 +373,6 @@ export class DBService {
         });
     }
 
-    // --- System ---
-
     async getSystemSettings(): Promise<SystemSettings> { 
         return this.request<SystemSettings>(`action=get_system_settings`); 
     }
@@ -425,8 +381,6 @@ export class DBService {
         return this.request(`action=update_system_settings`, { method: 'POST', body: JSON.stringify({settings: s})}); 
     }
     
-    // --- Admin ---
-
     async getAllUsers(): Promise<User[]> { 
         return this.request<User[]>(`action=get_all_users`); 
     }
@@ -435,8 +389,6 @@ export class DBService {
         return this.request(`action=admin_add_balance`, { method: 'POST', body: JSON.stringify({adminId, targetUserId: targetId, amount})});
     }
     
-    // --- Notifications ---
-
     async getNotifications(uid: string): Promise<Notification[]> { 
         return this.request<Notification[]>(`action=get_notifications&userId=${uid}`); 
     }
@@ -444,8 +396,6 @@ export class DBService {
     async markNotificationRead(id: string): Promise<void> { 
         return this.request(`action=mark_notification_read`, { method: 'POST', body: JSON.stringify({notifId: id}) }); 
     }
-
-    // --- Requests ---
 
     async searchExternal(q: string, src: string): Promise<VideoResult[]> { 
         return this.request<VideoResult[]>(`action=search_external`, { method: 'POST', body: JSON.stringify({query: q, source: src}) }); 
@@ -467,8 +417,6 @@ export class DBService {
         return this.request(`action=admin_update_request_status`, { method: 'POST', body: JSON.stringify({id, status})}); 
     }
 
-    // --- Misc ---
-
     invalidateCache(key: string) { localStorage.removeItem('sp_cache_' + key); }
     setHomeDirty() { this.invalidateCache('get_videos'); }
     
@@ -482,8 +430,6 @@ export class DBService {
     }
     
     needsSetup(): boolean { return false; } 
-
-    // --- Admin Library ---
 
     async scanLocalLibrary(path: string): Promise<any> { 
         return this.request(`action=scan_local_library`, { method: 'POST', body: JSON.stringify({path}) }); 
@@ -501,7 +447,9 @@ export class DBService {
         return this.request(`action=rectify_titles`, { method: 'POST', body: JSON.stringify({lastId}) }); 
     }
 
-    // --- Profile ---
+    async organizeWithAi(): Promise<{processed: number, details: any, message?: string}> {
+        return this.request(`action=admin_ai_organize`, { method: 'POST' });
+    }
 
     async updateUserProfile(uid: string, data: Partial<User>): Promise<void> { 
         return this.request(`action=update_user`, { method: 'POST', body: JSON.stringify({userId: uid, updates: data})}); 
@@ -538,8 +486,6 @@ export class DBService {
         return this.request(`action=admin_handle_vip_request`, { method: 'POST', body: JSON.stringify({adminId, requestId: reqId, action: status})});
     }
 
-    // --- FTP ---
-
     async listFtpFiles(path: string): Promise<FtpFile[]> { 
         return this.request<FtpFile[]>(`action=ftp_list`, { method: 'POST', body: JSON.stringify({path}) }); 
     }
@@ -551,8 +497,6 @@ export class DBService {
     async scanFtpRecursive(path: string): Promise<any> { 
         return this.request(`action=scan_ftp_recursive`, { method: 'POST', body: JSON.stringify({path}) }); 
     }
-
-    // --- Marketplace ---
 
     async getMarketplaceItems(): Promise<MarketplaceItem[]> { 
         return this.request<MarketplaceItem[]>(`action=get_marketplace_items`); 
@@ -603,8 +547,6 @@ export class DBService {
         return this.request(`action=admin_delete_listing`, { method: 'POST', body: JSON.stringify({id}) }); 
     }
 
-    // --- Admin Tools ---
-
     async adminCleanupSystemFiles(): Promise<any> { 
         return this.request(`action=admin_cleanup_system_files`); 
     }
@@ -632,8 +574,6 @@ export class DBService {
         return this.request<any>(`action=admin_get_real_stats`);
     }
 
-    // --- Setup ---
-
     async verifyDbConnection(config: any): Promise<boolean> { 
         try { 
             await this.request(`action=verify_db`, { method: 'POST', body: JSON.stringify(config)}); 
@@ -644,8 +584,6 @@ export class DBService {
     async initializeSystem(config: any, admin: any): Promise<void> {
         return this.request(`action=install`, { method: 'POST', body: JSON.stringify({dbConfig: config, adminUser: admin})});
     }
-
-    // --- Server ---
 
     async serverImportVideo(url: string): Promise<void> { 
         return this.request(`action=server_import_video`, { method: 'POST', body: JSON.stringify({url}) }); 

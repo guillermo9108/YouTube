@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, VideoCategory, VipPlan } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X } from 'lucide-react';
+import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
@@ -30,7 +30,6 @@ export default function AdminConfig() {
 
     useEffect(() => {
         db.getSystemSettings().then((s: SystemSettings) => {
-            // CRITICAL FIX: Ensure categoryPrices is an object, not an array (PHP empty array issue)
             if (Array.isArray(s.categoryPrices) || !s.categoryPrices) {
                 s.categoryPrices = {};
             }
@@ -49,11 +48,9 @@ export default function AdminConfig() {
         }
     };
 
-    // FIX: Use functional state update to prevent stale closure issues
     const updateCategoryPrice = (cat: string, price: number) => {
         setSettings(prev => {
             if (!prev) return null;
-            // Ensure we are working with an object
             const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
             return {
                 ...prev,
@@ -99,7 +96,6 @@ export default function AdminConfig() {
         setSettings(prev => {
             if (!prev) return null;
             const updatedCustom = (prev.customCategories || []).filter(c => c !== catToRemove);
-            
             const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
             const updatedPrices = { ...currentPrices };
             delete updatedPrices[catToRemove];
@@ -147,7 +143,6 @@ export default function AdminConfig() {
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500"/></div>;
     if (!settings) return <div className="p-10 text-center text-red-400">Error cargando configuración.</div>;
 
-    // Combine standard and custom categories for rendering
     const allCategories = [
         ...Object.values(VideoCategory),
         ...(settings.customCategories || [])
@@ -184,6 +179,43 @@ export default function AdminConfig() {
                 </div>
             </ConfigSection>
 
+            <ConfigSection 
+                title="Integraciones API & IA" 
+                icon={DownloadCloud} 
+                isOpen={openSection === 'API'} 
+                onToggle={() => setOpenSection(openSection === 'API' ? '' : 'API')}
+            >
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Google Gemini API Key <InfoTooltip text="Gratis: ai.google.dev (Para organizar videos)" /></label>
+                    <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings(p => p ? {...p, geminiKey: e.target.value} : null)} className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 placeholder-slate-700" placeholder="AIza..."/>
+                </div>
+
+                <div className="h-px bg-slate-800 my-2"></div>
+
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pexels API Key <InfoTooltip text="Para búsqueda de stock videos" /></label>
+                    <input type="password" value={settings.pexelsKey || ''} onChange={e => setSettings(p => p ? {...p, pexelsKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                </div>
+                
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pixabay API Key <InfoTooltip text="Alternativa stock gratuita" /></label>
+                    <input type="password" value={settings.pixabayKey || ''} onChange={e => setSettings(p => p ? {...p, pixabayKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                </div>
+
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">YouTube (yt-dlp)</label>
+                    <div className="flex items-center gap-2 p-3 bg-slate-950 rounded-lg border border-slate-700">
+                        <input 
+                            type="checkbox" 
+                            checked={settings.enableYoutube || false} 
+                            onChange={e => setSettings(p => p ? {...p, enableYoutube: e.target.checked} : null)} 
+                            className="accent-indigo-500 w-4 h-4 cursor-pointer"
+                        />
+                        <span className="text-sm text-slate-300">Habilitar descargas de YouTube</span>
+                    </div>
+                </div>
+            </ConfigSection>
+
             {/* VIP PLANS EDITOR */}
             <ConfigSection 
                 title="Planes VIP & Recargas" 
@@ -191,6 +223,7 @@ export default function AdminConfig() {
                 isOpen={openSection === 'VIP'} 
                 onToggle={() => setOpenSection(openSection === 'VIP' ? '' : 'VIP')}
             >
+                {/* ... (Existing VIP Code) ... */}
                 <div className="space-y-4">
                     {settings.vipPlans && settings.vipPlans.map((plan) => (
                         <div key={plan.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative">
@@ -296,6 +329,7 @@ export default function AdminConfig() {
                 isOpen={openSection === 'PRICES'} 
                 onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}
             >
+                {/* ... (Existing Prices Code) ... */}
                 <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800 mb-4">
                     Estos precios se aplicarán automáticamente a los videos durante el <strong>Paso 3: Organización Inteligente</strong> basándose en su categoría detectada.
                 </p>
@@ -303,7 +337,6 @@ export default function AdminConfig() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     {allCategories.map(cat => {
                         const isCustom = !Object.values(VideoCategory).includes(cat as any);
-                        // Safely access price, default to 0 if undefined
                         const currentPrice = settings.categoryPrices?.[cat] ?? 0;
                         
                         return (
@@ -337,7 +370,6 @@ export default function AdminConfig() {
                     })}
                 </div>
 
-                {/* Add New Category */}
                 <div className="flex gap-2 items-center bg-slate-950 p-3 rounded-lg border border-slate-800/50 border-dashed">
                     <input 
                         type="text" 
@@ -379,36 +411,6 @@ export default function AdminConfig() {
                             <span className="absolute right-3 top-2.5 text-slate-500 font-bold">%</span>
                         </div>
                         <p className="text-[10px] text-slate-500 mt-1">Retenido en ventas de productos físicos.</p>
-                    </div>
-                </div>
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Integraciones API" 
-                icon={DownloadCloud} 
-                isOpen={openSection === 'API'} 
-                onToggle={() => setOpenSection(openSection === 'API' ? '' : 'API')}
-            >
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pexels API Key <InfoTooltip text="Para búsqueda de stock videos" /></label>
-                    <input type="password" value={settings.pexelsKey || ''} onChange={e => setSettings(p => p ? {...p, pexelsKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                </div>
-                
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pixabay API Key <InfoTooltip text="Alternativa stock gratuita" /></label>
-                    <input type="password" value={settings.pixabayKey || ''} onChange={e => setSettings(p => p ? {...p, pixabayKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                </div>
-
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">YouTube (yt-dlp)</label>
-                    <div className="flex items-center gap-2 p-3 bg-slate-950 rounded-lg border border-slate-700">
-                        <input 
-                            type="checkbox" 
-                            checked={settings.enableYoutube || false} 
-                            onChange={e => setSettings(p => p ? {...p, enableYoutube: e.target.checked} : null)} 
-                            className="accent-indigo-500 w-4 h-4 cursor-pointer"
-                        />
-                        <span className="text-sm text-slate-300">Habilitar descargas de YouTube</span>
                     </div>
                 </div>
             </ConfigSection>

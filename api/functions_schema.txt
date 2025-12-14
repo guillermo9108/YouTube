@@ -142,6 +142,7 @@ function getAppSchema() {
                 'maxResolution' => 'INT DEFAULT 1080',
                 'pexelsKey' => 'VARCHAR(255)',
                 'pixabayKey' => 'VARCHAR(255)',
+                'geminiKey' => 'VARCHAR(255)',
                 'ytDlpPath' => 'VARCHAR(255)',
                 'enableYoutube' => 'TINYINT(1) DEFAULT 0',
                 'categoryPrices' => 'JSON DEFAULT NULL',

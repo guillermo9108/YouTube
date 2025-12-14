@@ -193,6 +193,7 @@ export interface SystemSettings {
   maxResolution: number;     
   pexelsKey: string;
   pixabayKey: string;
+  geminiKey: string; // NEW: Google AI
   ytDlpPath: string;    
   enableYoutube: boolean; 
   categoryPrices: Record<string, number>; 
