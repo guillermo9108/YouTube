@@ -39,18 +39,12 @@ function get_youtube_video($query, $config) {
         }
     }
 
-    // Fallback: si no encontramos archivo, confiamos en que está en el PATH global si se configuró algo
-    if (!$bin && !empty($config['ytDlpPath'])) {
-        $bin = $config['ytDlpPath'];
-    }
-
-    if (!$bin) {
-        // Último intento: asumir que está en el PATH del sistema
-        $bin = $isWin ? 'yt-dlp.exe' : 'yt-dlp';
-    }
+    // Fallback: si no encontramos archivo, confiamos en que está en el PATH global
+    if (!$bin && !empty($config['ytDlpPath'])) $bin = $config['ytDlpPath'];
+    if (!$bin) $bin = $isWin ? 'yt-dlp.exe' : 'yt-dlp';
 
     // Asegurar permisos en Linux si es un archivo local
-    if (!$isWin && file_exists($bin)) {
+    if (!$isWin && file_exists($bin) && !is_dir($bin)) {
         if (!is_executable($bin)) @chmod($bin, 0755); 
     }
 
@@ -64,28 +58,34 @@ function get_youtube_video($query, $config) {
     // 4. Estrategias de Ejecución
     $strategies = [];
     
-    // A) Ejecución Directa (Ideal)
-    // En Windows necesitamos comillas si hay espacios, en Linux también
+    // A) Ejecución Directa
     $strategies[] = "\"$bin\" $searchArg $flags 2>&1";
     
-    // B) Ejecución vía Python explícito (Si falla el shebang o no es ejecutable directo)
-    // IMPORTANTE: En Linux evitamos 'python' genérico porque suele ser Python 2.7 y causa SyntaxError
+    // B) Ejecución vía Python explícito
     if ($isWin) {
         $pythonPaths = ['python', 'py', 'python3'];
     } else {
         $pythonPaths = [
-            'python3',                          // PATH
-            '/usr/bin/python3',                 // Estándar
-            '/usr/local/bin/python3',           // Local
-            '/var/packages/python3/target/bin/python3',       // Synology DSM 7
-            '/var/packages/py3k/target/usr/local/bin/python3', // Synology DSM 6
-            '/opt/bin/python3',                 // Entware
-            'python3.9', 'python3.10', 'python3.11' // Versiones específicas
+            'python3',                          
+            '/usr/bin/python3',                 
+            '/usr/local/bin/python3',           
+            '/usr/local/bin/python3.5',                         // Synology DSM 6 standard link
+            '/var/packages/py3k/target/usr/local/bin/python3',  // Synology DSM 6 package path
+            '/var/packages/python3/target/bin/python3',         // Synology DSM 7
+            '/volume1/@appstore/py3k/usr/local/bin/python3',    // Synology Volume 1
+            '/opt/bin/python3'                                  // Entware
         ];
+        
+        // Intentar detectar via shell
+        $detected = trim(shell_exec('which python3 2>/dev/null'));
+        if ($detected) array_unshift($pythonPaths, $detected);
+        
+        $detected35 = trim(shell_exec('which python3.5 2>/dev/null'));
+        if ($detected35) array_unshift($pythonPaths, $detected35);
     }
 
-    foreach ($pythonPaths as $py) {
-        // Solo intentamos rutas absolutas si existen
+    $uniquePaths = array_unique($pythonPaths);
+    foreach ($uniquePaths as $py) {
         if ($py[0] === '/' && !file_exists($py)) continue;
         $strategies[] = "$py \"$bin\" $searchArg $flags 2>&1";
     }
@@ -93,7 +93,7 @@ function get_youtube_video($query, $config) {
     // 5. Intentar ejecutar
     $output = [];
     $returnVar = -1;
-    $lastError = "";
+    $errors = [];
     $success = false;
 
     foreach ($strategies as $cmd) {
@@ -101,22 +101,23 @@ function get_youtube_video($query, $config) {
         exec($cmd, $output, $returnVar);
         
         if ($returnVar === 0) {
-            // Verificar que la salida parece JSON válido y no un error silencioso
-            if (!empty($output) && (strpos($output[0], '{') === 0 || strpos(end($output), '}') !== false)) {
+            // Verificar JSON
+            if (!empty($output) && (strpos(trim($output[0]), '{') === 0)) {
                 $success = true;
                 break;
             }
         }
         
-        // Guardamos el error
-        $errLines = array_slice($output, -3);
-        $currError = implode(" | ", $errLines);
-        if (!empty($currError)) $lastError = $currError;
+        // Guardar error (limitado)
+        $errLine = !empty($output) ? substr(implode(" | ", array_slice($output, -2)), 0, 250) : "Exit Code $returnVar";
+        // Ocultar ruta completa del binario para limpieza visual
+        $simpleCmd = (strpos($cmd, $bin) !== false) ? str_replace($bin, 'yt-dlp', $cmd) : $cmd;
+        $errors[] = "[$simpleCmd] -> $errLine";
     }
 
     if (!$success) {
-        // Si falló, intentamos dar un mensaje útil
-        throw new Exception("yt-dlp execution failed. Python issue? Last error: " . $lastError);
+        // Devolver lista de errores para depuración
+        throw new Exception("yt-dlp falló. Detalles:\n" . implode("\n", array_slice($errors, 0, 4)));
     }
     
     // 6. Procesar Salida
@@ -126,7 +127,6 @@ function get_youtube_video($query, $config) {
         
         if ($data && isset($data['id']) && isset($data['title'])) {
             $thumb = $data['thumbnail'] ?? '';
-            // Intentar buscar thumbnail de mejor calidad
             if (isset($data['thumbnails']) && is_array($data['thumbnails'])) {
                 $last = end($data['thumbnails']);
                 if (isset($last['url'])) $thumb = $last['url'];
