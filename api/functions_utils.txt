@@ -16,70 +16,66 @@ function fix_url($url) {
 
 function get_youtube_video($query, $config) {
     // 1. Configurar Entorno
-    putenv("LC_ALL=C.UTF-8"); // Asegurar UTF8 para títulos
+    putenv("LC_ALL=C.UTF-8"); 
     
-    // 2. Resolver Ruta del Binario (Smart Path Resolution)
-    $bin = $config['ytDlpPath'];
+    // 2. Definir Candidatos de Ruta (Rutas Absolutas son más seguras)
+    $apiDir = __DIR__; // Carpeta donde está este script (/api)
+    $rootDir = dirname(__DIR__); // Carpeta raíz del proyecto
     
-    // Si la configuración está vacía o el archivo no existe en la ruta absoluta dada
-    if (empty($bin) || !file_exists($bin)) {
-        // Buscar en ubicaciones comunes relativas al script PHP (que corre en /api/)
-        $candidates = [
-            '../yt-dlp',           // Raíz del proyecto (Linux/Mac)
-            '../yt-dlp.exe',       // Raíz del proyecto (Windows)
-            './yt-dlp',            // Carpeta api (Linux/Mac)
-            './yt-dlp.exe',        // Carpeta api (Windows)
-            '/usr/local/bin/yt-dlp', // Sistema global
-            '/usr/bin/yt-dlp'
-        ];
-        
-        foreach ($candidates as $c) {
-            if (file_exists($c)) {
-                $bin = realpath($c); // Obtener ruta absoluta real
-                break;
-            }
+    $candidates = [
+        $config['ytDlpPath'] ?? '', // Configuración manual
+        $apiDir . '/yt-dlp',        // ./api/yt-dlp (Linux/Mac)
+        $apiDir . '/yt-dlp.exe',    // ./api/yt-dlp.exe (Windows)
+        $rootDir . '/yt-dlp',       // ./yt-dlp (Linux/Mac)
+        $rootDir . '/yt-dlp.exe',   // ./yt-dlp.exe (Windows)
+        '/usr/local/bin/yt-dlp',    // Global
+        '/usr/bin/yt-dlp'           // Global
+    ];
+
+    $bin = null;
+    foreach ($candidates as $c) {
+        if (!empty($c) && file_exists($c)) {
+            $bin = $c;
+            break;
         }
     }
 
-    // Si aún no lo encontramos, fallamos
-    if (empty($bin) || !file_exists($bin)) {
-        error_log("StreamPay Error: yt-dlp binary not found. Configured: " . $config['ytDlpPath']);
-        return [];
+    if (!$bin) {
+        // Fallar ruidosamente para que el usuario sepa qué pasa
+        throw new Exception("yt-dlp binary not found. Buscado en: " . implode(", ", $candidates));
     }
 
     // 3. Permisos de Ejecución (Solo Linux/Mac)
     if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
         if (!is_executable($bin)) {
-            @chmod($bin, 0755); // Intentar dar permisos
+            @chmod($bin, 0755); 
         }
     }
 
     // 4. Construir Comando
-    // Usamos escapeshellarg para seguridad
-    // --dump-json: Obtiene metadatos
-    // --default-search ytsearch10: Busca 10 videos si no es URL
-    // --no-playlist: Evita descargar listas enteras si se pega un link
-    // --ignore-config: Ignora configs locales que puedan romper el json
-    // --no-check-certificate: Evita errores SSL en servidores locales antiguos
     $safeQuery = escapeshellarg($query);
-    
-    // Si el query parece una URL directa, no usamos prefijo de búsqueda
     $isUrl = filter_var($query, FILTER_VALIDATE_URL) && strpos($query, 'youtube.com') !== false;
     $searchArg = $isUrl ? $safeQuery : escapeshellarg("ytsearch12:$query");
 
-    $cmd = "$bin $searchArg --dump-json --no-warnings --ignore-config --no-check-certificate --compat-options no-youtube-unavailable-videos 2>&1";
+    // Agregamos path al binario para asegurar que Python lo encuentre si es script
+    $cmd = "\"$bin\" $searchArg --dump-json --no-warnings --ignore-config --no-check-certificate --compat-options no-youtube-unavailable-videos 2>&1";
     
-    // 5. Ejecutar
-    exec($cmd, $output, $ret);
+    // 5. Ejecutar y Capturar Estado
+    exec($cmd, $output, $returnVar);
+    
+    // Si falla la ejecución (ej: falta python, permisos, etc)
+    if ($returnVar !== 0) {
+        $errorMsg = implode("\n", array_slice($output, -3)); // Últimas 3 líneas del error
+        if (empty($errorMsg)) $errorMsg = "Unknown error (Exit Code: $returnVar)";
+        throw new Exception("yt-dlp execution failed: " . $errorMsg);
+    }
     
     // 6. Procesar Salida
     $results = [];
     foreach ($output as $line) {
-        // yt-dlp a veces escupe advertencias antes del JSON. Intentamos decodificar cada línea.
         $data = json_decode($line, true);
         
         if ($data && isset($data['id']) && isset($data['title'])) {
-            // Preferir miniaturas de alta calidad
             $thumb = $data['thumbnail'] ?? '';
             if (isset($data['thumbnails']) && is_array($data['thumbnails'])) {
                 $last = end($data['thumbnails']);
@@ -101,8 +97,6 @@ function get_youtube_video($query, $config) {
     return $results;
 }
 
-// SIMPLIFIED: Categories are no longer hardcoded by duration. 
-// Everything defaults to 'GENERAL' unless strictly matched by custom categories.
 function detectCategoryFromDuration($duration) {
     return 'GENERAL';
 }
@@ -114,16 +108,11 @@ function getPriceForCategory($cat, $settings) {
 
 function smartParseFilename($fullPath, $existingCategory = null, $customCategories = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
-    
-    // Normalize Separators
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
-    // Get array of parts
     $pathParts = explode('/', dirname($fullPathNormalized));
     
-    // Generic folders to ignore when appending parent name
     $genericFolders = ['videos', 'uploads', 'torrents', 'storage', 'public', 'media', 'completed', 'downloads', '4k', '1080p'];
 
-    // --- CLEANING LOGIC ---
     $junkPatterns = [
         '/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i',
         '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i',
@@ -138,52 +127,35 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     $cleanText = function($txt) use ($junkPatterns) {
         $t = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $txt);
         foreach ($junkPatterns as $p) { if($p) $t = preg_replace($p, '', $t); }
-        // Clean multiple spaces and trim
         $t = trim(preg_replace('/\s+/', ' ', $t));
-        return ucwords(strtolower($t)); // Normalize case
+        return ucwords(strtolower($t));
     };
 
-    // 1. Clean File Name
     $cleanName = $cleanText($filename);
-    if (strlen($cleanName) < 2) $cleanName = $filename; // Fallback if cleaning removed everything
+    if (strlen($cleanName) < 2) $cleanName = $filename;
 
-    // 2. Clean Parent Folder Name
     $parentFolder = end($pathParts);
     $cleanParent = '';
     
     if ($parentFolder && !in_array(strtolower($parentFolder), $genericFolders)) {
         $cleanParent = $cleanText($parentFolder);
-        // Avoid redundancy if parent is same as filename
         if (strcasecmp($cleanParent, $cleanName) === 0) $cleanParent = '';
     }
 
-    // 3. Construct Final Title: "Cleaned Name - Parent Folder"
     $finalTitle = $cleanName;
     if (!empty($cleanParent)) {
         $finalTitle = "$cleanName - $cleanParent";
     }
 
-    // 4. Custom Category Detection (Fuzzy Match: Accents & Plurals)
     $detectedCategory = null;
     $ancestors = array_reverse(array_slice($pathParts, -3)); 
 
-    // Helper: Normalize for categorization (Lowercase, No Accents, No trailing 's')
     $normalizeForCat = function($str) {
-        // Lowercase
         $str = mb_strtolower($str, 'UTF-8');
-        // Remove accents/diacritics
-        $unwanted = [
-            'á'=>'a', 'é'=>'e', 'í'=>'i', 'ó'=>'o', 'ú'=>'u',
-            'à'=>'a', 'è'=>'e', 'ì'=>'i', 'ò'=>'o', 'ù'=>'u',
-            'ä'=>'a', 'ë'=>'e', 'ï'=>'i', 'ö'=>'o', 'ü'=>'u',
-            'ñ'=>'n'
-        ];
+        $unwanted = ['á'=>'a', 'é'=>'e', 'í'=>'i', 'ó'=>'o', 'ú'=>'u', 'ñ'=>'n'];
         $str = strtr($str, $unwanted);
-        // Clean non-alphanumeric (keep spaces)
         $str = preg_replace('/[^a-z0-9 ]/', '', $str);
         $str = trim($str);
-        
-        // Remove trailing 's' for singularization (only if word > 3 chars to avoid stripping 'bus', 'gas', etc aggressively)
         if (strlen($str) > 3 && substr($str, -1) === 's') {
             $str = substr($str, 0, -1);
         }
@@ -193,26 +165,21 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     if (!empty($customCategories)) {
         foreach ($ancestors as $folder) {
             $folderBase = $normalizeForCat($folder);
-            
             foreach ($customCategories as $customCat) {
-                // Compare normalized folder against normalized category setting
                 $catBase = $normalizeForCat($customCat);
-                
-                // Match if stems are equal OR if one is contained in the other
                 if ($folderBase === $catBase || (strlen($folderBase) > 3 && strpos($folderBase, $catBase) !== false)) {
-                    $detectedCategory = $customCat; // Return the official configuration name
+                    $detectedCategory = $customCat; 
                     break 2;
                 }
             }
         }
     }
 
-    // Fallback logic
     if (!$detectedCategory) {
         if ($existingCategory && $existingCategory !== 'PENDING' && $existingCategory !== 'PROCESSING' && $existingCategory !== 'OTHER') {
             $detectedCategory = $existingCategory;
         } else {
-            $detectedCategory = 'GENERAL'; // Default fallback
+            $detectedCategory = 'GENERAL'; 
         }
     }
     
@@ -223,8 +190,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
 }
 
 function streamVideo($filePath, $pdo) {
-    // AGGRESSIVE BUFFER CLEANING - CRITICAL FOR VIDEO STREAMS
-    // Must clear all existing output buffers (whitespace, includes)
     if (function_exists('ini_set')) {
         ini_set('zlib.output_compression', 'Off');
     }
@@ -241,14 +206,11 @@ function streamVideo($filePath, $pdo) {
     
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(0); }
 
-    // Check FTP (Redundant query here but safe for integrity, assumes $pdo is passed)
-    // To optimize, index_code.txt could pass $isLocal, but maintaining function signature is safer for now.
     $stmt = $pdo->prepare("SELECT isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
     $stmt->execute([$filePath, "api/" . $filePath]);
     $isLocal = $stmt->fetchColumn();
 
     if ($isLocal == 2) {
-        // FTP PROXY
         $sStmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
         $json = $sStmt->fetchColumn();
         $s = json_decode($json, true);
@@ -270,25 +232,19 @@ function streamVideo($filePath, $pdo) {
         fclose($resource);
         exit;
     } else {
-        // LOCAL FILE - PATH SANITIZATION LOGIC
-        // We try multiple path variations because DB might store relative paths like "api/uploads/..." 
-        // while the script runs inside /api/, making "api/" prefix incorrect.
-        
         $candidates = [
-            $filePath, // As stored in DB
-            str_replace('api/', '', $filePath), // Remove api/ prefix
-            '../' . $filePath, // Try going up (rare)
-            basename($filePath) // Just filename (fallback)
+            $filePath, 
+            str_replace('api/', '', $filePath),
+            '../' . $filePath,
+            basename($filePath)
         ];
 
         $realPath = null;
         foreach ($candidates as $c) {
-            // Check original
             if (file_exists($c) && !is_dir($c)) {
                 $realPath = $c;
                 break;
             }
-            // Check decoded (for spaces/special chars)
             $decoded = rawurldecode($c);
             if (file_exists($decoded) && !is_dir($decoded)) {
                 $realPath = $decoded;
@@ -338,12 +294,11 @@ function streamVideo($filePath, $pdo) {
         $fp = fopen($realPath, 'rb');
         if ($offset > 0) fseek($fp, $offset);
         
-        $buffer = 1024 * 256; // 256KB buffer chunks
+        $buffer = 1024 * 256; 
         while (!feof($fp) && ($p = ftell($fp)) <= $offset + $length) {
             if ($p + $buffer > $offset + $length) $buffer = $offset + $length - $p + 1;
             echo fread($fp, $buffer);
             flush();
-            // CRITICAL: Stop script if client disconnects to prevent server CPU hang
             if (connection_aborted()) {
                 fclose($fp);
                 exit;
