@@ -370,13 +370,14 @@ function admin_ai_organize($pdo, $input) {
     3. If the path contains 'movies' or 'pelis', classify as MOVIES.
     4. If the title sounds like a song or music video, classify as MUSIC.
     5. Return ONLY a JSON object where keys are the IDs and values are the chosen category.
-    6. Do not include markdown formatting, just the raw JSON string.
+    6. Ensure the output is valid JSON.
 
     Input Data:
     " . json_encode($videos);
 
-    // Call Gemini API
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" . $apiKey;
+    // Call Gemini API - USING 1.5 FLASH (STABLE)
+    // NOTE: 2.0-flash is preview and causes 403 on some keys. 1.5 is the safe bet.
+    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" . $apiKey;
     
     $data = [
         "contents" => [
@@ -385,6 +386,9 @@ function admin_ai_organize($pdo, $input) {
                     ["text" => $prompt]
                 ]
             ]
+        ],
+        "generationConfig" => [
+            "responseMimeType" => "application/json" // Force JSON response
         ]
     ];
 
@@ -400,7 +404,7 @@ function admin_ai_organize($pdo, $input) {
     
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch); // Capture actual error message
+    $curlError = curl_error($ch); 
     curl_close($ch);
 
     if ($response === false) {
@@ -408,13 +412,24 @@ function admin_ai_organize($pdo, $input) {
     }
 
     if ($httpCode !== 200) {
-        respond(false, null, "Gemini API Error ($httpCode): " . substr($response, 0, 150));
+        // Sanitize error message to avoid HTML dumps
+        $msg = "Gemini API Error ($httpCode)";
+        if (strpos($response, '<html') !== false || strpos($response, '<!DOCTYPE') !== false) {
+            if ($httpCode === 403) $msg .= ": Access Denied. Verify API Key / Service Status.";
+            else if ($httpCode === 404) $msg .= ": Model not found.";
+            else $msg .= ": Google Server Error (HTML response).";
+        } else {
+            $errJson = json_decode($response, true);
+            if (isset($errJson['error']['message'])) $msg .= ": " . $errJson['error']['message'];
+            else $msg .= ": " . substr($response, 0, 150);
+        }
+        respond(false, null, $msg);
     }
 
     $jsonRes = json_decode($response, true);
     $rawText = $jsonRes['candidates'][0]['content']['parts'][0]['text'] ?? '';
     
-    // Clean Markdown if present
+    // Clean Markdown if present (just in case 1.5 adds it despite mime type)
     $rawText = str_replace(['```json', '```'], '', $rawText);
     $classification = json_decode(trim($rawText), true);
 

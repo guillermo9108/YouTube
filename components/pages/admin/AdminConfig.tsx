@@ -186,7 +186,7 @@ export default function AdminConfig() {
                 onToggle={() => setOpenSection(openSection === 'API' ? '' : 'API')}
             >
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Google Gemini API Key <InfoTooltip text="Gratis: ai.google.dev (Para organizar videos)" /></label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Gemini 1.5 Flash API Key <InfoTooltip text="Obténla GRATIS en ai.google.dev (Modelo estable)" /></label>
                     <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings(p => p ? {...p, geminiKey: e.target.value} : null)} className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 placeholder-slate-700" placeholder="AIza..."/>
                 </div>
 
