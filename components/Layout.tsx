@@ -72,6 +72,7 @@ export default function Layout() {
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [isSecure, setIsSecure] = useState(true);
+  const [bannerDismissed, setBannerDismissed] = useState(false); // NEW STATE FOR CLOSING
 
   useEffect(() => {
     // 1. Check Protocol Security
@@ -86,19 +87,15 @@ export default function Layout() {
     checkStandalone();
     window.matchMedia('(display-mode: standalone)').addEventListener('change', checkStandalone);
 
-    // 3. Capture Install Prompt (Including Early Capture from index.html)
-    // Check if the event already fired before React mounted
+    // 3. Capture Install Prompt
     if ((window as any).deferredPrompt) {
-        console.log("Layout: Found deferred prompt from global scope");
         setInstallPrompt((window as any).deferredPrompt);
         setShowInstallBanner(true);
     }
 
     const handler = (e: any) => {
         e.preventDefault();
-        console.log("Layout: Captured beforeinstallprompt event");
         setInstallPrompt(e);
-        // Save to global too just in case
         (window as any).deferredPrompt = e;
         if (!isStandalone) setShowInstallBanner(true);
     };
@@ -111,7 +108,6 @@ export default function Layout() {
   }, [isStandalone]);
 
   const handleInstallClick = async () => {
-    // Prefer state prompt, fall back to global
     const promptEvent = installPrompt || (window as any).deferredPrompt;
 
     if (!promptEvent) {
@@ -119,20 +115,18 @@ export default function Layout() {
         return;
     }
     
-    // Show the native prompt
     promptEvent.prompt();
-    
-    // Wait for the user to respond to the prompt
     const { outcome } = await promptEvent.userChoice;
-    
     if (outcome === 'accepted') {
         setInstallPrompt(null);
-        (window as any).deferredPrompt = null;
         setShowInstallBanner(false);
     }
   };
 
-  const dismissInstall = () => setShowInstallBanner(false);
+  const dismissInstall = () => {
+      setShowInstallBanner(false);
+      setBannerDismissed(true);
+  };
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
   const isShortsMode = location.pathname === '/shorts';
@@ -237,7 +231,7 @@ export default function Layout() {
       <GridProcessor />
 
       {/* PWA INSTALL BOTTOM SHEET */}
-      {!isStandalone && (showInstallBanner || !isSecure) && (
+      {!isStandalone && !bannerDismissed && (showInstallBanner || !isSecure) && (
           <div className="fixed bottom-0 left-0 right-0 z-[100] bg-slate-900 border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom duration-500 pb-safe-area-bottom">
               <div className="p-4 flex items-center gap-4 max-w-lg mx-auto">
                   <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg text-white font-bold text-xl">SP</div>
@@ -254,7 +248,7 @@ export default function Layout() {
                           Instalar
                       </button>
                   ) : (
-                      <button onClick={() => setShowInstallBanner(false)} className="text-slate-500"><X size={20}/></button>
+                      <button onClick={dismissInstall} className="text-slate-500 hover:text-white"><X size={20}/></button>
                   )}
                   {isSecure && <button onClick={dismissInstall} className="p-2 text-slate-500 hover:text-white rounded-full"><X size={20}/></button>}
               </div>

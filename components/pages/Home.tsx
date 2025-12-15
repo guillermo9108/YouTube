@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, VideoCategory } from '../../types';
 import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, Heart, ChevronRight, ArrowDown } from 'lucide-react';
-import { Link } from '../Router';
+import { Link, useLocation } from '../Router';
 
 // --- COMPONENTS ---
 
@@ -31,6 +31,7 @@ const HorizontalScroll = ({ children }: { children?: React.ReactNode }) => (
 
 export default function Home() {
   const { user } = useAuth();
+  const location = useLocation(); // To track navigation
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('ALL');
@@ -147,7 +148,7 @@ export default function Home() {
       return { tasteNew, generalNew, tasteGeneral, trending, subs, discovery };
   };
 
-  // --- INITIAL LOAD ---
+  // --- INITIAL LOAD & REFRESH ---
   useEffect(() => {
     const loadData = async () => {
         setLoading(true);
@@ -208,7 +209,7 @@ export default function Home() {
         }
     };
     loadData();
-  }, [user]); // Re-run when user changes (login/logout) to refresh tastes
+  }, [user, location.pathname]); // Re-run when user OR pathname changes (returning to home)
 
   // --- FILTERING LOGIC (For Search or Manual Category) ---
   // When user types or selects a specific category, we bypass the Smart Feed
@@ -343,13 +344,13 @@ export default function Home() {
           // --- SMART FEED VIEW (6 Sections) ---
           <div className="space-y-10 animate-in fade-in">
               
-              {/* 1. Nuevos Basado en Gustos (Highlight) */}
-              {feed?.tasteNew && feed.tasteNew.length > 0 && (
-                  <section>
-                      <SectionHeader title="Nuevos para ti" icon={Sparkles} />
+              {/* 5. Suscripciones (Shown first for easy access) */}
+              {user && feed?.subs && feed.subs.length > 0 && (
+                  <section className="bg-slate-900/30 -mx-4 px-4 py-6 border-y border-slate-800/50">
+                      <SectionHeader title="De tus suscripciones" icon={UserCheck} />
                       <HorizontalScroll>
-                          {feed.tasteNew.map(video => (
-                              <div key={video.id} className="w-72 md:w-80 flex-shrink-0 snap-start">
+                          {feed.subs.map(video => (
+                              <div key={video.id} className="w-64 md:w-72 flex-shrink-0 snap-start">
                                   <VideoCard 
                                       video={video} 
                                       isUnlocked={isUnlocked(video.id, video.creatorId)}
@@ -361,13 +362,13 @@ export default function Home() {
                   </section>
               )}
 
-              {/* 5. Suscripciones (If logged in and has subs) */}
-              {user && feed?.subs && feed.subs.length > 0 && (
-                  <section className="bg-slate-900/30 -mx-4 px-4 py-6 border-y border-slate-800/50">
-                      <SectionHeader title="De tus suscripciones" icon={UserCheck} />
+              {/* 1. Nuevos Basado en Gustos (Highlight) */}
+              {feed?.tasteNew && feed.tasteNew.length > 0 && (
+                  <section>
+                      <SectionHeader title="Nuevos para ti" icon={Sparkles} />
                       <HorizontalScroll>
-                          {feed.subs.map(video => (
-                              <div key={video.id} className="w-64 md:w-72 flex-shrink-0 snap-start">
+                          {feed.tasteNew.map(video => (
+                              <div key={video.id} className="w-72 md:w-80 flex-shrink-0 snap-start">
                                   <VideoCard 
                                       video={video} 
                                       isUnlocked={isUnlocked(video.id, video.creatorId)}

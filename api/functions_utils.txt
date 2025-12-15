@@ -231,6 +231,7 @@ function streamVideo($filePath, $pdo) {
     if (function_exists('ini_set')) {
         ini_set('zlib.output_compression', 'Off');
     }
+    // CRITICAL: Clean buffer aggressively to prevent Synology injection
     while (ob_get_level() > 0) ob_end_clean();
     
     ini_set('display_errors', 0);
@@ -272,6 +273,7 @@ function streamVideo($filePath, $pdo) {
     } else {
         $candidates = [
             $filePath, 
+            rawurldecode($filePath), // Essential for Synology spaces
             str_replace('api/', '', $filePath),
             '../' . $filePath,
             basename($filePath)
@@ -279,10 +281,12 @@ function streamVideo($filePath, $pdo) {
 
         $realPath = null;
         foreach ($candidates as $c) {
+            // Check direct existence
             if (file_exists($c) && !is_dir($c)) {
                 $realPath = $c;
                 break;
             }
+            // Check decoded absolute path
             $decoded = rawurldecode($c);
             if (file_exists($decoded) && !is_dir($decoded)) {
                 $realPath = $decoded;
