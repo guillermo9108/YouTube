@@ -331,7 +331,7 @@ function admin_smart_cleaner_execute($pdo, $input) {
 function admin_ai_organize($pdo, $input) {
     set_time_limit(120); // 2 minutes timeout
     
-    $stmt = $pdo->query("SELECT geminiKey, customCategories FROM system_settings LIMIT 1");
+    $stmt = $pdo->query("SELECT geminiKey, customCategories, proxyUrl FROM system_settings LIMIT 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if (empty($settings['geminiKey'])) {
@@ -339,6 +339,7 @@ function admin_ai_organize($pdo, $input) {
     }
 
     $apiKey = $settings['geminiKey'];
+    $proxy = $settings['proxyUrl'] ?? null;
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
     
     // Default categories + custom ones
@@ -376,7 +377,6 @@ function admin_ai_organize($pdo, $input) {
     " . json_encode($videos);
 
     // Call Gemini API - USING 1.5 FLASH (STABLE)
-    // NOTE: 2.0-flash is preview and causes 403 on some keys. 1.5 is the safe bet.
     $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" . $apiKey;
     
     $data = [
@@ -402,6 +402,11 @@ function admin_ai_organize($pdo, $input) {
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
     
+    // PROXY SUPPORT
+    if (!empty($proxy)) {
+        curl_setopt($ch, CURLOPT_PROXY, $proxy);
+    }
+    
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch); 
@@ -412,12 +417,16 @@ function admin_ai_organize($pdo, $input) {
     }
 
     if ($httpCode !== 200) {
-        // Sanitize error message to avoid HTML dumps
-        $msg = "Gemini API Error ($httpCode)";
+        // Parse Title from HTML response for better error reporting (e.g. "Country not supported")
+        $title = '';
+        if (preg_match('/<title>(.*?)<\/title>/', $response, $matches)) {
+            $title = " - " . strip_tags($matches[1]);
+        }
+
+        $msg = "Gemini API Error ($httpCode)$title";
         if (strpos($response, '<html') !== false || strpos($response, '<!DOCTYPE') !== false) {
-            if ($httpCode === 403) $msg .= ": Access Denied. Verify API Key / Service Status.";
+            if ($httpCode === 403) $msg .= ": Access Denied. Likely Geo-block. Set Proxy in Config.";
             else if ($httpCode === 404) $msg .= ": Model not found.";
-            else $msg .= ": Google Server Error (HTML response).";
         } else {
             $errJson = json_decode($response, true);
             if (isset($errJson['error']['message'])) $msg .= ": " . $errJson['error']['message'];
@@ -429,7 +438,7 @@ function admin_ai_organize($pdo, $input) {
     $jsonRes = json_decode($response, true);
     $rawText = $jsonRes['candidates'][0]['content']['parts'][0]['text'] ?? '';
     
-    // Clean Markdown if present (just in case 1.5 adds it despite mime type)
+    // Clean Markdown if present
     $rawText = str_replace(['```json', '```'], '', $rawText);
     $classification = json_decode(trim($rawText), true);
 
@@ -511,7 +520,7 @@ function admin_get_settings($pdo) {
         'maxResolution' => intval($s['maxResolution'] ?? 1080),
         'pexelsKey' => $s['pexelsKey'] ?? '',
         'pixabayKey' => $s['pixabayKey'] ?? '',
-        'geminiKey' => $s['geminiKey'] ?? '', // NEW
+        'geminiKey' => $s['geminiKey'] ?? '', 
         'ytDlpPath' => $s['ytDlpPath'] ?? '',
         'enableYoutube' => (bool)($s['enableYoutube'] ?? 0),
         'categoryPrices' => $catPrices,
@@ -524,7 +533,8 @@ function admin_get_settings($pdo) {
         'paymentInstructions' => $s['paymentInstructions'] ?? '',
         'tropipayClientId' => $s['tropipayClientId'] ?? '',
         'tropipayClientSecret' => $s['tropipayClientSecret'] ?? '',
-        'currencyConversion' => floatval($s['currencyConversion']) ?? 1.00
+        'currencyConversion' => floatval($s['currencyConversion']) ?? 1.00,
+        'proxyUrl' => $s['proxyUrl'] ?? ''
     ];
     
     if (empty($settings['vipPlans'])) {
@@ -565,7 +575,8 @@ function admin_update_settings($pdo, $input) {
             paymentInstructions = ?,
             tropipayClientId = ?,
             tropipayClientSecret = ?,
-            currencyConversion = ?
+            currencyConversion = ?,
+            proxyUrl = ?
             WHERE id = 1";
             
     $pdo->prepare($sql)->execute([
@@ -590,7 +601,8 @@ function admin_update_settings($pdo, $input) {
         $s['paymentInstructions'] ?? '',
         $s['tropipayClientId'] ?? '',
         $s['tropipayClientSecret'] ?? '',
-        floatval($s['currencyConversion']) ?? 1.00
+        floatval($s['currencyConversion']) ?? 1.00,
+        $s['proxyUrl'] ?? ''
     ]);
     respond(true);
 }

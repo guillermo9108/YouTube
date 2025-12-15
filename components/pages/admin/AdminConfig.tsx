@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, VideoCategory, VipPlan } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles } from 'lucide-react';
+import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles, Globe } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
@@ -188,6 +188,12 @@ export default function AdminConfig() {
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Gemini 1.5 Flash API Key <InfoTooltip text="Obténla GRATIS en ai.google.dev (Modelo estable)" /></label>
                     <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings(p => p ? {...p, geminiKey: e.target.value} : null)} className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 placeholder-slate-700" placeholder="AIza..."/>
+                </div>
+
+                <div className="bg-slate-950 border border-indigo-900/30 p-4 rounded-lg my-2">
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2"><Globe size={12}/> HTTP Proxy <InfoTooltip text="Necesario si estás en un país restringido por Google (Error 403)" example="http://192.168.1.50:8080" /></label>
+                    <input type="text" value={settings.proxyUrl || ''} onChange={e => setSettings(p => p ? {...p, proxyUrl: e.target.value} : null)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="http://user:pass@host:port"/>
+                    <p className="text-[10px] text-slate-500 mt-1">Usado para conectar con Gemini API.</p>
                 </div>
 
                 <div className="h-px bg-slate-800 my-2"></div>

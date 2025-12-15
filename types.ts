@@ -208,6 +208,7 @@ export interface SystemSettings {
   tropipayClientId?: string;
   tropipayClientSecret?: string;
   currencyConversion?: number; // 1 USD/EUR = X Saldo
+  proxyUrl?: string; // NEW: For restricted regions
 }
 
 export interface OrganizeResult {
