@@ -14,18 +14,54 @@ function fix_url($url) {
     return $url;
 }
 
+function fetch_url_content($url) {
+    // Robust cURL wrapper for API calls
+    if (function_exists('curl_init')) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true); // Follow redirects
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Critical for old servers
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        // Mimic a real browser to avoid 403 blocks
+        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        
+        if ($httpCode >= 200 && $httpCode < 400 && $response) {
+            return $response;
+        }
+    } 
+    
+    // Fallback if cURL is disabled (unlikely but possible)
+    if (ini_get('allow_url_fopen')) {
+        $ctx = stream_context_create([
+            'http' => [
+                'timeout' => 10, 
+                'header' => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n"
+            ],
+            'ssl' => [
+                'verify_peer' => false, 
+                'verify_peer_name' => false
+            ]
+        ]);
+        return @file_get_contents($url, false, $ctx);
+    }
+    return false;
+}
+
 function get_youtube_video($query, $config) {
     $results = [];
-    $ytDlpSuccess = false;
+    $found = false;
 
-    // 1. Try yt-dlp if configured (Local Binary)
+    // 1. Try yt-dlp (Local Binary)
+    // Only works if Python/Binary are correctly set up.
     if (!empty($config['enableYoutube']) && !empty($config['ytDlpPath'])) {
         $bin = $config['ytDlpPath'];
-        // Capture stderr to prevent it leaking to output
         $cmd = "$bin \"ytsearch10:$query\" --dump-json --flat-playlist --no-warnings 2>&1";
-        
-        // Execute
-        exec($cmd, $output, $ret);
+        @exec($cmd, $output, $ret);
         
         if ($ret === 0 && !empty($output)) {
             foreach ($output as $line) {
@@ -42,58 +78,72 @@ function get_youtube_video($query, $config) {
                     ];
                 }
             }
-            if (!empty($results)) $ytDlpSuccess = true;
+            if (!empty($results)) $found = true;
         }
     }
 
-    // 2. Fallback: Public Invidious API (If yt-dlp fails due to Python version or missing binary)
-    // This allows the search feature to work on shared hosting or restricted containers.
-    if (!$ytDlpSuccess && !empty($config['enableYoutube'])) {
-        // Expanded Rotation of public instances
-        $instances = [
+    // 2. Fallback: Piped API (More reliable/faster than Invidious currently)
+    if (!$found && !empty($config['enableYoutube'])) {
+        $pipedInstances = [
+            'https://pipedapi.kavin.rocks', 
+            'https://api.piped.ot.ax',
+            'https://pipedapi.adminforge.de',
+            'https://api.piped.privacy.com.de'
+        ];
+        shuffle($pipedInstances);
+
+        foreach ($pipedInstances as $host) {
+            $url = "$host/search?q=" . urlencode($query) . "&filter=videos";
+            $json = fetch_url_content($url);
+            
+            if ($json) {
+                $data = json_decode($json, true);
+                if (isset($data['items']) && is_array($data['items'])) {
+                    foreach ($data['items'] as $item) {
+                        // Extract ID from /watch?v=ID
+                        $vidId = '';
+                        if (preg_match('/v=([^&]+)/', $item['url'], $m)) {
+                            $vidId = $m[1];
+                        } else {
+                            // Fallback if URL format differs
+                            $vidId = basename($item['url']);
+                        }
+
+                        if ($vidId) {
+                            $results[] = [
+                                'id' => $vidId,
+                                'source' => 'YouTube', // Normalized source name
+                                'thumbnail' => "https://i.ytimg.com/vi/{$vidId}/hqdefault.jpg", // Use direct YT img for reliability
+                                'title' => $item['title'],
+                                'duration' => $item['duration'] ?? 0,
+                                'downloadUrl' => "https://www.youtube.com/watch?v={$vidId}",
+                                'author' => $item['uploaderName'] ?? 'Unknown'
+                            ];
+                        }
+                        if (count($results) >= 12) break;
+                    }
+                    if (!empty($results)) {
+                        $found = true; 
+                        break; 
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Fallback: Invidious API (If Piped fails)
+    if (!$found && !empty($config['enableYoutube'])) {
+        $invInstances = [
             'https://inv.tux.pizza', 
             'https://vid.puffyan.us', 
             'https://invidious.projectsegfau.lt',
-            'https://invidious.perennialte.ch',
-            'https://invidious.jing.rocks',
-            'https://inv.zzls.xyz',
-            'https://yt.artemislena.eu'
+            'https://invidious.perennialte.ch'
         ];
+        shuffle($invInstances);
         
-        // Shuffle to load balance
-        shuffle($instances);
-        
-        foreach ($instances as $instance) {
+        foreach ($invInstances as $instance) {
             $url = "$instance/api/v1/search?q=" . urlencode($query) . "&type=video";
-            
-            $json = false;
-
-            // PREFERRED: cURL (Better for SSL/Timeouts)
-            if (function_exists('curl_init')) {
-                $ch = curl_init();
-                curl_setopt($ch, CURLOPT_URL, $url);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); // Critical for old servers
-                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-                curl_setopt($ch, CURLOPT_USERAGENT, 'StreamPay/1.0');
-                $response = curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                
-                if ($httpCode === 200 && $response) {
-                    $json = $response;
-                }
-            } 
-            
-            // FALLBACK: file_get_contents (If curl missing)
-            if (!$json && ini_get('allow_url_fopen')) {
-                $ctx = stream_context_create([
-                    'http' => ['timeout' => 5, 'header' => "User-Agent: StreamPay/1.0\r\n"],
-                    'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
-                ]);
-                $json = @file_get_contents($url, false, $ctx);
-            }
+            $json = fetch_url_content($url);
             
             if ($json) {
                 $data = json_decode($json, true);
@@ -112,7 +162,7 @@ function get_youtube_video($query, $config) {
                         ];
                         if (count($results) >= 12) break;
                     }
-                    if (!empty($results)) break; // Stop if we got results
+                    if (!empty($results)) break;
                 }
             }
         }
