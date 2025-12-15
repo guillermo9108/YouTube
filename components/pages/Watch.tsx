@@ -238,13 +238,14 @@ export default function Watch() {
 
     const getVideoSrc = (v: Video | null) => {
         if (!v) return '';
-        // FIX: Aggressively treat anything without a protocol as a local file requiring stream proxy
-        const hasProtocol = v.videoUrl.startsWith('http://') || v.videoUrl.startsWith('https://') || v.videoUrl.startsWith('//');
-        const isAlreadyStream = v.videoUrl.includes('action=stream');
         
-        if (!hasProtocol && !isAlreadyStream) {
+        // FIX: Force stream for local files
+        const isLocal = Boolean(v.isLocal) || (v as any).isLocal === 1 || (v as any).isLocal === "1";
+        
+        if (isLocal && !v.videoUrl.includes('action=stream')) {
             return `api/index.php?action=stream&id=${v.id}`;
         }
+        
         return v.videoUrl;
     };
 

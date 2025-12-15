@@ -18,9 +18,9 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     let streamSrc = video.videoUrl;
     const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
 
-    if (isLocal && !streamSrc.includes('action=stream')) {
+    // FORCE API STREAM if it's local. Browsers cannot load /volume1/... directly.
+    if (isLocal) {
         streamSrc = `api/index.php?action=stream&id=${video.id}`;
-        console.log("ScannerPlayer: Forcing stream URL for local video", video.id);
     }
 
     useEffect(() => {
@@ -50,7 +50,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const vid = e.currentTarget;
         if (!vid || processedRef.current) return;
 
-        if (vid.currentTime > 1.5) {
+        if (vid.currentTime > 1.5 && vid.videoWidth > 0) {
             vid.pause();
             processedRef.current = true;
             setStatus('Capturando...');

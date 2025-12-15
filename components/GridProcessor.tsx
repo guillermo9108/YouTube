@@ -22,10 +22,12 @@ export default function GridProcessor() {
         const vid = videoRef.current;
         if (!activeTask || !vid) return;
 
-        // 1. URL Transformation (Critical for Local Files)
+        // 1. URL Transformation (Critical for Local Files & Synology)
         let streamSrc = activeTask.videoUrl;
         const isLocal = Boolean(activeTask.isLocal) || (activeTask as any).isLocal === 1 || (activeTask as any).isLocal === "1";
-        if (isLocal && !streamSrc.includes('action=stream')) {
+        
+        // FORCE API STREAM if it's local. Browsers cannot load /volume1/... directly.
+        if (isLocal) {
             streamSrc = `api/index.php?action=stream&id=${activeTask.id}`;
         }
 
@@ -33,6 +35,7 @@ export default function GridProcessor() {
         vid.src = streamSrc;
         vid.currentTime = 0;
         vid.muted = true; // Required for autoplay
+        vid.crossOrigin = "anonymous"; // Essential for Canvas export
         
         // 3. Attempt Play
         const startPlay = async () => {
@@ -48,13 +51,13 @@ export default function GridProcessor() {
         };
         startPlay();
 
-        // Safety Timeout: If nothing happens in 15s, skip to avoid getting stuck
+        // Safety Timeout: If nothing happens in 25s, skip to avoid getting stuck
         const safetyTimer = setTimeout(() => {
             if (!processedRef.current) {
                 console.warn("GridProcessor timeout for:", activeTask.title);
                 skipTask();
             }
-        }, 15000);
+        }, 25000);
 
         return () => {
             clearTimeout(safetyTimer);
@@ -69,7 +72,8 @@ export default function GridProcessor() {
 
         // --- CAPTURE LOGIC (From AdminLibrary Step 2) ---
         // Wait for > 1.0s to ensure we aren't getting a black starting frame
-        if (vid.currentTime > 1.0) {
+        // Also ensure video dimensions are ready
+        if (vid.currentTime > 1.0 && vid.videoWidth > 0) {
             vid.pause();
             processedRef.current = true;
             
@@ -96,6 +100,7 @@ export default function GridProcessor() {
                 }
             } catch (err) {
                 console.error("Canvas error", err);
+                // Even if canvas fails (tainted), save duration
                 completeTask(vid.duration || 0, null);
             }
         }
