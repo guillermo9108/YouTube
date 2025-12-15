@@ -329,7 +329,7 @@ function admin_smart_cleaner_execute($pdo, $input) {
 
 // --- AI ORGANIZER (GEMINI API) ---
 function admin_ai_organize($pdo, $input) {
-    set_time_limit(120); // 2 minutes timeout
+    set_time_limit(180); // 3 minutes timeout
     
     $stmt = $pdo->query("SELECT geminiKey, customCategories, proxyUrl FROM system_settings LIMIT 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -342,7 +342,6 @@ function admin_ai_organize($pdo, $input) {
     $proxy = $settings['proxyUrl'] ?? null;
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
     
-    // Default categories + custom ones
     $availableCategories = [
         'GENERAL', 'MOVIES', 'SERIES', 'MUSIC', 'ADULT', 'KIDS', 'NEWS', 'SPORTS', 'GAMING', 'DOCUMENTARY', 'OTHER'
     ];
@@ -352,7 +351,7 @@ function admin_ai_organize($pdo, $input) {
     
     $catString = implode(', ', $availableCategories);
 
-    // Fetch batch of videos (limit 50 to fit context window comfortably)
+    // Fetch batch of videos
     $sql = "SELECT id, title, videoUrl FROM videos WHERE category IN ('GENERAL', 'OTHER', 'PROCESSING') ORDER BY id DESC LIMIT 50";
     $stmt = $pdo->query($sql);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -361,85 +360,85 @@ function admin_ai_organize($pdo, $input) {
         respond(true, ['processed' => 0, 'message' => 'No hay videos pendientes de clasificar.']);
     }
 
-    // Build Prompt
-    $prompt = "You are a video organizer assistant. I will provide a JSON list of video files with ID, Title and Path.
+    $prompt = "You are a video organizer assistant. I will provide a JSON list of video files.
     Your task is to classify each video into one of these exact categories: [{$catString}].
-    
     Rules:
     1. Analyze the 'title' and the folder structure in 'videoUrl'.
-    2. If the path contains 'series', 'season', 's01', classify as SERIES.
-    3. If the path contains 'movies' or 'pelis', classify as MOVIES.
-    4. If the title sounds like a song or music video, classify as MUSIC.
-    5. Return ONLY a JSON object where keys are the IDs and values are the chosen category.
-    6. Ensure the output is valid JSON.
+    2. If path contains 'series', 'season', classify as SERIES.
+    3. If path contains 'movies', classify as MOVIES.
+    4. Return ONLY a JSON object where keys are IDs and values are categories.
+    5. Valid JSON only.
 
     Input Data:
     " . json_encode($videos);
 
-    // Call Gemini API - USING 1.5 FLASH (STABLE)
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" . $apiKey;
+    // List of models to try in order (Fallback mechanism for 404/403)
+    $candidateModels = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-001', 'gemini-pro'];
     
-    $data = [
-        "contents" => [
-            [
-                "parts" => [
-                    ["text" => $prompt]
-                ]
-            ]
-        ],
-        "generationConfig" => [
-            "responseMimeType" => "application/json" // Force JSON response
-        ]
-    ];
+    $finalResponse = null;
+    $lastError = "";
 
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-    
-    // FIX: Disable SSL verification for local dev/NAS environments that lack CA bundles
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-    
-    // PROXY SUPPORT
-    if (!empty($proxy)) {
-        curl_setopt($ch, CURLOPT_PROXY, $proxy);
-    }
-    
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch); 
-    curl_close($ch);
+    foreach ($candidateModels as $model) {
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=" . $apiKey;
+        
+        $postBody = [
+            "contents" => [["parts" => [["text" => $prompt]]]]
+        ];
 
-    if ($response === false) {
-        respond(false, null, "Connection Failed: " . $curlError);
-    }
-
-    if ($httpCode !== 200) {
-        // Parse Title from HTML response for better error reporting (e.g. "Country not supported")
-        $title = '';
-        if (preg_match('/<title>(.*?)<\/title>/', $response, $matches)) {
-            $title = " - " . strip_tags($matches[1]);
+        // Legacy models (gemini-pro) do not support responseMimeType
+        if (strpos($model, '1.5') !== false) {
+            $postBody["generationConfig"] = ["responseMimeType" => "application/json"];
         }
 
-        $msg = "Gemini API Error ($httpCode)$title";
-        if (strpos($response, '<html') !== false || strpos($response, '<!DOCTYPE') !== false) {
-            if ($httpCode === 403) $msg .= ": Access Denied. Likely Geo-block. Set Proxy in Config.";
-            else if ($httpCode === 404) $msg .= ": Model not found.";
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postBody));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        
+        // FIX: Disable SSL verification for local dev/NAS environments
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        
+        // PROXY SUPPORT
+        if (!empty($proxy)) {
+            curl_setopt($ch, CURLOPT_PROXY, $proxy);
+        }
+        
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch); 
+        curl_close($ch);
+
+        if ($httpCode === 200 && $response) {
+            $finalResponse = $response;
+            break; // Success!
         } else {
-            $errJson = json_decode($response, true);
-            if (isset($errJson['error']['message'])) $msg .= ": " . $errJson['error']['message'];
-            else $msg .= ": " . substr($response, 0, 150);
+            $lastError = "Model $model failed ($httpCode). ";
+            if ($response) {
+                // Check if 404 Model not found
+                if ($httpCode === 404) { continue; } // Try next model
+            }
         }
-        respond(false, null, $msg);
     }
 
-    $jsonRes = json_decode($response, true);
+    if (!$finalResponse) {
+        respond(false, null, "All models failed. Last error: " . $lastError);
+    }
+
+    $jsonRes = json_decode($finalResponse, true);
     $rawText = $jsonRes['candidates'][0]['content']['parts'][0]['text'] ?? '';
     
-    // Clean Markdown if present
+    // Clean Markdown
     $rawText = str_replace(['```json', '```'], '', $rawText);
+    
+    // Fallback parser if not strict JSON (e.g. from gemini-pro)
+    $firstBrace = strpos($rawText, '{');
+    $lastBrace = strrpos($rawText, '}');
+    if ($firstBrace !== false && $lastBrace !== false) {
+        $rawText = substr($rawText, $firstBrace, $lastBrace - $firstBrace + 1);
+    }
+
     $classification = json_decode(trim($rawText), true);
 
     if (!$classification || !is_array($classification)) {
@@ -451,7 +450,6 @@ function admin_ai_organize($pdo, $input) {
     $updateStmt = $pdo->prepare("UPDATE videos SET category = ? WHERE id = ?");
     
     foreach ($classification as $vidId => $cat) {
-        // Validation: Ensure category is valid
         $upperCat = strtoupper(trim($cat));
         if (in_array($upperCat, $availableCategories)) {
             $updateStmt->execute([$upperCat, $vidId]);
