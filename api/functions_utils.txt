@@ -15,27 +15,81 @@ function fix_url($url) {
 }
 
 function get_youtube_video($query, $config) {
-    if (empty($config['enableYoutube']) || empty($config['ytDlpPath'])) return [];
-    
-    $bin = $config['ytDlpPath'];
-    $cmd = "$bin \"ytsearch10:$query\" --dump-json --flat-playlist --no-warnings 2>&1";
-    exec($cmd, $output, $ret);
-    
     $results = [];
-    foreach ($output as $line) {
-        $data = json_decode($line, true);
-        if ($data) {
-            $results[] = [
-                'id' => $data['id'],
-                'source' => 'YouTube',
-                'thumbnail' => "https://i.ytimg.com/vi/{$data['id']}/hqdefault.jpg",
-                'title' => $data['title'],
-                'duration' => $data['duration'] ?? 0,
-                'downloadUrl' => "https://www.youtube.com/watch?v={$data['id']}",
-                'author' => $data['uploader'] ?? 'Unknown'
-            ];
+    $ytDlpSuccess = false;
+
+    // 1. Try yt-dlp if configured (Local Binary)
+    if (!empty($config['enableYoutube']) && !empty($config['ytDlpPath'])) {
+        $bin = $config['ytDlpPath'];
+        // Capture stderr to prevent it leaking to output
+        $cmd = "$bin \"ytsearch10:$query\" --dump-json --flat-playlist --no-warnings 2>&1";
+        
+        // Execute
+        exec($cmd, $output, $ret);
+        
+        if ($ret === 0 && !empty($output)) {
+            foreach ($output as $line) {
+                $data = json_decode($line, true);
+                if ($data) {
+                    $results[] = [
+                        'id' => $data['id'],
+                        'source' => 'YouTube',
+                        'thumbnail' => "https://i.ytimg.com/vi/{$data['id']}/hqdefault.jpg",
+                        'title' => $data['title'],
+                        'duration' => $data['duration'] ?? 0,
+                        'downloadUrl' => "https://www.youtube.com/watch?v={$data['id']}",
+                        'author' => $data['uploader'] ?? 'Unknown'
+                    ];
+                }
+            }
+            if (!empty($results)) $ytDlpSuccess = true;
         }
     }
+
+    // 2. Fallback: Public Invidious API (If yt-dlp fails due to Python version or missing binary)
+    // This allows the search feature to work on shared hosting or restricted containers.
+    if (!$ytDlpSuccess && !empty($config['enableYoutube'])) {
+        // Rotation of public instances to ensure reliability
+        $instances = [
+            'https://inv.tux.pizza', 
+            'https://vid.puffyan.us', 
+            'https://invidious.projectsegfau.lt',
+            'https://invidious.perennialte.ch'
+        ];
+        
+        // Shuffle to load balance
+        shuffle($instances);
+        
+        foreach ($instances as $instance) {
+            $url = "$instance/api/v1/search?q=" . urlencode($query) . "&type=video";
+            
+            // Short timeout to fail fast and try next
+            $ctx = stream_context_create(['http' => ['timeout' => 3]]);
+            $json = @file_get_contents($url, false, $ctx);
+            
+            if ($json) {
+                $data = json_decode($json, true);
+                if (is_array($data)) {
+                    foreach ($data as $item) {
+                        if (isset($item['type']) && $item['type'] !== 'video') continue;
+                        
+                        $results[] = [
+                            'id' => $item['videoId'],
+                            'source' => 'YouTube',
+                            'thumbnail' => "https://i.ytimg.com/vi/{$item['videoId']}/hqdefault.jpg",
+                            'title' => $item['title'],
+                            'duration' => $item['lengthSeconds'] ?? 0,
+                            'downloadUrl' => "https://www.youtube.com/watch?v={$item['videoId']}",
+                            'author' => $item['author'] ?? 'Unknown'
+                        ];
+                        if (count($results) >= 12) break;
+                    }
+                    if (!empty($results)) break; // Stop if we got results
+                }
+            }
+        }
+    }
+    
     return $results;
 }
 
