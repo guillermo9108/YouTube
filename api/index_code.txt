@@ -1,4 +1,3 @@
-
 <?php
 ob_start();
 ini_set('display_errors', 0);
@@ -159,9 +158,7 @@ try {
         case 'get_system_settings': admin_get_settings($pdo); break;
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
         case 'search_external': admin_search_external($pdo, $input); break;
-        case 'admin_get_real_stats': admin_get_real_stats($pdo); break;
-        
-        case 'admin_ai_organize': admin_ai_organize($pdo, $input); break; // NEW
+        case 'admin_get_real_stats': admin_get_real_stats($pdo); break; // ADDED THIS
 
         case 'get_marketplace_items': market_get_items($pdo); break;
         case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;

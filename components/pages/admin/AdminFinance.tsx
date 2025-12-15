@@ -1,16 +1,15 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
-import { BalanceRequest, VipRequest, User } from '../../../types';
+import { BalanceRequest, VipRequest } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Check, X, Clock, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon, Wallet } from 'lucide-react';
+import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
     
-    // Explicitly type state to match API response
     const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({
         balance: [], 
         vip: []
@@ -18,7 +17,7 @@ export default function AdminFinance() {
     
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
     const [systemRevenue, setSystemRevenue] = useState(0);
-    const [activeVips, setActiveVips] = useState<Partial<User>[]>([]);
+    const [activeVips, setActiveVips] = useState<any[]>([]);
     
     // Countdown refresh trigger
     const [now, setNow] = useState(Date.now());
@@ -30,25 +29,21 @@ export default function AdminFinance() {
 
     const loadData = () => {
         db.getBalanceRequests()
-            .then((data: {balance: BalanceRequest[], vip: VipRequest[], activeVip?: Partial<User>[]}) => {
+            .then((data: any) => {
                 if (data && typeof data === 'object') {
                     setRequests({
                         balance: Array.isArray(data.balance) ? data.balance : [],
                         vip: Array.isArray(data.vip) ? data.vip : []
                     });
-                    if (data.activeVip && Array.isArray(data.activeVip)) {
-                        setActiveVips(data.activeVip);
-                    }
+                    if (data.activeVip) setActiveVips(data.activeVip);
                 }
             })
             .catch(e => console.error("Failed to load requests", e));
             
         db.getGlobalTransactions()
             .then((data: any) => {
-                if (data) {
-                    if (Array.isArray(data.history)) setGlobalTransactions(data.history);
-                    if (typeof data.systemRevenue === 'number') setSystemRevenue(data.systemRevenue);
-                }
+                if (data.history) setGlobalTransactions(data.history);
+                if (data.systemRevenue !== undefined) setSystemRevenue(data.systemRevenue);
             })
             .catch(e => console.error("Failed to load transactions", e));
     };
@@ -79,8 +74,7 @@ export default function AdminFinance() {
         }
     };
 
-    const getRemainingTime = (expiry?: number) => {
-        if (!expiry) return "N/A";
+    const getRemainingTime = (expiry: number) => {
         const diff = expiry * 1000 - now;
         if (diff <= 0) return "Expirado";
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -93,12 +87,13 @@ export default function AdminFinance() {
         const vip = requests.vip || [];
         
         const pendingCount = bal.length + vip.length;
-        return { pendingCount };
+        const totalPendingAmount = bal.reduce((acc, r) => acc + Number(r.amount), 0);
+        return { pendingCount, totalPendingAmount };
     }, [requests]);
 
     return (
         <div className="space-y-6 animate-in fade-in pb-20">
-            {/* KPI Cards */}
+            {/* KPI Cards - REVENUE SEPARATED */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
                     <div>
@@ -143,7 +138,7 @@ export default function AdminFinance() {
                         {activeVips.map(u => (
                             <div key={u.id} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-slate-800 overflow-hidden shrink-0">
-                                    {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><UserIcon size={20}/></div>}
+                                    {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><User size={20}/></div>}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="font-bold text-white text-sm truncate">{u.username}</div>
@@ -174,7 +169,6 @@ export default function AdminFinance() {
                             </thead>
                             <tbody className="divide-y divide-slate-800">
                                 {requests.vip.map(req => {
-                                    // Safe parsing for Plan Snapshot
                                     const rawSnapshot = req.planSnapshot as any;
                                     let plan: any = {};
                                     try {

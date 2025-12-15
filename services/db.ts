@@ -10,42 +10,11 @@ import {
 export class DBService {
     private baseUrl = 'api/index.php';
     private demoMode = false;
-    
-    private dbName = 'sp_offline_db';
-    private dbVersion = 1;
-    private idb: IDBDatabase | null = null;
 
     constructor() {
         if (localStorage.getItem('sp_demo_mode') === 'true') {
             this.demoMode = true;
         }
-        this.initIDB();
-    }
-
-    private initIDB(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.dbVersion);
-            
-            request.onerror = () => console.error("IDB Error");
-            
-            request.onupgradeneeded = (event: any) => {
-                const db = event.target.result;
-                if (!db.objectStoreNames.contains('videos')) {
-                    db.createObjectStore('videos', { keyPath: 'id' });
-                }
-                if (!db.objectStoreNames.contains('history')) {
-                    db.createObjectStore('history', { keyPath: 'id' }); 
-                }
-                if (!db.objectStoreNames.contains('downloads')) {
-                    db.createObjectStore('downloads', { keyPath: 'id' });
-                }
-            };
-
-            request.onsuccess = (event: any) => {
-                this.idb = event.target.result;
-                resolve();
-            };
-        });
     }
 
     enableDemoMode() {
@@ -58,143 +27,27 @@ export class DBService {
         const headers: any = options?.headers || {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
-        try {
-            const response = await fetch(`${this.baseUrl}?${query}`, {
-                ...options,
-                headers: { ...headers }
-            });
-
-            if (!response.ok) throw new Error(`Network response was not ok: ${response.statusText}`);
-            
-            const text = await response.text();
-            try {
-                const json = JSON.parse(text);
-                if (json.success === false) throw new Error(json.error || json.message || "API Error");
-                return json.data as T;
-            } catch (e: any) {
-                throw new Error(e.message || "Invalid JSON response");
+        const response = await fetch(`${this.baseUrl}?${query}`, {
+            ...options,
+            headers: {
+                ...headers
             }
-        } catch (error) {
-            if (!options || options.method === 'GET' || !options.method) {
-                if (query.includes('action=get_videos')) {
-                    return this.getOfflineVideos() as any;
-                }
-                if (query.includes('action=get_video')) {
-                    const idMatch = query.match(/id=([^&]+)/);
-                    if (idMatch && idMatch[1]) {
-                        const vid = await this.getOfflineVideo(idMatch[1]);
-                        if (vid) return vid as any;
-                    }
-                }
-            }
-            throw error;
-        }
-    }
-
-    private async putIDB(storeName: string, data: any) {
-        if (!this.idb) await this.initIDB();
-        const tx = this.idb!.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).put(data);
-    }
-
-    private async getIDB(storeName: string, key: string): Promise<any> {
-        if (!this.idb) await this.initIDB();
-        return new Promise((resolve) => {
-            const tx = this.idb!.transaction(storeName, 'readonly');
-            const req = tx.objectStore(storeName).get(key);
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => resolve(null);
         });
-    }
 
-    private async getAllIDB(storeName: string): Promise<any[]> {
-        if (!this.idb) await this.initIDB();
-        return new Promise((resolve) => {
-            const tx = this.idb!.transaction(storeName, 'readonly');
-            const req = tx.objectStore(storeName).getAll();
-            req.onsuccess = () => resolve(req.result || []);
-            req.onerror = () => resolve([]);
-        });
-    }
-
-    async getOfflineVideos(): Promise<Video[]> {
-        return this.getAllIDB('videos');
-    }
-
-    async getOfflineVideo(id: string): Promise<Video | null> {
-        return this.getIDB('videos', id);
-    }
-
-    async getAllVideos(): Promise<Video[]> { 
-        const videos = await this.request<Video[]>(`action=get_videos`); 
+        if (!response.ok) throw new Error(`Network response was not ok: ${response.statusText}`);
         
-        if (videos && videos.length > 0) {
-            const tx = this.idb?.transaction('videos', 'readwrite');
-            if (tx) {
-                const store = tx.objectStore('videos');
-                videos.forEach(v => store.put(v));
-            }
-        }
-        return videos;
-    }
-
-    async getVideo(id: string): Promise<Video | null> { 
-        const video = await this.request<Video>(`action=get_video&id=${id}`); 
-        if (video) this.putIDB('videos', video);
-        return video;
-    }
-
-    async downloadVideoForOffline(video: Video): Promise<void> {
-        if (!('serviceWorker' in navigator)) throw new Error("Service Worker not supported");
-        
-        const registration = await navigator.serviceWorker.ready;
-        if (!(registration as any).backgroundFetch) throw new Error("Background Fetch not supported");
-
-        let downloadUrl = video.videoUrl;
-        const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
-        if (isLocal && !downloadUrl.includes('action=stream')) {
-            downloadUrl = `api/index.php?action=stream&id=${video.id}`;
-        }
-
+        const text = await response.text();
         try {
-            const fetchId = `dl-${video.id}-${Date.now()}`;
-            const bgFetch = await (registration as any).backgroundFetch.fetch(fetchId, [downloadUrl], {
-                title: `Descargando: ${video.title}`,
-                icons: [{
-                    src: video.thumbnailUrl || '/pwa-192x192.png',
-                    sizes: '192x192',
-                    type: 'image/png'
-                }],
-                downloadTotal: 0 
-            });
-
-            await this.putIDB('downloads', { id: video.id, status: 'downloading', fetchId });
-
-            bgFetch.addEventListener('progress', (e: any) => {
-            });
-
+            const json = JSON.parse(text);
+            if (json.success === false) throw new Error(json.error || json.message || "API Error");
+            return json.data as T;
         } catch (e: any) {
-            console.error("BG Fetch Error", e);
-            throw new Error("No se pudo iniciar la descarga.");
+            console.error("API Response Parse Error:", text);
+            throw new Error(e.message || "Invalid JSON response");
         }
     }
 
-    async checkDownloadStatus(videoId: string): Promise<boolean> {
-        if ('caches' in window) {
-            const cache = await caches.open('streampay-videos-v1');
-            const video = await this.getOfflineVideo(videoId);
-            if (!video) return false;
-
-            let url = video.videoUrl;
-            if ((video.isLocal || (video as any).isLocal === 1) && !url.includes('action=stream')) {
-                url = `api/index.php?action=stream&id=${videoId}`;
-            }
-            
-            const match = await cache.match(url);
-            return !!match;
-        }
-        return false;
-    }
+    // --- Core Methods ---
 
     async getUnprocessedVideos(limit: number = 0, mode: 'normal' | 'random' = 'normal'): Promise<Video[]> {
         return this.request<Video[]>(`action=get_unprocessed_videos&limit=${limit}&mode=${mode}`);
@@ -212,7 +65,7 @@ export class DBService {
 
          const res = await fetch(`${this.baseUrl}?action=update_video_metadata`, { 
              method: 'POST', 
-             body: formData, 
+             body: formData,
              headers
          });
          
@@ -221,6 +74,8 @@ export class DBService {
          if (!json.success) throw new Error(json.message || "Metadata update failed");
     }
 
+    // --- Auth & User ---
+    
     async login(u: string, p: string): Promise<User> { 
         return this.request<User>(`action=login`, { method: 'POST', body: JSON.stringify({username: u, password: p}) }); 
     }
@@ -271,6 +126,16 @@ export class DBService {
         return this.request<string[]>(`action=get_subscriptions&userId=${userId}`);
     }
     
+    // --- Videos ---
+
+    async getAllVideos(): Promise<Video[]> { 
+        return this.request<Video[]>(`action=get_videos`); 
+    }
+
+    async getVideo(id: string): Promise<Video | null> { 
+        return this.request<Video>(`action=get_video&id=${id}`); 
+    }
+
     async getRelatedVideos(id: string): Promise<Video[]> { 
         return this.request<Video[]>(`action=get_related_videos&id=${id}`); 
     }
@@ -283,6 +148,8 @@ export class DBService {
         return this.request(`action=delete_video`, { method: 'POST', body: JSON.stringify({ id, userId: uid }) }); 
     }
     
+    // --- Interactions ---
+
     async getComments(vid: string): Promise<Comment[]> { 
         return this.request<Comment[]>(`action=get_comments&videoId=${vid}`); 
     }
@@ -303,6 +170,8 @@ export class DBService {
         this.request(`action=mark_watched`, { method: 'POST', body: JSON.stringify({userId: uid, videoId: vid})}); 
     }
 
+    // --- Subscriptions ---
+
     async checkSubscription(subscriberId: string, creatorId: string): Promise<boolean> {
         const res = await this.request<{isSubscribed: boolean}>(`action=check_subscription&subscriberId=${subscriberId}&creatorId=${creatorId}`);
         return res.isSubscribed;
@@ -312,6 +181,8 @@ export class DBService {
         return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe`, { method: 'POST', body: JSON.stringify({subscriberId, creatorId})});
     }
     
+    // --- Commerce & VIP ---
+
     async hasPurchased(uid: string, vid: string): Promise<boolean> { 
         const res = await this.request<{hasPurchased: boolean}>(`action=has_purchased&userId=${uid}&videoId=${vid}`); 
         return res.hasPurchased;
@@ -329,6 +200,8 @@ export class DBService {
         return this.request(`action=request_vip`, { method: 'POST', body: JSON.stringify({userId, plan, paymentRef})});
     }
 
+    // --- Payments ---
+
     async createPaymentLink(userId: string, plan: VipPlan): Promise<string> {
         const res = await this.request<{paymentUrl: string}>(`action=create_payment_link`, { method: 'POST', body: JSON.stringify({userId, plan})});
         return res.paymentUrl;
@@ -338,6 +211,8 @@ export class DBService {
         return this.request(`action=verify_payment`, { method: 'POST', body: JSON.stringify({userId, reference})});
     }
     
+    // --- Upload ---
+
     async uploadVideo(title: string, desc: string, price: number, cat: string, dur: number, user: User, file: File, thumb: File|null, onProgress: (p:number, l:number, t:number)=>void): Promise<void> {
         return new Promise((resolve, reject) => {
             const formData = new FormData();
@@ -346,7 +221,7 @@ export class DBService {
             formData.append('price', price.toString());
             formData.append('category', cat);
             formData.append('duration', dur.toString());
-            formData.append('creatorId', user.id); 
+            formData.append('creatorId', user.id); // Backend expects creatorId
             formData.append('video', file);
             if(thumb) formData.append('thumbnail', thumb);
 
@@ -373,6 +248,8 @@ export class DBService {
         });
     }
 
+    // --- System ---
+
     async getSystemSettings(): Promise<SystemSettings> { 
         return this.request<SystemSettings>(`action=get_system_settings`); 
     }
@@ -381,6 +258,8 @@ export class DBService {
         return this.request(`action=update_system_settings`, { method: 'POST', body: JSON.stringify({settings: s})}); 
     }
     
+    // --- Admin ---
+
     async getAllUsers(): Promise<User[]> { 
         return this.request<User[]>(`action=get_all_users`); 
     }
@@ -389,6 +268,8 @@ export class DBService {
         return this.request(`action=admin_add_balance`, { method: 'POST', body: JSON.stringify({adminId, targetUserId: targetId, amount})});
     }
     
+    // --- Notifications ---
+
     async getNotifications(uid: string): Promise<Notification[]> { 
         return this.request<Notification[]>(`action=get_notifications&userId=${uid}`); 
     }
@@ -396,6 +277,8 @@ export class DBService {
     async markNotificationRead(id: string): Promise<void> { 
         return this.request(`action=mark_notification_read`, { method: 'POST', body: JSON.stringify({notifId: id}) }); 
     }
+
+    // --- Requests ---
 
     async searchExternal(q: string, src: string): Promise<VideoResult[]> { 
         return this.request<VideoResult[]>(`action=search_external`, { method: 'POST', body: JSON.stringify({query: q, source: src}) }); 
@@ -417,9 +300,12 @@ export class DBService {
         return this.request(`action=admin_update_request_status`, { method: 'POST', body: JSON.stringify({id, status})}); 
     }
 
+    // --- Misc ---
+
     invalidateCache(key: string) { localStorage.removeItem('sp_cache_' + key); }
     setHomeDirty() { this.invalidateCache('get_videos'); }
     
+    // Improved Check Installation handling Offline mode
     async checkInstallation(): Promise<{status: 'installed' | 'not_installed' | 'error'}> { 
         try { 
             const res = await this.request<any>('action=check'); 
@@ -430,6 +316,8 @@ export class DBService {
     }
     
     needsSetup(): boolean { return false; } 
+
+    // --- Admin Library ---
 
     async scanLocalLibrary(path: string): Promise<any> { 
         return this.request(`action=scan_local_library`, { method: 'POST', body: JSON.stringify({path}) }); 
@@ -447,9 +335,7 @@ export class DBService {
         return this.request(`action=rectify_titles`, { method: 'POST', body: JSON.stringify({lastId}) }); 
     }
 
-    async organizeWithAi(): Promise<{processed: number, details: any, message?: string}> {
-        return this.request(`action=admin_ai_organize`, { method: 'POST' });
-    }
+    // --- Profile ---
 
     async updateUserProfile(uid: string, data: Partial<User>): Promise<void> { 
         return this.request(`action=update_user`, { method: 'POST', body: JSON.stringify({userId: uid, updates: data})}); 
@@ -486,6 +372,8 @@ export class DBService {
         return this.request(`action=admin_handle_vip_request`, { method: 'POST', body: JSON.stringify({adminId, requestId: reqId, action: status})});
     }
 
+    // --- FTP ---
+
     async listFtpFiles(path: string): Promise<FtpFile[]> { 
         return this.request<FtpFile[]>(`action=ftp_list`, { method: 'POST', body: JSON.stringify({path}) }); 
     }
@@ -497,6 +385,8 @@ export class DBService {
     async scanFtpRecursive(path: string): Promise<any> { 
         return this.request(`action=scan_ftp_recursive`, { method: 'POST', body: JSON.stringify({path}) }); 
     }
+
+    // --- Marketplace ---
 
     async getMarketplaceItems(): Promise<MarketplaceItem[]> { 
         return this.request<MarketplaceItem[]>(`action=get_marketplace_items`); 
@@ -547,6 +437,8 @@ export class DBService {
         return this.request(`action=admin_delete_listing`, { method: 'POST', body: JSON.stringify({id}) }); 
     }
 
+    // --- Admin Tools ---
+
     async adminCleanupSystemFiles(): Promise<any> { 
         return this.request(`action=admin_cleanup_system_files`); 
     }
@@ -574,6 +466,8 @@ export class DBService {
         return this.request<any>(`action=admin_get_real_stats`);
     }
 
+    // --- Setup ---
+
     async verifyDbConnection(config: any): Promise<boolean> { 
         try { 
             await this.request(`action=verify_db`, { method: 'POST', body: JSON.stringify(config)}); 
@@ -584,6 +478,8 @@ export class DBService {
     async initializeSystem(config: any, admin: any): Promise<void> {
         return this.request(`action=install`, { method: 'POST', body: JSON.stringify({dbConfig: config, adminUser: admin})});
     }
+
+    // --- Server ---
 
     async serverImportVideo(url: string): Promise<void> { 
         return this.request(`action=server_import_video`, { method: 'POST', body: JSON.stringify({url}) }); 
