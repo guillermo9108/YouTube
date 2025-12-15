@@ -38,7 +38,13 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                 setStatus('Procesando...');
             } catch (e) {
                 console.warn("Autoplay blocked", e);
-                setStatus('Esperando click manual...');
+                // Try again muted if failed
+                try {
+                    vid.muted = true;
+                    await vid.play();
+                } catch(e2) {
+                    setStatus('Esperando click manual...');
+                }
             }
         };
         
@@ -50,6 +56,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const vid = e.currentTarget;
         if (!vid || processedRef.current) return;
 
+        // Ensure we have loaded some video data
         if (vid.currentTime > 1.5 && vid.videoWidth > 0) {
             vid.pause();
             processedRef.current = true;
@@ -91,6 +98,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         setTimeout(() => {
             if (!processedRef.current) {
                 processedRef.current = true;
+                // If error, return 0 duration and null thumb, let Step 3 or logic handle it
                 onComplete(0, null);
             }
         }, 1500); 

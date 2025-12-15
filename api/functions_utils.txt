@@ -206,7 +206,8 @@ function streamVideo($filePath, $pdo) {
     if (function_exists('ini_set')) {
         ini_set('zlib.output_compression', 'Off');
     }
-    // CRITICAL: Clean all output buffers. Synology/Apache sometimes nest buffers.
+    // CRITICAL: Clean aggressively. 
+    // This removes warnings/notices/whitespaces that corrupt the video stream.
     while (ob_get_level()) ob_end_clean();
     
     ini_set('display_errors', 0);
@@ -220,24 +221,26 @@ function streamVideo($filePath, $pdo) {
     
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(0); }
 
-    // Double check path in DB to ensure we have the correct path on disk
-    $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
-    // Check both exact match and prefixed match
-    $stmt->execute([$filePath, "api/" . $filePath]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    // If not found by passed path, try looking up by ID if passed in GET
-    if (!$row && isset($_GET['id'])) {
-        $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ?");
-        $stmt->execute([$_GET['id']]);
+    // Try finding video via ID if path is just an ID (safeguard)
+    if (strpos($filePath, '/') === false && strlen($filePath) > 10) {
+         $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ? LIMIT 1");
+         $stmt->execute([$filePath]);
+         $row = $stmt->fetch(PDO::FETCH_ASSOC);
+         if ($row) {
+             $filePath = $row['videoUrl'];
+             $isLocal = $row['isLocal'];
+         }
+    } else {
+        // Double check path in DB to ensure we have the correct path on disk
+        $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
+        // Check both exact match and prefixed match
+        $stmt->execute([$filePath, "api/" . $filePath]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row) $filePath = $row['videoUrl'];
+        $isLocal = $row ? $row['isLocal'] : 0;
     }
 
-    $isLocal = $row ? $row['isLocal'] : 0;
-
     if ($isLocal == 2) {
-        // FTP LOGIC (Unchanged)
+        // FTP LOGIC
         $sStmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
         $json = $sStmt->fetchColumn();
         $s = json_decode($json, true);
@@ -295,9 +298,9 @@ function streamVideo($filePath, $pdo) {
         // Mime Type Detection
         $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
         $mimeTypes = [
-            'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/x-matroska', 
+            'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/webm', // Chrome plays MKV as WebM often
             'mov' => 'video/quicktime', 'avi' => 'video/x-msvideo', 'mp3' => 'audio/mpeg',
-            'm4v' => 'video/mp4', 'mpg' => 'video/mpeg', 'mpeg' => 'video/mpeg'
+            'm4v' => 'video/mp4', 'mpg' => 'video/mpeg', 'mpeg' => 'video/mpeg', 'ts' => 'video/mp2t'
         ];
         $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'video/mp4';
         

@@ -44,9 +44,10 @@ export default function GridProcessor() {
                 setStatus('CAPTURING');
             } catch (e) {
                 console.warn("Autoplay blocked, waiting for interaction or retry", e);
-                // Even if blocked, sometimes loading metadata is enough for a black frame, 
-                // but we really want playback for a valid thumb.
-                // We'll try to capture anyway after a timeout if play fails.
+                try {
+                    vid.muted = true; 
+                    await vid.play();
+                } catch(e2) {}
             }
         };
         startPlay();

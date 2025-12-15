@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
-import { BalanceRequest, VipRequest } from '../../../types';
+import { BalanceRequest, VipRequest, User } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User } from 'lucide-react';
+import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
@@ -17,7 +17,7 @@ export default function AdminFinance() {
     
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
     const [systemRevenue, setSystemRevenue] = useState(0);
-    const [activeVips, setActiveVips] = useState<any[]>([]);
+    const [activeVips, setActiveVips] = useState<Partial<User>[]>([]);
     
     // Countdown refresh trigger
     const [now, setNow] = useState(Date.now());
@@ -35,15 +35,19 @@ export default function AdminFinance() {
                         balance: Array.isArray(data.balance) ? data.balance : [],
                         vip: Array.isArray(data.vip) ? data.vip : []
                     });
-                    if (data.activeVip) setActiveVips(data.activeVip);
+                    if (Array.isArray(data.activeVip)) {
+                        setActiveVips(data.activeVip);
+                    }
                 }
             })
             .catch(e => console.error("Failed to load requests", e));
             
         db.getGlobalTransactions()
             .then((data: any) => {
-                if (data.history) setGlobalTransactions(data.history);
-                if (data.systemRevenue !== undefined) setSystemRevenue(data.systemRevenue);
+                if (data) {
+                    if (Array.isArray(data.history)) setGlobalTransactions(data.history);
+                    if (typeof data.systemRevenue === 'number') setSystemRevenue(data.systemRevenue);
+                }
             })
             .catch(e => console.error("Failed to load transactions", e));
     };
@@ -74,7 +78,8 @@ export default function AdminFinance() {
         }
     };
 
-    const getRemainingTime = (expiry: number) => {
+    const getRemainingTime = (expiry?: number) => {
+        if (!expiry) return "N/A";
         const diff = expiry * 1000 - now;
         if (diff <= 0) return "Expirado";
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -138,7 +143,7 @@ export default function AdminFinance() {
                         {activeVips.map(u => (
                             <div key={u.id} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-slate-800 overflow-hidden shrink-0">
-                                    {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><User size={20}/></div>}
+                                    {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><UserIcon size={20}/></div>}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="font-bold text-white text-sm truncate">{u.username}</div>

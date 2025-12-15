@@ -13,24 +13,28 @@ import AdminAnalytics from './admin/AdminAnalytics';
 import AdminFtp from './admin/AdminFtp';
 import AdminRequests from './admin/AdminRequests';
 
+type TabID = 'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'FTP' | 'MAINTENANCE' | 'ANALYTICS' | 'REQUESTS';
+
 export default function Admin() {
-  const [activeTab, setActiveTab] = useState<'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'FTP' | 'MAINTENANCE' | 'ANALYTICS' | 'REQUESTS'>('USERS');
+  const [activeTab, setActiveTab] = useState<TabID>('USERS');
+
+  const tabs: { id: TabID; icon: any; label: string }[] = [
+       { id: 'USERS', icon: UserIcon, label: 'Users' },
+       { id: 'FINANCE', icon: Wallet, label: 'Finance' },
+       { id: 'MARKET', icon: Store, label: 'Market' },
+       { id: 'REQUESTS', icon: DownloadCloud, label: 'Requests' },
+       { id: 'LIBRARY', icon: Database, label: 'Library' },
+       { id: 'FTP', icon: Network, label: 'FTP' },
+       { id: 'ANALYTICS', icon: TrendingUp, label: 'Stats' },
+       { id: 'CONFIG', icon: Settings, label: 'Config' },
+       { id: 'MAINTENANCE', icon: Wrench, label: 'Tools' },
+  ];
 
   return (
     <div className="space-y-6 pb-24 px-2 md:px-0">
       <div className="flex gap-2 overflow-x-auto bg-slate-900 p-2 rounded-xl scrollbar-hide">
-           {[
-               { id: 'USERS', icon: UserIcon, label: 'Users' },
-               { id: 'FINANCE', icon: Wallet, label: 'Finance' },
-               { id: 'MARKET', icon: Store, label: 'Market' },
-               { id: 'REQUESTS', icon: DownloadCloud, label: 'Requests' },
-               { id: 'LIBRARY', icon: Database, label: 'Library' },
-               { id: 'FTP', icon: Network, label: 'FTP' },
-               { id: 'ANALYTICS', icon: TrendingUp, label: 'Stats' },
-               { id: 'CONFIG', icon: Settings, label: 'Config' },
-               { id: 'MAINTENANCE', icon: Wrench, label: 'Tools' },
-           ].map(t => (
-               <button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 transition-colors ${activeTab === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+           {tabs.map(t => (
+               <button key={t.id} onClick={() => setActiveTab(t.id)} className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 transition-colors ${activeTab === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
                    <t.icon size={16}/> {t.label}
                </button>
            ))}
