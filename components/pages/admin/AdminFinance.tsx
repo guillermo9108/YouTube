@@ -4,12 +4,13 @@ import { db } from '../../../services/db';
 import { BalanceRequest, VipRequest, User } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Check, X, Clock, DollarSign, Wallet, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon } from 'lucide-react';
+import { Check, X, Clock, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon, Wallet } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
     
+    // Explicitly type state to match API response
     const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({
         balance: [], 
         vip: []
@@ -29,13 +30,13 @@ export default function AdminFinance() {
 
     const loadData = () => {
         db.getBalanceRequests()
-            .then((data: any) => {
+            .then((data: {balance: BalanceRequest[], vip: VipRequest[], activeVip?: Partial<User>[]}) => {
                 if (data && typeof data === 'object') {
                     setRequests({
                         balance: Array.isArray(data.balance) ? data.balance : [],
                         vip: Array.isArray(data.vip) ? data.vip : []
                     });
-                    if (Array.isArray(data.activeVip)) {
+                    if (data.activeVip && Array.isArray(data.activeVip)) {
                         setActiveVips(data.activeVip);
                     }
                 }
@@ -92,13 +93,12 @@ export default function AdminFinance() {
         const vip = requests.vip || [];
         
         const pendingCount = bal.length + vip.length;
-        const totalPendingAmount = bal.reduce((acc, r) => acc + Number(r.amount), 0);
-        return { pendingCount, totalPendingAmount };
+        return { pendingCount };
     }, [requests]);
 
     return (
         <div className="space-y-6 animate-in fade-in pb-20">
-            {/* KPI Cards - REVENUE SEPARATED */}
+            {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
                     <div>
@@ -174,6 +174,7 @@ export default function AdminFinance() {
                             </thead>
                             <tbody className="divide-y divide-slate-800">
                                 {requests.vip.map(req => {
+                                    // Safe parsing for Plan Snapshot
                                     const rawSnapshot = req.planSnapshot as any;
                                     let plan: any = {};
                                     try {

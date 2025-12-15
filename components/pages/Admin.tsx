@@ -13,6 +13,7 @@ import AdminAnalytics from './admin/AdminAnalytics';
 import AdminFtp from './admin/AdminFtp';
 import AdminRequests from './admin/AdminRequests';
 
+// Define explicit type for Tabs to avoid "string is not assignable to type..." errors
 type TabID = 'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'FTP' | 'MAINTENANCE' | 'ANALYTICS' | 'REQUESTS';
 
 export default function Admin() {
@@ -34,7 +35,11 @@ export default function Admin() {
     <div className="space-y-6 pb-24 px-2 md:px-0">
       <div className="flex gap-2 overflow-x-auto bg-slate-900 p-2 rounded-xl scrollbar-hide">
            {tabs.map(t => (
-               <button key={t.id} onClick={() => setActiveTab(t.id)} className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 transition-colors ${activeTab === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+               <button 
+                  key={t.id} 
+                  onClick={() => setActiveTab(t.id)} 
+                  className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 transition-colors ${activeTab === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                >
                    <t.icon size={16}/> {t.label}
                </button>
            ))}
