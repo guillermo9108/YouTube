@@ -1,0 +1,183 @@
+<?php
+function auth_login($pdo, $input) {
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
+    $stmt->execute([$input['username']]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($user && password_verify($input['password'], $user['password_hash'])) {
+        $token = bin2hex(random_bytes(32));
+        $pdo->prepare("UPDATE users SET currentSessionId = ?, lastActive = ? WHERE id = ?")->execute([$token, time(), $user['id']]);
+        
+        $user['sessionToken'] = $token;
+        unset($user['password_hash']);
+        
+        // Parse JSON fields
+        $user['watchLater'] = json_decode($user['watchLater'] ?? '[]', true);
+        $user['defaultPrices'] = json_decode($user['defaultPrices'] ?? '{}', true);
+        $user['shippingDetails'] = json_decode($user['shippingDetails'] ?? '{}', true);
+        
+        // Fix avatar URL
+        $user['avatarUrl'] = fix_url($user['avatarUrl']);
+
+        respond(true, $user);
+    }
+    respond(false, null, 'Invalid credentials');
+}
+
+function auth_logout($pdo, $input) {
+    if (isset($input['userId'])) {
+        $pdo->prepare("UPDATE users SET currentSessionId = NULL WHERE id = ?")->execute([$input['userId']]);
+    }
+    respond(true);
+}
+
+function auth_heartbeat($pdo, $input) {
+    $stmt = $pdo->prepare("SELECT currentSessionId FROM users WHERE id = ?");
+    $stmt->execute([$input['userId']]);
+    $sid = $stmt->fetchColumn();
+    
+    if ($sid === $input['token']) {
+        $pdo->prepare("UPDATE users SET lastActive = ? WHERE id = ?")->execute([time(), $input['userId']]);
+        respond(true);
+    } else {
+        http_response_code(401);
+        respond(false, null, 'Session invalid');
+    }
+}
+
+function auth_register($pdo, $input) {
+    $username = $_POST['username'] ?? '';
+    $password = $_POST['password'] ?? '';
+    
+    if (empty($username) || empty($password)) respond(false, null, 'Missing fields');
+
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
+    $stmt->execute([$username]);
+    if ($stmt->fetchColumn() > 0) respond(false, null, 'Username taken');
+
+    $id = 'u_' . uniqid();
+    $hash = password_hash($password, PASSWORD_DEFAULT);
+    
+    // Handle Avatar
+    $avatarUrl = null;
+    if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
+        $ext = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION));
+        if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
+            $name = "av_{$id}.{$ext}";
+            move_uploaded_file($_FILES['avatar']['tmp_name'], AVATAR_DIR . $name);
+            $avatarUrl = AVATAR_DIR . $name;
+        }
+    }
+
+    $token = bin2hex(random_bytes(32));
+    $timestamp = time();
+    $stmt = $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, avatarUrl, currentSessionId, lastActive, watchLater) VALUES (?, ?, ?, 'USER', 0.00, ?, ?, ?, '[]')");
+    $stmt->execute([$id, $username, $hash, $avatarUrl, $token, $timestamp]);
+
+    $user = [
+        'id' => $id, 
+        'username' => $username, 
+        'role' => 'USER', 
+        'balance' => 0.00, 
+        'avatarUrl' => fix_url($avatarUrl), 
+        'sessionToken' => $token,
+        'lastActive' => $timestamp,
+        'watchLater' => []
+    ];
+    respond(true, $user);
+}
+
+function auth_get_user($pdo, $id) {
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+    $stmt->execute([$id]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($user) {
+        unset($user['password_hash'], $user['currentSessionId']);
+        $user['watchLater'] = json_decode($user['watchLater'] ?? '[]', true);
+        $user['defaultPrices'] = json_decode($user['defaultPrices'] ?? '{}', true);
+        $user['shippingDetails'] = json_decode($user['shippingDetails'] ?? '{}', true);
+        
+        $user['avatarUrl'] = fix_url($user['avatarUrl']);
+        
+        respond(true, $user);
+    }
+    respond(false, null, 'User not found');
+}
+
+function auth_update_user($pdo, $input) {
+    $uid = $input['userId'];
+    $updates = $input['updates'];
+    
+    $fields = [];
+    $params = [];
+    
+    if (isset($updates['autoPurchaseLimit'])) {
+        $fields[] = 'autoPurchaseLimit = ?';
+        $params[] = $updates['autoPurchaseLimit'];
+    }
+    
+    if (isset($updates['defaultPrices'])) {
+        $fields[] = 'defaultPrices = ?';
+        $params[] = json_encode($updates['defaultPrices']);
+    }
+
+    if (isset($updates['shippingDetails'])) {
+        $fields[] = 'shippingDetails = ?';
+        $params[] = json_encode($updates['shippingDetails']);
+    }
+    
+    if (empty($fields)) respond(true);
+    
+    $params[] = $uid;
+    $sql = "UPDATE users SET " . implode(', ', $fields) . " WHERE id = ?";
+    $pdo->prepare($sql)->execute($params);
+    
+    respond(true);
+}
+
+function auth_update_avatar($pdo, $input) {
+    $userId = $_POST['userId'];
+    if (!isset($_FILES['avatar']) || $_FILES['avatar']['error'] !== UPLOAD_ERR_OK) {
+        respond(false, null, "No file uploaded");
+    }
+
+    $ext = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION));
+    $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+    if (!in_array($ext, $allowed)) respond(false, null, "Invalid image format");
+
+    $fileName = "av_{$userId}_" . time() . ".{$ext}";
+    $target = AVATAR_DIR . $fileName;
+
+    if (move_uploaded_file($_FILES['avatar']['tmp_name'], $target)) {
+        $pdo->prepare("UPDATE users SET avatarUrl = ? WHERE id = ?")->execute([$target, $userId]);
+        respond(true, ['avatarUrl' => fix_url($target)]);
+    }
+    respond(false, null, "Upload failed");
+}
+
+function auth_change_password($pdo, $input) {
+    $uid = $input['userId'];
+    $old = $input['oldPass'];
+    $new = $input['newPass'];
+
+    $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE id = ?");
+    $stmt->execute([$uid]);
+    $hash = $stmt->fetchColumn();
+
+    if (password_verify($old, $hash)) {
+        $newHash = password_hash($new, PASSWORD_DEFAULT);
+        $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")->execute([$newHash, $uid]);
+        respond(true);
+    }
+    respond(false, null, "Incorrect old password");
+}
+
+function auth_get_all_users($pdo) {
+    $stmt = $pdo->query("SELECT id, username, role, balance, avatarUrl, lastActive FROM users ORDER BY lastActive DESC");
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($users as &$u) {
+        $u['avatarUrl'] = fix_url($u['avatarUrl']);
+    }
+    respond(true, $users);
+}
+?>
