@@ -4,15 +4,10 @@ export enum UserRole {
   ADMIN = 'ADMIN'
 }
 
+// Categorías limpias. El administrador agregará las suyas.
 export enum VideoCategory {
-  SHORTS = 'SHORTS',
-  MUSIC = 'MUSICA',
-  SHORT_FILM = 'CORTOMETRAJE',
-  SERIES = 'SERIES',
-  NOVELAS = 'NOVELAS',
-  MOVIE = 'PELICULA',
-  EDUCATION = 'EDUCACION',
-  OTHER = 'OTRO'
+  GENERAL = 'GENERAL',
+  OTHER = 'OTHER'
 }
 
 export interface VipPlan {
@@ -198,6 +193,7 @@ export interface SystemSettings {
   maxResolution: number;     
   pexelsKey: string;
   pixabayKey: string;
+  geminiKey: string; // NEW: Google AI
   ytDlpPath: string;    
   enableYoutube: boolean; 
   categoryPrices: Record<string, number>; 
@@ -212,6 +208,7 @@ export interface SystemSettings {
   tropipayClientId?: string;
   tropipayClientSecret?: string;
   currencyConversion?: number; // 1 USD/EUR = X Saldo
+  proxyUrl?: string; // NEW: For restricted regions
 }
 
 export interface OrganizeResult {

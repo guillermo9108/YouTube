@@ -1,10 +1,10 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
-import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle, ShoppingCart } from 'lucide-react';
+import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle, ShoppingCart, Download, WifiOff, SkipForward } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
@@ -16,12 +16,23 @@ export default function Watch() {
     
     const [video, setVideo] = useState<Video | null>(null);
     const [loading, setLoading] = useState(true);
+    const [checkingAccess, setCheckingAccess] = useState(true); 
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [comments, setComments] = useState<Comment[]>([]);
     
+    // Historial para evitar bucles
+    const [watchedHistory, setWatchedHistory] = useState<string[]>([]);
+    
+    // Refs para control de concurrencia
+    const isPurchasingRef = useRef(false);
+    
+    // Offline / Download State
+    const [isDownloaded, setIsDownloaded] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
+    
     // Related Videos State
-    const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
+    const [rawRelatedVideos, setRawRelatedVideos] = useState<Video[]>([]);
     const [loadingRelated, setLoadingRelated] = useState(false);
     
     // Comment Form
@@ -36,24 +47,31 @@ export default function Watch() {
     useEffect(() => {
         if (!id) return;
         setLoading(true);
+        setCheckingAccess(true); // Reset access check
         setVideo(null); // Reset to prevent stale state
         setIsUnlocked(false); // Reset lock state
-        setRelatedVideos([]); // Reset related
+        setRawRelatedVideos([]); // Reset related
         setLoadingRelated(true); // Start loading related
+        setIsDownloaded(false);
+        isPurchasingRef.current = false; // Reset lock
 
         const fetchMeta = async () => {
             try {
+                // Modified: Now gets from local IDB if offline
                 const v = await db.getVideo(id);
                 if (v) {
                     setVideo(v);
                     
+                    // Check download status
+                    db.checkDownloadStatus(v.id).then(setIsDownloaded);
+                    
                     // Load related
                     db.getRelatedVideos(v.id)
-                      .then((res: Video[]) => setRelatedVideos(res))
+                      .then((res: Video[]) => setRawRelatedVideos(res))
                       .catch(err => console.error("Related error", err))
                       .finally(() => setLoadingRelated(false));
 
-                    // Load comments
+                    // Load comments (Likely network only, but safe to fail)
                     db.getComments(v.id).then(setComments).catch(() => {});
                 } else {
                     toast.error("Video no encontrado");
@@ -68,49 +86,135 @@ export default function Watch() {
         fetchMeta();
     }, [id]);
 
-    // Check Permissions & User Interaction (Runs on ID or User ID Change)
+    // Check Permissions, User Interaction & History
     useEffect(() => {
         if (!id || !user || !video) return;
 
         const checkAccess = async () => {
-            // Permissions
-            if (user.role === 'ADMIN' || user.id === video.creatorId) {
-                setIsUnlocked(true);
-            } else {
-                try {
-                    // Check if already unlocked locally to prevent flicker
-                    if (!isUnlocked) {
-                        const purchased = await db.hasPurchased(user.id, video.id);
-                        if (purchased) setIsUnlocked(true);
-                    }
-                } catch (e) {}
-            }
+            setCheckingAccess(true);
+            try {
+                // 0. Load User History (Watched IDs) to prevent loops
+                const activity = await db.getUserActivity(user.id);
+                setWatchedHistory(activity.watched || []);
 
-            // Interactions
-            db.getInteraction(user.id, video.id).then(setInteraction).catch(() => {});
+                // 1. Permissions (Admin or Creator)
+                if (user.role === 'ADMIN' || user.id === video.creatorId) {
+                    setIsUnlocked(true);
+                } else {
+                    // 2. Check DB (Purchase or VIP)
+                    // Note: db.hasPurchased handles VIP check on backend
+                    const status = await db.hasPurchased(user.id, video.id);
+                    if (status) setIsUnlocked(true);
+                }
+
+                // 3. Interactions
+                const interact = await db.getInteraction(user.id, video.id);
+                setInteraction(interact);
+            } catch (e) {
+                console.error("Access Check Error", e);
+            } finally {
+                setCheckingAccess(false); // Signal that check is complete
+            }
         };
 
         checkAccess();
     }, [id, user?.id, video?.id]); 
 
-    const handlePurchase = async () => {
-        if (!user || !video) return;
+    // --- SORTING LOGIC: NEXT EPISODES & ALPHABETICAL ---
+    const sortedRelatedVideos = useMemo(() => {
+        if (!video || rawRelatedVideos.length === 0) return [];
+
+        // 1. Filter out already watched videos AND current video
+        let filtered = rawRelatedVideos.filter(v => 
+            v.id !== video.id && 
+            !watchedHistory.includes(v.id)
+        );
+
+        // 2. Natural Sort (Alphanumeric: "Ep 2" comes before "Ep 10")
+        filtered.sort((a, b) => 
+            a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' })
+        );
+
+        // 3. Re-order to put "Next Episodes" first
+        // We compare the current video title with the list to find the split point
+        // Everything alphabetically "after" current title goes to top.
+        // Everything "before" goes to bottom (wrapped around).
+        const currentTitle = video.title;
+        
+        const nextEpisodes: Video[] = [];
+        const prevEpisodes: Video[] = [];
+
+        filtered.forEach(v => {
+            // Using localeCompare to check order
+            // 1 means v.title comes AFTER currentTitle
+            if (v.title.localeCompare(currentTitle, undefined, { numeric: true, sensitivity: 'base' }) > 0) {
+                nextEpisodes.push(v);
+            } else {
+                prevEpisodes.push(v);
+            }
+        });
+
+        return [...nextEpisodes, ...prevEpisodes];
+
+    }, [rawRelatedVideos, watchedHistory, video]);
+
+
+    // AUTO-PURCHASE EFFECT
+    useEffect(() => {
+        // CRITICAL: Run only if metadata loaded AND access check finished AND still locked
+        if (user && video && !loading && !checkingAccess && !isUnlocked && !isPurchasingRef.current) {
+            const price = Number(video.price);
+            const limit = Number(user.autoPurchaseLimit || 0);
+            const balance = Number(user.balance);
+            
+            // Logic: Price > 0, Price <= Limit, User has balance
+            // AND IMPORTANT: Double check we aren't already unlocked to avoid race conditions
+            if (price > 0 && price <= limit && balance >= price) {
+                console.log("Auto-purchasing video:", video.title);
+                handlePurchase(true); // Skip confirmation
+            }
+        }
+    }, [user, video, isUnlocked, loading, checkingAccess]);
+
+    const handlePurchase = async (skipConfirm = false) => {
+        if (!user || !video || isPurchasingRef.current) return;
+        if (isUnlocked) return; // Safety check
+
         if (user.balance < video.price) {
-            // Show VIP Upsell instead of just error
             navigate('/vip');
             return;
         }
 
-        if(confirm(`¿Desbloquear video por ${video.price} Saldo?`)) {
+        if(skipConfirm || confirm(`¿Desbloquear video por ${video.price} Saldo?`)) {
+            isPurchasingRef.current = true;
             try {
                 await db.purchaseVideo(user.id, video.id);
                 // Optimistic Update
                 setIsUnlocked(true);
                 refreshUser(); // Update balance in background
-                toast.success("Video desbloqueado");
+                if (!skipConfirm) toast.success("Video desbloqueado");
+                else toast.info(`Auto-compra: -${video.price} Saldo`);
             } catch (e: any) {
                 toast.error("Error al comprar: " + e.message);
+                isPurchasingRef.current = false;
             }
+        }
+    };
+
+    const handleDownload = async () => {
+        if (!video) return;
+        if (!isUnlocked) { toast.error("Debes desbloquear el video primero."); return; }
+        
+        setIsDownloading(true);
+        try {
+            await db.downloadVideoForOffline(video);
+            toast.info("Descarga iniciada en segundo plano.");
+            // We assume success via Background API, checking status later
+            setTimeout(() => db.checkDownloadStatus(video.id).then(setIsDownloaded), 2000);
+        } catch (e: any) {
+            toast.error(e.message);
+        } finally {
+            setIsDownloading(false);
         }
     };
 
@@ -134,11 +238,51 @@ export default function Watch() {
 
     const getVideoSrc = (v: Video | null) => {
         if (!v) return '';
+        
+        // FIX: Force stream for local files
         const isLocal = Boolean(v.isLocal) || (v as any).isLocal === 1 || (v as any).isLocal === "1";
-        if (isLocal && v.videoUrl && !v.videoUrl.includes('action=stream')) {
+        
+        if (isLocal && !v.videoUrl.includes('action=stream')) {
             return `api/index.php?action=stream&id=${v.id}`;
         }
+        
         return v.videoUrl;
+    };
+
+    // --- CONTINUOUS PLAYBACK LOGIC (SMART QUEUE) ---
+    const handleVideoEnded = () => {
+        if (!user || !video) return;
+
+        // 1. Mark current as watched in DB
+        if (!interaction?.isWatched) {
+            db.markWatched(user.id, video.id).catch(() => {});
+            setInteraction(prev => prev ? {...prev, isWatched: true} : null);
+        }
+
+        // 2. Add current video to local exclusion list immediately
+        const updatedHistory = [...watchedHistory, video.id];
+        setWatchedHistory(updatedHistory);
+
+        // 3. Find Next Video from the ALREADY SORTED list
+        // Since sortedRelatedVideos already filters out 'watchedHistory' (via useMemo dependencies),
+        // the first item in the array is typically the next logical episode.
+        if (sortedRelatedVideos.length > 0) {
+            const nextVideo = sortedRelatedVideos[0];
+            toast.info(`Siguiente: ${nextVideo.title} en 3s...`);
+            setTimeout(() => {
+                navigate(`/watch/${nextVideo.id}`);
+            }, 3000);
+        } else {
+            // Fallback if list is empty (e.g. all watched)
+            // Try fetching fresh related just in case
+            db.getRelatedVideos(video.id).then(res => {
+               const freshCandidates = res.filter(v => v.id !== video.id);
+               if (freshCandidates.length > 0) {
+                   toast.info(`Reproduciendo sugerencia en 5s...`);
+                   setTimeout(() => navigate(`/watch/${freshCandidates[0].id}`), 5000);
+               }
+            });
+        }
     };
 
     // --- EXTERNAL PLAYER HELPERS ---
@@ -173,14 +317,22 @@ export default function Watch() {
                                 playsInline
                                 className="w-full h-full object-contain bg-black"
                                 crossOrigin="anonymous"
-                                onEnded={() => {
-                                    if(user && !interaction?.isWatched) {
-                                        db.markWatched(user.id, video.id).catch(() => {});
-                                        setInteraction(prev => prev ? {...prev, isWatched: true} : null);
-                                    }
-                                }}
+                                onEnded={handleVideoEnded}
                             />
-                            <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-300">
+                            <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-300 flex gap-2">
+                                {/* Download Button inside Player */}
+                                <button 
+                                    onClick={handleDownload} 
+                                    disabled={isDownloaded || isDownloading}
+                                    className={`p-2 rounded-full backdrop-blur-md border transition-colors ${
+                                        isDownloaded ? 'bg-emerald-600/80 text-white border-emerald-500' : 
+                                        'bg-black/60 text-white hover:bg-indigo-600 border-white/20'
+                                    }`}
+                                    title={isDownloaded ? "Disponible Offline" : "Descargar"}
+                                >
+                                    {isDownloading ? <Loader2 size={20} className="animate-spin"/> : (isDownloaded ? <WifiOff size={20}/> : <Download size={20}/>)}
+                                </button>
+                                
                                 <button onClick={() => openExternal('intent')} className="bg-black/60 text-white p-2 rounded-full backdrop-blur-md hover:bg-indigo-600 border border-white/20">
                                     <ExternalLink size={20} />
                                 </button>
@@ -189,7 +341,7 @@ export default function Watch() {
                     ) : (
                         // LOCKED STATE - ENTIRE CONTAINER IS BUTTON
                         <div 
-                            onClick={handlePurchase}
+                            onClick={() => !checkingAccess && handlePurchase(false)}
                             className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden cursor-pointer group select-none"
                         >
                             {/* Background Image */}
@@ -207,26 +359,32 @@ export default function Watch() {
                             {/* Tap to Unlock UI */}
                             {video && (
                                 <div className="relative z-20 text-center flex flex-col items-center animate-in zoom-in duration-300">
-                                    <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20 mb-3 group-hover:scale-110 group-active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
-                                        <Lock className="text-white" size={32} />
-                                    </div>
-                                    
-                                    <h2 className="text-xl md:text-3xl font-black text-white mb-1 uppercase tracking-wider drop-shadow-lg">
-                                        Contenido Premium
-                                    </h2>
-                                    
-                                    <div className="flex items-center gap-2 text-slate-300 text-xs md:text-sm font-medium bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm border border-white/10 mt-2">
-                                        <span>Desbloquear por</span>
-                                        <span className="text-amber-400 font-bold text-lg">{video.price} $</span>
-                                    </div>
+                                    {checkingAccess ? (
+                                        <Loader2 className="text-indigo-400 animate-spin mb-4" size={48} />
+                                    ) : (
+                                        <>
+                                            <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20 mb-3 group-hover:scale-110 group-active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
+                                                <Lock className="text-white" size={32} />
+                                            </div>
+                                            
+                                            <h2 className="text-xl md:text-3xl font-black text-white mb-1 uppercase tracking-wider drop-shadow-lg">
+                                                Contenido Premium
+                                            </h2>
+                                            
+                                            <div className="flex items-center gap-2 text-slate-300 text-xs md:text-sm font-medium bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm border border-white/10 mt-2">
+                                                <span>Desbloquear por</span>
+                                                <span className="text-amber-400 font-bold text-lg">{video.price} $</span>
+                                            </div>
 
-                                    {user && user.balance < video.price && (
-                                        <div className="mt-4 bg-red-600/90 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg animate-pulse">
-                                            <AlertCircle size={14}/> Saldo insuficiente ({user.balance.toFixed(2)} $)
-                                        </div>
+                                            {user && user.balance < video.price && (
+                                                <div className="mt-4 bg-red-600/90 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg animate-pulse">
+                                                    <AlertCircle size={14}/> Saldo insuficiente ({user.balance.toFixed(2)} $)
+                                                </div>
+                                            )}
+                                            
+                                            <p className="mt-4 text-[10px] text-white/50 uppercase tracking-widest font-bold">Toca para comprar</p>
+                                        </>
                                     )}
-                                    
-                                    <p className="mt-4 text-[10px] text-white/50 uppercase tracking-widest font-bold">Toca para comprar</p>
                                 </div>
                             )}
                         </div>
@@ -279,8 +437,15 @@ export default function Watch() {
                                     <button onClick={() => handleRate('dislike')} className={`px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.disliked ? 'text-red-400 border-red-500/50' : 'text-slate-400'}`}>
                                         <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
                                     </button>
-                                    <button className="flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors text-slate-400">
-                                        <Share2 size={18}/> <span className="hidden md:inline text-sm font-bold">Compartir</span>
+                                    
+                                    {/* Mobile Download Button in Toolbar */}
+                                    <button 
+                                        onClick={handleDownload}
+                                        disabled={isDownloaded || isDownloading} 
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${isDownloaded ? 'text-emerald-400 border-emerald-500/50' : 'text-slate-400'}`}
+                                    >
+                                        {isDownloading ? <Loader2 size={18} className="animate-spin"/> : <Download size={18}/>}
+                                        <span className="hidden md:inline text-sm font-bold">{isDownloaded ? 'Offline' : 'Descargar'}</span>
                                     </button>
                                 </div>
                             </div>
@@ -334,22 +499,30 @@ export default function Watch() {
                     </div>
                 </div>
 
-                {/* Sidebar: Related */}
+                {/* Sidebar: Related - SORTED ALPHABETICALLY */}
                 <div className="w-full lg:w-80 shrink-0">
-                    <h3 className="font-bold text-white mb-4">A continuación</h3>
+                    <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                        <SkipForward size={18} className="text-indigo-400"/> A continuación
+                    </h3>
                     <div className="flex flex-col gap-3">
                         {loadingRelated ? (
                             <div className="text-center py-10 flex flex-col items-center">
                                 <Loader2 className="animate-spin text-indigo-500 mb-2" />
                                 <span className="text-slate-500 text-sm italic">Buscando sugerencias...</span>
                             </div>
-                        ) : relatedVideos.length > 0 ? (
-                            relatedVideos.map((v: Video) => (
-                                <VideoCard key={v.id} video={v} isUnlocked={false} isWatched={false} />
-                            ))
+                        ) : sortedRelatedVideos.length > 0 ? (
+                            sortedRelatedVideos.map((v: Video) => {
+                                // Videos in watched history shouldn't appear due to sortedRelatedVideos filter,
+                                // but we double check visually just in case logic changes
+                                return (
+                                    <div key={v.id}>
+                                        <VideoCard video={v} isUnlocked={false} isWatched={false} />
+                                    </div>
+                                );
+                            })
                         ) : (
                             <div className="text-slate-500 text-sm text-center py-10 italic border border-slate-800 rounded-xl bg-slate-900/50">
-                                No hay videos relacionados.
+                                No hay más videos en esta secuencia.
                             </div>
                         )}
                     </div>
