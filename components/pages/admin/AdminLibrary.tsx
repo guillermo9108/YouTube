@@ -358,11 +358,15 @@ export default function AdminLibrary() {
                 const prompt = `
                     You are a video library organizer. 
                     Categorize these titles into exactly one of these categories: 
-                    ['PELICULA', 'SERIES', 'MUSICA', 'SHORTS', 'EDUCACION', 'DEPORTES', 'DOCUMENTAL', 'OTRO'].
+                    ['PELICULA', 'SERIES', 'NOVELAS', 'MUSICA', 'SHORTS', 'EDUCACION', 'CORTOMETRAJE', 'OTRO'].
                     
                     Rules:
                     - 'SHORTS' if title implies TikTok/Reels or very short.
                     - 'SERIES' if title contains S01, E01, Chapter, etc.
+                    - 'NOVELAS' if it looks like a soap opera / telenovela.
+                    - 'MUSICA' if music video or concert.
+                    - 'EDUCACION' if tutorial or course.
+                    - 'CORTOMETRAJE' if short film.
                     - 'PELICULA' if it looks like a movie title.
                     - Return ONLY a JSON array of objects: [{"id": "...", "category": "..."}].
                     
