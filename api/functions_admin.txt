@@ -352,7 +352,6 @@ function admin_ai_organize($pdo, $input) {
     $catString = implode(', ', $availableCategories);
 
     // Fetch batch of videos (limit 50 to fit context window comfortably)
-    // We prioritize videos that are 'GENERAL' or 'OTHER' (unclassified) or 'PROCESSING'
     $sql = "SELECT id, title, videoUrl FROM videos WHERE category IN ('GENERAL', 'OTHER', 'PROCESSING') ORDER BY id DESC LIMIT 50";
     $stmt = $pdo->query($sql);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -395,12 +394,21 @@ function admin_ai_organize($pdo, $input) {
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
     
+    // FIX: Disable SSL verification for local dev/NAS environments that lack CA bundles
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch); // Capture actual error message
     curl_close($ch);
 
+    if ($response === false) {
+        respond(false, null, "Connection Failed: " . $curlError);
+    }
+
     if ($httpCode !== 200) {
-        respond(false, null, "Gemini API Error ($httpCode): " . substr($response, 0, 100));
+        respond(false, null, "Gemini API Error ($httpCode): " . substr($response, 0, 150));
     }
 
     $jsonRes = json_decode($response, true);
