@@ -15,10 +15,11 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const [status, setStatus] = useState('Cargando...');
     const processedRef = useRef(false);
 
+    // CRITICAL FIX: If video is local, browsers cannot load "/volume1/..." or "C:/" directly.
+    // We MUST use the PHP stream proxy.
     let streamSrc = video.videoUrl;
     const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
 
-    // FORCE API STREAM if it's local. Browsers cannot load /volume1/... directly.
     if (isLocal) {
         streamSrc = `api/index.php?action=stream&id=${video.id}`;
     }
@@ -29,25 +30,28 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         
         processedRef.current = false;
         setStatus('Iniciando...');
+        
+        // Reset
         vid.currentTime = 0;
+        vid.src = streamSrc;
+        vid.load();
 
         const startPlay = async () => {
             try {
-                vid.muted = true;
+                vid.muted = true; // Always mute for autoplay
                 await vid.play();
                 setStatus('Procesando...');
             } catch (e) {
-                console.warn("Autoplay blocked", e);
-                // Try again muted if failed
-                try {
-                    vid.muted = true;
-                    await vid.play();
-                } catch(e2) {
-                    setStatus('Esperando click manual...');
+                console.warn("Autoplay blocked or load error", e);
+                setStatus('Esperando click manual...');
+                // Fallback: try to force metadata load at least
+                if (vid.readyState >= 1) {
+                    setStatus('Listo para captura');
                 }
             }
         };
         
+        // Small delay to ensure DOM is ready
         const timer = setTimeout(startPlay, 250);
         return () => clearTimeout(timer);
     }, [video.id, streamSrc]); 
@@ -56,7 +60,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const vid = e.currentTarget;
         if (!vid || processedRef.current) return;
 
-        // Ensure we have loaded some video data
+        // Ensure we have loaded some video data (skip black frames at 0s)
         if (vid.currentTime > 1.5 && vid.videoWidth > 0) {
             vid.pause();
             processedRef.current = true;
@@ -77,6 +81,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                             const file = new File([blob], "thumb.jpg", { type: "image/jpeg" });
                             onComplete(duration, file);
                         } else {
+                            // If canvas is tainted or empty, save duration but no thumb
                             onComplete(duration, null);
                         }
                     }, 'image/jpeg', 0.8);
@@ -95,10 +100,11 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         console.error("Video Load Error", streamSrc, e);
         setStatus("Error de Reproducción. Saltando...");
         
+        // Auto-skip after delay if it fails to play (e.g. codec not supported)
         setTimeout(() => {
             if (!processedRef.current) {
                 processedRef.current = true;
-                // If error, return 0 duration and null thumb, let Step 3 or logic handle it
+                // Return 0 duration and null thumb so the queue continues
                 onComplete(0, null);
             }
         }, 1500); 
@@ -109,18 +115,14 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
             <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 aspect-video group">
                 <video 
                     ref={videoRef} 
-                    src={streamSrc}
-                    poster={video.thumbnailUrl} 
                     className="w-full h-full object-contain" 
                     controls={true} 
                     playsInline
                     muted={true}
-                    autoPlay
                     preload="auto"
                     crossOrigin="anonymous" 
                     onTimeUpdate={handleTimeUpdate}
                     onError={handleError}
-                    key={video.id} 
                 />
                 
                 <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 z-20 pointer-events-none">
