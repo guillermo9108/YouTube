@@ -15,95 +15,24 @@ function fix_url($url) {
 }
 
 function get_youtube_video($query, $config) {
-    putenv("LC_ALL=C.UTF-8"); 
-    $apiDir = __DIR__;
-    $rootDir = dirname(__DIR__);
-    $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+    if (empty($config['enableYoutube']) || empty($config['ytDlpPath'])) return [];
     
-    $candidates = [
-        $config['ytDlpPath'] ?? '',
-        $apiDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'), 
-        $rootDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'),
-        $isWin ? 'yt-dlp.exe' : '/usr/local/bin/yt-dlp',
-        $isWin ? 'yt-dlp' : '/usr/bin/yt-dlp'
-    ];
-
-    $bin = null;
-    foreach ($candidates as $c) {
-        if (!empty($c) && file_exists($c)) {
-            $bin = $c;
-            break;
-        }
-    }
-
-    if (!$bin && !empty($config['ytDlpPath'])) $bin = $config['ytDlpPath'];
-    if (!$bin) $bin = $isWin ? 'yt-dlp.exe' : 'yt-dlp';
-
-    if (!$isWin && file_exists($bin) && !is_dir($bin)) {
-        if (!is_executable($bin)) @chmod($bin, 0755); 
-    }
-
-    $safeQuery = escapeshellarg($query);
-    $isUrl = filter_var($query, FILTER_VALIDATE_URL) && strpos($query, 'youtube.com') !== false;
-    $searchArg = $isUrl ? $safeQuery : escapeshellarg("ytsearch12:$query");
-    
-    $flags = "--dump-json --no-warnings --ignore-config --no-check-certificate --compat-options no-youtube-unavailable-videos";
-
-    $strategies = [];
-    $strategies[] = "\"$bin\" $searchArg $flags 2>&1";
-    
-    if (!$isWin) {
-        $pythonCandidates = ['python3', '/usr/local/bin/python3', '/usr/bin/python3'];
-        foreach ($pythonCandidates as $py) {
-            $ver = shell_exec("$py --version 2>&1");
-            if (preg_match('/Python (\d+\.\d+)/', $ver, $matches) && version_compare($matches[1], '3.7', '>=')) {
-                $strategies[] = "$py \"$bin\" $searchArg $flags 2>&1";
-            }
-        }
-    } else {
-        $strategies[] = "python \"$bin\" $searchArg $flags 2>&1";
-    }
-
-    $output = [];
-    $returnVar = -1;
-    $errors = [];
-    $success = false;
-
-    foreach ($strategies as $cmd) {
-        $output = [];
-        exec($cmd, $output, $returnVar);
-        if ($returnVar === 0 && !empty($output) && strpos(trim($output[0]), '{') === 0) {
-            $success = true;
-            break;
-        }
-        $errLine = !empty($output) ? substr(implode(" | ", array_slice($output, -2)), 0, 150) : "Exit Code $returnVar";
-        $simpleCmd = (strpos($cmd, $bin) !== false) ? str_replace($bin, 'yt-dlp', $cmd) : $cmd;
-        $errors[] = "[$simpleCmd] -> $errLine";
-    }
-
-    if (!$success) {
-        $debugMsg = implode("\n", $errors);
-        throw new Exception("Error buscando videos. Detalles:\n$debugMsg");
-    }
+    $bin = $config['ytDlpPath'];
+    $cmd = "$bin \"ytsearch10:$query\" --dump-json --flat-playlist --no-warnings 2>&1";
+    exec($cmd, $output, $ret);
     
     $results = [];
     foreach ($output as $line) {
         $data = json_decode($line, true);
-        if ($data && isset($data['id']) && isset($data['title'])) {
-            $thumb = $data['thumbnail'] ?? '';
-            if (isset($data['thumbnails']) && is_array($data['thumbnails'])) {
-                $last = end($data['thumbnails']);
-                if (isset($last['url'])) $thumb = $last['url'];
-            }
-
+        if ($data) {
             $results[] = [
                 'id' => $data['id'],
                 'source' => 'YouTube',
-                'thumbnail' => $thumb,
+                'thumbnail' => "https://i.ytimg.com/vi/{$data['id']}/hqdefault.jpg",
                 'title' => $data['title'],
                 'duration' => $data['duration'] ?? 0,
-                'downloadUrl' => $data['webpage_url'] ?? "https://www.youtube.com/watch?v={$data['id']}",
-                'author' => $data['uploader'] ?? 'YouTube'
+                'downloadUrl' => "https://www.youtube.com/watch?v={$data['id']}",
+                'author' => $data['uploader'] ?? 'Unknown'
             ];
         }
     }
@@ -111,7 +40,12 @@ function get_youtube_video($query, $config) {
 }
 
 function detectCategoryFromDuration($duration) {
-    return 'GENERAL';
+    if ($duration <= 0) return 'OTRO'; 
+    if ($duration <= 180) return 'SHORTS'; 
+    if ($duration <= 300) return 'MUSICA'; 
+    if ($duration <= 1500) return 'CORTOMETRAJE'; 
+    if ($duration <= 2700) return 'SERIES'; 
+    return 'PELICULA'; 
 }
 
 function getPriceForCategory($cat, $settings) {
@@ -121,11 +55,122 @@ function getPriceForCategory($cat, $settings) {
 
 function smartParseFilename($fullPath, $existingCategory = null, $customCategories = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
+    
+    // Normalizar separadores
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
+    // Obtener array de carpetas
     $pathParts = explode('/', dirname($fullPathNormalized));
     
-    $genericFolders = ['videos', 'uploads', 'torrents', 'storage', 'public', 'media', 'completed', 'downloads', '4k', '1080p'];
+    // Carpetas genéricas a ignorar al buscar nombres de series/títulos
+    $genericFolders = ['series', 'serie', 'season', 'temporada', 'downloads', 'descargas', 'anime', 'tv shows', 'completed', 'videos', 'uploads', 'torrents', 'storage', 'public', 'media', '4k', '1080p'];
 
+    $detectedCategory = null;
+    $categoryLocked = false; // Flag crucial: Si es true, nadie más puede cambiar la categoría
+
+    // --- PASO 1: PRIORIDAD ABSOLUTA - ANÁLISIS DE ANCESTROS (CUSTOM Y ESTÁNDAR) ---
+    // Analizamos Padre, Abuelo y Bisabuelo
+    $ancestors = array_reverse(array_slice($pathParts, -3)); 
+    
+    // Mapa Estándar
+    $categoryMap = [
+        'SERIES' => ['series', 'serie', 'temporada', 'season', 'tv shows', 'capitulos', 'episodes', 'anime'],
+        'NOVELAS' => ['novelas', 'telenovelas', 'dramas', 'soap'],
+        'MOVIE' => ['movies', 'movie', 'peliculas', 'pelicula', 'films', 'cine', '4k movies', 'hd movies'],
+        'SHORTS' => ['shorts', 'cortos', 'tiktok', 'reels', 'vertical'],
+        'MUSIC' => ['music', 'musica', 'concerts', 'conciertos', 'videoclips'],
+        'EDUCATION' => ['education', 'educacion', 'cursos', 'courses', 'tutoriales']
+    ];
+
+    foreach ($ancestors as $folder) {
+        // Normalizar nombre carpeta: "Ciencia_Ficcion" -> "ciencia ficcion"
+        $folderClean = mb_strtolower(str_replace(['_', '-', '.'], ' ', trim($folder)), 'UTF-8');
+        
+        // 1. Revisar Categorías Personalizadas
+        if (!empty($customCategories)) {
+            foreach ($customCategories as $customCat) {
+                // Normalizar categoría custom: "CIENCIA_FICCION" -> "ciencia ficcion"
+                $catName = mb_strtolower(str_replace(['_', '-'], ' ', trim($customCat)), 'UTF-8');
+                
+                if ($folderClean === $catName || strpos($folderClean, $catName) !== false) {
+                    $detectedCategory = $customCat;
+                    $categoryLocked = true; // Bloquear cambios futuros
+                    break 2; // Éxito, salir de ambos bucles
+                }
+            }
+        }
+
+        // 2. Revisar Categorías Estándar
+        foreach ($categoryMap as $catKey => $keywords) {
+            foreach ($keywords as $kw) {
+                // Match de palabra completa o contenido claro
+                if (strpos($folderClean, $kw) !== false) {
+                    $detectedCategory = $catKey;
+                    $categoryLocked = true; // Bloquear cambios futuros también para estándar
+                    break 3; 
+                }
+            }
+        }
+    }
+
+    // --- PASO 3: ANÁLISIS DE ARCHIVO/CARPETA (EPISODIOS) ---
+    $season = '';
+    $episode = '';
+    $episodeEnd = ''; 
+    $isEpisodic = false;
+
+    // Función auxiliar para buscar patrones S01E01
+    $findEpisodeInfo = function($str) {
+        $res = ['s'=>'', 'e'=>'', 'e2'=>'', 'found'=>false];
+        // S01E01
+        if (preg_match('/S(\d+)\s*E(\d+)(?:-?E?(\d+))?/i', $str, $m)) {
+            $res['s'] = (int)$m[1]; $res['e'] = (int)$m[2]; 
+            if(isset($m[3])) $res['e2'] = (int)$m[3];
+            $res['found'] = true;
+        }
+        // 1x01
+        else if (preg_match('/(\d+)[xX](\d+)/', $str, $m)) {
+            $res['s'] = (int)$m[1]; $res['e'] = (int)$m[2]; $res['found'] = true;
+        }
+        // Cap/Ep 01
+        else if (preg_match('/(Cap|Capitulo|Ep|Episode|Episodio)\s*[-.]?\s*(\d+)/i', $str, $m)) {
+            $res['e'] = (int)$m[2]; $res['found'] = true;
+        }
+        // Anime absoluto (e.g. "One Piece - 1050" o " [1050] ")
+        else if (preg_match('/[ \-\[\(](\d{2,4})[ \-\]\)]/', $str, $m)) {
+             $num = (int)$m[1];
+             if ($num < 1900 || $num > 2100) { $res['e'] = $num; $res['found'] = true; }
+        }
+        return $res;
+    };
+
+    // Buscar en archivo
+    $info = $findEpisodeInfo($filename);
+    
+    // Si no, buscar en carpeta padre
+    $parentFolder = end($pathParts);
+    if (!$info['found']) {
+        $parentInfo = $findEpisodeInfo($parentFolder);
+        if ($parentInfo['found']) {
+            $info = $parentInfo;
+        }
+    }
+
+    if ($info['found']) {
+        $season = $info['s'];
+        $episode = $info['e'];
+        $episodeEnd = $info['e2'];
+        $isEpisodic = true;
+
+        // IMPORTANTE: Si NO está bloqueado por una categoría (Custom o Estándar), asignamos SERIES/NOVELAS
+        if (!$categoryLocked) {
+            // Si no hay categoría detectada o es genérica, asumimos serie por tener episodio
+            if (!$detectedCategory || $detectedCategory === 'OTHER' || $detectedCategory === 'PROCESSING' || $detectedCategory === 'MOVIE') {
+                $detectedCategory = ($detectedCategory === 'NOVELAS') ? 'NOVELAS' : 'SERIES';
+            }
+        }
+    }
+
+    // --- PASO 4: LIMPIEZA DE TÍTULO ---
     $junkPatterns = [
         '/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i',
         '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i',
@@ -134,65 +179,84 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
         '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i',
         '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i',
         '/\b(mkv|mp4|avi|mov)\b/i',
-        '/www\.[a-z0-9-]+\.[a-z]+/i'
+        '/www\.[a-z0-9-]+\.[a-z]+/i',
+        ($detectedCategory === 'SERIES' || $detectedCategory === 'NOVELAS' || $categoryLocked) ? '/\b(19|20)\d{2}\b/' : '' // Quitar año si es serie
     ];
 
     $cleanText = function($txt) use ($junkPatterns) {
         $t = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $txt);
         foreach ($junkPatterns as $p) { if($p) $t = preg_replace($p, '', $t); }
-        $t = trim(preg_replace('/\s+/', ' ', $t));
-        return ucwords(strtolower($t));
+        return trim(preg_replace('/\s+/', ' ', $t));
     };
 
     $cleanName = $cleanText($filename);
-    if (strlen($cleanName) < 2) $cleanName = $filename;
-
-    $parentFolder = end($pathParts);
-    $cleanParent = '';
-    
-    if ($parentFolder && !in_array(strtolower($parentFolder), $genericFolders)) {
-        $cleanParent = $cleanText($parentFolder);
-        if (strcasecmp($cleanParent, $cleanName) === 0) $cleanParent = '';
-    }
-
     $finalTitle = $cleanName;
-    if (!empty($cleanParent)) {
-        $finalTitle = "$cleanName - $cleanParent";
-    }
 
-    $detectedCategory = null;
-    $ancestors = array_reverse(array_slice($pathParts, -3)); 
+    // Lógica especial para Títulos de Series (o si es una categoría custom que parece episódica)
+    if ($detectedCategory === 'SERIES' || $detectedCategory === 'NOVELAS' || ($isEpisodic && $detectedCategory !== 'MOVIE')) {
+        $grandParent = prev($pathParts);
 
-    $normalizeForCat = function($str) {
-        $str = mb_strtolower($str, 'UTF-8');
-        $unwanted = ['á'=>'a', 'é'=>'e', 'í'=>'i', 'ó'=>'o', 'ú'=>'u', 'ñ'=>'n'];
-        $str = strtr($str, $unwanted);
-        $str = preg_replace('/[^a-z0-9 ]/', '', $str);
-        $str = trim($str);
-        if (strlen($str) > 3 && substr($str, -1) === 's') {
-            $str = substr($str, 0, -1);
+        $cleanParent = $cleanText($parentFolder);
+        // Quitar también patrones de episodio del nombre de la carpeta padre
+        $cleanParent = preg_replace('/S\d+\s*E\d+/i', '', $cleanParent);
+        $cleanParent = preg_replace('/\d+x\d+/i', '', $cleanParent);
+        
+        if (is_numeric(trim($cleanParent))) $cleanParent = "";
+        $cleanParent = trim($cleanParent);
+
+        $seriesName = "";
+        if (strlen($cleanParent) > 2 && !in_array(strtolower($cleanParent), $genericFolders)) {
+            $seriesName = $cleanParent;
+        } else if (!empty($grandParent)) {
+            $cleanGrandParent = $cleanText($grandParent);
+            if (!in_array(strtolower($cleanGrandParent), $genericFolders)) {
+                $seriesName = $cleanGrandParent;
+            }
         }
-        return $str;
-    };
 
-    if (!empty($customCategories)) {
-        foreach ($ancestors as $folder) {
-            $folderBase = $normalizeForCat($folder);
-            foreach ($customCategories as $customCat) {
-                $catBase = $normalizeForCat($customCat);
-                if ($folderBase === $catBase || (strlen($folderBase) > 3 && strpos($folderBase, $catBase) !== false)) {
-                    $detectedCategory = $customCat; 
-                    break 2;
+        // Formato Episodio
+        $epString = "";
+        if ($season !== '' && $episode !== '') {
+            $s = str_pad($season, 2, '0', STR_PAD_LEFT);
+            $e = str_pad($episode, 2, '0', STR_PAD_LEFT);
+            $epString = "S{$s}E{$e}";
+            if ($episodeEnd) $epString .= "-E".str_pad($episodeEnd, 2, '0', STR_PAD_LEFT);
+        } elseif ($episode !== '') {
+            if ($episode > 99) $epString = "Ep {$episode}"; 
+            else $epString = ($detectedCategory === 'NOVELAS' ? 'Cap' : 'Ep') . " " . str_pad($episode, 2, '0', STR_PAD_LEFT);
+        }
+
+        if ($seriesName) {
+            if ($epString) {
+                $finalTitle = "$seriesName - $epString";
+                // Añadir nombre del capítulo si existe en el archivo
+                $nameWithoutEp = str_replace($epString, '', $cleanName);
+                $nameWithoutEp = trim(preg_replace('/[^a-zA-Z0-9\s]/', '', $nameWithoutEp));
+                
+                if (strlen($nameWithoutEp) > 3 && stripos($seriesName, $nameWithoutEp) === false) {
+                    $finalTitle .= " - $nameWithoutEp";
                 }
+            } else {
+                $finalTitle = "$seriesName - $cleanName";
             }
         }
     }
 
+    // Capitalización
+    $finalTitle = ucwords(strtolower($finalTitle));
+    $finalTitle = str_replace([' - - ', '  '], [' - ', ' '], $finalTitle);
+    $finalTitle = trim($finalTitle, " -.");
+
+    if (empty($finalTitle) || strlen($finalTitle) < 2) {
+        $finalTitle = $filename;
+    }
+    
+    // Si no detectamos nada nuevo, mantener la existente si es válida, o 'OTHER'
     if (!$detectedCategory) {
-        if ($existingCategory && $existingCategory !== 'PENDING' && $existingCategory !== 'PROCESSING' && $existingCategory !== 'OTHER') {
+        if ($existingCategory && $existingCategory !== 'PENDING' && $existingCategory !== 'PROCESSING') {
             $detectedCategory = $existingCategory;
         } else {
-            $detectedCategory = 'GENERAL'; 
+            $detectedCategory = 'OTHER';
         }
     }
     
@@ -203,16 +267,17 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
 }
 
 function streamVideo($filePath, $pdo) {
+    // AGGRESSIVE BUFFER CLEANING - CRITICAL FOR VIDEO STREAMS
+    // Must clear all existing output buffers (whitespace, includes)
     if (function_exists('ini_set')) {
         ini_set('zlib.output_compression', 'Off');
-        ini_set('display_errors', 0);
     }
+    while (ob_get_level() > 0) ob_end_clean();
+    
+    ini_set('display_errors', 0);
     error_reporting(0);
     set_time_limit(0);
 
-    // CRITICAL: Clean aggressively. 
-    while (ob_get_level()) ob_end_clean();
-    
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
     header('Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type');
@@ -220,28 +285,14 @@ function streamVideo($filePath, $pdo) {
     
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(0); }
 
-    // Logic to determine real path
-    $realPath = $filePath;
-    $isLocal = 1;
-
-    // Check if ID passed directly (edge case)
-    if (strpos($filePath, '/') === false && strlen($filePath) > 10) {
-         $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ? LIMIT 1");
-         $stmt->execute([$filePath]);
-         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-         if ($row) {
-             $realPath = $row['videoUrl'];
-             $isLocal = $row['isLocal'];
-         }
-    }
-
-    // Strip api/ prefix if present
-    if (strpos($realPath, 'api/') === 0) {
-        $realPath = substr($realPath, 4);
-    }
+    // Check FTP (Redundant query here but safe for integrity, assumes $pdo is passed)
+    // To optimize, index_code.txt could pass $isLocal, but maintaining function signature is safer for now.
+    $stmt = $pdo->prepare("SELECT isLocal FROM videos WHERE videoUrl = ? OR videoUrl = ? LIMIT 1");
+    $stmt->execute([$filePath, "api/" . $filePath]);
+    $isLocal = $stmt->fetchColumn();
 
     if ($isLocal == 2) {
-        // FTP LOGIC
+        // FTP PROXY
         $sStmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
         $json = $sStmt->fetchColumn();
         $s = json_decode($json, true);
@@ -263,47 +314,23 @@ function streamVideo($filePath, $pdo) {
         fclose($resource);
         exit;
     } else {
-        // LOCAL FILE LOGIC
-        
-        // Try multiple path variations to find the file on disk
-        $candidates = [
-            $realPath, 
-            rawurldecode($realPath), // Essential for paths with spaces %20
-            $filePath, // Original input
-            '../' . $realPath, // Attempt parent dir if inside subfolder
-            basename($realPath) // Just filename as last resort
-        ];
-
-        $finalPath = null;
-        foreach ($candidates as $c) {
-            // Check direct existence
-            if (file_exists($c) && !is_dir($c)) {
-                $finalPath = $c;
-                break;
-            }
-            // Check absolute decoded path (for Synology volume paths)
-            $decoded = rawurldecode($c);
-            if (file_exists($decoded) && !is_dir($decoded)) {
-                $finalPath = $decoded;
-                break;
-            }
+        // LOCAL FILE
+        $realPath = $filePath;
+        if (!file_exists($realPath)) {
+            $realPath = rawurldecode($filePath);
         }
 
-        if (!$finalPath) {
+        if (!file_exists($realPath)) {
             header("HTTP/1.0 404 Not Found");
-            // Debug header to help trace
-            // header("X-Debug-Path: " . $realPath); 
             exit;
         }
         
-        $fileSize = sprintf("%u", filesize($finalPath));
-        
-        // Mime Type Detection
-        $ext = strtolower(pathinfo($finalPath, PATHINFO_EXTENSION));
+        $fileSize = sprintf("%u", filesize($realPath));
+        $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
         $mimeTypes = [
-            'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/mp4', 
-            'mov' => 'video/mp4', 'avi' => 'video/mp4', 'mp3' => 'audio/mpeg',
-            'm4v' => 'video/mp4', 'mpg' => 'video/mpeg', 'mpeg' => 'video/mpeg', 'ts' => 'video/mp2t'
+            'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/x-matroska', 
+            'mov' => 'video/quicktime', 'avi' => 'video/x-msvideo', 'mp3' => 'audio/mpeg',
+            'm4v' => 'video/mp4', 'mpg' => 'video/mpeg', 'mpeg' => 'video/mpeg'
         ];
         $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'video/mp4';
         
@@ -330,18 +357,17 @@ function streamVideo($filePath, $pdo) {
             header("Content-Length: $fileSize");
         }
         
-        // FINAL BUFFER CLEAN BEFORE OUTPUT
-        while (ob_get_level()) ob_end_clean();
         if (headers_sent()) exit;
 
-        $fp = fopen($finalPath, 'rb');
+        $fp = fopen($realPath, 'rb');
         if ($offset > 0) fseek($fp, $offset);
         
-        $buffer = 1024 * 256; // 256KB Chunks
+        $buffer = 1024 * 256; // 256KB buffer chunks
         while (!feof($fp) && ($p = ftell($fp)) <= $offset + $length) {
             if ($p + $buffer > $offset + $length) $buffer = $offset + $length - $p + 1;
             echo fread($fp, $buffer);
             flush();
+            // CRITICAL: Stop script if client disconnects to prevent server CPU hang
             if (connection_aborted()) {
                 fclose($fp);
                 exit;

@@ -745,6 +745,29 @@ function video_rectify_titles($pdo, $input) {
     respond(true, ['processed' => $processedCount, 'lastId' => $newLastId, 'completed' => false]);
 }
 
+// STEP 5: AI Categorization Batch Update (New)
+function video_batch_update_categories($pdo, $input) {
+    $updates = $input['updates']; // Array of {id, category}
+    if (!is_array($updates)) respond(false, null, "Invalid input");
+
+    $stmt = $pdo->prepare("UPDATE videos SET category = ?, price = ? WHERE id = ?");
+    $settingsStmt = $pdo->query("SELECT categoryPrices FROM system_settings LIMIT 1");
+    $prices = json_decode($settingsStmt->fetchColumn() ?? '{}', true);
+
+    $updated = 0;
+    foreach ($updates as $u) {
+        if (!empty($u['id']) && !empty($u['category'])) {
+            $cat = $u['category'];
+            $price = isset($prices[$cat]) ? $prices[$cat] : 1;
+            
+            $stmt->execute([$cat, $price, $u['id']]);
+            $updated++;
+        }
+    }
+    
+    respond(true, ['updated' => $updated]);
+}
+
 function video_update_prices_bulk($pdo, $input) {
     $pdo->prepare("UPDATE videos SET price = ? WHERE creatorId = ?")->execute([$input['newPrice'], $input['creatorId']]);
     respond(true);

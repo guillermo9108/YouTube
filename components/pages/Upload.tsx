@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2, Clock } from 'lucide-react';
+import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useUpload } from '../../context/UploadContext';
 import { useNavigate } from '../Router';
@@ -62,8 +62,7 @@ export default function Upload() {
               if (isMounted.current) {
                 const standard = Object.values(VideoCategory) as string[];
                 const custom = settings.customCategories || [];
-                const unique = Array.from(new Set([...standard, ...custom]));
-                setAvailableCategories(unique);
+                setAvailableCategories([...standard, ...custom]);
                 setSystemCategoryPrices(settings.categoryPrices || {});
               }
           } catch(e) { console.error(e); }
@@ -96,6 +95,15 @@ export default function Upload() {
       return 1;
   };
 
+  const detectCategory = (duration: number): string => {
+      if (duration <= 180) return VideoCategory.SHORTS;
+      if (duration <= 300) return VideoCategory.MUSIC;
+      if (duration <= 1500) return VideoCategory.SHORT_FILM;
+      if (duration <= 2700) return VideoCategory.SERIES;
+      if (duration > 2700) return VideoCategory.MOVIE;
+      return VideoCategory.OTHER;
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const newFiles = Array.from(e.target.files) as File[];
@@ -109,8 +117,8 @@ export default function Upload() {
       setThumbnails(prev => [...prev, ...new Array(newFiles.length).fill(null)]);
       setDurations(prev => [...prev, ...new Array(newFiles.length).fill(0)]);
       
-      // Default initial state
-      const defaultCat = VideoCategory.GENERAL;
+      // Default initial state (will be refined by processor)
+      const defaultCat = VideoCategory.OTHER;
       const defaultPrice = getPriceForCategory(defaultCat);
 
       setCategories(prev => [...prev, ...new Array(newFiles.length).fill(defaultCat)]);
@@ -151,8 +159,8 @@ export default function Upload() {
               const thumbnail = result.thumbnail; // Can be null
               
               if (isMounted.current) {
-                  // Only use GENERAL since we removed auto-detection logic to avoid using deprecated categories
-                  const cat = VideoCategory.GENERAL;
+                  // Intelligent Logic
+                  const cat = detectCategory(duration);
                   const price = getPriceForCategory(cat);
 
                   setThumbnails(prev => {
@@ -164,9 +172,10 @@ export default function Upload() {
                       const n = [...prev]; n[task.index] = duration; return n;
                   });
                   
-                  // Only auto-update if still generic
+                  // Only auto-update if user hasn't touched it (still 'OTHER')
                   setCategories(prev => {
                       if (prev.length <= task.index) return prev;
+                      if (prev[task.index] !== VideoCategory.OTHER) return prev;
                       const n = [...prev]; n[task.index] = cat; return n;
                   });
 
@@ -177,6 +186,7 @@ export default function Upload() {
               }
           } catch (e) {
               console.error("Analysis failed for file:", task.file.name, e);
+              // Continue processing other files even if one fails
           }
 
           await new Promise(r => setTimeout(r, 100)); // Small delay
@@ -210,10 +220,6 @@ export default function Upload() {
   
   const updatePrice = (index: number, val: number) => {
     setPrices(prev => { const next = [...prev]; next[index] = val; return next; });
-  };
-
-  const updateDuration = (index: number, val: number) => {
-    setDurations(prev => { const next = [...prev]; next[index] = val; return next; });
   };
 
   // --- BULK ACTIONS ---
@@ -253,22 +259,14 @@ export default function Upload() {
     e.preventDefault();
     if (!user || files.length === 0) return;
 
-    // Check for zero duration
-    const zeroDurationCount = durations.filter(d => d === 0).length;
-    if (zeroDurationCount > 0) {
-        if (!confirm(`Advertencia: ${zeroDurationCount} videos tienen 0 segundos de duración. ¿Subir de todos modos?`)) {
-            return;
-        }
-    }
-
     const queue = files.map((file, i) => ({
         title: titles[i],
         description: bulkDesc, // Use bulk description
         price: prices[i],
-        category: categories[i] as VideoCategory, // Cast generic string
-        duration: durations[i] || 0,
+        category: categories[i] as VideoCategory,
+        duration: durations[i] || 0, // Fallback to 0
         file: file,
-        thumbnail: thumbnails[i]
+        thumbnail: thumbnails[i] // Can be null, provider handles default
     }));
 
     addToQueue(queue, user);
@@ -425,21 +423,21 @@ export default function Upload() {
                        </div>
 
                        {/* Inputs */}
-                       <div className="flex-1 min-w-0 space-y-2">
-                          <div className="flex items-center gap-2">
+                       <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                          <div className="md:col-span-6">
                               <input 
                                 type="text" 
                                 value={titles[idx]} 
                                 onChange={(e) => updateTitle(idx, e.target.value)} 
-                                className="flex-1 bg-transparent border-b border-transparent hover:border-slate-600 focus:border-indigo-500 outline-none text-sm font-bold text-white p-1 transition-colors placeholder-slate-600" 
+                                className="w-full bg-transparent border-b border-transparent hover:border-slate-600 focus:border-indigo-500 outline-none text-sm font-bold text-white p-1 transition-colors placeholder-slate-600" 
                                 placeholder="Título del video" 
                                 required 
                               />
-                              <div className="text-[10px] text-slate-500 whitespace-nowrap">{(file.size / 1024 / 1024).toFixed(1)} MB</div>
+                              <div className="text-[10px] text-slate-500 mt-0.5 pl-1">{(file.size / 1024 / 1024).toFixed(1)} MB</div>
                           </div>
                           
-                          <div className="grid grid-cols-3 gap-2">
-                              <div className="relative">
+                          <div className="md:col-span-3">
+                                <div className="relative">
                                     <Tag size={10} className="absolute left-2 top-2.5 text-slate-500 pointer-events-none"/>
                                     <select 
                                         value={categories[idx]} 
@@ -448,9 +446,11 @@ export default function Upload() {
                                     >
                                         {availableCategories.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
                                     </select>
-                              </div>
+                                </div>
+                          </div>
 
-                              <div className="relative">
+                          <div className="md:col-span-3">
+                                <div className="relative">
                                     <DollarSign size={10} className="absolute left-2 top-2.5 text-amber-500 pointer-events-none"/>
                                     <input 
                                         type="number" 
@@ -460,20 +460,7 @@ export default function Upload() {
                                         onChange={(e) => updatePrice(idx, parseFloat(e.target.value))}
                                         className="w-full bg-slate-950 border border-slate-700 rounded-lg text-[11px] text-amber-400 font-bold py-1.5 pl-6 pr-2 outline-none focus:border-indigo-500"
                                     />
-                              </div>
-
-                              <div className="relative">
-                                    <Clock size={10} className="absolute left-2 top-2.5 text-slate-500 pointer-events-none"/>
-                                    <input 
-                                        type="number" 
-                                        min="0"
-                                        title="Duración en segundos"
-                                        value={durations[idx]}
-                                        onChange={(e) => updateDuration(idx, parseInt(e.target.value) || 0)}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg text-[11px] text-slate-300 font-mono py-1.5 pl-6 pr-2 outline-none focus:border-indigo-500"
-                                        placeholder="Seg"
-                                    />
-                              </div>
+                                </div>
                           </div>
                        </div>
 
@@ -505,7 +492,7 @@ export default function Upload() {
                     <button onClick={() => setShowPriceConfig(false)} className="text-slate-500 hover:text-white p-1 rounded-full hover:bg-slate-800"><X size={20}/></button>
                 </div>
                 <div className="p-4 max-h-[60vh] overflow-y-auto space-y-3 bg-slate-900">
-                    <p className="text-xs text-slate-400 mb-4 bg-slate-950 p-3 rounded-lg border border-slate-800">Define tus precios base por categoría.</p>
+                    <p className="text-xs text-slate-400 mb-4 bg-slate-950 p-3 rounded-lg border border-slate-800">Define tus precios base por categoría. Estos valores se aplicarán automáticamente al detectar la categoría del video.</p>
                     {availableCategories.map(cat => (
                         <div key={cat} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors">
                              <span className="text-xs font-bold text-slate-300 uppercase flex items-center gap-2">

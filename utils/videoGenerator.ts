@@ -25,7 +25,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       const video = document.createElement('video');
       
       // Critical settings for background processing
-      video.preload = "metadata"; // Priority 1: Get metadata first
+      video.preload = "auto"; // Force load data
       video.muted = true;
       video.playsInline = true;
       video.crossOrigin = "anonymous";
@@ -39,8 +39,6 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       video.style.opacity = '0';
       document.body.appendChild(video);
 
-      let isResolved = false;
-
       const cleanup = () => {
           try {
               video.pause();
@@ -51,43 +49,28 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           } catch(e) {}
       };
 
-      const finish = (thumb: File | null, dur: number) => {
-          if (isResolved) return;
-          isResolved = true;
-          clearTimeout(timeout);
-          cleanup();
-          resolve({ thumbnail: thumb, duration: Math.floor(dur) });
-      };
-
-      // Safety timeout (15s) - Reduced to prevent UI hanging too long
+      // Safety timeout (20s)
       const timeout = setTimeout(() => {
-          console.warn("Video generator timed out for:", isFile ? (fileOrUrl as File).name : 'url');
-          // Try to return at least duration if we got it
-          const fallbackDur = (video.duration && isFinite(video.duration)) ? video.duration : 0;
-          finish(null, fallbackDur);
-      }, 15000);
+          cleanup();
+          // Fallback: return what we have (duration might be known even if seek failed)
+          const fallbackDur = video.duration && isFinite(video.duration) ? video.duration : 0;
+          console.warn("Video thumb generator timed out");
+          resolve({ thumbnail: null, duration: fallbackDur });
+      }, 20000);
 
-      // --- STAGE 1: Metadata Loaded (Get Duration) ---
-      video.onloadedmetadata = () => {
+      // 1. Data Loaded -> Seek to representative frame
+      video.onloadeddata = () => {
           const duration = video.duration;
+          // Seek to 10% or 2 seconds, whichever is safe, to avoid black intro frames
+          let seekTime = Math.min(2, duration / 2);
+          if (duration > 60) seekTime = 5; // Long video? Take 5th second
           
-          if (!isFinite(duration)) {
-              // Streaming or corrupt duration
-              video.currentTime = 1; // Try to force a seek to trigger loading
-          } else {
-              // We have duration, now try to get thumbnail
-              // Seek to 20% or 2s to avoid black intro
-              let seekTime = Math.min(2, duration / 5); 
-              if (duration > 60) seekTime = 5; 
-              video.currentTime = seekTime;
-          }
+          video.currentTime = seekTime;
       };
 
-      // --- STAGE 2: Frame Ready (Capture Thumbnail) ---
+      // 2. Seeked -> Capture Frame
       video.onseeked = () => {
           try {
-              if (isResolved) return;
-
               const canvas = document.createElement('canvas');
               canvas.width = video.videoWidth || 640;
               canvas.height = video.videoHeight || 360;
@@ -96,27 +79,36 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               if (ctx) {
                   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                   
+                  // Optional: Check brightness to ensure not black frame?
+                  // Skipping for performance/simplicity now.
+
                   canvas.toBlob(blob => {
+                      clearTimeout(timeout);
+                      cleanup();
                       const file = blob ? new File([blob], "thumbnail.jpg", { type: "image/jpeg" }) : null;
-                      const duration = (video.duration && isFinite(video.duration)) ? video.duration : 0;
-                      finish(file, duration);
-                  }, 'image/jpeg', 0.75); // Slightly lower quality for speed
+                      const duration = video.duration && isFinite(video.duration) ? video.duration : 0;
+                      resolve({ thumbnail: file, duration });
+                  }, 'image/jpeg', 0.8);
               } else {
-                  finish(null, video.duration || 0);
+                  throw new Error("Canvas failed");
               }
           } catch (e) {
               console.error("Frame capture error", e);
-              finish(null, video.duration || 0);
+              clearTimeout(timeout);
+              cleanup();
+              resolve({ thumbnail: null, duration: video.duration || 0 });
           }
       };
 
-      // Error Handling (e.g., codec not supported by browser)
       video.onerror = (e) => {
-          console.warn("Video load error (Codec likely unsupported):", e);
-          finish(null, 0); // Return 0 duration so user can manually edit
+          console.error("Video load error", e);
+          clearTimeout(timeout);
+          cleanup();
+          resolve({ thumbnail: null, duration: 0 }); // Return empty on hard error
       };
 
       // Start loading
       video.src = videoUrl;
+      video.load();
   });
 };

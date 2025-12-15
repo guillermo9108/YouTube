@@ -172,7 +172,7 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
   if (!shouldLoad) {
       return (
           <div className="w-full h-full snap-start snap-always shrink-0 bg-black flex items-center justify-center relative">
-              <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover opacity-30 blur-md" loading="lazy" />
+              <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover opacity-30 blur-md" />
               <Loader2 className="animate-spin text-slate-500" />
           </div>
       );
@@ -354,6 +354,10 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
     </div>
   );
 }, (prev, next) => {
+    // Only re-render if:
+    // 1. It becomes active or inactive
+    // 2. It needs to load or unload
+    // 3. The video ID changed (data update)
     return (
         prev.isActive === next.isActive &&
         prev.shouldLoad === next.shouldLoad &&
@@ -395,6 +399,7 @@ export default function Shorts() {
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
+                // Get index from dataset to be 100% accurate
                 const index = Number((entry.target as HTMLElement).dataset.index);
                 if (!isNaN(index)) {
                      setActiveIndex(index);
@@ -403,14 +408,18 @@ export default function Shorts() {
         });
     }, {
         root: container,
-        threshold: 0.55 // Threshold to trigger slide change
+        threshold: 0.55 // Slightly higher threshold to avoid flipping too early
     });
 
+    // Observe children
     Array.from(container.children).forEach((child) => observer.observe(child as Element));
 
     return () => observer.disconnect();
   }, [videos]);
 
+  // Virtualization Window Optimizations for NAS: 
+  // 1. Widen the window (Active +/- 2) to keep DOM elements around longer.
+  // 2. Control PRELOAD carefully. Only Active gets 'auto'. Next gets 'metadata' (to not kill bandwidth).
   return (
     <div 
       ref={containerRef}
@@ -424,16 +433,18 @@ export default function Shorts() {
       </div>
 
       {videos.map((video, idx) => {
-          // Window Logic - Widened window for smoother scroll experience
+          // Window Logic - Widened to 2 for smoother DOM handling
           const distance = Math.abs(idx - activeIndex);
           const shouldLoad = distance <= 2; 
           
           const isActive = idx === activeIndex;
           const isNext = idx === activeIndex + 1;
 
-          // Optimization: Fully preload the active video AND the next video.
-          // This ensures that when the user swipes up, the next video plays instantly.
-          const preloadStrategy = isActive || isNext ? "auto" : "none";
+          // NAS Bandwidth protection: 
+          // Only fully buffer the ACTIVE video.
+          // Fetch metadata for NEXT video (so cover displays).
+          // Do NOT fetch PREVIOUS or far videos.
+          const preloadStrategy = isActive ? "auto" : (isNext ? "metadata" : "none");
 
           return (
             <div key={video.id} data-index={idx} className="w-full h-full snap-start snap-always">
