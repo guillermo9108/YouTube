@@ -119,7 +119,6 @@ try {
         case 'scan_ftp_recursive': video_ftp_scan_recursive($pdo, $input); break;
         case 'smart_organize': video_smart_organize($pdo); break;
         case 'rectify_titles': video_rectify_titles($pdo, $input); break;
-        case 'batch_update_categories': video_batch_update_categories($pdo, $input); break; // NEW
 
         case 'has_purchased': interact_has_purchased($pdo, $_GET['userId'], $_GET['videoId']); break;
         case 'purchase_video': interact_purchase($pdo, $input); break;
@@ -161,6 +160,8 @@ try {
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
         case 'search_external': admin_search_external($pdo, $input); break;
         case 'admin_get_real_stats': admin_get_real_stats($pdo); break;
+        
+        case 'admin_ai_organize': admin_ai_organize($pdo, $input); break; // NEW
 
         case 'get_marketplace_items': market_get_items($pdo); break;
         case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;

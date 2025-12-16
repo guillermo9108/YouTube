@@ -1,63 +1,79 @@
 
-# Historial de Actualizaciones - StreamPay
+# Historial de Actualizaciones Técnicas - StreamPay
 
-## Versión 1.4 (Actual) - Optimización de Rendimiento y NAS
+## v1.6.0 - Consolidación de Módulos Administrativos y Core Streaming
 
-Esta versión se centra en la capacidad de ejecutar la plataforma en hardware modesto (NAS, Raspberry Pi, Hosting Compartido) moviendo la carga de procesamiento pesado del servidor al cliente y mejorando la lógica de archivos.
+Esta versión estabiliza el núcleo de reproducción para servidores locales e integra lógica de negocio avanzada en todos los paneles de administración.
 
-### 🎥 Reproducción de Video Local
-*   **Método:** Proxy de Streaming PHP con soporte de Rangos de Bytes (Byte-Range Requests).
-*   **Ubicación:** Función `streamVideo` en `api/functions_utils.php`.
-*   **Detalles Técnicos:**
-    *   En lugar de servir el archivo estático (que a menudo falla por restricciones de seguridad del navegador con rutas locales o permisos de NAS) o cargar el archivo completo en memoria RAM, el script actúa como un servidor de streaming inteligente.
-    *   El backend intercepta las cabeceras HTTP `Range` enviadas por el navegador (ej. `bytes=0-102400`).
-    *   Abre el archivo local en modo binario (`rb`) y busca (`fseek`) la posición exacta solicitada.
-    *   Envía el fragmento de datos (Chunk) con el código de estado `206 Partial Content`.
-    *   **Resultado:** Permite reproducción instantánea, "seeking" (saltar a cualquier punto) fluido y soporte para archivos masivos (4K/MKV) consumiendo apenas unos KB de RAM en el servidor.
+### 🚀 Core: Motor de Streaming y Procesamiento
 
-### 🖼️ Extracción de Miniaturas y Duración
-*   **Método:** Procesamiento en el Cliente (Client-Side Canvas & HTML5 Video API).
-*   **Ubicación:** Componentes `GridProcessor.tsx` (para escaneo local) y `utils/videoGenerator.ts` (para subidas).
-*   **Detalles Técnicos:**
-    *   **Anteriormente:** Se dependía de FFmpeg en el servidor, lo cual era lento y colapsaba la CPU en servidores modestos.
-    *   **Actualmente:**
-        1.  El navegador carga el video (o el stream local) en un elemento `<video>` oculto en memoria.
-        2.  **Duración:** Se lee la propiedad nativa `video.duration` del elemento HTML5 una vez cargados los metadatos.
-        3.  **Miniatura:** Se fuerza al video a buscar (`seek`) el segundo `1.5` (para evitar pantallas negras iniciales). Se usa un elemento `<canvas>` HTML5 para "dibujar" el fotograma actual del video (`ctx.drawImage`).
-        4.  El canvas se convierte en un archivo binario JPG (`canvas.toBlob`) y se envía al servidor para guardarlo.
-    *   **Resultado:** Cero carga de CPU para el servidor en tareas de transcodificación.
+#### 1. Proxy de Streaming PHP (Backend)
+*   **Objetivo:** Permitir reproducción de archivos locales (`/volume1/...`, `C:\...`) que los navegadores bloquean por seguridad, y soportar formatos no nativos (MKV/AVI).
+*   **Implementación Técnica:**
+    *   **Byte-Range Requests:** Soporte completo para cabeceras HTTP `Range`. El servidor abre el archivo en modo binario (`rb`), salta al byte solicitado con `fseek` y sirve solo el fragmento necesario (Chunk de 256KB).
+    *   **Limpieza de Buffer:** Implementación crítica de `ob_end_clean()` para eliminar cualquier "basura" (warnings, espacios) antes de enviar los headers de video, evitando errores de corrupción.
+    *   **MIME Spoofing:** Se fuerza `Content-Type: video/mp4` para contenedores `.mkv`, `.avi` y `.mov`, engañando al navegador para que decodifique el stream H.264/H.265 interno.
+    *   **Cache Busting:** Se añade `&t=timestamp` a las URLs de stream para evitar que el navegador cachee errores 404/500 previos.
 
-### 📂 Organización Inteligente (Smart Organizer v2)
-*   **Método:** Análisis Jerárquico de Rutas con Bloqueo de Categoría.
-*   **Ubicación:** Función `smartParseFilename` en `api/functions_utils.php`.
-*   **Lógica de Prioridad:**
-    1.  **Análisis de Ancestros (Prioridad Máxima):** Escanea las carpetas Padre, Abuela y Bisabuela. Si encuentra coincidencia con una Categoría Personalizada o Estándar (ej. "Action Movies"), asigna esa categoría y activa un **Bloqueo (Lock)**.
-    2.  **Detección de Episodios:** Si no hay bloqueo, busca patrones de series (`S01E01`, `1x01`) en el nombre del archivo para asignar "SERIES".
-    3.  **Fallback por Duración:** Si no hay coincidencias de texto ni carpetas, clasifica basándose en la duración del video (Shorts < 3min, Películas > 45min).
+#### 2. Generación de Metadatos Client-Side (Frontend)
+*   **Objetivo:** Eliminar la carga de CPU del servidor (evitando FFmpeg) delegando el procesamiento al navegador del administrador.
+*   **Implementación Técnica:**
+    *   **Canvas Capture:** Se carga el video en un elemento HTMLVideoElement en memoria, se busca el segundo 1.5, y se dibuja en un Canvas 2D.
+    *   **Blob Conversion:** El canvas se convierte a Blob JPEG y se sube al servidor mediante `XMLHttpRequest` o `fetch`.
+    *   **Cola Secuencial:** El `GridProcessor` y `AdminLibrary` manejan una cola para procesar un video a la vez y no saturar la red.
 
 ---
 
-## Versión 1.3 - E-commerce y VIP
+### 🎛️ Detalle de Implementaciones por Módulo (Admin)
 
-### 🛒 Marketplace P2P
-*   Sistema completo de compra/venta de productos físicos entre usuarios.
-*   Gestión de stock, estados de pedido (Pendiente/Enviado) y reseñas.
-*   Integración del saldo virtual para pagos de productos.
+#### 1. Biblioteca (AdminLibrary)
+*   **Paso 1 (Indexado):**
+    *   Uso de `RecursiveDirectoryIterator` en PHP para escanear estructuras de carpetas profundas (NAS).
+    *   Filtrado de archivos de sistema (ej. `@eaDir` en Synology) y validación de codificación UTF-8 en rutas.
+*   **Paso 2 (Extracción):**
+    *   Interfaz de reproducción automática oculta que recorre la lista de videos pendientes ("PENDING").
+    *   Detección automática de rutas locales para enrutarlas por el Proxy de Streaming.
+*   **Paso 3 (Organización Inteligente):**
+    *   **Regex Parser:** Limpieza de nombres de archivo (eliminación de tags como `1080p`, `x264`, `www.`).
+    *   **Folder Mapping:** Detección de estructura de carpetas para categorizar automáticamente (ej. carpeta "Peliculas" -> Categoría MOVIES).
+*   **Paso 5 (AI Organization):**
+    *   Integración con **Google Gemini 1.5 Flash**. Se envían lotes de títulos JSON y la IA devuelve la categorización semántica óptima.
 
-### 👑 Sistema VIP
-*   Implementación de membresías temporales (Días de acceso ilimitado).
-*   Implementación de paquetes de recarga con bonificación.
-*   Integración con pasarela de pago Tropipay.
+#### 2. Finanzas (AdminFinance)
+*   **Sistema de Aprobación ACID:**
+    *   Transacciones atómicas para aprobar solicitudes de saldo/VIP. Si falla el registro en el historial, no se acredita el saldo.
+    *   Registro dual: Actualización de la tabla `users` (balance/vipExpiry) e inserción en `transactions` (historial inmutable).
+*   **Simulador de Proyecciones:**
+    *   Algoritmo en Frontend que proyecta ingresos a 12 meses.
+    *   Variables ajustables: Crecimiento de usuarios, Tasa de conversión, Ventas del Admin vs Comisiones P2P.
+    *   Visualización mediante gráficos SVG generados dinámicamente.
+
+#### 3. Configuración (AdminConfig)
+*   **Gestión de Planes VIP:**
+    *   Editor visual de objetos JSON almacenados en `system_settings`.
+    *   Soporte para dos tipos de planes: `ACCESS` (Días ilimitados) y `BALANCE` (Recarga de saldo con % de bono).
+*   **Integración de Pagos:**
+    *   Configuración de credenciales API (Client ID/Secret) para **Tropipay**.
+    *   Generación de referencias de pago únicas (`VP-UserId-PlanId-Time`) para conciliación automática via Webhook o retorno.
+
+#### 4. Mantenimiento (AdminMaintenance)
+*   **Limpieza de Huérfanos:**
+    *   Script que lista todos los archivos físicos en `uploads/` y los compara contra los registros en la base de datos.
+    *   Eliminación física (`unlink`) de archivos sin referencia SQL para recuperar espacio.
+*   **Smart Cleaner:**
+    *   Consulta SQL ponderada: `(views + (likes * 5) - (dislikes * 10))`.
+    *   Identifica contenido de bajo rendimiento antiguo para sugerir su eliminación.
+
+#### 5. FTP Remoto (AdminFtp)
+*   **Conector Pasivo:** Cliente FTP PHP configurado en modo pasivo (`ftp_pasv`) para atravesar NATs y Firewalls.
+*   **Indexación Remota:** Permite agregar videos a la base de datos guardando la ruta remota (`ftp://...`) en lugar de descargar el archivo. El sistema luego hace streaming "on-the-fly" desde el FTP origen al usuario final.
 
 ---
 
-## Versión 1.2 - Core y Economía
+## Versiones Anteriores
 
-### 💰 Sistema de Economía Cerrada (Saldo)
-*   Billetera virtual interna.
-*   Historial de transacciones inmutable.
-*   Sistema de comisiones configurables para el administrador (Revenue Share).
-
-### ☁️ Gestor de Archivos FTP
-*   Capacidad de conectarse a servidores FTP remotos.
-*   Indexación de archivos remotos sin descarga (Streaming directo desde FTP).
+### v1.5.0 - Estructura Base PWA
+*   Arquitectura React + Vite + TypeScript.
+*   Sistema de Base de Datos MariaDB.
+*   Módulo de E-commerce (Marketplace) integrado.
+*   API RESTful en PHP nativo.

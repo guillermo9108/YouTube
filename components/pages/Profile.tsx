@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from '../Router';
 import { db } from '../../services/db';
 import { SaleRecord, Video, Transaction, VideoCategory } from '../../types';
-import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck, PlusCircle, Package, MapPin, Phone, TrendingUp } from 'lucide-react';
+import { Wallet, History, Settings2, Clock, PlayCircle, DownloadCloud, ChevronRight, Camera, Shield, User as UserIcon, Tag, Save, Truck, PlusCircle, Package, MapPin, Phone, TrendingUp, Video as VideoIcon, DollarSign, Upload } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 
 export default function Profile() {
@@ -68,10 +68,17 @@ export default function Profile() {
   }, [user]);
 
   useEffect(() => {
-      if (user && tab === 'SALES') {
+      if (user && (tab === 'SALES' || tab === 'OVERVIEW')) {
           db.getSales(user.id).then(setSales);
       }
   }, [user, tab]);
+
+  // Calculated Stats
+  const stats = useMemo(() => {
+      const totalSpent = transactions.filter(t => t.type === 'PURCHASE' && t.buyerId === user?.id).reduce((acc, t) => acc + Number(t.amount), 0);
+      const totalEarned = sales.reduce((acc, s) => acc + (Number(s.amount) - Number(s.adminFee || 0)), 0);
+      return { totalSpent, totalEarned };
+  }, [transactions, sales, user]);
 
   if (!user) return null;
 
@@ -209,123 +216,152 @@ export default function Profile() {
             </div>
         </div>
 
-        {/* Request Content Button */}
-        <Link to="/requests" className="block bg-slate-900 p-5 rounded-2xl border border-slate-800 hover:border-red-500/50 hover:bg-slate-900/80 transition-all group shadow-lg">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-red-600/20 text-red-500 flex items-center justify-center border border-red-500/20 group-hover:scale-110 transition-transform">
-                        <DownloadCloud size={24} />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-white text-lg">Peticiones</h3>
-                        <p className="text-slate-400 text-sm">Solicita contenido de YouTube</p>
-                    </div>
-                </div>
-                <ChevronRight className="text-slate-600 group-hover:text-white transition-colors" />
-            </div>
-        </Link>
-
-        {/* Settings Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-            <h3 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
-                <PlayCircle size={16} className="text-indigo-400" /> Límite Auto-Compra
-            </h3>
-            <p className="text-xs text-slate-500 mb-3">Precio máximo para comprar sin preguntar al ver series.</p>
-            <div className="flex gap-2">
-                <input 
-                    type="number" 
-                    min="0"
-                    value={autoLimit}
-                    onChange={(e) => setAutoLimit(parseInt(e.target.value))}
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
-                />
-                <button onClick={handleAutoLimitChange} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                    Guardar
-                </button>
+                <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">Videos Subidos</div>
+                <div className="text-xl font-bold text-white flex items-center gap-2">
+                    {myVideos.length} <VideoIcon size={16} className="text-indigo-400"/>
+                </div>
             </div>
-            </div>
-
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-            <div className="flex justify-between items-center cursor-pointer mb-2" onClick={() => setShowBulk(!showBulk)}>
-                <div className="flex items-center gap-2 text-slate-200 font-semibold text-sm">
-                <Settings2 size={16} className="text-indigo-400" /> Precios Masivos (Videos)
+                <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">Ingresos Totales</div>
+                <div className="text-xl font-bold text-emerald-400 flex items-center gap-2">
+                    +{stats.totalEarned.toFixed(0)} <TrendingUp size={16}/>
                 </div>
-                <span className="text-indigo-400 text-xs">{showBulk ? 'Cerrar' : 'Abrir'}</span>
             </div>
-            
-            {showBulk ? (
-                <div className="mt-2">
-                <p className="text-xs text-slate-500 mb-2">Pon precio a todos tus {myVideos.length} videos.</p>
-                <div className="flex gap-2">
-                    <input 
-                    type="number" 
-                    min="1"
-                    value={bulkPrice}
-                    onChange={(e) => setBulkPrice(parseInt(e.target.value))}
-                    className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
-                    />
-                    <button onClick={handleBulkUpdate} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-sm font-medium">
-                    Aplicar
-                    </button>
+            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">Gastado</div>
+                <div className="text-xl font-bold text-slate-300 flex items-center gap-2">
+                    -{stats.totalSpent.toFixed(0)} <DollarSign size={16}/>
                 </div>
-                </div>
-            ) : (
-                <p className="text-xs text-slate-500">Actualiza todos los precios de una vez.</p>
-            )}
             </div>
+            <Link to="/requests" className="bg-slate-900 p-4 rounded-xl border border-slate-800 hover:border-indigo-500 transition-colors flex flex-col justify-center items-center group">
+                <DownloadCloud size={24} className="text-purple-400 mb-1 group-hover:scale-110 transition-transform"/>
+                <div className="text-[10px] font-bold text-slate-300 uppercase">Peticiones</div>
+            </Link>
         </div>
 
-        <div>
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Clock size={18} /> Ver Más Tarde</h3>
-            {watchLaterVideos.length === 0 ? (
-            <div className="bg-slate-900 rounded-xl p-6 text-center text-slate-500 text-sm border border-slate-800">Lista vacía.</div>
-            ) : (
-            <div className="grid grid-cols-1 gap-3">
-                {watchLaterVideos.map(v => (
-                <Link key={v.id} to={`/watch/${v.id}`} className="flex items-center gap-3 bg-slate-900 p-3 rounded-lg border border-slate-800 hover:border-indigo-500 transition-colors">
-                    <img src={v.thumbnailUrl} alt={v.title} className="w-16 h-10 object-cover rounded bg-slate-800" />
-                    <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-medium text-slate-200 truncate">{v.title}</h4>
-                        <p className="text-xs text-slate-500">{v.creatorName}</p>
-                    </div>
-                    <div className="text-xs font-bold text-amber-400">{v.price} $</div>
-                </Link>
-                ))}
-            </div>
-            )}
-        </div>
-
-        <div>
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><History size={18} /> Historial Transacciones</h3>
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden max-h-60 overflow-y-auto">
-            {transactions.length === 0 ? (
-                <div className="p-6 text-center text-slate-500 text-sm">Sin transacciones.</div>
-            ) : (
-                <div className="divide-y divide-slate-800">
-                {transactions.map((tx: Transaction) => {
-                    const isIncoming = tx.type === 'DEPOSIT' || tx.creatorId === user.id;
-                    const isSystem = tx.type === 'DEPOSIT';
-                    const isMarket = tx.type === 'MARKETPLACE';
-                    
-                    return (
-                    <div key={tx.id} className="p-4 flex justify-between items-center">
-                        <div>
-                        <div className="font-medium text-slate-200 text-sm">
-                            {isSystem ? 'Depósito Admin' : (isMarket ? (isIncoming ? 'Venta Marketplace' : 'Compra Marketplace') : (isIncoming ? 'Venta Video' : 'Compra Video'))}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                            {new Date(tx.timestamp * 1000).toLocaleString()}
-                        </div>
-                        </div>
-                        <div className={`font-mono font-bold text-sm ${isIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {isIncoming ? '+' : '-'}{Number(tx.amount).toFixed(2)}
-                        </div>
-                    </div>
-                    );
-                })}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* My Videos Section */}
+            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden flex flex-col max-h-[500px]">
+                <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                    <h3 className="font-bold text-white flex items-center gap-2"><VideoIcon size={18} className="text-indigo-400"/> Mis Videos</h3>
+                    <Link to="/upload" className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded-full flex items-center gap-1">
+                        <Upload size={12}/> Subir
+                    </Link>
                 </div>
-            )}
+                
+                {myVideos.length === 0 ? (
+                    <div className="p-10 text-center text-slate-500 text-sm">No has subido videos.</div>
+                ) : (
+                    <div className="overflow-y-auto flex-1 p-2 space-y-2">
+                        {myVideos.map(v => (
+                            <div key={v.id} className="flex gap-3 bg-slate-950/50 p-2 rounded-lg border border-slate-800/50">
+                                <div className="w-20 h-12 bg-black rounded overflow-hidden shrink-0 relative">
+                                    <img src={v.thumbnailUrl} className="w-full h-full object-cover opacity-80" />
+                                </div>
+                                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                    <div className="text-sm font-bold text-white truncate">{v.title}</div>
+                                    <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                                        <span>{v.views} vistas</span>
+                                        <span>{new Date(v.createdAt * 1000).toLocaleDateString()}</span>
+                                        <span className="text-emerald-400 font-bold">{v.price} $</span>
+                                    </div>
+                                </div>
+                                <Link to={`/watch/${v.id}`} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white self-center">
+                                    <ChevronRight size={16}/>
+                                </Link>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Transactions & Settings */}
+            <div className="space-y-4">
+                {/* Auto Purchase Settings */}
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <h3 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
+                        <PlayCircle size={16} className="text-indigo-400" /> Límite Auto-Compra
+                    </h3>
+                    <p className="text-xs text-slate-500 mb-3">Precio máximo para comprar sin preguntar al ver series.</p>
+                    <div className="flex gap-2">
+                        <input 
+                            type="number" 
+                            min="0"
+                            value={autoLimit}
+                            onChange={(e) => setAutoLimit(parseInt(e.target.value))}
+                            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500"
+                        />
+                        <button onClick={handleAutoLimitChange} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                            Guardar
+                        </button>
+                    </div>
+                </div>
+
+                {/* Bulk Prices */}
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <div className="flex justify-between items-center cursor-pointer mb-2" onClick={() => setShowBulk(!showBulk)}>
+                        <div className="flex items-center gap-2 text-slate-200 font-semibold text-sm">
+                        <Settings2 size={16} className="text-indigo-400" /> Precios Masivos
+                        </div>
+                        <span className="text-indigo-400 text-xs">{showBulk ? 'Cerrar' : 'Abrir'}</span>
+                    </div>
+                    {showBulk && (
+                        <div className="mt-2 animate-in slide-in-from-top-2">
+                            <p className="text-xs text-slate-500 mb-2">Pon precio a todos tus videos.</p>
+                            <div className="flex gap-2">
+                                <input 
+                                type="number" 
+                                min="1"
+                                value={bulkPrice}
+                                onChange={(e) => setBulkPrice(parseInt(e.target.value))}
+                                className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500"
+                                />
+                                <button onClick={handleBulkUpdate} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-sm font-medium">
+                                Aplicar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Transaction List */}
+                <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden flex flex-col max-h-[300px]">
+                    <div className="p-3 border-b border-slate-800 bg-slate-950 font-bold text-sm text-white flex items-center gap-2">
+                        <History size={16}/> Historial Reciente
+                    </div>
+                    <div className="overflow-y-auto p-0">
+                        {transactions.length === 0 ? (
+                            <div className="p-6 text-center text-slate-500 text-sm">Sin transacciones.</div>
+                        ) : (
+                            <div className="divide-y divide-slate-800">
+                            {transactions.map((tx: Transaction) => {
+                                const isIncoming = tx.type === 'DEPOSIT' || tx.creatorId === user.id;
+                                const isSystem = tx.type === 'DEPOSIT';
+                                const isMarket = tx.type === 'MARKETPLACE';
+                                
+                                return (
+                                <div key={tx.id} className="p-3 flex justify-between items-center hover:bg-slate-800/30 transition-colors">
+                                    <div>
+                                    <div className="font-medium text-slate-200 text-xs">
+                                        {isSystem ? 'Depósito Admin' : (isMarket ? (isIncoming ? 'Venta Marketplace' : 'Compra Marketplace') : (isIncoming ? 'Venta Video' : 'Compra Video'))}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500">
+                                        {new Date(tx.timestamp * 1000).toLocaleString()}
+                                    </div>
+                                    </div>
+                                    <div className={`font-mono font-bold text-xs ${isIncoming ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {isIncoming ? '+' : '-'}{Number(tx.amount).toFixed(2)}
+                                    </div>
+                                </div>
+                                );
+                            })}
+                            </div>
+                        )}
+                    </div>
+                </div>
             </div>
         </div>
       </>

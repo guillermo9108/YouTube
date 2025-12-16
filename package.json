@@ -1,4 +1,3 @@
-
 {
   "name": "streampay-pwa",
   "private": true,
@@ -10,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "*",
     "lucide-react": "^0.555.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

@@ -75,24 +75,18 @@ function admin_handle_vip_request($pdo, $input) {
         $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$action, $reqId]);
         
         if ($action === 'APPROVED') {
-            // Log Revenue for System
-            // Since this is an approved payment (from Tropipay or Manual), we consider the Plan Price as System Income
             $revenue = floatval($plan['price']);
             $tid = uniqid('rev_');
-            // 'creatorId' null means system.
             $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP_REVENUE')")
                 ->execute([$tid, $req['userId'], $revenue, time()]);
 
             if ($plan['type'] === 'BALANCE') {
-                // Balance Bonus Logic
                 $baseAmount = floatval($plan['price']);
                 $bonus = floatval($plan['bonusPercent'] ?? 0);
                 $total = $baseAmount + ($baseAmount * ($bonus / 100));
                 
                 $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $req['userId']]);
                 
-                // Transaction Log for user credit (Not revenue, but 'VIP' type usually means bonus credit in this context, or we can use 'DEPOSIT')
-                // Let's keep existing logic:
                 $tid2 = uniqid('tx_vip_');
                 $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP')")
                     ->execute([$tid2, $req['userId'], $total, time()]);
@@ -100,17 +94,14 @@ function admin_handle_vip_request($pdo, $input) {
                 $msg = "Tu recarga VIP de {$total} Saldo ha sido aprobada.";
                 
             } else {
-                // Access Logic (Time based)
                 $days = intval($plan['durationDays']);
                 $seconds = $days * 86400;
                 $now = time();
                 
-                // Get current expiry
                 $stmtUser = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
                 $stmtUser->execute([$req['userId']]);
                 $currentExpiry = intval($stmtUser->fetchColumn());
                 
-                // Extend if already active, else start from now
                 $newStart = ($currentExpiry > $now) ? $currentExpiry : $now;
                 $newExpiry = $newStart + $seconds;
                 
@@ -119,12 +110,10 @@ function admin_handle_vip_request($pdo, $input) {
                 $msg = "Tu Membresía VIP '{$plan['name']}' está activa hasta " . date('d/m/Y', $newExpiry);
             }
             
-            // Notify User
             $nid = uniqid('n_');
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
                 ->execute([$nid, $req['userId'], $msg, time()]);
         } else {
-             // Notify Rejection
             $nid = uniqid('n_');
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
                 ->execute([$nid, $req['userId'], "Tu solicitud VIP fue rechazada.", time()]);
@@ -139,7 +128,6 @@ function admin_handle_vip_request($pdo, $input) {
 }
 
 function admin_get_global_transactions($pdo) {
-    // Fetch last 100 transactions of any type
     $sql = "SELECT t.*, b.username as buyerName, s.username as sellerName, v.title as videoTitle, m.title as itemTitle
             FROM transactions t
             LEFT JOIN users b ON t.buyerId = b.id
@@ -150,10 +138,7 @@ function admin_get_global_transactions($pdo) {
     $stmt = $pdo->query($sql);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Calculate Total System Revenue
-    // 1. Commissions from interactions/sales (adminFee column)
     $commissions = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn();
-    // 2. Direct revenue from VIP/Recharges (type = VIP_REVENUE)
     $vipRevenue = $pdo->query("SELECT SUM(amount) FROM transactions WHERE type='VIP_REVENUE'")->fetchColumn();
     
     $totalRevenue = floatval($commissions) + floatval($vipRevenue);
@@ -161,10 +146,9 @@ function admin_get_global_transactions($pdo) {
     respond(true, ['history' => $rows, 'systemRevenue' => $totalRevenue]);
 }
 
-// Admin Action: Handle Request
 function admin_handle_balance_request($pdo, $input) {
     $reqId = $input['requestId'];
-    $action = $input['action']; // APPROVED or REJECTED
+    $action = $input['action']; 
     $adminId = $input['adminId'];
     
     $pdo->beginTransaction();
@@ -178,20 +162,16 @@ function admin_handle_balance_request($pdo, $input) {
         $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$action, $reqId]);
         
         if ($action === 'APPROVED') {
-            // Add Balance
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
             
-            // Log Transaction
             $tid = uniqid('tx_dep_');
             $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'DEPOSIT')")
                 ->execute([$tid, $req['userId'], $req['amount'], time()]);
                 
-            // Notify User
             $nid = uniqid('n_');
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
                 ->execute([$nid, $req['userId'], "Your request for {$req['amount']} Saldo was approved.", time()]);
         } else {
-             // Notify Rejection
             $nid = uniqid('n_');
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
                 ->execute([$nid, $req['userId'], "Your request for {$req['amount']} Saldo was declined.", time()]);
@@ -205,9 +185,7 @@ function admin_handle_balance_request($pdo, $input) {
     }
 }
 
-// Database Cleanup: Removes DB rows if file is missing (Safe logic)
 function admin_cleanup_videos($pdo) {
-    // SECURITY: Ensure the upload directory is actually accessible before deleting DB records
     if (!is_dir(UPLOAD_DIR) || !is_readable(UPLOAD_DIR)) {
         respond(false, null, 'Error crítico: El directorio de videos no es accesible. Operación abortada para prevenir pérdida de datos.');
     }
@@ -218,8 +196,6 @@ function admin_cleanup_videos($pdo) {
     
     foreach ($videos as $v) {
         $path = str_replace('api/', '', $v['videoUrl']);
-        
-        // SECURITY: Only delete if inside uploads directory
         if (strpos($path, 'uploads/') !== 0) continue;
         
         if (!file_exists($path)) {
@@ -230,88 +206,60 @@ function admin_cleanup_videos($pdo) {
     respond(true, ['deleted' => $deleted]);
 }
 
-// Filesystem Cleanup: Removes physical files if not in DB (Orphaned files)
 function admin_cleanup_system_files($pdo) {
-    set_time_limit(600); // 10 minutes for large libraries
+    set_time_limit(600); 
     $stats = ['videos' => 0, 'thumbnails' => 0, 'avatars' => 0, 'market' => 0];
     
-    // Helper to extract clean filename from DB path
-    $cleanName = function($path) {
-        return basename($path);
-    };
+    $cleanName = function($path) { return basename($path); };
 
-    // --- 1. CLEAN VIDEOS ---
     $validVideos = [];
     $stmt = $pdo->query("SELECT videoUrl FROM videos");
-    while ($path = $stmt->fetchColumn()) {
-        $validVideos[] = $cleanName($path);
-    }
+    while ($path = $stmt->fetchColumn()) { $validVideos[] = $cleanName($path); }
     
     if (is_dir(UPLOAD_DIR) && is_readable(UPLOAD_DIR)) {
         $files = scandir(UPLOAD_DIR);
         foreach ($files as $f) {
             if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
-            if (!in_array($f, $validVideos)) {
-                if (unlink(UPLOAD_DIR . $f)) $stats['videos']++;
-            }
+            if (!in_array($f, $validVideos)) { if (unlink(UPLOAD_DIR . $f)) $stats['videos']++; }
         }
     }
 
-    // --- 2. CLEAN THUMBNAILS ---
     $validThumbs = [];
     $stmt = $pdo->query("SELECT thumbnailUrl FROM videos");
-    while ($path = $stmt->fetchColumn()) {
-        $validThumbs[] = $cleanName($path);
-    }
+    while ($path = $stmt->fetchColumn()) { $validThumbs[] = $cleanName($path); }
     
     if (is_dir(THUMB_DIR) && is_readable(THUMB_DIR)) {
         $files = scandir(THUMB_DIR);
         foreach ($files as $f) {
             if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess' || $f === 'default.jpg') continue;
-            // Thumbnails usually have IDs, but let's be strict
-            if (!in_array($f, $validThumbs)) {
-                if (unlink(THUMB_DIR . $f)) $stats['thumbnails']++;
-            }
+            if (!in_array($f, $validThumbs)) { if (unlink(THUMB_DIR . $f)) $stats['thumbnails']++; }
         }
     }
 
-    // --- 3. CLEAN AVATARS (Users + Marketplace History) ---
     $validAvatars = [];
     $stmt = $pdo->query("SELECT avatarUrl FROM users WHERE avatarUrl IS NOT NULL");
-    while ($path = $stmt->fetchColumn()) {
-        $validAvatars[] = $cleanName($path);
-    }
-    // Also include marketplace buyer/seller avatars cache if any (usually linked to users, but check notifications/messages if implemented)
+    while ($path = $stmt->fetchColumn()) { $validAvatars[] = $cleanName($path); }
     
     if (is_dir(AVATAR_DIR) && is_readable(AVATAR_DIR)) {
         $files = scandir(AVATAR_DIR);
         foreach ($files as $f) {
             if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
-            if (!in_array($f, $validAvatars)) {
-                if (unlink(AVATAR_DIR . $f)) $stats['avatars']++;
-            }
+            if (!in_array($f, $validAvatars)) { if (unlink(AVATAR_DIR . $f)) $stats['avatars']++; }
         }
     }
 
-    // --- 4. CLEAN MARKETPLACE IMAGES ---
     $validMarket = [];
     $stmt = $pdo->query("SELECT images FROM marketplace_items");
     while ($json = $stmt->fetchColumn()) {
         $imgs = json_decode($json, true);
-        if (is_array($imgs)) {
-            foreach ($imgs as $img) {
-                $validMarket[] = $cleanName($img);
-            }
-        }
+        if (is_array($imgs)) { foreach ($imgs as $img) { $validMarket[] = $cleanName($img); } }
     }
     
     if (is_dir(MARKET_DIR) && is_readable(MARKET_DIR)) {
         $files = scandir(MARKET_DIR);
         foreach ($files as $f) {
             if ($f === '.' || $f === '..' || $f === 'index.php' || $f === '.htaccess') continue;
-            if (!in_array($f, $validMarket)) {
-                if (unlink(MARKET_DIR . $f)) $stats['market']++;
-            }
+            if (!in_array($f, $validMarket)) { if (unlink(MARKET_DIR . $f)) $stats['market']++; }
         }
     }
 
@@ -321,11 +269,7 @@ function admin_cleanup_system_files($pdo) {
 function admin_repair_db($pdo) {
     require_once 'functions_schema.php';
     $schema = getAppSchema();
-    
-    foreach ($schema as $tableName => $def) {
-        syncTable($pdo, $tableName, $def);
-    }
-    
+    foreach ($schema as $tableName => $def) { syncTable($pdo, $tableName, $def); }
     respond(true);
 }
 
@@ -334,42 +278,32 @@ function admin_smart_cleaner_preview($pdo, $input) {
     $percent = $input['percentage'];
     $safeDays = $input['safeHarborDays'];
     
-    // Build Query
     $where = "WHERE 1=1";
     if ($cat !== 'ALL') $where .= " AND category = '$cat'";
     
-    // Safe Harbor
     $cutoff = time() - ($safeDays * 86400);
     $where .= " AND createdAt < $cutoff";
     
-    // Score: Views + (Likes * 5) - (Dislikes * 10)
-    // We want to delete LOWEST scores.
     $sql = "SELECT *, (views + (likes * 5) - (dislikes * 10)) as score FROM videos $where ORDER BY score ASC";
     $stmt = $pdo->query($sql);
     $allCandidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     $count = count($allCandidates);
     $limit = floor($count * ($percent / 100));
-    // Ensure we don't delete everything if list is small but percentage is high
     if ($limit < 1 && $percent > 0 && $count > 0) $limit = 1;
     
     $toDelete = array_slice($allCandidates, 0, $limit);
     
-    // Estimate space (very rough, average 50MB if file missing)
     $space = 0;
     foreach ($toDelete as $v) {
         $path = str_replace('api/', '', $v['videoUrl']);
         if (file_exists($path)) $space += filesize($path);
-        else $space += 50 * 1024 * 1024; // Fallback estimate
+        else $space += 50 * 1024 * 1024;
     }
     
     respond(true, [
         'preview' => $toDelete,
-        'stats' => [
-            'totalVideos' => $count,
-            'videosToDelete' => count($toDelete),
-            'spaceReclaimed' => round($space / 1024 / 1024, 2) . " MB"
-        ]
+        'stats' => ['totalVideos' => $count, 'videosToDelete' => count($toDelete), 'spaceReclaimed' => round($space / 1024 / 1024, 2) . " MB"]
     ]);
 }
 
@@ -381,13 +315,9 @@ function admin_smart_cleaner_execute($pdo, $input) {
         $stmt->execute([$id]);
         $v = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($v) {
-            // Delete Files
             $vidPath = str_replace('api/', '', $v['videoUrl']);
-            // SECURITY: Only delete if inside uploads directory
             if (file_exists($vidPath) && strpos($vidPath, 'uploads/') === 0) unlink($vidPath);
-            
             $thumbPath = str_replace('api/', '', $v['thumbnailUrl']);
-            // Only delete if local upload (not http) and safe
             if (strpos($thumbPath, 'http') === false && file_exists($thumbPath) && strpos($thumbPath, 'uploads/') === 0) unlink($thumbPath);
             
             $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
@@ -397,11 +327,143 @@ function admin_smart_cleaner_execute($pdo, $input) {
     respond(true, ['deleted' => $deleted]);
 }
 
+// --- AI ORGANIZER (GEMINI API) ---
+function admin_ai_organize($pdo, $input) {
+    set_time_limit(180); // 3 minutes timeout
+    
+    $stmt = $pdo->query("SELECT geminiKey, customCategories, proxyUrl FROM system_settings LIMIT 1");
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (empty($settings['geminiKey'])) {
+        respond(false, null, "Falta la Gemini API Key en Configuración.");
+    }
+
+    $apiKey = $settings['geminiKey'];
+    $proxy = $settings['proxyUrl'] ?? null;
+    $customCats = json_decode($settings['customCategories'] ?? '[]', true);
+    
+    $availableCategories = [
+        'GENERAL', 'MOVIES', 'SERIES', 'MUSIC', 'ADULT', 'KIDS', 'NEWS', 'SPORTS', 'GAMING', 'DOCUMENTARY', 'OTHER'
+    ];
+    if (!empty($customCats)) {
+        $availableCategories = array_unique(array_merge($availableCategories, $customCats));
+    }
+    
+    $catString = implode(', ', $availableCategories);
+
+    // Fetch batch of videos
+    $sql = "SELECT id, title, videoUrl FROM videos WHERE category IN ('GENERAL', 'OTHER', 'PROCESSING') ORDER BY id DESC LIMIT 50";
+    $stmt = $pdo->query($sql);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (empty($videos)) {
+        respond(true, ['processed' => 0, 'message' => 'No hay videos pendientes de clasificar.']);
+    }
+
+    $prompt = "You are a video organizer assistant. I will provide a JSON list of video files.
+    Your task is to classify each video into one of these exact categories: [{$catString}].
+    Rules:
+    1. Analyze the 'title' and the folder structure in 'videoUrl'.
+    2. If path contains 'series', 'season', classify as SERIES.
+    3. If path contains 'movies', classify as MOVIES.
+    4. Return ONLY a JSON object where keys are IDs and values are categories.
+    5. Valid JSON only.
+
+    Input Data:
+    " . json_encode($videos);
+
+    // List of models to try in order (Fallback mechanism for 404/403)
+    $candidateModels = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-001', 'gemini-pro'];
+    
+    $finalResponse = null;
+    $lastError = "";
+
+    foreach ($candidateModels as $model) {
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=" . $apiKey;
+        
+        $postBody = [
+            "contents" => [["parts" => [["text" => $prompt]]]]
+        ];
+
+        // Legacy models (gemini-pro) do not support responseMimeType
+        if (strpos($model, '1.5') !== false) {
+            $postBody["generationConfig"] = ["responseMimeType" => "application/json"];
+        }
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postBody));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        
+        // FIX: Disable SSL verification for local dev/NAS environments
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        
+        // PROXY SUPPORT
+        if (!empty($proxy)) {
+            curl_setopt($ch, CURLOPT_PROXY, $proxy);
+        }
+        
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch); 
+        curl_close($ch);
+
+        if ($httpCode === 200 && $response) {
+            $finalResponse = $response;
+            break; // Success!
+        } else {
+            $lastError = "Model $model failed ($httpCode). ";
+            if ($response) {
+                // Check if 404 Model not found
+                if ($httpCode === 404) { continue; } // Try next model
+            }
+        }
+    }
+
+    if (!$finalResponse) {
+        respond(false, null, "All models failed. Last error: " . $lastError);
+    }
+
+    $jsonRes = json_decode($finalResponse, true);
+    $rawText = $jsonRes['candidates'][0]['content']['parts'][0]['text'] ?? '';
+    
+    // Clean Markdown
+    $rawText = str_replace(['```json', '```'], '', $rawText);
+    
+    // Fallback parser if not strict JSON (e.g. from gemini-pro)
+    $firstBrace = strpos($rawText, '{');
+    $lastBrace = strrpos($rawText, '}');
+    if ($firstBrace !== false && $lastBrace !== false) {
+        $rawText = substr($rawText, $firstBrace, $lastBrace - $firstBrace + 1);
+    }
+
+    $classification = json_decode(trim($rawText), true);
+
+    if (!$classification || !is_array($classification)) {
+        respond(false, null, "Failed to parse AI response.");
+    }
+
+    // Update DB
+    $updatedCount = 0;
+    $updateStmt = $pdo->prepare("UPDATE videos SET category = ? WHERE id = ?");
+    
+    foreach ($classification as $vidId => $cat) {
+        $upperCat = strtoupper(trim($cat));
+        if (in_array($upperCat, $availableCategories)) {
+            $updateStmt->execute([$upperCat, $vidId]);
+            $updatedCount++;
+        }
+    }
+
+    respond(true, ['processed' => $updatedCount, 'details' => $classification]);
+}
+
 function admin_get_requests($pdo, $status) {
     $sql = "SELECT r.*, u.username FROM requests r LEFT JOIN users u ON r.userId = u.id";
     if ($status && $status !== 'ALL') $sql .= " WHERE r.status = '$status'";
     $sql .= " ORDER BY r.createdAt DESC";
-    
     $stmt = $pdo->query($sql);
     respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
@@ -411,7 +473,6 @@ function admin_update_request_status($pdo, $input) {
     $status = $input['status'];
     $pdo->prepare("UPDATE requests SET status = ? WHERE id = ?")->execute([$status, $id]);
     
-    // Notify User
     $stmt = $pdo->prepare("SELECT userId, query FROM requests WHERE id = ?");
     $stmt->execute([$id]);
     $req = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -421,7 +482,6 @@ function admin_update_request_status($pdo, $input) {
         $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
             ->execute([$nid, $req['userId'], "Tu petición '{$req['query']}' ha sido completada y añadida.", time()]);
     }
-    
     respond(true);
 }
 
@@ -441,13 +501,13 @@ function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $s = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    // Ensure we always return settings, even if default is missing
     if (!$s) {
         $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
         $s = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     }
 
-    // Default object structure to prevent frontend "empty" issues
+    $catPrices = json_decode($s['categoryPrices'] ?? '{}', true) ?: new stdClass();
+
     $settings = [
         'id' => 1,
         'downloadStartTime' => $s['downloadStartTime'] ?? '01:00',
@@ -458,9 +518,10 @@ function admin_get_settings($pdo) {
         'maxResolution' => intval($s['maxResolution'] ?? 1080),
         'pexelsKey' => $s['pexelsKey'] ?? '',
         'pixabayKey' => $s['pixabayKey'] ?? '',
+        'geminiKey' => $s['geminiKey'] ?? '', 
         'ytDlpPath' => $s['ytDlpPath'] ?? '',
         'enableYoutube' => (bool)($s['enableYoutube'] ?? 0),
-        'categoryPrices' => json_decode($s['categoryPrices'] ?? '{}', true) ?: [],
+        'categoryPrices' => $catPrices,
         'customCategories' => json_decode($s['customCategories'] ?? '[]', true) ?: [],
         'localLibraryPath' => $s['localLibraryPath'] ?? '',
         'ftpSettings' => json_decode($s['ftpSettings'] ?? '{}', true) ?: [],
@@ -470,18 +531,14 @@ function admin_get_settings($pdo) {
         'paymentInstructions' => $s['paymentInstructions'] ?? '',
         'tropipayClientId' => $s['tropipayClientId'] ?? '',
         'tropipayClientSecret' => $s['tropipayClientSecret'] ?? '',
-        'currencyConversion' => floatval($s['currencyConversion']) ?? 1.00
+        'currencyConversion' => floatval($s['currencyConversion']) ?? 1.00,
+        'proxyUrl' => $s['proxyUrl'] ?? ''
     ];
     
-    // DEFAULT VIP PLANS IF EMPTY
     if (empty($settings['vipPlans'])) {
         $settings['vipPlans'] = [
             ['id' => 'v1', 'name' => 'VIP Mensual', 'price' => 1000, 'type' => 'ACCESS', 'durationDays' => 30, 'description' => 'Acceso total a todos los videos por 30 días.'],
-            ['id' => 'v2', 'name' => 'VIP Quincenal', 'price' => 800, 'type' => 'ACCESS', 'durationDays' => 15, 'description' => 'Acceso total por 15 días.'],
-            ['id' => 'v3', 'name' => 'VIP Semanal', 'price' => 500, 'type' => 'ACCESS', 'durationDays' => 7, 'description' => 'Acceso total por 7 días.'],
-            ['id' => 'r1', 'name' => 'Recarga +20%', 'price' => 300, 'type' => 'BALANCE', 'bonusPercent' => 20, 'description' => 'Recibes 360 de Saldo.'],
-            ['id' => 'r2', 'name' => 'Recarga +10%', 'price' => 200, 'type' => 'BALANCE', 'bonusPercent' => 10, 'description' => 'Recibes 220 de Saldo.'],
-            ['id' => 'r3', 'name' => 'Recarga +5%', 'price' => 100, 'type' => 'BALANCE', 'bonusPercent' => 5, 'description' => 'Recibes 105 de Saldo.']
+            ['id' => 'r1', 'name' => 'Recarga +20%', 'price' => 300, 'type' => 'BALANCE', 'bonusPercent' => 20, 'description' => 'Recibes 360 de Saldo.']
         ];
     }
 
@@ -491,7 +548,6 @@ function admin_get_settings($pdo) {
 function admin_update_settings($pdo, $input) {
     $s = $input['settings'];
     
-    // Ensure table has vipPlans column
     require_once 'functions_schema.php';
     syncTable($pdo, 'system_settings', getAppSchema()['system_settings']);
 
@@ -504,6 +560,7 @@ function admin_update_settings($pdo, $input) {
             maxResolution = ?, 
             pexelsKey = ?, 
             pixabayKey = ?,
+            geminiKey = ?,
             ytDlpPath = ?,
             enableYoutube = ?,
             categoryPrices = ?,
@@ -516,7 +573,8 @@ function admin_update_settings($pdo, $input) {
             paymentInstructions = ?,
             tropipayClientId = ?,
             tropipayClientSecret = ?,
-            currencyConversion = ?
+            currencyConversion = ?,
+            proxyUrl = ?
             WHERE id = 1";
             
     $pdo->prepare($sql)->execute([
@@ -528,9 +586,10 @@ function admin_update_settings($pdo, $input) {
         intval($s['maxResolution'] ?? 1080), 
         $s['pexelsKey'] ?? '', 
         $s['pixabayKey'] ?? '',
+        $s['geminiKey'] ?? '',
         $s['ytDlpPath'] ?? '',
         isset($s['enableYoutube']) ? ($s['enableYoutube'] ? 1 : 0) : 0,
-        json_encode($s['categoryPrices'] ?? []),
+        json_encode($s['categoryPrices'] ?? new stdClass()), 
         json_encode($s['customCategories'] ?? []),
         $s['localLibraryPath'] ?? '',
         json_encode($s['ftpSettings'] ?? []),
@@ -540,7 +599,8 @@ function admin_update_settings($pdo, $input) {
         $s['paymentInstructions'] ?? '',
         $s['tropipayClientId'] ?? '',
         $s['tropipayClientSecret'] ?? '',
-        floatval($s['currencyConversion']) ?? 1.00
+        floatval($s['currencyConversion']) ?? 1.00,
+        $s['proxyUrl'] ?? ''
     ]);
     respond(true);
 }
@@ -556,17 +616,13 @@ function admin_search_external($pdo, $input) {
     if ($source === 'YOUTUBE') {
         $results = get_youtube_video($query, $keys);
     } else {
-        // STOCK LOGIC (Pexels/Pixabay) - Simplified for brevity
         if (!empty($keys['pixabayKey'])) {
              $url = "https://pixabay.com/api/videos/?key={$keys['pixabayKey']}&q=" . urlencode($query);
              $res = @file_get_contents($url);
              if ($res) {
                  $data = json_decode($res, true);
                  foreach ($data['hits'] as $hit) {
-                     // FIX: If userImageURL is missing, use empty string to let frontend handle it, 
-                     // or use local default. Ideally frontend handles empty.
                      $thumb = $hit['userImageURL'] ?: "";
-                     
                      $results[] = [
                          'id' => 'pix_' . $hit['id'],
                          'source' => 'Pixabay',
@@ -590,18 +646,11 @@ function admin_process_queue($pdo) {
 function admin_get_real_stats($pdo) {
     $stats = [];
     $stats['userCount'] = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
-    
-    // Admin ID
     $stmt = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1");
     $adminId = $stmt->fetchColumn();
-    
-    // Admin Sales last 30 days
     $monthAgo = time() - (30*24*60*60);
     $stats['adminVideoSales'] = $pdo->query("SELECT COUNT(*) FROM transactions WHERE creatorId = '$adminId' AND type='PURCHASE' AND timestamp > $monthAgo")->fetchColumn();
-    
-    // Avg Deposit (DEPOSIT and VIP_REVENUE are cash in)
     $stats['avgDeposit'] = $pdo->query("SELECT AVG(amount) FROM transactions WHERE type IN ('DEPOSIT', 'VIP_REVENUE')")->fetchColumn() ?: 0;
-    
     respond(true, $stats);
 }
 ?>

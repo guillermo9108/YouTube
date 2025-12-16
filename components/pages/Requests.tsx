@@ -38,10 +38,16 @@ export default function Requests() {
     
     try {
         const hits = await db.searchExternal(query, source);
-        if (hits && hits.length > 0) setResults(hits);
-        else setError("No results found. Please check Admin API Keys configuration.");
+        if (hits && hits.length > 0) {
+            setResults(hits);
+        } else {
+            // Si el backend devuelve array vacío sin error, es que no encontró nada.
+            // Si falla la ejecución, db.searchExternal lanzará excepción (catch)
+            setError("No se encontraron videos para esta búsqueda.");
+        }
     } catch (e: any) {
-        setError("Search failed: " + e.message);
+        // Aquí mostramos el error real del backend (ej: "yt-dlp execution failed: ...")
+        setError(e.message || "Error desconocido al buscar.");
     } finally {
         setLoadingSearch(false);
     }
@@ -185,7 +191,7 @@ export default function Requests() {
             </form>
           </div>
 
-          {error && <div className="bg-red-900/20 text-red-400 p-4 rounded-xl text-sm border border-red-500/20 mb-6">{error}</div>}
+          {error && <div className="bg-red-900/20 text-red-400 p-4 rounded-xl text-sm border border-red-500/20 mb-6 font-mono whitespace-pre-wrap">{error}</div>}
 
           {results.length > 0 && (
              <div className="space-y-4">
