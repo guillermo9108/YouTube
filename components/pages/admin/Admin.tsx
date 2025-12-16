@@ -3,15 +3,15 @@ import React, { useState } from 'react';
 import { User as UserIcon, Wallet, Store, Settings, Database, Wrench, TrendingUp, Network, DownloadCloud } from 'lucide-react';
 
 // Sub Components
-import AdminUsers from './admin/AdminUsers';
-import AdminFinance from './admin/AdminFinance';
-import AdminMarket from './admin/AdminMarket';
-import AdminConfig from './admin/AdminConfig';
-import AdminLibrary from './admin/AdminLibrary';
-import AdminMaintenance from './admin/AdminMaintenance';
-import AdminAnalytics from './admin/AdminAnalytics';
-import AdminFtp from './admin/AdminFtp';
-import AdminRequests from './admin/AdminRequests';
+import AdminUsers from './AdminUsers';
+import AdminFinance from './AdminFinance';
+import AdminMarket from './AdminMarket';
+import AdminConfig from './AdminConfig';
+import AdminLibrary from './AdminLibrary';
+import AdminMaintenance from './AdminMaintenance';
+import AdminAnalytics from './AdminAnalytics';
+import AdminFtp from './AdminFtp';
+import AdminRequests from './AdminRequests';
 
 // Define explicit type for Tabs to avoid "string is not assignable to type..." errors
 type TabID = 'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'FTP' | 'MAINTENANCE' | 'ANALYTICS' | 'REQUESTS';

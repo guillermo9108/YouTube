@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
@@ -15,19 +15,21 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const [status, setStatus] = useState('Cargando...');
     const processedRef = useRef(false);
 
-    // CRITICAL FIX: Build stream URL manually for local files
-    // Add timestamp to prevent caching of previous 404/500 errors
-    let streamSrc = video.videoUrl;
-    const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
+    // CRITICAL FIX: Memoize URL to prevent re-generation on every render (which resets the video)
+    const streamSrc = useMemo(() => {
+        let src = video.videoUrl;
+        const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
 
-    if (isLocal) {
-        // If it's already a stream URL, append cache buster, else build it
-        if (streamSrc.includes('action=stream')) {
-             streamSrc += `&t=${Date.now()}`;
-        } else {
-             streamSrc = `api/index.php?action=stream&id=${video.id}&t=${Date.now()}`;
+        if (isLocal) {
+            // If it's already a stream URL, append cache buster, else build it
+            if (src.includes('action=stream')) {
+                 src += `&t=${Date.now()}`;
+            } else {
+                 src = `api/index.php?action=stream&id=${video.id}&t=${Date.now()}`;
+            }
         }
-    }
+        return src;
+    }, [video.id, video.videoUrl, (video as any).isLocal]);
 
     useEffect(() => {
         const vid = videoRef.current;
@@ -57,7 +59,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         };
         
         startPlay();
-    }, [video.id, streamSrc]); 
+    }, [streamSrc]); 
 
     const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;

@@ -6,7 +6,8 @@ import Home from './components/pages/Home';
 import Watch from './components/pages/Watch';
 import Upload from './components/pages/Upload';
 import Profile from './components/pages/Profile';
-import Admin from './components/pages/Admin';
+// Correct import path for Admin component (located in subfolder)
+import Admin from './components/pages/admin/Admin';
 import Shorts from './components/pages/Shorts';
 import Setup from './components/pages/Setup';
 import Requests from './components/pages/Requests';
