@@ -1,8 +1,6 @@
 
 <?php
 // DEFINICIÓN DEL ESQUEMA MAESTRO
-// Encapsulado en función para evitar problemas de scope global
-
 function getAppSchema() {
     return [
         'users' => [
@@ -38,7 +36,8 @@ function getAppSchema() {
                 'category' => "VARCHAR(50) DEFAULT 'OTHER'",
                 'duration' => 'INT DEFAULT 0',
                 'fileHash' => 'VARCHAR(32)',
-                'isLocal' => 'TINYINT(1) DEFAULT 0'
+                'isLocal' => 'TINYINT(1) DEFAULT 0',
+                'processing_attempts' => 'INT DEFAULT 0'
             ]
         ],
         'marketplace_items' => [
