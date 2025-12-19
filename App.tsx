@@ -81,14 +81,18 @@ const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
   const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
-    db.checkInstallation().then((res) => {
-       // Only force setup if we are explicitly told "not_installed".
-       // If "error" (offline/network issue), we assume installed to let offline cache work.
-       if (res.status === 'not_installed') {
-           setNeedsSetup(true);
-       }
-       setCheckDone(true);
-    });
+    db.checkInstallation()
+      .then((res) => {
+         if (res.status === 'not_installed') {
+             setNeedsSetup(true);
+         }
+         setCheckDone(true);
+      })
+      .catch(() => {
+         // En caso de error crítico, asumimos que no está instalado para mostrar el Setup
+         setNeedsSetup(true);
+         setCheckDone(true);
+      });
   }, []);
 
   if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Conectando...</div>;

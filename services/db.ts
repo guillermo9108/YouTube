@@ -7,12 +7,10 @@ import {
     Notification as AppNotification
 } from '../types';
 
-/* Fix: Wrapped the request method into a class and implemented missing methods called throughout the app. */
 class DBService {
     private baseUrl = 'api/index.php';
     private homeDirty = false;
 
-    /* Fix: Implemented the generic request helper used for API communication. */
     public async request<T>(query: string, options?: RequestInit): Promise<T> {
         const token = localStorage.getItem('sp_session_token');
         const headers: any = options?.headers || {};
@@ -35,7 +33,6 @@ class DBService {
                 throw new Error(e.message || "Invalid JSON response");
             }
         } catch (error) {
-            /* Fix: Added offline fallback for video listing as requested in original snippet. */
             if (!options || options.method === 'GET' || !options.method) {
                 if (query.includes('action=get_videos')) {
                     return this.getOfflineVideos() as any;
@@ -79,29 +76,33 @@ class DBService {
     public async updateUserProfile(userId: string, data: Partial<User>): Promise<void> {
         return this.request<void>(`action=update_profile&userId=${userId}`, {
             method: 'POST',
-            body: JSON.stringify(data)
+            body: JSON.stringify({ updates: data })
         });
     }
 
     public async uploadAvatar(userId: string, file: File): Promise<void> {
         const formData = new FormData();
+        formData.append('userId', userId);
         formData.append('avatar', file);
-        return this.request<void>(`action=upload_avatar&userId=${userId}`, {
+        return this.request<void>(`action=upload_avatar`, {
             method: 'POST',
             body: formData
         });
     }
 
     public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> {
-        return this.request<void>(`action=change_password&userId=${userId}`, {
+        return this.request<void>(`action=change_password`, {
             method: 'POST',
-            body: JSON.stringify({ oldPass, newPass })
+            body: JSON.stringify({ userId, oldPass, newPass })
         });
     }
 
     public async heartbeat(userId: string, token: string): Promise<boolean> {
         try {
-            return await this.request<boolean>(`action=heartbeat&userId=${userId}`);
+            return await this.request<boolean>(`action=heartbeat`, {
+                method: 'POST',
+                body: JSON.stringify({ userId, token })
+            });
         } catch (e) {
             return true;
         }
@@ -127,7 +128,10 @@ class DBService {
     }
 
     public async deleteVideo(videoId: string, userId: string): Promise<void> {
-        return this.request<void>(`action=delete_video&id=${videoId}&userId=${userId}`, { method: 'POST' });
+        return this.request<void>(`action=delete_video`, {
+            method: 'POST',
+            body: JSON.stringify({ id: videoId, userId })
+        });
     }
 
     public async uploadVideo(title: string, description: string, price: number, category: string, duration: number, user: User, file: File, thumbnail: File | null, onProgress: (percent: number, loaded: number, total: number) => void): Promise<void> {
@@ -137,7 +141,7 @@ class DBService {
         formData.append('price', price.toString());
         formData.append('category', category);
         formData.append('duration', duration.toString());
-        formData.append('userId', user.id);
+        formData.append('creatorId', user.id);
         formData.append('video', file);
         if (thumbnail) formData.append('thumbnail', thumbnail);
 
@@ -176,11 +180,17 @@ class DBService {
     }
 
     public async rateVideo(userId: string, videoId: string, type: 'like' | 'dislike'): Promise<UserInteraction> {
-        return this.request<UserInteraction>(`action=rate_video&userId=${userId}&videoId=${videoId}&type=${type}`, { method: 'POST' });
+        return this.request<UserInteraction>(`action=rate_video`, {
+            method: 'POST',
+            body: JSON.stringify({ userId, videoId, rating: type })
+        });
     }
 
     public async markWatched(userId: string, videoId: string): Promise<void> {
-        return this.request<void>(`action=mark_watched&userId=${userId}&videoId=${videoId}`, { method: 'POST' });
+        return this.request<void>(`action=mark_watched`, {
+            method: 'POST',
+            body: JSON.stringify({ userId, videoId })
+        });
     }
 
     public async getUserActivity(userId: string): Promise<{watched: string[], liked: string[]}> {
@@ -192,14 +202,15 @@ class DBService {
     }
 
     public async addComment(userId: string, videoId: string, text: string): Promise<Comment> {
-        return this.request<Comment>(`action=add_comment&userId=${userId}&videoId=${videoId}`, {
+        return this.request<Comment>(`action=add_comment`, {
             method: 'POST',
-            body: JSON.stringify({ text })
+            body: JSON.stringify({ userId, videoId, text })
         });
     }
 
     public async checkSubscription(userId: string, creatorId: string): Promise<boolean> {
-        return this.request<boolean>(`action=check_subscription&userId=${userId}&creatorId=${creatorId}`);
+        const res = await this.request<{isSubscribed: boolean}>(`action=check_subscription&userId=${userId}&creatorId=${creatorId}`);
+        return res.isSubscribed;
     }
 
     public async getSubscriptions(userId: string): Promise<string[]> {
@@ -207,16 +218,23 @@ class DBService {
     }
 
     public async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
-        return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe&userId=${userId}&creatorId=${creatorId}`, { method: 'POST' });
+        return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe`, {
+            method: 'POST',
+            body: JSON.stringify({ userId, creatorId })
+        });
     }
 
     // Finance & VIP
     public async hasPurchased(userId: string, videoId: string): Promise<boolean> {
-        return this.request<boolean>(`action=has_purchased&userId=${userId}&videoId=${videoId}`);
+        const res = await this.request<{hasPurchased: boolean}>(`action=has_purchased&userId=${userId}&videoId=${videoId}`);
+        return res.hasPurchased;
     }
 
     public async purchaseVideo(userId: string, videoId: string): Promise<void> {
-        return this.request<void>(`action=purchase_video&userId=${userId}&videoId=${videoId}`, { method: 'POST' });
+        return this.request<void>(`action=purchase_video`, {
+            method: 'POST',
+            body: JSON.stringify({ userId, videoId })
+        });
     }
 
     public async getSales(userId: string): Promise<SaleRecord[]> {
@@ -228,33 +246,46 @@ class DBService {
     }
 
     public async requestBalance(userId: string, amount: number): Promise<void> {
-        return this.request<void>(`action=request_balance&userId=${userId}&amount=${amount}`, { method: 'POST' });
+        return this.request<void>(`action=request_balance`, {
+            method: 'POST',
+            body: JSON.stringify({ userId, amount })
+        });
     }
 
     public async requestVip(userId: string, plan: VipPlan, paymentRef: string): Promise<void> {
-        return this.request<void>(`action=request_vip&userId=${userId}`, {
+        return this.request<void>(`action=request_vip`, {
             method: 'POST',
-            body: JSON.stringify({ plan, paymentRef })
+            body: JSON.stringify({ userId, plan, paymentRef })
         });
     }
 
     public async verifyPayment(userId: string, ref: string): Promise<void> {
-        return this.request<void>(`action=verify_payment&userId=${userId}&ref=${ref}`, { method: 'POST' });
-    }
-
-    public async createPaymentLink(userId: string, plan: VipPlan): Promise<string> {
-        return this.request<string>(`action=create_payment_link&userId=${userId}`, {
+        return this.request<void>(`action=verify_payment`, {
             method: 'POST',
-            body: JSON.stringify({ plan })
+            body: JSON.stringify({ userId, reference: ref })
         });
     }
 
+    public async createPaymentLink(userId: string, plan: VipPlan): Promise<string> {
+        const res = await this.request<{paymentUrl: string}>(`action=create_payment_link`, {
+            method: 'POST',
+            body: JSON.stringify({ userId, plan })
+        });
+        return res.paymentUrl;
+    }
+
     public async updatePricesBulk(userId: string, price: number): Promise<void> {
-        return this.request<void>(`action=update_prices_bulk&userId=${userId}&price=${price}`, { method: 'POST' });
+        return this.request<void>(`action=update_prices_bulk`, {
+            method: 'POST',
+            body: JSON.stringify({ creatorId: userId, newPrice: price })
+        });
     }
 
     public async updateOrderStatus(userId: string, txId: string, status: string): Promise<void> {
-        return this.request<void>(`action=update_order_status&userId=${userId}&txId=${txId}&status=${status}`, { method: 'POST' });
+        return this.request<void>(`action=update_order_status`, {
+            method: 'POST',
+            body: JSON.stringify({ userId, transactionId: txId, status })
+        });
     }
 
     // Marketplace
@@ -274,16 +305,16 @@ class DBService {
     }
 
     public async editListing(id: string, userId: string, data: any): Promise<void> {
-        return this.request<void>(`action=edit_listing&id=${id}&userId=${userId}`, {
+        return this.request<void>(`action=edit_listing`, {
             method: 'POST',
-            body: JSON.stringify(data)
+            body: JSON.stringify({ id, userId, data })
         });
     }
 
     public async checkoutCart(userId: string, items: CartItem[], shipping: any): Promise<void> {
-        return this.request<void>(`action=checkout_cart&userId=${userId}`, {
+        return this.request<void>(`action=checkout_cart`, {
             method: 'POST',
-            body: JSON.stringify({ items, shipping })
+            body: JSON.stringify({ userId, cart: items, shippingDetails: shipping })
         });
     }
 
@@ -292,15 +323,24 @@ class DBService {
     }
 
     public async addReview(itemId: string, userId: string, rating: number, comment: string): Promise<void> {
-        return this.request<void>(`action=add_review&itemId=${itemId}&userId=${userId}`, {
+        return this.request<void>(`action=add_review`, {
             method: 'POST',
-            body: JSON.stringify({ rating, comment })
+            body: JSON.stringify({ itemId, userId, rating, comment })
         });
     }
 
     // Admin
     public async checkInstallation(): Promise<{status: string}> {
-        return this.request<{status: string}>(`action=check_installation`);
+        try {
+            return await this.request<{status: string}>(`action=check_installation`);
+        } catch (e: any) {
+            // Si el backend responde con error 404 o el mensaje "Not installed", asumimos not_installed
+            if (e.message && e.message.includes('Not installed')) {
+                return { status: 'not_installed' };
+            }
+            // En caso de error de red, asumimos instalado para no bloquear el modo offline si existe caché
+            return { status: 'installed' }; 
+        }
     }
 
     public async verifyDbConnection(config: any): Promise<boolean> {
@@ -324,7 +364,7 @@ class DBService {
     public async updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> {
         return this.request<void>(`action=update_system_settings`, {
             method: 'POST',
-            body: JSON.stringify(settings)
+            body: JSON.stringify({ settings })
         });
     }
 
@@ -333,15 +373,24 @@ class DBService {
     }
 
     public async handleBalanceRequest(adminId: string, reqId: string, action: 'APPROVED' | 'REJECTED'): Promise<void> {
-        return this.request<void>(`action=handle_balance_request&adminId=${adminId}&reqId=${reqId}&status=${action}`, { method: 'POST' });
+        return this.request<void>(`action=handle_balance_request`, { 
+            method: 'POST',
+            body: JSON.stringify({ adminId, requestId: reqId, action })
+        });
     }
 
     public async handleVipRequest(adminId: string, reqId: string, action: 'APPROVED' | 'REJECTED'): Promise<void> {
-        return this.request<void>(`action=handle_vip_request&adminId=${adminId}&reqId=${reqId}&status=${action}`, { method: 'POST' });
+        return this.request<void>(`action=handle_vip_request`, { 
+            method: 'POST',
+            body: JSON.stringify({ adminId, requestId: reqId, action })
+        });
     }
 
     public async adminAddBalance(adminId: string, userId: string, amount: number): Promise<void> {
-        return this.request<void>(`action=admin_add_balance&adminId=${adminId}&userId=${userId}&amount=${amount}`, { method: 'POST' });
+        return this.request<void>(`action=admin_add_balance`, { 
+            method: 'POST',
+            body: JSON.stringify({ adminId, targetUserId: userId, amount })
+        });
     }
 
     public async getGlobalTransactions(): Promise<any> {
@@ -353,11 +402,14 @@ class DBService {
     }
 
     public async adminDeleteListing(itemId: string): Promise<void> {
-        return this.request<void>(`action=admin_delete_listing&id=${itemId}`, { method: 'POST' });
+        return this.request<void>(`action=admin_delete_listing`, {
+            method: 'POST',
+            body: JSON.stringify({ id: itemId })
+        });
     }
 
     public async adminCleanupSystemFiles(): Promise<any> {
-        return this.request<any>(`action=admin_cleanup_files`, { method: 'POST' });
+        return this.request<any>(`action=admin_cleanup_system_files`, { method: 'POST' });
     }
 
     public async adminRepairDb(): Promise<void> {
@@ -365,27 +417,33 @@ class DBService {
     }
 
     public async getSmartCleanerPreview(category: string, percent: number, days: number): Promise<SmartCleanerResult> {
-        return this.request<SmartCleanerResult>(`action=smart_cleaner_preview&category=${category}&percent=${percent}&days=${days}`);
+        return this.request<SmartCleanerResult>(`action=admin_smart_cleaner_preview`, {
+            method: 'POST',
+            body: JSON.stringify({ category, percentage: percent, safeHarborDays: days })
+        });
     }
 
     public async executeSmartCleaner(ids: string[]): Promise<{deleted: number}> {
-        return this.request<{deleted: number}>(`action=execute_smart_cleaner`, {
+        return this.request<{deleted: number}>(`action=admin_smart_cleaner_execute`, {
             method: 'POST',
-            body: JSON.stringify({ ids })
+            body: JSON.stringify({ videoIds: ids })
         });
     }
 
     public async getRealStats(): Promise<any> {
-        return this.request<any>(`action=get_real_stats`);
+        return this.request<any>(`action=admin_get_real_stats`);
     }
 
     // Library & Local
     public async scanLocalLibrary(path: string): Promise<{success: boolean, totalFound: number, newToImport: number, errors?: string[], error?: string}> {
-        return this.request<any>(`action=scan_local_library&path=${encodeURIComponent(path)}`, { method: 'POST' });
+        return this.request<any>(`action=scan_local_library`, { 
+            method: 'POST',
+            body: JSON.stringify({ path })
+        });
     }
 
     public async processScanBatch(): Promise<any> {
-        return this.request<any>(`action=process_scan_batch`, { method: 'POST' });
+        return this.request<any>(`action=process_queue`, { method: 'POST' });
     }
 
     public async getUnprocessedVideos(limit: number, mode: 'normal' | 'random'): Promise<Video[]> {
@@ -405,56 +463,80 @@ class DBService {
     }
 
     public async smartOrganizeLibrary(): Promise<OrganizeResult> {
-        return this.request<OrganizeResult>(`action=smart_organize_library`, { method: 'POST' });
+        return this.request<OrganizeResult>(`action=smart_organize`, { method: 'POST' });
     }
 
     public async rectifyLibraryTitles(lastId: string): Promise<{processed: number, completed: boolean, lastId: string}> {
-        return this.request<any>(`action=rectify_library_titles&lastId=${lastId}`, { method: 'POST' });
+        return this.request<any>(`action=rectify_titles`, { 
+            method: 'POST',
+            body: JSON.stringify({ lastId })
+        });
     }
 
     public async organizeWithAi(): Promise<{processed: number}> {
-        return this.request<{processed: number}>(`action=organize_with_ai`, { method: 'POST' });
+        return this.request<{processed: number}>(`action=admin_ai_organize`, { method: 'POST' });
     }
 
     // External Requests
     public async searchExternal(query: string, source: 'STOCK' | 'YOUTUBE'): Promise<VideoResult[]> {
-        return this.request<VideoResult[]>(`action=search_external&query=${encodeURIComponent(query)}&source=${source}`);
+        return this.request<VideoResult[]>(`action=search_external`, {
+            method: 'POST',
+            body: JSON.stringify({ query, source })
+        });
     }
 
     public async serverImportVideo(url: string): Promise<void> {
-        return this.request<void>(`action=server_import_video&url=${encodeURIComponent(url)}`, { method: 'POST' });
+        return this.request<void>(`action=server_import_video`, {
+            method: 'POST',
+            body: JSON.stringify({ url })
+        });
     }
 
-    public async getRequests(filter: string = 'PENDING'): Promise<ContentRequest[]> {
-        return this.request<ContentRequest[]>(`action=get_requests&filter=${filter}`);
+    public async getRequests(filter: string = 'ALL'): Promise<ContentRequest[]> {
+        return this.request<ContentRequest[]>(`action=get_requests&status=${filter}`);
     }
 
     public async requestContent(userId: string, query: string, useLocalNetwork: boolean): Promise<void> {
-        return this.request<void>(`action=request_content&userId=${userId}`, {
+        return this.request<void>(`action=request_content`, {
             method: 'POST',
-            body: JSON.stringify({ query, useLocalNetwork })
+            body: JSON.stringify({ userId, query, useLocalNetwork })
         });
     }
 
     public async updateRequestStatus(id: string, status: string): Promise<void> {
-        return this.request<void>(`action=update_request_status&id=${id}&status=${status}`, { method: 'POST' });
+        return this.request<void>(`action=admin_update_request_status`, {
+            method: 'POST',
+            body: JSON.stringify({ id, status })
+        });
     }
 
     public async deleteRequest(id: string): Promise<void> {
-        return this.request<void>(`action=delete_request&id=${id}`, { method: 'POST' });
+        return this.request<void>(`action=delete_request`, {
+            method: 'POST',
+            body: JSON.stringify({ requestId: id })
+        });
     }
 
     // FTP
     public async listFtpFiles(path: string): Promise<FtpFile[]> {
-        return this.request<FtpFile[]>(`action=ftp_list&path=${encodeURIComponent(path)}`);
+        return this.request<FtpFile[]>(`action=ftp_list`, {
+            method: 'POST',
+            body: JSON.stringify({ path })
+        });
     }
 
     public async importFtpFile(path: string): Promise<void> {
-        return this.request<void>(`action=ftp_import&path=${encodeURIComponent(path)}`, { method: 'POST' });
+        return this.request<void>(`action=ftp_import`, {
+            method: 'POST',
+            body: JSON.stringify({ path })
+        });
     }
 
     public async scanFtpRecursive(path: string): Promise<{scanned: number, added: number}> {
-        return this.request<any>(`action=ftp_scan_recursive&path=${encodeURIComponent(path)}`, { method: 'POST' });
+        return this.request<any>(`action=scan_ftp_recursive`, {
+            method: 'POST',
+            body: JSON.stringify({ path })
+        });
     }
 
     // Notifications
@@ -463,7 +545,10 @@ class DBService {
     }
 
     public async markNotificationRead(id: string): Promise<void> {
-        return this.request<void>(`action=mark_notification_read&id=${id}`, { method: 'POST' });
+        return this.request<void>(`action=mark_notification_read`, {
+            method: 'POST',
+            body: JSON.stringify({ notifId: id })
+        });
     }
 
     // Cache & Helpers

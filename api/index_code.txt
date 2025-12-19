@@ -39,6 +39,13 @@ define('THUMB_DIR', 'uploads/thumbnails/');
 define('AVATAR_DIR', 'uploads/avatars/');
 define('MARKET_DIR', 'uploads/market/');
 
+function respond($success, $data = null, $error = null) {
+    ob_clean();
+    header('Content-Type: application/json');
+    echo json_encode(['success' => $success, 'data' => $data, 'error' => $error]);
+    exit();
+}
+
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
@@ -49,7 +56,58 @@ register_shutdown_function(function() {
     }
 });
 
+$action = $_GET['action'] ?? null;
+$input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 $configFile = 'db_config.json';
+
+// --- ACCIONES QUE NO REQUIEREN DB CONFIG ---
+if ($action === 'check_installation') {
+    $installed = false;
+    if (file_exists($configFile)) {
+        $config = json_decode(file_get_contents($configFile), true);
+        try {
+            $testPdo = new PDO("mysql:host={$config['host']};port={$config['port']};dbname={$config['name']}", $config['user'], $config['password']);
+            $installed = true;
+        } catch (Exception $e) {}
+    }
+    respond(true, ['status' => $installed ? 'installed' : 'not_installed']);
+}
+
+if ($action === 'verify_db_connection') {
+    try {
+        $host = $input['host'] ?? '127.0.0.1';
+        $pdo = new PDO("mysql:host=$host;port={$input['port']};charset=utf8mb4", $input['username'], $input['password']);
+        respond(true, true);
+    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
+}
+
+if ($action === 'initialize_system') {
+    require_once 'functions_utils.php';
+    // Lógica de instalación (basada en api/install_code.txt)
+    $dbConfig = $input['dbConfig'];
+    $adminUser = $input['adminConfig'];
+    try {
+        $pdo = new PDO("mysql:host={$dbConfig['host']};port={$dbConfig['port']};charset=utf8mb4", $dbConfig['username'], $dbConfig['password']);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbConfig['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $pdo->exec("USE `{$dbConfig['database']}`");
+        $schema = getAppSchema();
+        foreach ($schema as $tableName => $def) { syncTable($pdo, $tableName, $def); }
+        $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
+        $adminId = 'u_' . uniqid();
+        $hash = password_hash($adminUser['password'], PASSWORD_DEFAULT);
+        $stmt = $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater) VALUES (?, ?, ?, 'ADMIN', 999999.00, 100.00, '[]')");
+        $stmt->execute([$adminId, $adminUser['username'], $hash]);
+        file_put_contents($configFile, json_encode(['host'=>$dbConfig['host'],'port'=>$dbConfig['port'],'user'=>$dbConfig['username'],'password'=>$dbConfig['password'],'name'=>$dbConfig['database']]));
+        if (!is_dir('uploads/videos')) mkdir('uploads/videos', 0777, true);
+        if (!is_dir('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
+        if (!is_dir('uploads/avatars')) mkdir('uploads/avatars', 0777, true);
+        if (!is_dir('uploads/market')) mkdir('uploads/market', 0777, true);
+        respond(true, ['message' => 'Installation successful']);
+    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
+}
+
+// --- CHEQUEO DE SEGURIDAD PARA EL RESTO DE ACCIONES ---
 if (!file_exists($configFile)) { respond(false, null, 'Not installed'); }
 $db_config = json_decode(file_get_contents($configFile), true);
 
@@ -66,41 +124,36 @@ require_once 'functions_market.php';
 require_once 'functions_admin.php';
 require_once 'functions_payment.php';
 
-$action = $_GET['action'] ?? null;
-$input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-
 try {
     switch ($action) {
         case 'login': auth_login($pdo, $input); break;
         case 'logout': auth_logout($pdo, $input); break;
         case 'heartbeat': auth_heartbeat($pdo, $input); break;
         case 'register': auth_register($pdo, $input); break;
-        case 'get_user': auth_get_user($pdo, $_GET['id']); break;
-        case 'update_user': auth_update_user($pdo, $input); break;
-        case 'update_avatar': auth_update_avatar($pdo, $input); break;
+        case 'get_user': auth_get_user($pdo, $_GET['userId']); break;
+        case 'update_profile': auth_update_user($pdo, $input); break;
+        case 'upload_avatar': auth_update_avatar($pdo, $input); break;
         case 'change_password': auth_change_password($pdo, $input); break;
         case 'get_all_users': auth_get_all_users($pdo); break;
 
         case 'get_videos': video_get_all($pdo); break;
         case 'get_video': video_get_one($pdo, $_GET['id']); break;
-        case 'get_creator_videos': video_get_by_creator($pdo, $_GET['creatorId']); break;
+        case 'get_videos_by_creator': video_get_by_creator($pdo, $_GET['userId']); break;
         case 'get_related_videos': video_get_related($pdo, $_GET['id']); break;
         case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;
         case 'delete_video': video_delete($pdo, $input); break;
-        case 'repair_thumbnail': video_repair_thumbnail($pdo, $_POST, $_FILES); break;
-        case 'server_import_video': video_server_import($pdo, $input); break;
         case 'scan_local_library': video_scan_local($pdo, $input); break;
         case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
         case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
         case 'update_prices_bulk': video_update_prices_bulk($pdo, $input); break;
-        case 'ftp_list': video_ftp_list($pdo, $input); break;
-        case 'ftp_import': video_ftp_import($pdo, $input); break;
-        case 'scan_ftp_recursive': video_ftp_scan_recursive($pdo, $input); break;
-        case 'smart_organize': video_smart_organize($pdo); break;
-        case 'rectify_titles': video_rectify_titles($pdo, $input); break;
+        case 'ftp_list': video_ftp_list($pdo, $_GET); break;
+        case 'ftp_import': video_ftp_import($pdo, $_GET); break;
+        case 'ftp_scan_recursive': video_ftp_scan_recursive($pdo, $_GET); break;
+        case 'smart_organize_library': video_smart_organize($pdo); break;
+        case 'rectify_library_titles': video_rectify_titles($pdo, $_GET); break;
 
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
-        case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $input); break;
+        case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $_GET); break;
         case 'admin_file_cleanup_execute': admin_file_cleanup_execute($pdo, $input); break;
         case 'admin_organize_physical_files': admin_organize_physical_files($pdo); break;
         case 'admin_transcode_video': admin_transcode_video($pdo, $input); break;
@@ -118,7 +171,7 @@ try {
         case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId']); break;
         case 'get_notifications': interact_get_notifications($pdo, $_GET['userId']); break;
         case 'mark_notification_read': interact_mark_notification_read($pdo, $input); break;
-        case 'get_transactions': interact_get_transactions($pdo, $_GET['userId']); break;
+        case 'get_user_transactions': interact_get_transactions($pdo, $_GET['userId']); break;
         case 'request_balance': user_request_balance($pdo, $input); break;
         
         case 'create_payment_link': payment_create_link($pdo, $input); break;
@@ -126,25 +179,15 @@ try {
         case 'request_vip': request_vip($pdo, $input); break;
 
         case 'admin_add_balance': admin_add_balance($pdo, $input); break;
-        case 'admin_get_balance_requests': admin_get_balance_requests($pdo); break;
-        case 'admin_get_global_transactions': admin_get_global_transactions($pdo); break;
-        case 'admin_handle_balance_request': admin_handle_balance_request($pdo, $input); break;
-        case 'admin_handle_vip_request': admin_handle_vip_request($pdo, $input); break;
-        case 'admin_cleanup_videos': admin_cleanup_videos($pdo); break;
-        case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
-        case 'admin_repair_db': admin_repair_db($pdo); break;
-        case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
-        case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
-        case 'get_requests': admin_get_requests($pdo, $_GET['status'] ?? 'ALL'); break;
-        case 'request_content': admin_request_content($pdo, $input); break;
-        case 'admin_update_request_status': admin_update_request_status($pdo, $input); break;
-        case 'delete_request': admin_delete_request($pdo, $input); break;
-        case 'process_queue': admin_process_queue($pdo); break;
+        case 'get_balance_requests': admin_get_balance_requests($pdo); break;
+        case 'get_global_transactions': admin_get_global_transactions($pdo); break;
+        case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;
+        case 'handle_vip_request': admin_handle_vip_request($pdo, $input); break;
         case 'get_system_settings': admin_get_settings($pdo); break;
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
-        case 'search_external': admin_search_external($pdo, $input); break;
-        case 'admin_get_real_stats': admin_get_real_stats($pdo); break;
-        case 'admin_ai_organize': admin_ai_organize($pdo, $input); break; 
+        case 'search_external': admin_search_external($pdo, $_GET); break;
+        case 'get_real_stats': admin_get_real_stats($pdo); break;
+        case 'organize_with_ai': admin_ai_organize($pdo, $input); break; 
 
         case 'get_marketplace_items': market_get_items($pdo); break;
         case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;
