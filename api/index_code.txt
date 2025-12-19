@@ -1,9 +1,8 @@
-
 <?php
 ob_start();
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
-set_time_limit(0); // Disable timeout for streams
+set_time_limit(0); 
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
@@ -11,48 +10,19 @@ header('Access-Control-Allow-Headers: Content-Type, Range');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { ob_clean(); http_response_code(200); exit(); }
 
-// --- STREAMING HANDLER (TOP PRIORITY) ---
-if (isset($_GET['action']) && $_GET['action'] === 'stream') {
-    $configFile = 'db_config.json';
-    if (file_exists($configFile)) {
-        $db_config = json_decode(file_get_contents($configFile), true);
-        try {
-            $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password']);
-            $vid = $_GET['id'] ?? '';
-            $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ?");
-            $stmt->execute([$vid]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($row) {
-                require_once 'functions_utils.php';
-                streamVideo($row['videoUrl'], $pdo);
-                exit; 
-            }
-        } catch (Exception $e) { http_response_code(500); exit; }
-    }
-    http_response_code(404);
-    exit;
-}
-
-require_once 'functions_schema.php';
-define('UPLOAD_DIR', 'uploads/videos/');
-define('THUMB_DIR', 'uploads/thumbnails/');
-define('AVATAR_DIR', 'uploads/avatars/');
-define('MARKET_DIR', 'uploads/market/');
-
+// --- 1. DEFINICIÓN ÚNICA DE RESPUESTA ---
 function respond($success, $data = null, $error = null) {
-    ob_clean();
+    while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json');
     echo json_encode(['success' => $success, 'data' => $data, 'error' => $error]);
     exit();
 }
 
+// --- 2. CAPTURA DE ERRORES CRÍTICOS ---
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
-        ob_clean();
-        header('Content-Type: application/json');
-        echo json_encode(['success' => false, 'error' => 'Critical PHP Error: ' . $error['message']]);
-        exit;
+        respond(false, null, 'Critical PHP Error: ' . $error['message']);
     }
 });
 
@@ -60,15 +30,23 @@ $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 $configFile = 'db_config.json';
 
-// --- ACCIONES QUE NO REQUIEREN DB CONFIG ---
+// --- 3. ACCIONES PRE-INSTALACIÓN (SIN DEPENDENCIAS) ---
 if ($action === 'check_installation') {
     $installed = false;
     if (file_exists($configFile)) {
-        $config = json_decode(file_get_contents($configFile), true);
-        try {
-            $testPdo = new PDO("mysql:host={$config['host']};port={$config['port']};dbname={$config['name']}", $config['user'], $config['password']);
-            $installed = true;
-        } catch (Exception $e) {}
+        $content = file_get_contents($configFile);
+        $config = json_decode($content, true);
+        if (is_array($config) && isset($config['host'], $config['user'], $config['name'])) {
+            try {
+                $testPdo = new PDO("mysql:host={$config['host']};port={$config['port']};dbname={$config['name']}", $config['user'], $config['password'], [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_TIMEOUT => 2
+                ]);
+                $installed = true;
+            } catch (Exception $e) {
+                // Config existe pero conexión falla
+            }
+        }
     }
     respond(true, ['status' => $installed ? 'installed' : 'not_installed']);
 }
@@ -76,14 +54,36 @@ if ($action === 'check_installation') {
 if ($action === 'verify_db_connection') {
     try {
         $host = $input['host'] ?? '127.0.0.1';
-        $pdo = new PDO("mysql:host=$host;port={$input['port']};charset=utf8mb4", $input['username'], $input['password']);
+        $port = $input['port'] ?? '3306';
+        $pdo = new PDO("mysql:host=$host;port=$port;charset=utf8mb4", $input['username'], $input['password'], [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_TIMEOUT => 5
+        ]);
         respond(true, true);
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
+// --- 4. CARGA DE MÓDULOS (ESTO PUEDE FALLAR SI NO SE HA CONSTRUIDO EL PROYECTO) ---
+$required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
+
+foreach ($required_files as $file) {
+    if (file_exists($file)) {
+        require_once $file;
+    } else {
+        // Si falta un archivo crítico después del setup, respondemos error.
+        if ($action !== 'initialize_system') {
+            respond(false, null, "Missing core component: $file. Please run build script.");
+        }
+    }
+}
+
+define('UPLOAD_DIR', 'uploads/videos/');
+define('THUMB_DIR', 'uploads/thumbnails/');
+define('AVATAR_DIR', 'uploads/avatars/');
+define('MARKET_DIR', 'uploads/market/');
+
+// --- 5. INICIALIZACIÓN DEL SISTEMA ---
 if ($action === 'initialize_system') {
-    require_once 'functions_utils.php';
-    // Lógica de instalación (basada en api/install_code.txt)
     $dbConfig = $input['dbConfig'];
     $adminUser = $input['adminConfig'];
     try {
@@ -91,23 +91,45 @@ if ($action === 'initialize_system') {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbConfig['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         $pdo->exec("USE `{$dbConfig['database']}`");
-        $schema = getAppSchema();
-        foreach ($schema as $tableName => $def) { syncTable($pdo, $tableName, $def); }
+        
+        if (function_exists('getAppSchema')) {
+            $schema = getAppSchema();
+            foreach ($schema as $tableName => $def) { syncTable($pdo, $tableName, $def); }
+        }
+        
         $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
         $adminId = 'u_' . uniqid();
         $hash = password_hash($adminUser['password'], PASSWORD_DEFAULT);
         $stmt = $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater) VALUES (?, ?, ?, 'ADMIN', 999999.00, 100.00, '[]')");
         $stmt->execute([$adminId, $adminUser['username'], $hash]);
+        
         file_put_contents($configFile, json_encode(['host'=>$dbConfig['host'],'port'=>$dbConfig['port'],'user'=>$dbConfig['username'],'password'=>$dbConfig['password'],'name'=>$dbConfig['database']]));
-        if (!is_dir('uploads/videos')) mkdir('uploads/videos', 0777, true);
-        if (!is_dir('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
-        if (!is_dir('uploads/avatars')) mkdir('uploads/avatars', 0777, true);
-        if (!is_dir('uploads/market')) mkdir('uploads/market', 0777, true);
+        
+        foreach (['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market'] as $dir) {
+            if (!is_dir($dir)) mkdir($dir, 0777, true);
+        }
         respond(true, ['message' => 'Installation successful']);
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
-// --- CHEQUEO DE SEGURIDAD PARA EL RESTO DE ACCIONES ---
+// --- 6. HANDLER DE STREAMING (DENTRO DEL FLUJO PRINCIPAL) ---
+if ($action === 'stream') {
+    if (!file_exists($configFile)) respond(false, null, 'Not installed');
+    $db_config = json_decode(file_get_contents($configFile), true);
+    try {
+        $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password']);
+        $vid = $_GET['id'] ?? '';
+        $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ?");
+        $stmt->execute([$vid]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && function_exists('streamVideo')) {
+            streamVideo($row['videoUrl'], $pdo);
+            exit; 
+        }
+    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
+}
+
+// --- 7. CONEXIÓN GLOBAL PARA EL RESTO DE ACCIONES ---
 if (!file_exists($configFile)) { respond(false, null, 'Not installed'); }
 $db_config = json_decode(file_get_contents($configFile), true);
 
@@ -116,14 +138,7 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) { respond(false, null, 'DB Connection Error: ' . $e->getMessage()); }
 
-require_once 'functions_utils.php';
-require_once 'functions_auth.php';
-require_once 'functions_videos.php';
-require_once 'functions_interactions.php';
-require_once 'functions_market.php';
-require_once 'functions_admin.php';
-require_once 'functions_payment.php';
-
+// --- 8. SWITCH DE ACCIONES ---
 try {
     switch ($action) {
         case 'login': auth_login($pdo, $input); break;

@@ -1,11 +1,5 @@
-
 <?php
-function respond($success, $data = null, $error = null) {
-    while (ob_get_level()) ob_end_clean(); 
-    header('Content-Type: application/json');
-    echo json_encode(['success' => $success, 'data' => $data, 'error' => $error]);
-    exit();
-}
+// RESPOND removed from here as it is now in index.php to avoid "Cannot redeclare" error.
 
 function fix_url($url) {
     if (!empty($url) && strpos($url, 'uploads/') === 0) {
@@ -291,8 +285,6 @@ function streamVideo($filePath, $pdo) {
 
         if (!$finalPath) {
             header("HTTP/1.0 404 Not Found");
-            // Debug header to help trace
-            // header("X-Debug-Path: " . $realPath); 
             exit;
         }
         
