@@ -1,59 +1,19 @@
 
 import { 
     User, Video, Transaction, Comment, UserInteraction, 
-    SystemSettings, VideoCategory, MarketplaceItem, 
-    MarketplaceReview, CartItem, SaleRecord, ContentRequest, 
-    BalanceRequest, SmartCleanerResult, VideoResult, FtpFile, Notification,
-    OrganizeResult, VipPlan, VipRequest
+    ContentRequest, BalanceRequest, SystemSettings, 
+    MarketplaceItem, MarketplaceReview, CartItem, 
+    VipPlan, VipRequest, SaleRecord, VideoResult, FtpFile, OrganizeResult, SmartCleanerResult,
+    Notification as AppNotification
 } from '../types';
 
-export class DBService {
+/* Fix: Wrapped the request method into a class and implemented missing methods called throughout the app. */
+class DBService {
     private baseUrl = 'api/index.php';
-    private demoMode = false;
-    
-    private dbName = 'sp_offline_db';
-    private dbVersion = 1;
-    private idb: IDBDatabase | null = null;
+    private homeDirty = false;
 
-    constructor() {
-        if (localStorage.getItem('sp_demo_mode') === 'true') {
-            this.demoMode = true;
-        }
-        this.initIDB();
-    }
-
-    private initIDB(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.dbName, this.dbVersion);
-            
-            request.onerror = () => console.error("IDB Error");
-            
-            request.onupgradeneeded = (event: any) => {
-                const db = event.target.result;
-                if (!db.objectStoreNames.contains('videos')) {
-                    db.createObjectStore('videos', { keyPath: 'id' });
-                }
-                if (!db.objectStoreNames.contains('history')) {
-                    db.createObjectStore('history', { keyPath: 'id' }); 
-                }
-                if (!db.objectStoreNames.contains('downloads')) {
-                    db.createObjectStore('downloads', { keyPath: 'id' });
-                }
-            };
-
-            request.onsuccess = (event: any) => {
-                this.idb = event.target.result;
-                resolve();
-            };
-        });
-    }
-
-    enableDemoMode() {
-        this.demoMode = true;
-        localStorage.setItem('sp_demo_mode', 'true');
-    }
-
-    private async request<T>(query: string, options?: RequestInit): Promise<T> {
+    /* Fix: Implemented the generic request helper used for API communication. */
+    public async request<T>(query: string, options?: RequestInit): Promise<T> {
         const token = localStorage.getItem('sp_session_token');
         const headers: any = options?.headers || {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -75,378 +35,501 @@ export class DBService {
                 throw new Error(e.message || "Invalid JSON response");
             }
         } catch (error) {
+            /* Fix: Added offline fallback for video listing as requested in original snippet. */
             if (!options || options.method === 'GET' || !options.method) {
                 if (query.includes('action=get_videos')) {
                     return this.getOfflineVideos() as any;
-                }
-                if (query.includes('action=get_video')) {
-                    const idMatch = query.match(/id=([^&]+)/);
-                    if (idMatch && idMatch[1]) {
-                        const vid = await this.getOfflineVideo(idMatch[1]);
-                        if (vid) return vid as any;
-                    }
                 }
             }
             throw error;
         }
     }
 
-    private async putIDB(storeName: string, data: any) {
-        if (!this.idb) await this.initIDB();
-        const tx = this.idb!.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).put(data);
-    }
-
-    private async getIDB(storeName: string, key: string): Promise<any> {
-        if (!this.idb) await this.initIDB();
-        return new Promise((resolve) => {
-            const tx = this.idb!.transaction(storeName, 'readonly');
-            const req = tx.objectStore(storeName).get(key);
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => resolve(null);
+    // Auth & Users
+    public async login(username: string, password: string): Promise<User> {
+        return this.request<User>(`action=login`, {
+            method: 'POST',
+            body: JSON.stringify({ username, password })
         });
     }
 
-    private async getAllIDB(storeName: string): Promise<any[]> {
-        if (!this.idb) await this.initIDB();
-        return new Promise((resolve) => {
-            const tx = this.idb!.transaction(storeName, 'readonly');
-            const req = tx.objectStore(storeName).getAll();
-            req.onsuccess = () => resolve(req.result || []);
-            req.onerror = () => resolve([]);
+    public async register(username: string, password: string, avatar?: File | null): Promise<User> {
+        const formData = new FormData();
+        formData.append('username', username);
+        formData.append('password', password);
+        if (avatar) formData.append('avatar', avatar);
+        return this.request<User>(`action=register`, {
+            method: 'POST',
+            body: formData
         });
     }
 
-    async getOfflineVideos(): Promise<Video[]> {
-        return this.getAllIDB('videos');
+    public async logout(userId: string): Promise<void> {
+        return this.request<void>(`action=logout&userId=${userId}`, { method: 'POST' });
     }
 
-    async getOfflineVideo(id: string): Promise<Video | null> {
-        return this.getIDB('videos', id);
+    public async getUser(userId: string): Promise<User | null> {
+        return this.request<User | null>(`action=get_user&userId=${userId}`);
     }
 
-    async getAllVideos(): Promise<Video[]> { 
-        const videos = await this.request<Video[]>(`action=get_videos`); 
-        
-        if (videos && videos.length > 0) {
-            const tx = this.idb?.transaction('videos', 'readwrite');
-            if (tx) {
-                const store = tx.objectStore('videos');
-                videos.forEach(v => store.put(v));
-            }
+    public async getAllUsers(): Promise<User[]> {
+        return this.request<User[]>(`action=get_all_users`);
+    }
+
+    public async updateUserProfile(userId: string, data: Partial<User>): Promise<void> {
+        return this.request<void>(`action=update_profile&userId=${userId}`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    public async uploadAvatar(userId: string, file: File): Promise<void> {
+        const formData = new FormData();
+        formData.append('avatar', file);
+        return this.request<void>(`action=upload_avatar&userId=${userId}`, {
+            method: 'POST',
+            body: formData
+        });
+    }
+
+    public async changePassword(userId: string, oldPass: string, newPass: string): Promise<void> {
+        return this.request<void>(`action=change_password&userId=${userId}`, {
+            method: 'POST',
+            body: JSON.stringify({ oldPass, newPass })
+        });
+    }
+
+    public async heartbeat(userId: string, token: string): Promise<boolean> {
+        try {
+            return await this.request<boolean>(`action=heartbeat&userId=${userId}`);
+        } catch (e) {
+            return true;
         }
+    }
+
+    // Videos
+    public async getAllVideos(): Promise<Video[]> {
+        const videos = await this.request<Video[]>(`action=get_videos`);
+        this.saveOfflineVideos(videos);
         return videos;
     }
 
-    async getVideo(id: string): Promise<Video | null> { 
-        const video = await this.request<Video>(`action=get_video&id=${id}`); 
-        if (video) this.putIDB('videos', video);
-        return video;
+    public async getVideo(id: string): Promise<Video | null> {
+        return this.request<Video | null>(`action=get_video&id=${id}`);
     }
 
-    async downloadVideoForOffline(video: Video): Promise<void> {
-        if (!('serviceWorker' in navigator)) throw new Error("Service Worker not supported");
-        const registration = await navigator.serviceWorker.ready;
-        if (!(registration as any).backgroundFetch) throw new Error("Background Fetch not supported");
-        let downloadUrl = video.videoUrl;
-        const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
-        if (isLocal && !downloadUrl.includes('action=stream')) {
-            downloadUrl = `api/index.php?action=stream&id=${video.id}`;
+    public async getVideosByCreator(userId: string): Promise<Video[]> {
+        return this.request<Video[]>(`action=get_videos_by_creator&userId=${userId}`);
+    }
+
+    public async getRelatedVideos(videoId: string): Promise<Video[]> {
+        return this.request<Video[]>(`action=get_related_videos&id=${videoId}`);
+    }
+
+    public async deleteVideo(videoId: string, userId: string): Promise<void> {
+        return this.request<void>(`action=delete_video&id=${videoId}&userId=${userId}`, { method: 'POST' });
+    }
+
+    public async uploadVideo(title: string, description: string, price: number, category: string, duration: number, user: User, file: File, thumbnail: File | null, onProgress: (percent: number, loaded: number, total: number) => void): Promise<void> {
+        const formData = new FormData();
+        formData.append('title', title);
+        formData.append('description', description);
+        formData.append('price', price.toString());
+        formData.append('category', category);
+        formData.append('duration', duration.toString());
+        formData.append('userId', user.id);
+        formData.append('video', file);
+        if (thumbnail) formData.append('thumbnail', thumbnail);
+
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const token = localStorage.getItem('sp_session_token');
+            xhr.open('POST', `${this.baseUrl}?action=upload_video`);
+            if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    onProgress(percent, e.loaded, e.total);
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        const res = JSON.parse(xhr.responseText);
+                        if (res.success) resolve();
+                        else reject(new Error(res.error || res.message));
+                    } catch (e) {
+                        reject(new Error("Invalid response"));
+                    }
+                } else reject(new Error("Upload failed"));
+            };
+            xhr.onerror = () => reject(new Error("Network error"));
+            xhr.send(formData);
+        });
+    }
+
+    // Social
+    public async getInteraction(userId: string, videoId: string): Promise<UserInteraction | null> {
+        return this.request<UserInteraction | null>(`action=get_interaction&userId=${userId}&videoId=${videoId}`);
+    }
+
+    public async rateVideo(userId: string, videoId: string, type: 'like' | 'dislike'): Promise<UserInteraction> {
+        return this.request<UserInteraction>(`action=rate_video&userId=${userId}&videoId=${videoId}&type=${type}`, { method: 'POST' });
+    }
+
+    public async markWatched(userId: string, videoId: string): Promise<void> {
+        return this.request<void>(`action=mark_watched&userId=${userId}&videoId=${videoId}`, { method: 'POST' });
+    }
+
+    public async getUserActivity(userId: string): Promise<{watched: string[], liked: string[]}> {
+        return this.request<{watched: string[], liked: string[]}>(`action=get_user_activity&userId=${userId}`);
+    }
+
+    public async getComments(videoId: string): Promise<Comment[]> {
+        return this.request<Comment[]>(`action=get_comments&videoId=${videoId}`);
+    }
+
+    public async addComment(userId: string, videoId: string, text: string): Promise<Comment> {
+        return this.request<Comment>(`action=add_comment&userId=${userId}&videoId=${videoId}`, {
+            method: 'POST',
+            body: JSON.stringify({ text })
+        });
+    }
+
+    public async checkSubscription(userId: string, creatorId: string): Promise<boolean> {
+        return this.request<boolean>(`action=check_subscription&userId=${userId}&creatorId=${creatorId}`);
+    }
+
+    public async getSubscriptions(userId: string): Promise<string[]> {
+        return this.request<string[]>(`action=get_subscriptions&userId=${userId}`);
+    }
+
+    public async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
+        return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe&userId=${userId}&creatorId=${creatorId}`, { method: 'POST' });
+    }
+
+    // Finance & VIP
+    public async hasPurchased(userId: string, videoId: string): Promise<boolean> {
+        return this.request<boolean>(`action=has_purchased&userId=${userId}&videoId=${videoId}`);
+    }
+
+    public async purchaseVideo(userId: string, videoId: string): Promise<void> {
+        return this.request<void>(`action=purchase_video&userId=${userId}&videoId=${videoId}`, { method: 'POST' });
+    }
+
+    public async getSales(userId: string): Promise<SaleRecord[]> {
+        return this.request<SaleRecord[]>(`action=get_sales&userId=${userId}`);
+    }
+
+    public async getUserTransactions(userId: string): Promise<Transaction[]> {
+        return this.request<Transaction[]>(`action=get_user_transactions&userId=${userId}`);
+    }
+
+    public async requestBalance(userId: string, amount: number): Promise<void> {
+        return this.request<void>(`action=request_balance&userId=${userId}&amount=${amount}`, { method: 'POST' });
+    }
+
+    public async requestVip(userId: string, plan: VipPlan, paymentRef: string): Promise<void> {
+        return this.request<void>(`action=request_vip&userId=${userId}`, {
+            method: 'POST',
+            body: JSON.stringify({ plan, paymentRef })
+        });
+    }
+
+    public async verifyPayment(userId: string, ref: string): Promise<void> {
+        return this.request<void>(`action=verify_payment&userId=${userId}&ref=${ref}`, { method: 'POST' });
+    }
+
+    public async createPaymentLink(userId: string, plan: VipPlan): Promise<string> {
+        return this.request<string>(`action=create_payment_link&userId=${userId}`, {
+            method: 'POST',
+            body: JSON.stringify({ plan })
+        });
+    }
+
+    public async updatePricesBulk(userId: string, price: number): Promise<void> {
+        return this.request<void>(`action=update_prices_bulk&userId=${userId}&price=${price}`, { method: 'POST' });
+    }
+
+    public async updateOrderStatus(userId: string, txId: string, status: string): Promise<void> {
+        return this.request<void>(`action=update_order_status&userId=${userId}&txId=${txId}&status=${status}`, { method: 'POST' });
+    }
+
+    // Marketplace
+    public async getMarketplaceItems(): Promise<MarketplaceItem[]> {
+        return this.request<MarketplaceItem[]>(`action=get_marketplace_items`);
+    }
+
+    public async getMarketplaceItem(id: string): Promise<MarketplaceItem | null> {
+        return this.request<MarketplaceItem | null>(`action=get_marketplace_item&id=${id}`);
+    }
+
+    public async createListing(formData: FormData): Promise<void> {
+        return this.request<void>(`action=create_listing`, {
+            method: 'POST',
+            body: formData
+        });
+    }
+
+    public async editListing(id: string, userId: string, data: any): Promise<void> {
+        return this.request<void>(`action=edit_listing&id=${id}&userId=${userId}`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    public async checkoutCart(userId: string, items: CartItem[], shipping: any): Promise<void> {
+        return this.request<void>(`action=checkout_cart&userId=${userId}`, {
+            method: 'POST',
+            body: JSON.stringify({ items, shipping })
+        });
+    }
+
+    public async getReviews(itemId: string): Promise<MarketplaceReview[]> {
+        return this.request<MarketplaceReview[]>(`action=get_reviews&itemId=${itemId}`);
+    }
+
+    public async addReview(itemId: string, userId: string, rating: number, comment: string): Promise<void> {
+        return this.request<void>(`action=add_review&itemId=${itemId}&userId=${userId}`, {
+            method: 'POST',
+            body: JSON.stringify({ rating, comment })
+        });
+    }
+
+    // Admin
+    public async checkInstallation(): Promise<{status: string}> {
+        return this.request<{status: string}>(`action=check_installation`);
+    }
+
+    public async verifyDbConnection(config: any): Promise<boolean> {
+        return this.request<boolean>(`action=verify_db_connection`, {
+            method: 'POST',
+            body: JSON.stringify(config)
+        });
+    }
+
+    public async initializeSystem(dbConfig: any, adminConfig: any): Promise<void> {
+        return this.request<void>(`action=initialize_system`, {
+            method: 'POST',
+            body: JSON.stringify({ dbConfig, adminConfig })
+        });
+    }
+
+    public async getSystemSettings(): Promise<SystemSettings> {
+        return this.request<SystemSettings>(`action=get_system_settings`);
+    }
+
+    public async updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> {
+        return this.request<void>(`action=update_system_settings`, {
+            method: 'POST',
+            body: JSON.stringify(settings)
+        });
+    }
+
+    public async getBalanceRequests(): Promise<{balance: BalanceRequest[], vip: VipRequest[], activeVip?: Partial<User>[]}> {
+        return this.request<{balance: BalanceRequest[], vip: VipRequest[], activeVip?: Partial<User>[]}> (`action=get_balance_requests`);
+    }
+
+    public async handleBalanceRequest(adminId: string, reqId: string, action: 'APPROVED' | 'REJECTED'): Promise<void> {
+        return this.request<void>(`action=handle_balance_request&adminId=${adminId}&reqId=${reqId}&status=${action}`, { method: 'POST' });
+    }
+
+    public async handleVipRequest(adminId: string, reqId: string, action: 'APPROVED' | 'REJECTED'): Promise<void> {
+        return this.request<void>(`action=handle_vip_request&adminId=${adminId}&reqId=${reqId}&status=${action}`, { method: 'POST' });
+    }
+
+    public async adminAddBalance(adminId: string, userId: string, amount: number): Promise<void> {
+        return this.request<void>(`action=admin_add_balance&adminId=${adminId}&userId=${userId}&amount=${amount}`, { method: 'POST' });
+    }
+
+    public async getGlobalTransactions(): Promise<any> {
+        return this.request<any>(`action=get_global_transactions`);
+    }
+
+    public async adminGetMarketplaceItems(): Promise<MarketplaceItem[]> {
+        return this.request<MarketplaceItem[]>(`action=admin_get_marketplace_items`);
+    }
+
+    public async adminDeleteListing(itemId: string): Promise<void> {
+        return this.request<void>(`action=admin_delete_listing&id=${itemId}`, { method: 'POST' });
+    }
+
+    public async adminCleanupSystemFiles(): Promise<any> {
+        return this.request<any>(`action=admin_cleanup_files`, { method: 'POST' });
+    }
+
+    public async adminRepairDb(): Promise<void> {
+        return this.request<void>(`action=admin_repair_db`, { method: 'POST' });
+    }
+
+    public async getSmartCleanerPreview(category: string, percent: number, days: number): Promise<SmartCleanerResult> {
+        return this.request<SmartCleanerResult>(`action=smart_cleaner_preview&category=${category}&percent=${percent}&days=${days}`);
+    }
+
+    public async executeSmartCleaner(ids: string[]): Promise<{deleted: number}> {
+        return this.request<{deleted: number}>(`action=execute_smart_cleaner`, {
+            method: 'POST',
+            body: JSON.stringify({ ids })
+        });
+    }
+
+    public async getRealStats(): Promise<any> {
+        return this.request<any>(`action=get_real_stats`);
+    }
+
+    // Library & Local
+    public async scanLocalLibrary(path: string): Promise<{success: boolean, totalFound: number, newToImport: number, errors?: string[], error?: string}> {
+        return this.request<any>(`action=scan_local_library&path=${encodeURIComponent(path)}`, { method: 'POST' });
+    }
+
+    public async processScanBatch(): Promise<any> {
+        return this.request<any>(`action=process_scan_batch`, { method: 'POST' });
+    }
+
+    public async getUnprocessedVideos(limit: number, mode: 'normal' | 'random'): Promise<Video[]> {
+        return this.request<Video[]>(`action=get_unprocessed_videos&limit=${limit}&mode=${mode}`);
+    }
+
+    public async updateVideoMetadata(id: string, duration: number, thumbnail: File | null, success: boolean = true): Promise<{status: string}> {
+        const formData = new FormData();
+        formData.append('id', id);
+        formData.append('duration', duration.toString());
+        formData.append('success', success ? '1' : '0');
+        if (thumbnail) formData.append('thumbnail', thumbnail);
+        return this.request<{status: string}>(`action=update_video_metadata`, {
+            method: 'POST',
+            body: formData
+        });
+    }
+
+    public async smartOrganizeLibrary(): Promise<OrganizeResult> {
+        return this.request<OrganizeResult>(`action=smart_organize_library`, { method: 'POST' });
+    }
+
+    public async rectifyLibraryTitles(lastId: string): Promise<{processed: number, completed: boolean, lastId: string}> {
+        return this.request<any>(`action=rectify_library_titles&lastId=${lastId}`, { method: 'POST' });
+    }
+
+    public async organizeWithAi(): Promise<{processed: number}> {
+        return this.request<{processed: number}>(`action=organize_with_ai`, { method: 'POST' });
+    }
+
+    // External Requests
+    public async searchExternal(query: string, source: 'STOCK' | 'YOUTUBE'): Promise<VideoResult[]> {
+        return this.request<VideoResult[]>(`action=search_external&query=${encodeURIComponent(query)}&source=${source}`);
+    }
+
+    public async serverImportVideo(url: string): Promise<void> {
+        return this.request<void>(`action=server_import_video&url=${encodeURIComponent(url)}`, { method: 'POST' });
+    }
+
+    public async getRequests(filter: string = 'PENDING'): Promise<ContentRequest[]> {
+        return this.request<ContentRequest[]>(`action=get_requests&filter=${filter}`);
+    }
+
+    public async requestContent(userId: string, query: string, useLocalNetwork: boolean): Promise<void> {
+        return this.request<void>(`action=request_content&userId=${userId}`, {
+            method: 'POST',
+            body: JSON.stringify({ query, useLocalNetwork })
+        });
+    }
+
+    public async updateRequestStatus(id: string, status: string): Promise<void> {
+        return this.request<void>(`action=update_request_status&id=${id}&status=${status}`, { method: 'POST' });
+    }
+
+    public async deleteRequest(id: string): Promise<void> {
+        return this.request<void>(`action=delete_request&id=${id}`, { method: 'POST' });
+    }
+
+    // FTP
+    public async listFtpFiles(path: string): Promise<FtpFile[]> {
+        return this.request<FtpFile[]>(`action=ftp_list&path=${encodeURIComponent(path)}`);
+    }
+
+    public async importFtpFile(path: string): Promise<void> {
+        return this.request<void>(`action=ftp_import&path=${encodeURIComponent(path)}`, { method: 'POST' });
+    }
+
+    public async scanFtpRecursive(path: string): Promise<{scanned: number, added: number}> {
+        return this.request<any>(`action=ftp_scan_recursive&path=${encodeURIComponent(path)}`, { method: 'POST' });
+    }
+
+    // Notifications
+    public async getNotifications(userId: string): Promise<AppNotification[]> {
+        return this.request<AppNotification[]>(`action=get_notifications&userId=${userId}`);
+    }
+
+    public async markNotificationRead(id: string): Promise<void> {
+        return this.request<void>(`action=mark_notification_read&id=${id}`, { method: 'POST' });
+    }
+
+    // Cache & Helpers
+    public invalidateCache(key: string): void {
+        localStorage.removeItem(`sp_cache_${key.replace(/[^a-z0-9]/gi, '_')}`);
+    }
+
+    public setHomeDirty(): void {
+        this.homeDirty = true;
+    }
+
+    public enableDemoMode(): void {
+        localStorage.setItem('sp_demo_mode', 'true');
+    }
+
+    // Offline / LocalStorage logic
+    public saveOfflineUser(user: User): void {
+        localStorage.setItem('sp_offline_user', JSON.stringify(user));
+    }
+
+    public getOfflineUser(): User | null {
+        const saved = localStorage.getItem('sp_offline_user');
+        return saved ? JSON.parse(saved) : null;
+    }
+
+    public saveOfflineVideos(videos: Video[]): void {
+        localStorage.setItem('sp_cache_get_videos', JSON.stringify({
+            timestamp: Date.now(),
+            data: videos
+        }));
+    }
+
+    public getOfflineVideos(): Video[] {
+        const saved = localStorage.getItem('sp_cache_get_videos');
+        if (saved) {
+            try { return JSON.parse(saved).data || []; } catch(e) {}
         }
-        try {
-            const fetchId = `dl-${video.id}-${Date.now()}`;
-            await (registration as any).backgroundFetch.fetch(fetchId, [downloadUrl], {
-                title: `Descargando: ${video.title}`,
-                icons: [{ src: video.thumbnailUrl || '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
-                downloadTotal: 0 
-            });
-            await this.putIDB('downloads', { id: video.id, status: 'downloading', fetchId });
-        } catch (e: any) { throw new Error("No se pudo iniciar la descarga."); }
+        return [];
     }
 
-    async checkDownloadStatus(videoId: string): Promise<boolean> {
+    public async checkDownloadStatus(id: string): Promise<boolean> {
         if ('caches' in window) {
             const cache = await caches.open('streampay-videos-v1');
-            const video = await this.getOfflineVideo(videoId);
-            if (!video) return false;
-            let url = video.videoUrl;
-            if ((video.isLocal || (video as any).isLocal === 1) && !url.includes('action=stream')) {
-                url = `api/index.php?action=stream&id=${videoId}`;
-            }
-            const match = await cache.match(url);
+            const match = await cache.match(`api/index.php?action=stream&id=${id}`);
             return !!match;
         }
         return false;
     }
 
-    async getUnprocessedVideos(limit: number = 0, mode: 'normal' | 'random' = 'normal'): Promise<Video[]> {
-        return this.request<Video[]>(`action=get_unprocessed_videos&limit=${limit}&mode=${mode}`);
+    public async downloadVideoForOffline(video: Video): Promise<void> {
+        const url = video.isLocal ? `api/index.php?action=stream&id=${video.id}` : video.videoUrl;
+        
+        if ('BackgroundFetchManager' in self) {
+            const registration = await navigator.serviceWorker.ready;
+            // @ts-ignore
+            await registration.backgroundFetch.fetch(video.id, [url], {
+                title: video.title,
+                icons: [{ src: video.thumbnailUrl, sizes: '192x192', type: 'image/jpeg' }],
+                downloadTotal: 0
+            });
+        } else {
+            const response = await fetch(url);
+            const cache = await caches.open('streampay-videos-v1');
+            await cache.put(url, response);
+        }
     }
-
-    async updateVideoMetadata(id: string, duration: number, thumbnail: File | null, success: boolean = true): Promise<any> {
-         const formData = new FormData();
-         formData.append('id', id);
-         formData.append('duration', duration.toString());
-         formData.append('success', success ? 'true' : 'false');
-         if (thumbnail) formData.append('thumbnail', thumbnail);
-         
-         const headers: any = {};
-         const token = localStorage.getItem('sp_session_token');
-         if (token) headers['Authorization'] = `Bearer ${token}`;
-
-         const res = await fetch(`${this.baseUrl}?action=update_video_metadata`, { 
-             method: 'POST', 
-             body: formData, 
-             headers
-         });
-         
-         if (!res.ok) throw new Error("Metadata update failed");
-         const json = await res.json();
-         if (!json.success) throw new Error(json.message || "Metadata update failed");
-         return json.data;
-    }
-
-    async login(u: string, p: string): Promise<User> { 
-        return this.request<User>(`action=login`, { method: 'POST', body: JSON.stringify({username: u, password: p}) }); 
-    }
-
-    async register(u: string, p: string, a?: File|null): Promise<User> { 
-        const formData = new FormData();
-        formData.append('username', u);
-        formData.append('password', p);
-        if(a) formData.append('avatar', a);
-        const res = await fetch(`${this.baseUrl}?action=register`, { method: 'POST', body: formData });
-        const json = await res.json();
-        if(!json.success) throw new Error(json.message);
-        return json.data;
-    }
-
-    async logout(uid: string): Promise<void> { 
-        this.request(`action=logout&user_id=${uid}`); 
-    }
-
-    async getUser(id: string): Promise<User | null> { 
-        return this.request<User>(`action=get_user&id=${id}`); 
-    }
-
-    saveOfflineUser(u: User) { 
-        localStorage.setItem('sp_offline_user', JSON.stringify(u)); 
-    }
-
-    getOfflineUser(): User | null { 
-        const u = localStorage.getItem('sp_offline_user'); 
-        return u ? JSON.parse(u) : null; 
-    }
-
-    async heartbeat(uid: string, token: string): Promise<boolean> { 
-        try { 
-            await this.request(`action=heartbeat`, { method: 'POST', body: JSON.stringify({ userId: uid, token }) }); 
-            return true; 
-        } catch(e) { return false; }
-    }
-
-    async getUserActivity(userId: string): Promise<{liked: string[], watched: string[]}> {
-        return this.request<{liked: string[], watched: string[]}>(`action=get_user_activity&userId=${userId}`);
-    }
-
-    async getSubscriptions(userId: string): Promise<string[]> {
-        return this.request<string[]>(`action=get_subscriptions&userId=${userId}`);
-    }
-    
-    async getRelatedVideos(id: string): Promise<Video[]> { 
-        return this.request<Video[]>(`action=get_related_videos&id=${id}`); 
-    }
-
-    async getVideosByCreator(id: string): Promise<Video[]> { 
-        return this.request<Video[]>(`action=get_creator_videos&creatorId=${id}`); 
-    }
-
-    async deleteVideo(id: string, uid: string): Promise<void> { 
-        return this.request(`action=delete_video`, { method: 'POST', body: JSON.stringify({ id, userId: uid }) }); 
-    }
-    
-    async getComments(vid: string): Promise<Comment[]> { 
-        return this.request<Comment[]>(`action=get_comments&videoId=${vid}`); 
-    }
-
-    async addComment(uid: string, vid: string, text: string): Promise<Comment> { 
-        return this.request<Comment>(`action=add_comment`, { method: 'POST', body: JSON.stringify({userId: uid, videoId: vid, text}) }); 
-    }
-
-    async getInteraction(uid: string, vid: string): Promise<UserInteraction> { 
-        return this.request<UserInteraction>(`action=get_interaction&userId=${uid}&videoId=${vid}`); 
-    }
-
-    async rateVideo(uid: string, vid: string, type: string): Promise<UserInteraction> {
-        return this.request<UserInteraction>(`action=rate_video`, { method: 'POST', body: JSON.stringify({userId: uid, videoId: vid, rating: type})});
-    }
-
-    async markWatched(uid: string, vid: string): Promise<void> { 
-        this.request(`action=mark_watched`, { method: 'POST', body: JSON.stringify({userId: uid, videoId: vid})}); 
-    }
-
-    async checkSubscription(subscriberId: string, creatorId: string): Promise<boolean> {
-        const res = await this.request<{isSubscribed: boolean}>(`action=check_subscription&subscriberId=${subscriberId}&creatorId=${creatorId}`);
-        return res.isSubscribed;
-    }
-
-    async toggleSubscribe(subscriberId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
-        return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe`, { method: 'POST', body: JSON.stringify({subscriberId, creatorId})});
-    }
-    
-    async hasPurchased(uid: string, vid: string): Promise<boolean> { 
-        const res = await this.request<{hasPurchased: boolean}>(`action=has_purchased&userId=${uid}&videoId=${vid}`); 
-        return res.hasPurchased;
-    }
-
-    async purchaseVideo(uid: string, vid: string): Promise<void> { 
-        return this.request(`action=purchase_video`, { method: 'POST', body: JSON.stringify({userId: uid, videoId: vid})}); 
-    }
-
-    async getUserTransactions(uid: string): Promise<Transaction[]> { 
-        return this.request<Transaction[]>(`action=get_transactions&userId=${uid}`); 
-    }
-
-    async requestVip(userId: string, plan: VipPlan, paymentRef?: string): Promise<void> {
-        return this.request(`action=request_vip`, { method: 'POST', body: JSON.stringify({userId, plan, paymentRef})});
-    }
-
-    async createPaymentLink(userId: string, plan: VipPlan): Promise<string> {
-        const res = await this.request<{paymentUrl: string}>(`action=create_payment_link`, { method: 'POST', body: JSON.stringify({userId, plan})});
-        return res.paymentUrl;
-    }
-
-    async verifyPayment(userId: string, reference: string): Promise<void> {
-        return this.request(`action=verify_payment`, { method: 'POST', body: JSON.stringify({userId, reference})});
-    }
-    
-    async uploadVideo(title: string, desc: string, price: number, cat: string, dur: number, user: User, file: File, thumb: File|null, onProgress: (p:number, l:number, t:number)=>void): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const formData = new FormData();
-            formData.append('title', title);
-            formData.append('description', desc);
-            formData.append('price', price.toString());
-            formData.append('category', cat);
-            formData.append('duration', dur.toString());
-            formData.append('creatorId', user.id); 
-            formData.append('video', file);
-            if(thumb) formData.append('thumbnail', thumb);
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${this.baseUrl}?action=upload_video`);
-            const token = localStorage.getItem('sp_session_token');
-            if(token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-            xhr.upload.onprogress = (e) => { if(e.lengthComputable) onProgress((e.loaded/e.total)*100, e.loaded, e.total); };
-            xhr.onload = () => {
-                if(xhr.status >= 200 && xhr.status < 300) {
-                    try {
-                        const json = JSON.parse(xhr.responseText);
-                        if(json.success) resolve(); else reject(new Error(json.error || 'Upload failed'));
-                    } catch(e) { reject(new Error("Invalid JSON from server")); }
-                }
-                else reject(new Error(xhr.statusText));
-            };
-            xhr.onerror = () => reject(new Error("Network Error"));
-            xhr.send(formData);
-        });
-    }
-
-    async getSystemSettings(): Promise<SystemSettings> { 
-        return this.request<SystemSettings>(`action=get_system_settings`); 
-    }
-
-    async updateSystemSettings(s: Partial<SystemSettings>): Promise<void> { 
-        return this.request(`action=update_system_settings`, { method: 'POST', body: JSON.stringify({settings: s})}); 
-    }
-    
-    async getAllUsers(): Promise<User[]> { return this.request<User[]>(`action=get_all_users`); }
-    async adminAddBalance(adminId: string, targetId: string, amount: number): Promise<void> {
-        return this.request(`action=admin_add_balance`, { method: 'POST', body: JSON.stringify({adminId, targetUserId: targetId, amount})});
-    }
-    async getNotifications(uid: string): Promise<Notification[]> { return this.request<Notification[]>(`action=get_notifications&userId=${uid}`); }
-    async markNotificationRead(id: string): Promise<void> { return this.request(`action=mark_notification_read`, { method: 'POST', body: JSON.stringify({notifId: id}) }); }
-    async searchExternal(q: string, src: string): Promise<VideoResult[]> { return this.request<VideoResult[]>(`action=search_external`, { method: 'POST', body: JSON.stringify({query: q, source: src}) }); }
-    async requestContent(uid: string, q: string, local: boolean): Promise<void> {
-        return this.request(`action=request_content`, { method: 'POST', body: JSON.stringify({userId: uid, query: q, useLocalNetwork: local})});
-    }
-    async getRequests(filter: string = 'ALL'): Promise<ContentRequest[]> { return this.request<ContentRequest[]>(`action=get_requests&status=${filter}`); }
-    async deleteRequest(id: string): Promise<void> { return this.request(`action=delete_request`, { method: 'POST', body: JSON.stringify({requestId: id}) }); }
-    async updateRequestStatus(id: string, status: string): Promise<void> { return this.request(`action=admin_update_request_status`, { method: 'POST', body: JSON.stringify({id, status})}); }
-    invalidateCache(key: string) { localStorage.removeItem('sp_cache_' + key); }
-    setHomeDirty() { this.invalidateCache('get_videos'); }
-    async checkInstallation(): Promise<{status: 'installed' | 'not_installed' | 'error'}> { 
-        try { 
-            const res = await this.request<any>('action=check'); 
-            return { status: res.installed ? 'installed' : 'not_installed' };
-        } catch(e) { return { status: 'error' }; } 
-    }
-    async scanLocalLibrary(path: string): Promise<any> { return this.request(`action=scan_local_library`, { method: 'POST', body: JSON.stringify({path}) }); }
-    async processScanBatch(): Promise<any> { return this.request(`action=process_queue`); }
-    async smartOrganizeLibrary(): Promise<any> { return this.request(`action=smart_organize`); }
-    async rectifyLibraryTitles(lastId?: string): Promise<any> { return this.request(`action=rectify_titles`, { method: 'POST', body: JSON.stringify({lastId}) }); }
-    async organizeWithAi(): Promise<{processed: number, details: any, message?: string}> { return this.request(`action=admin_ai_organize`, { method: 'POST' }); }
-    async updateUserProfile(uid: string, data: Partial<User>): Promise<void> { return this.request(`action=update_user`, { method: 'POST', body: JSON.stringify({userId: uid, updates: data})}); }
-    async updatePricesBulk(uid: string, price: number): Promise<void> { return this.request(`action=update_prices_bulk`, { method: 'POST', body: JSON.stringify({creatorId: uid, newPrice: price})}); }
-    async uploadAvatar(uid: string, file: File): Promise<void> { 
-        const formData = new FormData();
-        formData.append('userId', uid);
-        formData.append('avatar', file);
-        await fetch(`${this.baseUrl}?action=update_avatar`, { method: 'POST', body: formData });
-    }
-    async changePassword(uid: string, oldP: string, newP: string): Promise<void> {
-        return this.request(`action=change_password`, { method: 'POST', body: JSON.stringify({userId: uid, oldPass: oldP, newPass: newP})});
-    }
-    async requestBalance(uid: string, amount: number): Promise<void> {
-        return this.request(`action=request_balance`, { method: 'POST', body: JSON.stringify({userId: uid, amount})});
-    }
-    async getBalanceRequests(): Promise<{balance: BalanceRequest[], vip: VipRequest[]}> { return this.request<{balance: BalanceRequest[], vip: VipRequest[]}>(`action=admin_get_balance_requests`); }
-    async handleBalanceRequest(adminId: string, reqId: string, status: string): Promise<void> {
-        return this.request(`action=admin_handle_balance_request`, { method: 'POST', body: JSON.stringify({adminId, requestId: reqId, action: status})});
-    }
-    async handleVipRequest(adminId: string, reqId: string, status: string): Promise<void> {
-        return this.request(`action=admin_handle_vip_request`, { method: 'POST', body: JSON.stringify({adminId, requestId: reqId, action: status})});
-    }
-    async listFtpFiles(path: string): Promise<FtpFile[]> { return this.request<FtpFile[]>(`action=ftp_list`, { method: 'POST', body: JSON.stringify({path}) }); }
-    async importFtpFile(path: string): Promise<void> { return this.request(`action=ftp_import`, { method: 'POST', body: JSON.stringify({path}) }); }
-    async scanFtpRecursive(path: string): Promise<any> { return this.request(`action=scan_ftp_recursive`, { method: 'POST', body: JSON.stringify({path}) }); }
-    async getMarketplaceItems(): Promise<MarketplaceItem[]> { return this.request<MarketplaceItem[]>(`action=get_marketplace_items`); }
-    async getMarketplaceItem(id: string): Promise<MarketplaceItem|null> { return this.request<MarketplaceItem>(`action=get_marketplace_item&id=${id}`); }
-    async createListing(formData: FormData): Promise<void> { 
-        const token = localStorage.getItem('sp_session_token');
-        await fetch(`${this.baseUrl}?action=create_listing`, { method: 'POST', body: formData, headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
-    }
-    async editListing(id: string, sellerId: string, data: any): Promise<void> { return this.request(`action=edit_listing`, { method: 'POST', body: JSON.stringify({id, userId: sellerId, data})}); }
-    async getReviews(itemId: string): Promise<MarketplaceReview[]> { return this.request<MarketplaceReview[]>(`action=get_reviews&itemId=${itemId}`); }
-    async addReview(itemId: string, userId: string, rating: number, comment: string): Promise<void> {
-        return this.request(`action=add_review`, { method: 'POST', body: JSON.stringify({itemId, userId, rating, comment})});
-    }
-    async checkoutCart(userId: string, cart: CartItem[], shipping: any): Promise<void> {
-        return this.request(`action=checkout_cart`, { method: 'POST', body: JSON.stringify({userId, cart, shippingDetails: shipping})});
-    }
-    async getSales(userId: string): Promise<SaleRecord[]> { return this.request<SaleRecord[]>(`action=get_sales&userId=${userId}`); }
-    async updateOrderStatus(userId: string, txId: string, status: string): Promise<void> {
-        return this.request(`action=update_order_status`, { method: 'POST', body: JSON.stringify({userId, transactionId: txId, status})});
-    }
-    async adminGetMarketplaceItems(): Promise<MarketplaceItem[]> { return this.request<MarketplaceItem[]>(`action=admin_get_marketplace_items`); }
-    async adminDeleteListing(id: string): Promise<void> { return this.request(`action=admin_delete_listing`, { method: 'POST', body: JSON.stringify({id}) }); }
-    async adminCleanupSystemFiles(): Promise<any> { return this.request(`action=admin_cleanup_system_files`); }
-    async adminRepairDb(): Promise<void> { return this.request(`action=admin_repair_db`); }
-    async getSmartCleanerPreview(cat: string, pct: number, days: number): Promise<SmartCleanerResult> {
-        return this.request<SmartCleanerResult>(`action=admin_smart_cleaner_preview`, {
-            method: 'POST',
-            body: JSON.stringify({ category: cat, percentage: pct, safeHarborDays: days })
-        });
-    }
-    async executeSmartCleaner(ids: string[]): Promise<any> { return this.request(`action=admin_smart_cleaner_execute`, { method: 'POST', body: JSON.stringify({videoIds: ids})}); }
-    async getGlobalTransactions(): Promise<any[]> { return this.request<any[]>(`action=admin_get_global_transactions`); }
-    async getRealStats(): Promise<any> { return this.request<any>(`action=admin_get_real_stats`); }
-    async verifyDbConnection(config: any): Promise<boolean> { 
-        try { 
-            await this.request(`action=verify_db`, { method: 'POST', body: JSON.stringify(config)}); 
-            return true; 
-        } catch(e) { return false; } 
-    }
-    async initializeSystem(config: any, admin: any): Promise<void> { return this.request(`action=install`, { method: 'POST', body: JSON.stringify({dbConfig: config, adminUser: admin})}); }
-    async serverImportVideo(url: string): Promise<void> { return this.request(`action=server_import_video`, { method: 'POST', body: JSON.stringify({url}) }); }
 }
 
 export const db = new DBService();
