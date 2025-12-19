@@ -233,12 +233,12 @@ export default function AdminLocalFiles() {
                 {cleanupType === 'LOW_PERFORMANCE' && (
                     <div className="p-4 bg-slate-950/30 border-b border-slate-800 flex gap-6 items-center">
                          <div className="flex items-center gap-2">
-                             <span className="text-[10px] font-bold text-slate-500 uppercase">Antigüedad ></span>
+                             <span className="text-[10px] font-bold text-slate-500 uppercase">Antigüedad &gt;</span>
                              <input type="number" value={cleanupParams.days} onChange={e => setCleanupParams({...cleanupParams, days: parseInt(e.target.value)})} className="w-16 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white" />
                              <span className="text-[10px] text-slate-600">días</span>
                          </div>
                          <div className="flex items-center gap-2">
-                             <span className="text-[10px] font-bold text-slate-500 uppercase">Vistas ≤</span>
+                             <span className="text-[10px] font-bold text-slate-500 uppercase">Vistas &le;</span>
                              <input type="number" value={cleanupParams.views} onChange={e => setCleanupParams({...cleanupParams, views: parseInt(e.target.value)})} className="w-16 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-white" />
                          </div>
                     </div>
