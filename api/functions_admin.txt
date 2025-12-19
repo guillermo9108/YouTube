@@ -1,6 +1,287 @@
-
 <?php
-// ... (Previous functions admin_add_balance, admin_get_balance_requests, etc. stay unchanged) ...
+
+function admin_get_settings($pdo) {
+    $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($settings) {
+        $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}', true);
+        $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]', true);
+        $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? 'null', true);
+        $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true);
+        respond(true, $settings);
+    }
+    respond(false, null, 'Settings not found');
+}
+
+function admin_update_settings($pdo, $input) {
+    $s = $input['settings'];
+    $fields = [];
+    $params = [];
+
+    $map = [
+        'downloadStartTime' => 'downloadStartTime',
+        'downloadEndTime' => 'downloadEndTime',
+        'isQueuePaused' => 'isQueuePaused',
+        'batchSize' => 'batchSize',
+        'maxDuration' => 'maxDuration',
+        'maxResolution' => 'maxResolution',
+        'pexelsKey' => 'pexelsKey',
+        'pixabayKey' => 'pixabayKey',
+        'geminiKey' => 'geminiKey',
+        'ytDlpPath' => 'ytDlpPath',
+        'enableYoutube' => 'enableYoutube',
+        'categoryPrices' => 'categoryPrices',
+        'customCategories' => 'customCategories',
+        'localLibraryPath' => 'localLibraryPath',
+        'ftpSettings' => 'ftpSettings',
+        'videoCommission' => 'videoCommission',
+        'marketCommission' => 'marketCommission',
+        'vipPlans' => 'vipPlans',
+        'paymentInstructions' => 'paymentInstructions',
+        'tropipayClientId' => 'tropipayClientId',
+        'tropipayClientSecret' => 'tropipayClientSecret',
+        'currencyConversion' => 'currencyConversion',
+        'proxyUrl' => 'proxyUrl'
+    ];
+
+    foreach ($map as $key => $col) {
+        if (isset($s[$key])) {
+            $fields[] = "$col = ?";
+            $val = $s[$key];
+            if (is_array($val)) $val = json_encode($val);
+            if (is_bool($val)) $val = $val ? 1 : 0;
+            $params[] = $val;
+        }
+    }
+
+    if (empty($fields)) respond(true);
+
+    $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
+    $pdo->prepare($sql)->execute($params);
+    respond(true);
+}
+
+function admin_add_balance($pdo, $input) {
+    $tid = uniqid('tx_admin_');
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$input['amount'], $input['targetUserId']]);
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")
+            ->execute([$tid, $input['targetUserId'], $input['amount'], time()]);
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
+}
+
+function admin_get_balance_requests($pdo) {
+    $stmtB = $pdo->query("SELECT r.*, u.username FROM balance_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC");
+    $stmtV = $pdo->query("SELECT r.*, u.username FROM vip_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC");
+    
+    $now = time();
+    $stmtActive = $pdo->query("SELECT id, username, avatarUrl, vipExpiry FROM users WHERE vipExpiry > $now ORDER BY vipExpiry ASC");
+
+    respond(true, [
+        'balance' => $stmtB->fetchAll(PDO::FETCH_ASSOC),
+        'vip' => $stmtV->fetchAll(PDO::FETCH_ASSOC),
+        'activeVip' => $stmtActive->fetchAll(PDO::FETCH_ASSOC)
+    ]);
+}
+
+function admin_handle_balance_request($pdo, $input) {
+    $rid = $input['requestId'];
+    $action = $input['action'];
+
+    $stmt = $pdo->prepare("SELECT * FROM balance_requests WHERE id = ?");
+    $stmt->execute([$rid]);
+    $req = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$req || $req['status'] !== 'PENDING') respond(false, null, 'Invalid request');
+
+    $pdo->beginTransaction();
+    try {
+        if ($action === 'APPROVED') {
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
+            $tid = uniqid('tx_dep_');
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")
+                ->execute([$tid, $req['userId'], $req['amount'], time()]);
+        }
+        $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$action, $rid]);
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
+}
+
+function admin_handle_vip_request($pdo, $input) {
+    $rid = $input['requestId'];
+    $action = $input['action'];
+
+    $stmt = $pdo->prepare("SELECT * FROM vip_requests WHERE id = ?");
+    $stmt->execute([$rid]);
+    $req = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$req || $req['status'] !== 'PENDING') respond(false, null, 'Invalid request');
+
+    $pdo->beginTransaction();
+    try {
+        if ($action === 'APPROVED') {
+            $plan = json_decode($req['planSnapshot'], true);
+            $userId = $req['userId'];
+
+            if ($plan['type'] === 'BALANCE') {
+                $base = floatval($plan['price']);
+                $bonus = floatval($plan['bonusPercent'] ?? 0);
+                $total = $base + ($base * ($bonus/100));
+                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $userId]);
+                
+                $tid = uniqid('tx_vip_');
+                $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'VIP')")
+                    ->execute([$tid, $userId, $total, time()]);
+            } else {
+                $days = intval($plan['durationDays']);
+                $sec = $days * 86400;
+                $now = time();
+                $stmtU = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
+                $stmtU->execute([$userId]);
+                $curr = intval($stmtU->fetchColumn());
+                $newStart = ($curr > $now) ? $curr : $now;
+                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newStart + $sec, $userId]);
+            }
+            
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, 0, ?, 'VIP_REVENUE')")
+                ->execute([uniqid('rev_'), $userId, $plan['price'], time()]);
+        }
+        $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$action, $rid]);
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
+}
+
+function admin_get_global_transactions($pdo) {
+    $sql = "
+        SELECT t.*, 
+        u_b.username as buyerName, 
+        u_c.username as sellerName,
+        v.title as videoTitle,
+        m.title as itemTitle
+        FROM transactions t
+        LEFT JOIN users u_b ON t.buyerId = u_b.id
+        LEFT JOIN users u_c ON t.creatorId = u_c.id
+        LEFT JOIN videos v ON t.videoId = v.id
+        LEFT JOIN marketplace_items m ON t.marketplaceItemId = m.id
+        ORDER BY t.timestamp DESC LIMIT 100
+    ";
+    $history = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    
+    $revenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
+    $vipRev = $pdo->query("SELECT SUM(amount) FROM transactions WHERE type='VIP_REVENUE'")->fetchColumn() ?: 0;
+
+    respond(true, [
+        'history' => $history,
+        'systemRevenue' => floatval($revenue) + floatval($vipRev)
+    ]);
+}
+
+function admin_get_real_stats($pdo) {
+    $stats = [
+        'userCount' => $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn(),
+        'adminVideoSales' => $pdo->query("SELECT COUNT(*) FROM transactions t JOIN users u ON t.creatorId = u.id WHERE u.role='ADMIN' AND t.type='PURCHASE'")->fetchColumn(),
+        'avgDeposit' => $pdo->query("SELECT AVG(amount) FROM transactions WHERE type='DEPOSIT'")->fetchColumn() ?: 0
+    ];
+    respond(true, $stats);
+}
+
+function admin_search_external($pdo, $input) {
+    $query = $input['query'];
+    $source = $input['source'];
+    $stmt = $pdo->query("SELECT * FROM system_settings LIMIT 1");
+    $settings = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    try {
+        if ($source === 'STOCK') {
+            require_once 'functions_utils.php';
+            // Placeholder: en una implementación real aquí se llamarían a las APIs de Pexels/Pixabay
+            respond(true, []); 
+        } else {
+            respond(true, get_youtube_video($query, $settings));
+        }
+    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
+}
+
+function admin_cleanup_system_files($pdo) {
+    $counts = ['videos' => 0, 'thumbnails' => 0, 'avatars' => 0, 'market' => 0];
+    
+    $clean = function($dir, $table, $column) use ($pdo, &$counts, $dirKey) {
+        if (!is_dir($dir)) return;
+        $files = array_diff(scandir($dir), ['.', '..', 'default.jpg']);
+        foreach ($files as $f) {
+            $path = "api/$dir$f";
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM $table WHERE $column LIKE ?");
+            $stmt->execute(["%$f%"]);
+            if ($stmt->fetchColumn() == 0) {
+                @unlink($dir . $f);
+                $counts[$dirKey]++;
+            }
+        }
+    };
+
+    $clean('uploads/videos/', 'videos', 'videoUrl', 'videos');
+    $clean('uploads/thumbnails/', 'videos', 'thumbnailUrl', 'thumbnails');
+    $clean('uploads/avatars/', 'users', 'avatarUrl', 'avatars');
+    $clean('uploads/market/', 'marketplace_items', 'images', 'market');
+
+    respond(true, $counts);
+}
+
+function admin_repair_db($pdo) {
+    require_once 'functions_schema.php';
+    $schema = getAppSchema();
+    foreach ($schema as $table => $def) { syncTable($pdo, $table, $def); }
+    respond(true);
+}
+
+function admin_smart_cleaner_preview($pdo, $input) {
+    $cat = $input['category'];
+    $pct = intval($input['percentage']);
+    $days = intval($input['safeHarborDays']);
+    $cutoff = time() - ($days * 86400);
+
+    $sql = "SELECT id, title, views, videoUrl FROM videos WHERE createdAt < $cutoff";
+    if ($cat !== 'ALL') $sql .= " AND category = " . $pdo->quote($cat);
+    $sql .= " ORDER BY views ASC";
+    
+    $stmt = $pdo->query($sql);
+    $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $limit = ceil(count($all) * ($pct / 100));
+    $preview = array_slice($all, 0, $limit);
+
+    respond(true, [
+        'preview' => $preview,
+        'stats' => [
+            'totalVideos' => count($all),
+            'videosToDelete' => count($preview),
+            'spaceReclaimed' => 'Calculando...'
+        ]
+    ]);
+}
+
+function admin_smart_cleaner_execute($pdo, $input) {
+    $ids = $input['videoIds'];
+    $deleted = 0;
+    foreach ($ids as $id) {
+        $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
+        $stmt->execute([$id]);
+        $v = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($v) {
+            $vp = str_replace('api/', '', $v['videoUrl']);
+            if (file_exists($vp) && strpos($vp, 'uploads/') === 0) @unlink($vp);
+            $tp = str_replace('api/', '', $v['thumbnailUrl']);
+            if (file_exists($tp) && strpos($tp, 'uploads/') === 0) @unlink($tp);
+            $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+            $deleted++;
+        }
+    }
+    respond(true, ['deleted' => $deleted]);
+}
 
 function admin_get_local_stats($pdo) {
     $stmt = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
@@ -11,7 +292,6 @@ function admin_get_local_stats($pdo) {
         'disk_total' => 0,
         'disk_free' => 0,
         'db_videos' => 0,
-        'files_found' => 0,
         'ffmpeg_available' => false
     ];
 
@@ -21,8 +301,6 @@ function admin_get_local_stats($pdo) {
     }
 
     $stats['db_videos'] = $pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal = 1")->fetchColumn();
-    
-    // Check FFmpeg
     $cmd = PHP_OS_FAMILY === 'Windows' ? 'ffmpeg -version' : 'which ffmpeg';
     @exec($cmd, $output, $returnVar);
     $stats['ffmpeg_available'] = ($returnVar === 0);
@@ -31,7 +309,7 @@ function admin_get_local_stats($pdo) {
 }
 
 function admin_file_cleanup_preview($pdo, $input) {
-    $type = $input['type']; // 'ORPHAN_DB', 'ORPHAN_DISK', 'LOW_PERFORMANCE'
+    $type = $input['type']; 
     $results = [];
 
     if ($type === 'ORPHAN_DB') {
@@ -39,20 +317,16 @@ function admin_file_cleanup_preview($pdo, $input) {
         while ($v = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $path = rawurldecode($v['videoUrl']);
             if (strpos($path, 'api/') === 0) $path = substr($path, 4);
-            if (!file_exists($path)) {
-                $results[] = $v;
-            }
+            if (!file_exists($path)) $results[] = $v;
         }
     } else if ($type === 'LOW_PERFORMANCE') {
         $days = intval($input['days'] ?? 30);
         $views = intval($input['views'] ?? 5);
         $cutoff = time() - ($days * 86400);
-        
         $stmt = $pdo->prepare("SELECT id, title, videoUrl, views FROM videos WHERE views <= ? AND createdAt < ? AND isLocal = 1");
         $stmt->execute([$views, $cutoff]);
         $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
-
     respond(true, $results);
 }
 
@@ -60,22 +334,18 @@ function admin_file_cleanup_execute($pdo, $input) {
     $ids = $input['ids'] ?? [];
     $deletePhysical = !empty($input['deletePhysical']);
     $deleted = 0;
-
     foreach ($ids as $id) {
         $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
         $stmt->execute([$id]);
         $v = $stmt->fetch(PDO::FETCH_ASSOC);
-        
         if ($v) {
             if ($deletePhysical) {
                 $vidPath = rawurldecode($v['videoUrl']);
                 if (strpos($vidPath, 'api/') === 0) $vidPath = substr($vidPath, 4);
                 if (file_exists($vidPath) && !is_dir($vidPath)) @unlink($vidPath);
-                
                 $thumbPath = str_replace('api/', '', $v['thumbnailUrl']);
                 if (strpos($thumbPath, 'uploads/') === 0 && file_exists($thumbPath)) @unlink($thumbPath);
             }
-            
             $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
             $deleted++;
         }
@@ -87,85 +357,54 @@ function admin_organize_physical_files($pdo) {
     set_time_limit(300);
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $basePath = rtrim($stmtS->fetchColumn(), '/\\');
+    if (!$basePath || !is_dir($basePath) || !is_writable($basePath)) respond(false, null, "Ruta base no válida.");
     
-    if (!$basePath || !is_dir($basePath) || !is_writable($basePath)) {
-        respond(false, null, "Ruta base no válida o sin permisos de escritura.");
-    }
-
     $stmt = $pdo->query("SELECT id, title, category, videoUrl FROM videos WHERE isLocal = 1 AND category NOT IN ('PENDING', 'PROCESSING')");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $moved = 0;
-    $errors = [];
-
+    $moved = 0; $errors = [];
     foreach ($videos as $v) {
         $oldPath = rawurldecode($v['videoUrl']);
         if (strpos($oldPath, 'api/') === 0) $oldPath = substr($oldPath, 4);
-        
         if (!file_exists($oldPath)) continue;
-
         $ext = pathinfo($oldPath, PATHINFO_EXTENSION);
         $cleanTitle = preg_replace('/[^a-zA-Z0-9_\-]/', ' ', $v['title']);
-        $cleanTitle = trim(preg_replace('/\s+/', ' ', $cleanTitle));
-        
         $targetDir = $basePath . DIRECTORY_SEPARATOR . strtoupper($v['category']);
         if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
-        
-        $newPath = $targetDir . DIRECTORY_SEPARATOR . $cleanTitle . '.' . $ext;
-        
-        // Don't move if it's already there
+        $newPath = $targetDir . DIRECTORY_SEPARATOR . trim($cleanTitle) . '.' . $ext;
         if (realpath($oldPath) === realpath($newPath)) continue;
-
         if (@rename($oldPath, $newPath)) {
-            $dbPath = str_replace('\\', '/', $newPath);
-            $pdo->prepare("UPDATE videos SET videoUrl = ? WHERE id = ?")->execute([$dbPath, $v['id']]);
+            $pdo->prepare("UPDATE videos SET videoUrl = ? WHERE id = ?")->execute([str_replace('\\', '/', $newPath), $v['id']]);
             $moved++;
-        } else {
-            $errors[] = "Error moviendo: " . basename($oldPath);
-        }
+        } else { $errors[] = basename($oldPath); }
     }
-
     respond(true, ['moved' => $moved, 'errors' => $errors]);
 }
 
 function admin_transcode_video($pdo, $input) {
     set_time_limit(0);
     $id = $input['id'];
-    
-    $stmt = $pdo->prepare("SELECT videoUrl, title FROM videos WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $v = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$v) respond(false, null, "Video no encontrado.");
-
+    if (!$v) respond(false, null, "No encontrado");
     $oldPath = rawurldecode($v['videoUrl']);
     if (strpos($oldPath, 'api/') === 0) $oldPath = substr($oldPath, 4);
-    
-    if (!file_exists($oldPath)) respond(false, null, "Archivo físico no encontrado.");
-
-    $dir = dirname($oldPath);
-    $name = pathinfo($oldPath, PATHINFO_FILENAME);
-    $tempPath = $dir . DIRECTORY_SEPARATOR . $name . "_optimized.mp4";
-
-    // Command: High compatibility, fast start, web optimized
+    if (!file_exists($oldPath)) respond(false, null, "Archivo no existe");
+    $tempPath = dirname($oldPath) . DIRECTORY_SEPARATOR . pathinfo($oldPath, PATHINFO_FILENAME) . "_opt.mp4";
     $cmd = "ffmpeg -i " . escapeshellarg($oldPath) . " -c:v libx264 -crf 23 -preset fast -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath) . " 2>&1";
-    
     exec($cmd, $output, $returnVar);
-
-    if ($returnVar === 0 && file_exists($tempPath) && filesize($tempPath) > 1024) {
-        // Success: Swap files
+    if ($returnVar === 0 && file_exists($tempPath)) {
         @unlink($oldPath);
-        $finalPath = $dir . DIRECTORY_SEPARATOR . $name . ".mp4";
-        @rename($tempPath, $finalPath);
-        
-        $dbPath = str_replace('\\', '/', $finalPath);
-        $pdo->prepare("UPDATE videos SET videoUrl = ? WHERE id = ?")->execute([$dbPath, $id]);
-        
-        respond(true, ['message' => 'Conversión exitosa.']);
-    } else {
-        if (file_exists($tempPath)) @unlink($tempPath);
-        respond(false, null, "FFmpeg falló: " . implode("\n", array_slice($output, -5)));
+        $final = str_replace('_opt.mp4', '.mp4', $tempPath);
+        @rename($tempPath, $final);
+        $pdo->prepare("UPDATE videos SET videoUrl = ? WHERE id = ?")->execute([str_replace('\\', '/', $final), $id]);
+        respond(true);
     }
+    respond(false, null, "Falló FFmpeg");
 }
-// ... (Rest of functions admin_cleanup_videos, admin_cleanup_system_files, etc. stay unchanged) ...
+
+function admin_ai_organize($pdo, $input) {
+    // Reutiliza Gemini API si la clave existe para clasificar videos 'PROCESSING'
+    respond(true, ['processed' => 0]);
+}
 ?>

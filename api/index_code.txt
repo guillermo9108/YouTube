@@ -43,9 +43,7 @@ if ($action === 'check_installation') {
                     PDO::ATTR_TIMEOUT => 2
                 ]);
                 $installed = true;
-            } catch (Exception $e) {
-                // Config existe pero conexión falla
-            }
+            } catch (Exception $e) {}
         }
     }
     respond(true, ['status' => $installed ? 'installed' : 'not_installed']);
@@ -63,14 +61,13 @@ if ($action === 'verify_db_connection') {
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
-// --- 4. CARGA DE MÓDULOS (ESTO PUEDE FALLAR SI NO SE HA CONSTRUIDO EL PROYECTO) ---
+// --- 4. CARGA DE MÓDULOS ---
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
 
 foreach ($required_files as $file) {
     if (file_exists($file)) {
         require_once $file;
     } else {
-        // Si falta un archivo crítico después del setup, respondemos error.
         if ($action !== 'initialize_system') {
             respond(false, null, "Missing core component: $file. Please run build script.");
         }
@@ -112,7 +109,7 @@ if ($action === 'initialize_system') {
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
-// --- 6. HANDLER DE STREAMING (DENTRO DEL FLUJO PRINCIPAL) ---
+// --- 6. HANDLER DE STREAMING ---
 if ($action === 'stream') {
     if (!file_exists($configFile)) respond(false, null, 'Not installed');
     $db_config = json_decode(file_get_contents($configFile), true);
@@ -129,7 +126,7 @@ if ($action === 'stream') {
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
-// --- 7. CONEXIÓN GLOBAL PARA EL RESTO DE ACCIONES ---
+// --- 7. CONEXIÓN GLOBAL ---
 if (!file_exists($configFile)) { respond(false, null, 'Not installed'); }
 $db_config = json_decode(file_get_contents($configFile), true);
 
@@ -138,7 +135,7 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) { respond(false, null, 'DB Connection Error: ' . $e->getMessage()); }
 
-// --- 8. SWITCH DE ACCIONES ---
+// --- 8. SWITCH DE ACCIONES (SINCRONIZADO CON db.ts) ---
 try {
     switch ($action) {
         case 'login': auth_login($pdo, $input); break;
@@ -158,14 +155,30 @@ try {
         case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;
         case 'delete_video': video_delete($pdo, $input); break;
         case 'scan_local_library': video_scan_local($pdo, $input); break;
+        case 'process_queue': video_process_batch($pdo); break; // Alias para compatibilidad
         case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
         case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
         case 'update_prices_bulk': video_update_prices_bulk($pdo, $input); break;
-        case 'ftp_list': video_ftp_list($pdo, $_GET); break;
-        case 'ftp_import': video_ftp_import($pdo, $_GET); break;
-        case 'ftp_scan_recursive': video_ftp_scan_recursive($pdo, $_GET); break;
-        case 'smart_organize_library': video_smart_organize($pdo); break;
-        case 'rectify_library_titles': video_rectify_titles($pdo, $_GET); break;
+        case 'ftp_list': video_ftp_list($pdo, $input); break;
+        case 'ftp_import': video_ftp_import($pdo, $input); break;
+        case 'scan_ftp_recursive': video_ftp_scan_recursive($pdo, $input); break;
+        case 'smart_organize': video_smart_organize($pdo); break;
+        case 'rectify_titles': video_rectify_titles($pdo, $input); break;
+
+        case 'admin_add_balance': admin_add_balance($pdo, $input); break;
+        case 'get_balance_requests': admin_get_balance_requests($pdo); break;
+        case 'get_global_transactions': admin_get_global_transactions($pdo); break;
+        case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;
+        case 'handle_vip_request': admin_handle_vip_request($pdo, $input); break;
+        case 'get_system_settings': admin_get_settings($pdo); break;
+        case 'update_system_settings': admin_update_settings($pdo, $input); break;
+        case 'search_external': admin_search_external($pdo, $input); break;
+        case 'admin_get_real_stats': admin_get_real_stats($pdo); break;
+        case 'admin_ai_organize': admin_ai_organize($pdo, $input); break; 
+        case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
+        case 'admin_repair_db': admin_repair_db($pdo); break;
+        case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
+        case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
 
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $_GET); break;
@@ -193,17 +206,6 @@ try {
         case 'verify_payment': payment_verify($pdo, $input); break;
         case 'request_vip': request_vip($pdo, $input); break;
 
-        case 'admin_add_balance': admin_add_balance($pdo, $input); break;
-        case 'get_balance_requests': admin_get_balance_requests($pdo); break;
-        case 'get_global_transactions': admin_get_global_transactions($pdo); break;
-        case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;
-        case 'handle_vip_request': admin_handle_vip_request($pdo, $input); break;
-        case 'get_system_settings': admin_get_settings($pdo); break;
-        case 'update_system_settings': admin_update_settings($pdo, $input); break;
-        case 'search_external': admin_search_external($pdo, $_GET); break;
-        case 'get_real_stats': admin_get_real_stats($pdo); break;
-        case 'organize_with_ai': admin_ai_organize($pdo, $input); break; 
-
         case 'get_marketplace_items': market_get_items($pdo); break;
         case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;
         case 'admin_delete_listing': market_delete_listing($pdo, $input); break;
@@ -216,7 +218,7 @@ try {
         case 'get_sales': market_get_sales($pdo, $_GET['userId']); break;
         case 'update_order_status': market_update_order_status($pdo, $input); break;
 
-        default: respond(false, null, 'Invalid action');
+        default: respond(false, null, "Invalid action: $action");
     }
 } catch (Exception $e) { respond(false, null, 'Error: ' . $e->getMessage()); }
 ?>
