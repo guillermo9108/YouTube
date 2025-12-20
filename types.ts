@@ -1,4 +1,5 @@
 
+
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -209,6 +210,8 @@ export interface SystemSettings {
   tropipayClientSecret?: string;
   currencyConversion?: number; // 1 USD/EUR = X Saldo
   proxyUrl?: string; // NEW: For restricted regions
+  // Added to support the Librarian feature in AdminLocalFiles.tsx
+  paqueteMapper?: Record<string, string>;
 }
 
 export interface OrganizeResult {
