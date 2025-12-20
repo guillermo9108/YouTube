@@ -167,15 +167,15 @@ function video_get_related($pdo, $id) {
 }
 
 function video_upload($pdo, $post, $files) {
-    $title = $post['title'];
-    $price = floatval($post['price']);
-    $creatorId = $post['creatorId'];
-    $duration = intval($post['duration']);
-    $category = $post['category'];
+    $title = $post['title'] ?? 'Untitled';
+    $price = floatval($post['price'] ?? 0);
+    $creatorId = $post['creatorId'] ?? '';
+    $duration = intval($post['duration'] ?? 0);
+    $category = $post['category'] ?? 'GENERAL';
     $desc = $post['description'] ?? '';
 
     if (!isset($files['video']) || $files['video']['error'] !== UPLOAD_ERR_OK) {
-        respond(false, null, 'Video upload failed');
+        respond(false, null, 'Video upload failed or empty');
     }
 
     $vidId = 'v_' . uniqid();
@@ -191,20 +191,25 @@ function video_upload($pdo, $post, $files) {
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         $thumbExt = strtolower(pathinfo($files['thumbnail']['name'], PATHINFO_EXTENSION));
         $thumbName = "{$vidId}.{$thumbExt}";
-        $thumbPath = THUMB_DIR . $thumbName;
+        $targetThumb = THUMB_DIR . $thumbName;
         if (!is_dir(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
-        move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
+        move_uploaded_file($files['thumbnail']['tmp_name'], $targetThumb);
+        $thumbPath = "api/" . $targetThumb;
     }
 
     // --- AUTO TRANSCODE CHECK ---
-    $settings = $pdo->query("SELECT autoTranscode FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+    $settingsStmt = $pdo->query("SELECT autoTranscode FROM system_settings WHERE id = 1");
+    $settings = $settingsStmt->fetch(PDO::FETCH_ASSOC);
     $needsTrans = 0; $tStatus = 'NONE';
     
-    if ($settings['autoTranscode'] && function_exists('check_needs_transcode')) {
-        $realPath = UPLOAD_DIR . $vidName;
-        if (check_needs_transcode($realPath)) {
-            $needsTrans = 1;
-            $tStatus = 'WAITING';
+    if (!empty($settings['autoTranscode'])) {
+        // La función check_needs_transcode debe estar disponible via functions_admin.php
+        if (function_exists('check_needs_transcode')) {
+            $realPath = UPLOAD_DIR . $vidName;
+            if (check_needs_transcode($realPath)) {
+                $needsTrans = 1;
+                $tStatus = 'WAITING';
+            }
         }
     }
 
@@ -223,13 +228,13 @@ function video_delete($pdo, $input) {
     
     $stmtRole = $pdo->prepare("SELECT role FROM users WHERE id = ?");
     $stmtRole->execute([$userId]);
-    $isAdmin = $stmtRole->fetchColumn() === 'ADMIN';
+    $isAdmin = ($stmtRole->fetchColumn() === 'ADMIN');
 
     if ($v && ($v['creatorId'] === $userId || $isAdmin)) {
-        $vidPath = str_replace('api/', '', $v['videoUrl']);
-        if (file_exists($vidPath) && strpos($vidPath, 'uploads/') === 0) unlink($vidPath);
-        $thumbPath = str_replace('api/', '', $v['thumbnailUrl']);
-        if (file_exists($thumbPath) && strpos($thumbPath, 'uploads/') === 0) unlink($thumbPath);
+        $vidPath = str_replace('api/', '', rawurldecode($v['videoUrl']));
+        if (file_exists($vidPath) && strpos($vidPath, 'uploads/') === 0) @unlink($vidPath);
+        $thumbPath = str_replace('api/', '', rawurldecode($v['thumbnailUrl']));
+        if (file_exists($thumbPath) && strpos($thumbPath, 'uploads/') === 0 && basename($thumbPath) !== 'default.jpg') @unlink($thumbPath);
 
         $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
         $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
@@ -240,19 +245,18 @@ function video_delete($pdo, $input) {
 }
 
 function video_scan_local($pdo, $input) {
-    set_time_limit(600);
-    ini_set('memory_limit', '512M');
-    $path = $input['path'];
+    set_time_limit(0);
+    $path = $input['path'] ?? '';
     
-    if (!is_dir($path) || !is_readable($path)) {
-        respond(true, ['success' => false, 'error' => "Permiso denegado o ruta inválida: $path"]);
+    if (!$path || !is_dir($path)) {
+        respond(false, null, "Ruta de librería inválida: $path");
     }
 
     $filesFound = [];
     try {
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveDirectoryIterator::SELF_FIRST, RecursiveDirectoryIterator::CATCH_GET_CHILD);
+        $dirIterator = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
         foreach ($iterator as $file) {
-            if (strpos($file->getPathname(), '@eaDir') !== false) continue;
             if ($file->isFile()) {
                 $ext = strtolower($file->getExtension());
                 if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
@@ -260,23 +264,26 @@ function video_scan_local($pdo, $input) {
                 }
             }
         }
-    } catch (Exception $e) { respond(true, ['success' => false, 'error' => $e->getMessage()]); }
+    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 
-    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
-    $settings = $pdo->query("SELECT autoTranscode FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+    $adminIdStmt = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1");
+    $adminId = $adminIdStmt->fetchColumn();
+    
+    $settingsStmt = $pdo->query("SELECT autoTranscode FROM system_settings WHERE id = 1");
+    $settings = $settingsStmt->fetch(PDO::FETCH_ASSOC);
     
     $addedCount = 0;
     
-    $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? COLLATE utf8mb4_unicode_ci");
+    $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
     $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, needs_transcode, transcode_status) VALUES (?, ?, ?, 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, ?, ?)");
 
     foreach ($filesFound as $fullPath) {
         $check->execute([$fullPath]);
         if ($check->fetchColumn() == 0) {
             $vidId = 'loc_' . md5($fullPath);
-            
             $needsTrans = 0; $tStatus = 'NONE';
-            if ($settings['autoTranscode'] && function_exists('check_needs_transcode')) {
+            
+            if (!empty($settings['autoTranscode']) && function_exists('check_needs_transcode')) {
                 if (check_needs_transcode($fullPath)) {
                     $needsTrans = 1;
                     $tStatus = 'WAITING';
@@ -291,11 +298,10 @@ function video_scan_local($pdo, $input) {
 }
 
 function video_get_unprocessed($pdo) {
-    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 10000;
-    $mode = isset($_GET['mode']) ? $_GET['mode'] : 'normal';
+    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
+    $mode = $_GET['mode'] ?? 'normal';
     $orderBy = ($mode === 'random') ? 'RAND()' : 'id ASC';
     
-    // Filter by processing_attempts < 3
     $sql = "SELECT id, videoUrl, title, thumbnailUrl, isLocal FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 ORDER BY $orderBy LIMIT $limit";
     $stmt = $pdo->query($sql);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -304,28 +310,18 @@ function video_get_unprocessed($pdo) {
 }
 
 function video_update_metadata($pdo, $post, $files) {
-    $id = $post['id'];
+    $id = $post['id'] ?? '';
     $duration = isset($post['duration']) ? floatval($post['duration']) : 0;
     $isSuccess = isset($post['success']) && ($post['success'] === 'true' || $post['success'] === '1');
     
-    if (!$id) respond(false);
+    if (!$id) respond(false, null, 'Missing ID');
 
     if (!$isSuccess) {
-        // FAILED ATTEMPT: Increment counter
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1 WHERE id = ?")->execute([$id]);
-        
-        // Check if exceeded limit
-        $stmt = $pdo->prepare("SELECT processing_attempts FROM videos WHERE id = ?");
-        $stmt->execute([$id]);
-        if (intval($stmt->fetchColumn()) >= 3) {
-            $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA' WHERE id = ?")->execute([$id]);
-            respond(true, ['status' => 'discarded', 'message' => 'Too many failed attempts']);
-        }
         respond(true, ['status' => 'failure_logged']);
         return;
     }
 
-    // SUCCESS: Save metadata
     $sql = "UPDATE videos SET category = 'PROCESSING', duration = ?, processing_attempts = 0";
     $params = [$duration];
     
@@ -340,19 +336,17 @@ function video_update_metadata($pdo, $post, $files) {
     $params[] = $id;
     $pdo->prepare($sql)->execute($params);
 
-    // --- INSTANT STEP 3 TRIGGER ---
-    // Trigger organization logic immediately for this specific ID so it appears on home
+    // Organización inmediata del video específico para que sea visible
     $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
-    
     internal_organize_video($pdo, $id, $settings, $customCats);
 
     respond(true, ['status' => 'organized']);
 }
 
 function video_smart_organize($pdo) {
-    set_time_limit(300);
+    set_time_limit(0);
     $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
@@ -360,7 +354,7 @@ function video_smart_organize($pdo) {
     $stmt = $pdo->query("SELECT id FROM videos WHERE category = 'PROCESSING' LIMIT 50");
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     
-    $stats = ['processed' => 0, 'renamed' => 0, 'categorized' => 0, 'details' => []];
+    $stats = ['processed' => 0];
     foreach ($ids as $vid) {
         if (internal_organize_video($pdo, $vid, $settings, $customCats)) {
             $stats['processed']++;
@@ -369,92 +363,5 @@ function video_smart_organize($pdo) {
     
     $stats['remaining'] = $pdo->query("SELECT COUNT(*) FROM videos WHERE category = 'PROCESSING'")->fetchColumn();
     respond(true, $stats);
-}
-
-function video_rectify_titles($pdo, $input) {
-    set_time_limit(300);
-    $lastId = $input['lastId'] ?? '';
-    $limit = 50;
-    $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
-    $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
-    $customCats = json_decode($settings['customCategories'] ?? '[]', true);
-
-    $stmt = $pdo->prepare("SELECT id FROM videos WHERE id > ? AND category NOT IN ('PENDING', 'FAILED_METADATA') ORDER BY id ASC LIMIT $limit");
-    $stmt->execute([$lastId]);
-    $ids = $stmt->fetchAll(PDO::COLUMN);
-
-    if (empty($ids)) respond(true, ['processed' => 0, 'completed' => true]);
-
-    $processed = 0;
-    $newLastId = $lastId;
-    foreach ($ids as $vid) {
-        internal_organize_video($pdo, $vid, $settings, $customCats);
-        $processed++;
-        $newLastId = $vid;
-    }
-    respond(true, ['processed' => $processed, 'lastId' => $newLastId, 'completed' => false]);
-}
-
-function video_ftp_list($pdo, $input) {
-    try {
-        $conn = getFtpConnection($pdo);
-        $path = $input['path'] ?? '/';
-        $rawList = ftp_mlsd($conn, $path);
-        $files = [];
-        if (is_array($rawList)) {
-            foreach ($rawList as $item) {
-                if ($item['name'] == '.' || $item['name'] == '..') continue;
-                $isDir = $item['type'] == 'dir';
-                $ext = strtolower(pathinfo($item['name'], PATHINFO_EXTENSION));
-                if ($isDir || in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'm4v', 'ts', 'flv'])) {
-                    $files[] = ['name' => $item['name'], 'type' => $item['type'], 'size' => isset($item['size']) ? round($item['size'] / 1024 / 1024, 2) . ' MB' : '-', 'path' => rtrim($path, '/') . '/' . $item['name']];
-                }
-            }
-        }
-        ftp_close($conn);
-        respond(true, $files);
-    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
-}
-
-function video_ftp_import($pdo, $input) {
-    $remotePath = $input['path'];
-    $vidId = 'ftp_' . md5($remotePath);
-    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
-    $stmt = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 2)");
-    $stmt->execute([$vidId, basename($remotePath), "FTP Stream", $remotePath, $adminId, time()]);
-    respond(true, ['id' => $vidId]);
-}
-
-function video_ftp_scan_recursive($pdo, $input) {
-    set_time_limit(600); 
-    try {
-        $conn = getFtpConnection($pdo);
-        $filesFound = [];
-        $queue = [$input['path'] ?? '/'];
-        while(!empty($queue)) {
-            $currentDir = array_shift($queue);
-            $list = @ftp_mlsd($conn, $currentDir);
-            if(!is_array($list)) continue;
-            foreach($list as $item) {
-                if($item['name'] == '.' || $item['name'] == '..') continue;
-                $fullPath = rtrim($currentDir, '/') . '/' . $item['name'];
-                if($item['type'] == 'dir') $queue[] = $fullPath;
-                else if(in_array(strtolower(pathinfo($item['name'], PATHINFO_EXTENSION)), ['mp4', 'mkv', 'avi', 'mov', 'wmv', 'm4v', 'ts', 'flv'])) $filesFound[] = $fullPath;
-            }
-        }
-        ftp_close($conn);
-        $added = 0;
-        $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
-        $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
-        $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 2)");
-        foreach($filesFound as $path) {
-            $check->execute([$path]);
-            if($check->fetchColumn() == 0) {
-                $insert->execute(['ftp_'.md5($path), basename($path), "FTP Stream", $path, $adminId, time()]);
-                $added++;
-            }
-        }
-        respond(true, ['scanned' => count($filesFound), 'added' => $added]);
-    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 ?>

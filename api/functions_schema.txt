@@ -197,7 +197,6 @@ function syncTable($pdo, $tableName, $def) {
             $sql .= ") CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
             $pdo->exec($sql);
         } else {
-            // Case-insensitive column check
             $stmt = $pdo->query("SHOW COLUMNS FROM $tableName");
             $rawCols = $stmt->fetchAll(PDO::FETCH_COLUMN);
             $existingCols = array_map('strtolower', $rawCols);
