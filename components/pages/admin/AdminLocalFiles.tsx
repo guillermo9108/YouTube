@@ -1,10 +1,7 @@
-
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-/* Added 'Save' to the lucide-react imports to fix the 'Cannot find name Save' error */
 import { HardDrive, Trash2, Wand2, RefreshCw, Loader2, FileVideo, AlertCircle, CheckCircle, Info, Move, Settings2, PlayCircle, Filter, ChevronRight, PieChart, Database, ListFilter, Trash, CheckSquare, Square, Layers, Play, Pause, FastForward, Clock, Calendar, Hash, Eye, Tv, Map, FolderOpen, FileJson, Check, Save } from 'lucide-react';
 
 const PAQUETE_CATEGORIES = [
@@ -59,7 +56,6 @@ export default function AdminLocalFiles() {
             ]);
             setSettings(sRes);
             setStats(statRes);
-            /* paqueteMapper is now safely accessible via the updated SystemSettings interface */
             setPaqueteMapper(sRes.paqueteMapper || {});
 
             const all = await db.getAllVideos();
@@ -113,7 +109,7 @@ export default function AdminLocalFiles() {
     const handleOrganizePaquete = async () => {
         setIsOrganizing(true);
         try {
-            /* Fixed typo: changed action=action=admin_organize_paquete to action=admin_organize_paquete */
+            // FIX: Removed duplicate action=action=
             const res = await db.request<any>(`action=admin_organize_paquete`, { method: 'POST' });
             toast.success(`Organización terminada. Movidos: ${res.moved}`);
             if (res.indexGenerated) toast.info("index.json generado correctamente");
