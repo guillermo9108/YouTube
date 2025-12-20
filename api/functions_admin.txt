@@ -144,7 +144,7 @@ function admin_handle_vip_request($pdo, $input) {
                 $stmtU->execute([$userId]);
                 $curr = intval($stmtU->fetchColumn());
                 $newStart = ($curr > $now) ? $curr : $now;
-                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([newStart + $sec, $userId]);
+                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newStart + $sec, $userId]);
             }
             
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, 0, ?, 'VIP_REVENUE')")
@@ -199,7 +199,6 @@ function admin_search_external($pdo, $input) {
     try {
         if ($source === 'STOCK') {
             require_once 'functions_utils.php';
-            // Placeholder: en una implementación real aquí se llamarían a las APIs de Pexels/Pixabay
             respond(true, []); 
         } else {
             respond(true, get_youtube_video($query, $settings));
@@ -239,70 +238,6 @@ function admin_repair_db($pdo) {
     respond(true);
 }
 
-function admin_smart_cleaner_preview($pdo, $input) {
-    $cat = $input['category'];
-    $pct = intval($input['percentage']);
-    $days = intval($input['safeHarborDays']);
-    $minSizeMB = intval($input['minSizeMB'] ?? 0);
-    $cutoff = time() - ($days * 86400);
-
-    $sql = "SELECT id, title, views, videoUrl FROM videos WHERE createdAt < $cutoff";
-    if ($cat !== 'ALL') $sql .= " AND category = " . $pdo->quote($cat);
-    $sql .= " ORDER BY views ASC";
-    
-    $stmt = $pdo->query($sql);
-    $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $filtered = [];
-    foreach ($all as $v) {
-        $path = rawurldecode($v['videoUrl']);
-        if (strpos($path, 'api/') === 0) $path = substr($path, 4);
-        
-        $size = 0;
-        if (file_exists($path)) {
-            $size = filesize($path);
-        }
-        
-        if ($minSizeMB > 0 && ($size / 1024 / 1024) < $minSizeMB) continue;
-        
-        $v['size_bytes'] = $size;
-        $filtered[] = $v;
-    }
-
-    $limit = ceil(count($filtered) * ($pct / 100));
-    $preview = array_slice($filtered, 0, $limit);
-    
-    $totalSpace = array_reduce($preview, function($acc, $item) { return $acc + $item['size_bytes']; }, 0);
-
-    respond(true, [
-        'preview' => $preview,
-        'stats' => [
-            'totalVideos' => count($filtered),
-            'videosToDelete' => count($preview),
-            'spaceReclaimed' => round($totalSpace / 1024 / 1024 / 1024, 2) . ' GB'
-        ]
-    ]);
-}
-
-function admin_smart_cleaner_execute($pdo, $input) {
-    $ids = $input['videoIds'];
-    $deleted = 0;
-    foreach ($ids as $id) {
-        $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
-        $stmt->execute([$id]);
-        $v = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($v) {
-            $vp = str_replace('api/', '', $v['videoUrl']);
-            if (file_exists($vp) && strpos($vp, 'uploads/') === 0) @unlink($vp);
-            $tp = str_replace('api/', '', $v['thumbnailUrl']);
-            if (file_exists($tp) && strpos($tp, 'uploads/') === 0) @unlink($tp);
-            $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
-            $deleted++;
-        }
-    }
-    respond(true, ['deleted' => $deleted]);
-}
-
 function admin_get_local_stats($pdo) {
     $stmt = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $path = $stmt->fetchColumn();
@@ -329,11 +264,11 @@ function admin_get_local_stats($pdo) {
 }
 
 function admin_file_cleanup_preview($pdo, $input) {
-    $type = $input['type']; 
+    $type = $input['type'] ?? 'LOW_PERFORMANCE'; 
     $results = [];
 
     if ($type === 'ORPHAN_DB') {
-        $stmt = $pdo->query("SELECT id, title, videoUrl FROM videos WHERE isLocal = 1");
+        $stmt = $pdo->query("SELECT id, title, videoUrl, views FROM videos WHERE isLocal = 1");
         while ($v = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $path = rawurldecode($v['videoUrl']);
             if (strpos($path, 'api/') === 0) $path = substr($path, 4);
@@ -342,18 +277,26 @@ function admin_file_cleanup_preview($pdo, $input) {
                 $results[] = $v;
             }
         }
-    } else if ($type === 'LOW_PERFORMANCE') {
+    } else {
         $days = intval($input['days'] ?? 30);
-        $views = intval($input['views'] ?? 5);
+        $maxViews = intval($input['views'] ?? 5);
+        $minSizeMB = intval($input['minSizeMB'] ?? 0);
         $cutoff = time() - ($days * 86400);
-        $stmt = $pdo->prepare("SELECT id, title, videoUrl, views FROM videos WHERE views <= ? AND createdAt < ? AND isLocal = 1");
-        $stmt->execute([$views, $cutoff]);
+        
+        $sql = "SELECT id, title, videoUrl, views, createdAt FROM videos WHERE views <= ? AND createdAt < ? AND isLocal = 1";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$maxViews, $cutoff]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
         foreach ($rows as $r) {
             $path = rawurldecode($r['videoUrl']);
             if (strpos($path, 'api/') === 0) $path = substr($path, 4);
-            $r['size_bytes'] = file_exists($path) ? filesize($path) : 0;
-            $results[] = $r;
+            if (file_exists($path)) {
+                $size = filesize($path);
+                if ($minSizeMB > 0 && ($size / 1024 / 1024) < $minSizeMB) continue;
+                $r['size_bytes'] = $size;
+                $results[] = $r;
+            }
         }
     }
     respond(true, $results);
@@ -383,15 +326,15 @@ function admin_file_cleanup_execute($pdo, $input) {
 }
 
 function admin_organize_physical_files($pdo, $input) {
-    set_time_limit(300);
-    $strategy = $input['strategy'] ?? 'CATEGORY_FOLDERS'; // CATEGORY_FOLDERS, FLATTEN or SERIES_NESTING
+    set_time_limit(600);
+    $strategy = $input['strategy'] ?? 'CATEGORY_FOLDERS'; 
     $dryRun = !empty($input['dryRun']);
     
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $basePath = rtrim($stmtS->fetchColumn(), '/\\');
     if (!$basePath || !is_dir($basePath) || !is_writable($basePath)) respond(false, null, "Ruta base no válida.");
     
-    $stmt = $pdo->query("SELECT id, title, category, videoUrl FROM videos WHERE isLocal = 1 AND category NOT IN ('PENDING', 'PROCESSING')");
+    $stmt = $pdo->query("SELECT id, title, category, videoUrl, createdAt FROM videos WHERE isLocal = 1 AND category NOT IN ('PENDING', 'PROCESSING')");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $moved = 0; $errors = []; $preview = [];
 
@@ -406,10 +349,13 @@ function admin_organize_physical_files($pdo, $input) {
         if ($strategy === 'FLATTEN') {
             $targetDir = $basePath;
         } else if ($strategy === 'SERIES_NESTING') {
-            // Lógica inteligente: Si el título tiene patrones de series (E01, Cap 1), intenta extraer el nombre raíz
-            $rootName = trim(preg_replace('/\s*(?:E\d+|S\d+E\d+|Capitulo\s*\d+|Episodio\s*\d+|[\(\[]\d+[\)\]]).*/i', '', $v['title']));
+            // Lógica Pro para series: detecta patrones de capítulos
+            // Ej: "Naruto 01", "Betty Cap 5", "El Clon Episodio 2"
+            $rootName = trim(preg_replace('/\s*(?:E\d+|S\d+E\d+|Capitulo\s*\d+|Cap\s*\d+|Episodio\s*\d+|[\(\[]\d+[\)\]]).*/i', '', $v['title']));
             if (empty($rootName) || strlen($rootName) < 3) $rootName = strtoupper($v['category']);
             $targetDir = $basePath . DIRECTORY_SEPARATOR . $rootName;
+        } else if ($strategy === 'DATE_FOLDERS') {
+            $targetDir = $basePath . DIRECTORY_SEPARATOR . date('Y', $v['createdAt']) . DIRECTORY_SEPARATOR . date('m', $v['createdAt']);
         } else {
             $targetDir = $basePath . DIRECTORY_SEPARATOR . strtoupper($v['category']);
         }
@@ -435,7 +381,7 @@ function admin_organize_physical_files($pdo, $input) {
 function admin_transcode_video($pdo, $input) {
     set_time_limit(0);
     $id = $input['id'];
-    $preset = $input['preset'] ?? 'fast'; // fast, medium, slow
+    $preset = $input['preset'] ?? 'fast'; 
     
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
@@ -447,8 +393,6 @@ function admin_transcode_video($pdo, $input) {
     if (!file_exists($oldPath)) respond(false, null, "Archivo no existe");
     
     $tempPath = dirname($oldPath) . DIRECTORY_SEPARATOR . pathinfo($oldPath, PATHINFO_FILENAME) . "_opt.mp4";
-    
-    // Preset logic for FFmpeg
     $crf = ($preset === 'slow') ? 20 : 23;
     
     $cmd = "ffmpeg -i " . escapeshellarg($oldPath) . " -c:v libx264 -crf $crf -preset $preset -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath) . " 2>&1";
@@ -465,7 +409,6 @@ function admin_transcode_video($pdo, $input) {
 }
 
 function admin_ai_organize($pdo, $input) {
-    // Reutiliza Gemini API si la clave existe para clasificar videos 'PROCESSING'
     respond(true, ['processed' => 0]);
 }
 ?>
