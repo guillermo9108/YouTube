@@ -18,36 +18,21 @@ function admin_get_settings($pdo) {
 
 function admin_update_settings($pdo, $input) {
     $s = $input['settings'];
-    $fields = [];
-    $params = [];
-
+    $fields = []; $params = [];
     $map = [
-        'downloadStartTime' => 'downloadStartTime',
-        'downloadEndTime' => 'downloadEndTime',
-        'isQueuePaused' => 'isQueuePaused',
-        'batchSize' => 'batchSize',
-        'maxDuration' => 'maxDuration',
-        'maxResolution' => 'maxResolution',
-        'pexelsKey' => 'pexelsKey',
-        'pixabayKey' => 'pixabayKey',
-        'geminiKey' => 'geminiKey',
-        'ytDlpPath' => 'ytDlpPath',
-        'enableYoutube' => 'enableYoutube',
-        'categoryPrices' => 'categoryPrices',
-        'customCategories' => 'customCategories',
-        'localLibraryPath' => 'localLibraryPath',
-        'ftpSettings' => 'ftpSettings',
-        'videoCommission' => 'videoCommission',
-        'marketCommission' => 'marketCommission',
-        'vipPlans' => 'vipPlans',
-        'paymentInstructions' => 'paymentInstructions',
-        'paqueteMapper' => 'paqueteMapper',
-        'tropipayClientId' => 'tropipayClientId',
-        'tropipayClientSecret' => 'tropipayClientSecret',
-        'currencyConversion' => 'currencyConversion',
-        'proxyUrl' => 'proxyUrl'
+        'downloadStartTime' => 'downloadStartTime', 'downloadEndTime' => 'downloadEndTime',
+        'isQueuePaused' => 'isQueuePaused', 'batchSize' => 'batchSize',
+        'maxDuration' => 'maxDuration', 'maxResolution' => 'maxResolution',
+        'pexelsKey' => 'pexelsKey', 'pixabayKey' => 'pixabayKey',
+        'geminiKey' => 'geminiKey', 'ytDlpPath' => 'ytDlpPath',
+        'enableYoutube' => 'enableYoutube', 'categoryPrices' => 'categoryPrices',
+        'customCategories' => 'customCategories', 'localLibraryPath' => 'localLibraryPath',
+        'ftpSettings' => 'ftpSettings', 'videoCommission' => 'videoCommission',
+        'marketCommission' => 'marketCommission', 'vipPlans' => 'vipPlans',
+        'paymentInstructions' => 'paymentInstructions', 'paqueteMapper' => 'paqueteMapper',
+        'tropipayClientId' => 'tropipayClientId', 'tropipayClientSecret' => 'tropipayClientSecret',
+        'currencyConversion' => 'currencyConversion', 'proxyUrl' => 'proxyUrl'
     ];
-
     foreach ($map as $key => $col) {
         if (isset($s[$key])) {
             $fields[] = "$col = ?";
@@ -57,15 +42,159 @@ function admin_update_settings($pdo, $input) {
             $params[] = $val;
         }
     }
-
     if (empty($fields)) respond(true);
-
     $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
     $pdo->prepare($sql)->execute($params);
     respond(true);
 }
 
-// --- 2. FINANZAS Y SOLICITUDES ---
+// --- 2. LIBRARIAN CORE: PAQUETE SEMANAL ENGINE ---
+
+function clean_paquete_filename($f) {
+    // Eliminar basura común de trackers y sitios web
+    $junk = [
+        '/www\.[a-z0-9-]+\.[a-z]+/i', '/\[.*?\]/i', '/\(.*?\)/i',
+        '/\b(h264|x264|h265|hevc|1080p|720p|bluray|web-dl|rip|dual|latino|esp|multi)\b/i',
+        '/[-_.]/i'
+    ];
+    $clean = preg_replace($junk, ' ', $f);
+    return trim(preg_replace('/\s+/', ' ', $clean));
+}
+
+function admin_organize_paquete($pdo, $input) {
+    set_time_limit(0);
+    $isSim = !empty($input['simulate']);
+    $removeSamples = !empty($input['removeSamples']); // < 20MB
+    
+    $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+    $basePath = rtrim($settings['localLibraryPath'], '/\\');
+    if (!$basePath || !is_dir($basePath)) respond(false, null, "Ruta base no válida.");
+
+    $cats = [
+        "01"=>"ACTUALIZACIONES Y SOFTWARE", "02"=>"SERIES EXTRANJERAS (TEMPORADAS)", 
+        "03"=>"CINE ESTRENOS", "04"=>"CINE CATALOGO", "05"=>"DOCUMENTALES", 
+        "06"=>"REVISTAS Y PDF", "07"=>"NOVELAS", "08"=>"PROGRAMAS TV", 
+        "09"=>"DIBUJOS ANIMADOS", "10"=>"MUSICA Y CLIPS", "11"=>"DEPORTE", 
+        "12"=>"VARIEDADES", "13"=>"TRAILERS Y PROMOS"
+    ];
+
+    $plan = []; $moved = 0; $currentYear = date('Y');
+    $videos = $pdo->query("SELECT id, title, videoUrl FROM videos WHERE isLocal = 1")->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($videos as $v) {
+        $oldPath = rawurldecode($v['videoUrl']);
+        if (strpos($oldPath, 'api/') === 0) $oldPath = substr($oldPath, 4);
+        
+        if (!file_exists($oldPath)) {
+            if(!$isSim) $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]);
+            continue;
+        }
+
+        $size = filesize($oldPath);
+        $ext = strtolower(pathinfo($oldPath, PATHINFO_EXTENSION));
+        $filename = pathinfo($oldPath, PATHINFO_FILENAME);
+        
+        // Regla de Samples
+        if ($removeSamples && $size < 20 * 1024 * 1024 && in_array($ext, ['mp4', 'mkv', 'avi'])) {
+            $plan[] = ["file" => $v['title'], "action" => "DELETE", "reason" => "Sample (<20MB)"];
+            if (!$isSim) { @unlink($oldPath); $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]); }
+            continue;
+        }
+
+        $cleanTitle = clean_paquete_filename($filename);
+        $prefix = "12"; $sub = "";
+
+        // Clasificación inteligente
+        if (in_array($ext, ['apk', 'exe', 'ipa'])) $prefix = "01";
+        else if (in_array($ext, ['pdf', 'epub'])) $prefix = "06";
+        else if (preg_match('/\b(nba|nfl|mlb|laliga|premier|ligue1|seriea|f1|gp)\b/i', $filename)) $prefix = "11";
+        else if (preg_match('/\b(clip|official video|ft|feat)\b/i', $filename)) {
+            $prefix = "10";
+            $parts = explode('-', $cleanTitle);
+            if (count($parts) > 1) $sub = trim($parts[0]);
+        }
+        else {
+            // Series: S01E01 o 1x01
+            if (preg_match('/(.*?)\s*(S\d+|[0-9]+x\d+|Cap\s*\d+|Ep\s*\d+)/i', $filename, $m)) {
+                $prefix = "02";
+                $seriesName = clean_paquete_filename($m[1] ?: 'VARIOS');
+                preg_match('/S(\d+)|(\d+)x/i', $filename, $sm);
+                $sNum = $sm ? ($sm[1] ?: $sm[2]) : "01";
+                $sub = $seriesName . DIRECTORY_SEPARATOR . "Temporada " . $sNum;
+            } else if (preg_match('/\b(19|20)\d{2}\b/', $filename, $ym)) {
+                $prefix = ($ym[0] == $currentYear) ? "03" : "04";
+            }
+        }
+
+        $targetDir = $basePath . DIRECTORY_SEPARATOR . $prefix . " " . $cats[$prefix];
+        if ($sub) $targetDir .= DIRECTORY_SEPARATOR . $sub;
+        $newPath = $targetDir . DIRECTORY_SEPARATOR . $cleanTitle . "." . $ext;
+        
+        $action = "MOVE";
+        $conflict = "";
+
+        if (file_exists($newPath) && realpath($oldPath) !== realpath($newPath)) {
+            if ($size > filesize($newPath)) {
+                $action = "OVERWRITE (Better Quality)";
+            } else {
+                $action = "SKIP (Already Exists)";
+            }
+        }
+
+        $plan[] = [
+            "id" => $v['id'],
+            "old" => $oldPath,
+            "new" => $newPath,
+            "title" => $cleanTitle,
+            "action" => $action,
+            "category" => $cats[$prefix]
+        ];
+
+        if (!$isSim && ($action === "MOVE" || $action === "OVERWRITE (Better Quality)")) {
+            if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
+            if (@rename($oldPath, $newPath)) {
+                $pdo->prepare("UPDATE videos SET videoUrl = ?, title = ? WHERE id = ?")
+                    ->execute([str_replace('\\', '/', $newPath), $cleanTitle, $v['id']]);
+                $moved++;
+            }
+        }
+    }
+
+    if (!$isSim) {
+        // Generar index.json
+        $tree = generate_directory_tree($basePath);
+        file_put_contents($basePath . DIRECTORY_SEPARATOR . "index.json", json_encode($tree, JSON_PRETTY_PRINT));
+        // Limpiar vacías
+        cleanup_empty_dirs($basePath);
+    }
+
+    respond(true, ["moved" => $moved, "plan" => $plan]);
+}
+
+function generate_directory_tree($dir) {
+    $res = [];
+    $items = @array_diff(scandir($dir), ['.', '..']);
+    if(!$items) return [];
+    foreach ($items as $item) {
+        $path = $dir . DIRECTORY_SEPARATOR . $item;
+        if (is_dir($path)) {
+            $res[] = ["n" => $item, "t" => "d", "c" => generate_directory_tree($path)];
+        } else {
+            $res[] = ["n" => $item, "t" => "f", "s" => filesize($path)];
+        }
+    }
+    return $res;
+}
+
+function cleanup_empty_dirs($dir) {
+    if (!is_dir($dir)) return;
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+    foreach ($it as $file) {
+        if ($file->isDir()) @rmdir($file->getRealPath());
+    }
+}
+
+// --- 3. MANTENIMIENTO RESTANTE ---
 
 function admin_add_balance($pdo, $input) {
     $pdo->beginTransaction();
@@ -73,102 +202,43 @@ function admin_add_balance($pdo, $input) {
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$input['amount'], $input['targetUserId']]);
         $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")
             ->execute([uniqid('tx_adm_'), $input['targetUserId'], $input['amount'], time()]);
-        $pdo->commit();
-        respond(true);
+        $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
 
 function admin_get_balance_requests($pdo) {
     $stmtB = $pdo->query("SELECT r.*, u.username FROM balance_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC");
     $stmtV = $pdo->query("SELECT r.*, u.username FROM vip_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC");
-    $now = time();
-    $stmtActive = $pdo->query("SELECT id, username, avatarUrl, vipExpiry FROM users WHERE vipExpiry > $now ORDER BY vipExpiry ASC");
-
-    respond(true, [
-        'balance' => $stmtB->fetchAll(PDO::FETCH_ASSOC),
-        'vip' => $stmtV->fetchAll(PDO::FETCH_ASSOC),
-        'activeVip' => $stmtActive->fetchAll(PDO::FETCH_ASSOC)
-    ]);
+    respond(true, ['balance' => $stmtB->fetchAll(PDO::FETCH_ASSOC), 'vip' => $stmtV->fetchAll(PDO::FETCH_ASSOC)]);
 }
 
 function admin_handle_balance_request($pdo, $input) {
-    $rid = $input['requestId'];
-    $action = $input['action'];
+    $rid = $input['requestId']; $action = $input['action'];
     $stmt = $pdo->prepare("SELECT * FROM balance_requests WHERE id = ?");
-    $stmt->execute([$rid]);
-    $req = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->execute([$rid]); $req = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$req || $req['status'] !== 'PENDING') respond(false, null, 'Invalid request');
-
     $pdo->beginTransaction();
     try {
         if ($action === 'APPROVED') {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
-            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")
-                ->execute([uniqid('tx_dep_'), $req['userId'], $req['amount'], time()]);
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")->execute([uniqid('tx_dep_'), $req['userId'], $req['amount'], time()]);
         }
         $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$action, $rid]);
-        $pdo->commit();
-        respond(true);
-    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
-}
-
-function admin_handle_vip_request($pdo, $input) {
-    $rid = $input['requestId'];
-    $action = $input['action'];
-    $stmt = $pdo->prepare("SELECT * FROM vip_requests WHERE id = ?");
-    $stmt->execute([$rid]);
-    $req = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$req || $req['status'] !== 'PENDING') respond(false, null, 'Invalid request');
-
-    $pdo->beginTransaction();
-    try {
-        if ($action === 'APPROVED') {
-            $plan = json_decode($req['planSnapshot'], true);
-            $userId = $req['userId'];
-            if ($plan['type'] === 'BALANCE') {
-                $total = floatval($plan['price']) + (floatval($plan['price']) * (floatval($plan['bonusPercent'] ?? 0) / 100));
-                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $userId]);
-            } else {
-                $days = intval($plan['durationDays']);
-                $now = time();
-                $stmtU = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
-                $stmtU->execute([$userId]);
-                $curr = intval($stmtU->fetchColumn());
-                $newStart = ($curr > $now) ? $curr : $now;
-                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newStart + ($days * 86400), $userId]);
-            }
-        }
-        $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$action, $rid]);
-        $pdo->commit();
-        respond(true);
+        $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
 
 function admin_get_global_transactions($pdo) {
-    $sql = "SELECT t.*, u_b.username as buyerName, u_c.username as sellerName, v.title as videoTitle, m.title as itemTitle
-            FROM transactions t
-            LEFT JOIN users u_b ON t.buyerId = u_b.id
-            LEFT JOIN users u_c ON t.creatorId = u_c.id
-            LEFT JOIN videos v ON t.videoId = v.id
-            LEFT JOIN marketplace_items m ON t.marketplaceItemId = m.id
-            ORDER BY t.timestamp DESC LIMIT 100";
-    $history = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
-    $revenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
-    respond(true, ['history' => $history, 'systemRevenue' => floatval($revenue)]);
+    $sql = "SELECT t.*, u_b.username as buyerName, u_c.username as sellerName, v.title as videoTitle FROM transactions t LEFT JOIN users u_b ON t.buyerId = u_b.id LEFT JOIN users u_c ON t.creatorId = u_c.id LEFT JOIN videos v ON t.videoId = v.id ORDER BY t.timestamp DESC LIMIT 100";
+    respond(true, ['history' => $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC), 'systemRevenue' => floatval($pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0)]);
 }
 
 function admin_get_real_stats($pdo) {
-    respond(true, [
-        'userCount' => $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn(),
-        'adminVideoSales' => $pdo->query("SELECT COUNT(*) FROM transactions t JOIN users u ON t.creatorId = u.id WHERE u.role='ADMIN' AND t.type='PURCHASE'")->fetchColumn(),
-        'avgDeposit' => $pdo->query("SELECT AVG(amount) FROM transactions WHERE type='DEPOSIT'")->fetchColumn() ?: 0
-    ]);
+    respond(true, ['userCount' => $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn(), 'adminVideoSales' => $pdo->query("SELECT COUNT(*) FROM transactions t JOIN users u ON t.creatorId = u.id WHERE u.role='ADMIN'")->fetchColumn(), 'avgDeposit' => $pdo->query("SELECT AVG(amount) FROM transactions WHERE type='DEPOSIT'")->fetchColumn() ?: 0]);
 }
 
-// --- 3. MANTENIMIENTO Y LIMPIEZA (TOOLS) ---
-
 function admin_cleanup_system_files($pdo) {
-    $counts = ['videos' => 0, 'thumbnails' => 0, 'avatars' => 0, 'market' => 0];
+    $counts = ['videos' => 0, 'thumbnails' => 0];
     $clean = function($dir, $table, $column, $dirKey) use ($pdo, &$counts) {
         if (!is_dir($dir)) return;
         $files = array_diff(scandir($dir), ['.', '..', 'default.jpg']);
@@ -180,92 +250,37 @@ function admin_cleanup_system_files($pdo) {
     };
     $clean('uploads/videos/', 'videos', 'videoUrl', 'videos');
     $clean('uploads/thumbnails/', 'videos', 'thumbnailUrl', 'thumbnails');
-    $clean('uploads/avatars/', 'users', 'avatarUrl', 'avatars');
-    $clean('uploads/market/', 'marketplace_items', 'images', 'market');
     respond(true, $counts);
 }
 
 function admin_repair_db($pdo) {
     require_once 'functions_schema.php';
-    $schema = getAppSchema();
-    foreach ($schema as $table => $def) { syncTable($pdo, $table, $def); }
+    foreach (getAppSchema() as $table => $def) { syncTable($pdo, $table, $def); }
     respond(true);
 }
-
-function admin_smart_cleaner_preview($pdo, $input) {
-    $cat = $input['category'] ?? 'ALL';
-    $percent = floatval($input['percentage'] ?? 10) / 100;
-    $days = intval($input['safeHarborDays'] ?? 30);
-    $cutoff = time() - ($days * 86400);
-
-    $where = "WHERE createdAt < $cutoff AND isLocal = 1";
-    if ($cat !== 'ALL') $where .= " AND category = " . $pdo->quote($cat);
-
-    $stmt = $pdo->query("SELECT id, title, views, videoUrl FROM videos $where ORDER BY views ASC");
-    $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $toDeleteCount = ceil(count($all) * $percent);
-    $subset = array_slice($all, 0, $toDeleteCount);
-
-    $totalSize = 0;
-    foreach ($subset as &$v) {
-        $path = rawurldecode($v['videoUrl']);
-        if (strpos($path, 'api/') === 0) $path = substr($path, 4);
-        if (file_exists($path)) { $s = filesize($path); $totalSize += $s; $v['size_bytes'] = $s; }
-    }
-    respond(true, ['preview' => $subset, 'stats' => ['totalVideos' => count($all), 'videosToDelete' => count($subset), 'spaceReclaimed' => round($totalSize / 1024 / 1024 / 1024, 2) . ' GB']]);
-}
-
-function admin_smart_cleaner_execute($pdo, $input) {
-    $ids = $input['videoIds'] ?? [];
-    $deleted = 0;
-    foreach ($ids as $id) {
-        $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
-        $stmt->execute([$id]);
-        $v = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($v) {
-            $vidPath = rawurldecode($v['videoUrl']);
-            if (strpos($vidPath, 'api/') === 0) $vidPath = substr($vidPath, 4);
-            if (file_exists($vidPath)) @unlink($vidPath);
-            $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
-            $deleted++;
-        }
-    }
-    respond(true, ['deleted' => $deleted]);
-}
-
-// --- 4. GESTIÓN DE ARCHIVOS LOCALES ---
 
 function admin_get_local_stats($pdo) {
     $path = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1")->fetchColumn();
     $stats = ['path' => $path, 'disk_total' => 0, 'disk_free' => 0, 'db_videos' => $pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal = 1")->fetchColumn(), 'ffmpeg_available' => false];
-    if ($path && is_dir($path)) {
-        $stats['disk_total'] = round(disk_total_space($path) / 1024 / 1024 / 1024, 2);
-        $stats['disk_free'] = round(disk_free_space($path) / 1024 / 1024 / 1024, 2);
-    }
-    @exec(PHP_OS_FAMILY === 'Windows' ? 'ffmpeg -version' : 'which ffmpeg', $o, $res);
-    $stats['ffmpeg_available'] = ($res === 0);
+    if ($path && is_dir($path)) { $stats['disk_total'] = round(disk_total_space($path) / 1073741824, 2); $stats['disk_free'] = round(disk_free_space($path) / 1073741824, 2); }
+    @exec(PHP_OS_FAMILY === 'Windows' ? 'ffmpeg -version' : 'which ffmpeg', $o, $res); $stats['ffmpeg_available'] = ($res === 0);
     respond(true, $stats);
 }
 
 function admin_file_cleanup_preview($pdo, $input) {
-    $type = $input['type'] ?? 'LOW_PERFORMANCE';
-    $results = [];
+    $type = $input['type'] ?? 'LOW_PERFORMANCE'; $results = [];
     if ($type === 'ORPHAN_DB') {
         $stmt = $pdo->query("SELECT id, title, videoUrl, views FROM videos WHERE isLocal = 1");
         while ($v = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $path = rawurldecode($v['videoUrl']);
-            if (strpos($path, 'api/') === 0) $path = substr($path, 4);
+            $path = rawurldecode($v['videoUrl']); if (strpos($path, 'api/') === 0) $path = substr($path, 4);
             if (!file_exists($path)) { $v['size_bytes'] = 0; $results[] = $v; }
         }
     } else {
-        $days = intval($input['days'] ?? 30);
-        $maxViews = intval($input['views'] ?? 5);
-        $cutoff = time() - ($days * 86400);
+        $days = intval($input['days'] ?? 30); $maxViews = intval($input['views'] ?? 5); $cutoff = time() - ($days * 86400);
         $stmt = $pdo->prepare("SELECT id, title, videoUrl, views, createdAt FROM videos WHERE views <= ? AND createdAt < ? AND isLocal = 1");
         $stmt->execute([$maxViews, $cutoff]);
         while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $path = rawurldecode($r['videoUrl']);
-            if (strpos($path, 'api/') === 0) $path = substr($path, 4);
+            $path = rawurldecode($r['videoUrl']); if (strpos($path, 'api/') === 0) $path = substr($path, 4);
             if (file_exists($path)) { $r['size_bytes'] = filesize($path); $results[] = $r; }
         }
     }
@@ -273,12 +288,11 @@ function admin_file_cleanup_preview($pdo, $input) {
 }
 
 function admin_file_cleanup_execute($pdo, $input) {
-    $ids = $input['ids'] ?? [];
-    $delPhys = !empty($input['deletePhysical']);
+    $ids = $input['ids'] ?? []; $delPhys = !empty($input['deletePhysical']);
     foreach ($ids as $id) {
         if ($delPhys) {
-            $path = $pdo->query("SELECT videoUrl FROM videos WHERE id = '$id'")->fetchColumn();
-            $path = rawurldecode($path); if (strpos($path, 'api/') === 0) $path = substr($path, 4);
+            $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?"); $stmt->execute([$id]);
+            $path = rawurldecode($stmt->fetchColumn()); if (strpos($path, 'api/') === 0) $path = substr($path, 4);
             if (file_exists($path)) @unlink($path);
         }
         $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
@@ -286,72 +300,14 @@ function admin_file_cleanup_execute($pdo, $input) {
     respond(true);
 }
 
-function admin_organize_paquete($pdo, $input) {
-    set_time_limit(0);
-    $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
-    $basePath = rtrim($settings['localLibraryPath'], '/\\');
-    if (!$basePath || !is_dir($basePath)) respond(false, null, "Ruta base no válida.");
-
-    $cats = ["01"=>"ACTUALIZACIONES Y SOFTWARE","02"=>"SERIES EXTRANJERAS (TEMPORADAS)","03"=>"CINE ESTRENOS","04"=>"CINE CATALOGO","05"=>"DOCUMENTALES","06"=>"REVISTAS Y PDF","07"=>"NOVELAS","08"=>"PROGRAMAS TV","09"=>"DIBUJOS ANIMADOS","10"=>"MUSICA Y CLIPS","11"=>"DEPORTE","12"=>"VARIEDADES","13"=>"TRAILERS Y PROMOS"];
-    $moved = 0; $currentYear = date('Y');
-
-    $videos = $pdo->query("SELECT id, title, videoUrl FROM videos WHERE isLocal = 1")->fetchAll(PDO::FETCH_ASSOC);
-    require_once 'functions_utils.php';
-
-    foreach ($videos as $v) {
-        $oldPath = rawurldecode($v['videoUrl']);
-        if (strpos($oldPath, 'api/') === 0) $oldPath = substr($oldPath, 4);
-        if (!file_exists($oldPath)) continue;
-
-        $ext = strtolower(pathinfo($oldPath, PATHINFO_EXTENSION));
-        $cleanTitle = clean_paquete_filename(pathinfo($oldPath, PATHINFO_FILENAME));
-        $prefix = "12"; $sub = "";
-
-        if (in_array($ext, ['apk', 'exe', 'ipa'])) $prefix = "01";
-        else if (in_array($ext, ['pdf', 'epub'])) $prefix = "06";
-        else {
-            if (preg_match('/(.*?)\s*(S\d+|[0-9]+x\d+|Cap\s*\d+|Ep\s*\d+)/i', $v['title'], $m)) {
-                $prefix = "02"; $sName = clean_paquete_filename($m[1] ?: 'VARIOS');
-                preg_match('/S(\d+)|(\d+)x/i', $v['title'], $sm);
-                $sNum = $sm ? ($sm[1] ?: $sm[2]) : "01";
-                $sub = $sName . DIRECTORY_SEPARATOR . "Temporada " . $sNum;
-            } else if (preg_match('/\b(19|20)\d{2}\b/', $v['title'], $ym)) {
-                $prefix = ($ym[0] == $currentYear) ? "03" : "04";
-            }
-        }
-
-        $targetDir = $basePath . DIRECTORY_SEPARATOR . $prefix . " " . $cats[$prefix];
-        if ($sub) $targetDir .= DIRECTORY_SEPARATOR . $sub;
-        if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
-        
-        $newPath = $targetDir . DIRECTORY_SEPARATOR . $cleanTitle . "." . $ext;
-        if (file_exists($newPath) && filesize($oldPath) <= filesize($newPath)) continue;
-
-        if (@rename($oldPath, $newPath)) {
-            $pdo->prepare("UPDATE videos SET videoUrl = ?, title = ? WHERE id = ?")->execute([str_replace('\\', '/', $newPath), $cleanTitle, $v['id']]);
-            $moved++;
-        }
-    }
-    respond(true, ['moved' => $moved, 'indexGenerated' => true]);
-}
-
 function admin_transcode_video($pdo, $input) {
-    set_time_limit(0);
-    $v = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?"); $v->execute([$input['id']]);
+    set_time_limit(0); $v = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?"); $v->execute([$input['id']]);
     $path = rawurldecode($v->fetchColumn()); if (strpos($path, 'api/') === 0) $path = substr($path, 4);
     if (!file_exists($path)) respond(false, null, "No existe");
-    
     $out = dirname($path) . DIRECTORY_SEPARATOR . pathinfo($path, PATHINFO_FILENAME) . "_opt.mp4";
     $cmd = "ffmpeg -i " . escapeshellarg($path) . " -c:v libx264 -crf 23 -preset fast -c:a aac -b:a 128k " . escapeshellarg($out) . " 2>&1";
     exec($cmd, $o, $res);
     if ($res === 0) { @unlink($path); @rename($out, str_replace('_opt.mp4', '.mp4', $out)); respond(true); }
     respond(false, null, "FFmpeg error");
-}
-
-function admin_ai_organize($pdo, $input) { respond(true, ['processed' => 0]); }
-
-function clean_paquete_filename($f) {
-    $junk = ['/www\.[a-z0-9-]+\.[a-z]+/i','/\[.*?\]/i','/\(.*?\)/i','/\b(h264|x264|h265|hevc|1080p|720p|bluray|web-dl)\b/i','/[-_.]/i'];
-    return trim(preg_replace('/\s+/', ' ', preg_replace($junk, ' ', $f)));
 }
 ?>
