@@ -203,7 +203,6 @@ function video_upload($pdo, $post, $files) {
     $needsTrans = 0; $tStatus = 'NONE';
     
     if (!empty($settings['autoTranscode'])) {
-        // La función check_needs_transcode debe estar disponible via functions_admin.php
         if (function_exists('check_needs_transcode')) {
             $realPath = UPLOAD_DIR . $vidName;
             if (check_needs_transcode($realPath)) {
@@ -248,21 +247,24 @@ function video_scan_local($pdo, $input) {
     set_time_limit(0);
     $path = $input['path'] ?? '';
     
-    if (!$path || !is_dir($path)) {
-        respond(false, null, "Ruta de librería inválida: $path");
+    if (!$path || !is_dir($path) || !is_readable($path)) {
+        respond(false, null, "Ruta de librería inválida o sin permisos: $path");
     }
 
     $filesFound = [];
     try {
+        // CATCH_GET_CHILD evita errores fatales en carpetas protegidas
         $dirIterator = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveDirectoryIterator::SELF_FIRST);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST | RecursiveIteratorIterator::CATCH_GET_CHILD);
         foreach ($iterator as $file) {
-            if ($file->isFile()) {
-                $ext = strtolower($file->getExtension());
-                if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
-                    $filesFound[] = $file->getPathname();
+            try {
+                if ($file->isFile()) {
+                    $ext = strtolower($file->getExtension());
+                    if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
+                        $filesFound[] = $file->getPathname();
+                    }
                 }
-            }
+            } catch (Exception $e) { continue; }
         }
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 
@@ -336,7 +338,6 @@ function video_update_metadata($pdo, $post, $files) {
     $params[] = $id;
     $pdo->prepare($sql)->execute($params);
 
-    // Organización inmediata del video específico para que sea visible
     $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
