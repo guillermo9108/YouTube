@@ -85,7 +85,7 @@ if ($action === 'initialize_system') {
     $adminUser = $input['adminConfig'];
     try {
         $pdo = new PDO("mysql:host={$dbConfig['host']};port={$dbConfig['port']};charset=utf8mb4", $dbConfig['username'], $dbConfig['password']);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::EXCEPTION);
         $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbConfig['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         $pdo->exec("USE `{$dbConfig['database']}`");
         
@@ -132,10 +132,10 @@ $db_config = json_decode(file_get_contents($configFile), true);
 
 try {
     $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password'], [PDO::ATTR_PERSISTENT => true]);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::EXCEPTION);
 } catch (PDOException $e) { respond(false, null, 'DB Connection Error: ' . $e->getMessage()); }
 
-// --- 8. SWITCH DE ACCIONES (SINCRONIZADO CON db.ts) ---
+// --- 8. SWITCH DE ACCIONES ---
 try {
     switch ($action) {
         case 'login': auth_login($pdo, $input); break;
@@ -179,12 +179,12 @@ try {
         case 'admin_repair_db': admin_repair_db($pdo); break;
         case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
         case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
+        case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
 
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $_GET); break;
         case 'admin_file_cleanup_execute': admin_file_cleanup_execute($pdo, $input); break;
         case 'admin_organize_paquete': admin_organize_paquete($pdo, $input); break;
-        case 'admin_transcode_video': admin_transcode_video($pdo, $input); break;
 
         case 'has_purchased': interact_has_purchased($pdo, $_GET['userId'], $_GET['videoId']); break;
         case 'purchase_video': interact_purchase($pdo, $input); break;

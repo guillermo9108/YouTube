@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, VideoCategory, VipPlan } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles, Globe } from 'lucide-react';
+import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles, Globe, Cpu } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
@@ -23,13 +22,13 @@ const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) =
 
 export default function AdminConfig() {
     const toast = useToast();
-    const [settings, setSettings] = useState<SystemSettings | null>(null);
+    const [settings, setSettings] = useState<any>(null);
     const [openSection, setOpenSection] = useState<string>('SYSTEM');
     const [loading, setLoading] = useState(true);
     const [newCatName, setNewCatName] = useState('');
 
     useEffect(() => {
-        db.getSystemSettings().then((s: SystemSettings) => {
+        db.getSystemSettings().then((s: any) => {
             if (Array.isArray(s.categoryPrices) || !s.categoryPrices) {
                 s.categoryPrices = {};
             }
@@ -180,6 +179,45 @@ export default function AdminConfig() {
             </ConfigSection>
 
             <ConfigSection 
+                title="Conversión Automática (FFmpeg)" 
+                icon={Cpu} 
+                isOpen={openSection === 'TRANSCODE'} 
+                onToggle={() => setOpenSection(openSection === 'TRANSCODE' ? '' : 'TRANSCODE')}
+            >
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
+                        <div>
+                            <h4 className="font-bold text-white text-sm">Procesamiento Automático</h4>
+                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Detecta y convierte videos no compatibles (WebReady)</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" checked={settings.autoTranscode || false} onChange={e => setSettings({...settings, autoTranscode: e.target.checked})} className="sr-only peer"/>
+                            <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+
+                    {settings.autoTranscode && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Cpu size={12}/> Preset de Velocidad</label>
+                                <select value={settings.transcodePreset || 'superfast'} onChange={e => setSettings({...settings, transcodePreset: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
+                                    <option value="ultrafast">Ultrafast (CPU Bajo / Archivo Grande)</option>
+                                    <option value="superfast">Superfast (Recomendado)</option>
+                                    <option value="veryfast">Veryfast</option>
+                                    <option value="fast">Fast</option>
+                                    <option value="medium">Medium (Calidad Óptima / Lento)</option>
+                                </select>
+                            </div>
+                            <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-lg p-3 text-[10px] text-indigo-300 leading-relaxed">
+                                <Sparkles size={14} className="mb-1"/>
+                                <strong>Smart FastStart:</strong> FFmpeg moverá automáticamente los metadatos al inicio del archivo (FastStart) para habilitar reproducción instantánea en la PWA.
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </ConfigSection>
+
+            <ConfigSection 
                 title="Integraciones API & IA" 
                 icon={DownloadCloud} 
                 isOpen={openSection === 'API'} 
@@ -229,9 +267,8 @@ export default function AdminConfig() {
                 isOpen={openSection === 'VIP'} 
                 onToggle={() => setOpenSection(openSection === 'VIP' ? '' : 'VIP')}
             >
-                {/* ... (Existing VIP Code) ... */}
                 <div className="space-y-4">
-                    {settings.vipPlans && settings.vipPlans.map((plan) => (
+                    {settings.vipPlans && settings.vipPlans.map((plan: any) => (
                         <div key={plan.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative">
                             <button onClick={() => removeVipPlan(plan.id)} className="absolute top-2 right-2 text-slate-600 hover:text-red-500 p-1"><Trash2 size={16}/></button>
                             
@@ -335,7 +372,6 @@ export default function AdminConfig() {
                 isOpen={openSection === 'PRICES'} 
                 onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}
             >
-                {/* ... (Existing Prices Code) ... */}
                 <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800 mb-4">
                     Estos precios se aplicarán automáticamente a los videos durante el <strong>Paso 3: Organización Inteligente</strong> basándose en su categoría detectada.
                 </p>

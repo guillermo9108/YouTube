@@ -1,35 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { 
-    HardDrive, Trash2, Wand2, Loader2, Move, Settings2, PlayCircle, 
-    Filter, ChevronRight, PieChart, Database, Save, Map, FileJson, 
-    Check, Eye, ShieldAlert, Zap, Layers, AlertTriangle, FileSearch, Trash, X, FolderTree, Info
+    HardDrive, Trash2, Wand2, Loader2, Move, PlayCircle, 
+    PieChart, Database, Eye, ShieldAlert, Zap, AlertTriangle, X, Info, Trash, FolderTree, CheckCircle, Shield
 } from 'lucide-react';
-
-const PAQUETE_CATEGORIES = [
-    { id: "01", label: "Actualizaciones y Software" },
-    { id: "02", label: "Series Extranjeras" },
-    { id: "03", label: "Cine Estrenos" },
-    { id: "04", label: "Cine Catálogo" },
-    { id: "05", label: "Documentales" },
-    { id: "06", label: "Revistas y PDF" },
-    { id: "07", label: "Novelas" },
-    { id: "08", label: "Programas TV" },
-    { id: "09", label: "Dibujos Animados" },
-    { id: "10", label: "Música y Clips" },
-    { id: "11", label: "Deporte" },
-    { id: "12", label: "Variedades" },
-    { id: "13", label: "Trailers y Promos" }
-];
 
 export default function AdminLocalFiles() {
     const toast = useToast();
     const [stats, setStats] = useState<any>(null);
-    const [settings, setSettings] = useState<any>(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'STORAGE' | 'JANITOR' | 'LIBRARIAN' | 'CONVERTER'>('STORAGE');
+    const [activeTab, setActiveTab] = useState<'STORAGE' | 'JANITOR' | 'LIBRARIAN'>('STORAGE');
     
     // Janitor State
     const [cleanupType, setCleanupType] = useState<'ORPHAN_DB' | 'LOW_PERFORMANCE'>('LOW_PERFORMANCE');
@@ -38,28 +20,19 @@ export default function AdminLocalFiles() {
 
     // Librarian State
     const [isOrganizing, setIsOrganizing] = useState(false);
-    const [showMapper, setShowMapper] = useState(false);
     const [simPlan, setSimPlan] = useState<any[]>([]);
-    const [deepCleanOptions, setDeepCleanOptions] = useState({ removeSamples: true });
-
-    // Converter State
-    const [nonWebVideos, setNonWebVideos] = useState<Video[]>([]);
-    const [isQueueRunning, setIsQueueRunning] = useState(false);
+    const [libOptions, setLibOptions] = useState({ 
+        removeSamples: true, 
+        keepBestQuality: true, 
+        cleanOrphanMeta: true,
+        pruneEmptyFolders: true 
+    });
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const [sRes, statRes] = await Promise.all([
-                db.getSystemSettings(),
-                db.request<any>('action=admin_get_local_stats')
-            ]);
-            setSettings(sRes);
+            const statRes = await db.request<any>('action=admin_get_local_stats');
             setStats(statRes);
-            const all = await db.getAllVideos();
-            setNonWebVideos(all.filter(v => {
-                const ext = v.videoUrl.split('.').pop()?.toLowerCase();
-                return v.isLocal && ext && !['mp4', 'webm', 'mkv', 'avi'].includes(ext);
-            }));
         } catch (e) { console.error(e); }
         finally { setLoading(false); }
     };
@@ -75,19 +48,19 @@ export default function AdminLocalFiles() {
         finally { setIsSearching(false); }
     };
 
-    const runPaquete = async (simulate: boolean) => {
+    const runLibrarian = async (simulate: boolean) => {
         setIsOrganizing(true);
         if (simulate) setSimPlan([]);
         try {
             const res = await db.request<any>(`action=admin_organize_paquete`, {
                 method: 'POST',
-                body: JSON.stringify({ simulate, ...deepCleanOptions })
+                body: JSON.stringify({ simulate, options: libOptions })
             });
             if (simulate) {
                 setSimPlan(res.plan);
-                toast.info(`Simulación completada: ${res.plan.length} operaciones calculadas.`);
+                toast.info(`Auditoría completa: ${res.plan.length} cambios proyectados.`);
             } else {
-                toast.success(`Organización terminada. Movidos: ${res.moved}`);
+                toast.success(`Consolidación terminada. Movidos: ${res.moved}. Limpiados: ${res.cleaned}`);
                 loadData();
             }
         } catch (e: any) { toast.error(e.message); }
@@ -105,10 +78,9 @@ export default function AdminLocalFiles() {
     return (
         <div className="space-y-4 animate-in fade-in pb-20 max-w-5xl mx-auto">
             <div className="flex bg-slate-900 border-b border-slate-800 sticky top-0 z-20 -mx-2 px-2 md:mx-0 md:rounded-t-xl overflow-hidden shadow-lg backdrop-blur-md">
-                <TabBtn id="STORAGE" label="Dashboard" icon={PieChart} />
+                <TabBtn id="STORAGE" label="Capacidad" icon={PieChart} />
                 <TabBtn id="JANITOR" label="Limpieza" icon={Trash2} />
-                <TabBtn id="LIBRARIAN" label="Librarian" icon={Wand2} />
-                <TabBtn id="CONVERTER" label="Convertir" icon={PlayCircle} />
+                <TabBtn id="LIBRARIAN" label="Librarian V5" icon={FolderTree} />
             </div>
 
             {activeTab === 'STORAGE' && (
@@ -116,7 +88,7 @@ export default function AdminLocalFiles() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-2 md:px-0">
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
                             <div className="flex justify-between items-center mb-6">
-                                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Almacenamiento</h4>
+                                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Almacenamiento Local</h4>
                                 <HardDrive size={20} className="text-indigo-500" />
                             </div>
                             <div className="flex items-center gap-6">
@@ -133,10 +105,10 @@ export default function AdminLocalFiles() {
                                 </div>
                             </div>
                         </div>
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-                            <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Librería</h4>
-                            <div className="text-4xl font-black text-emerald-400">{stats?.db_videos}</div>
-                            <div className="text-[10px] font-bold text-slate-500 uppercase">Videos locales activos</div>
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-center">
+                            <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Database size={18} className="text-emerald-500"/> Videos en Biblioteca</h4>
+                            <div className="text-4xl font-black text-white">{stats?.db_videos}</div>
+                            <div className="text-[10px] font-bold text-slate-500 uppercase">Registrados como locales</div>
                         </div>
                     </div>
                 </div>
@@ -151,11 +123,11 @@ export default function AdminLocalFiles() {
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <select value={cleanupType} onChange={e => setCleanupType(e.target.value as any)} className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-white text-sm">
-                                <option value="LOW_PERFORMANCE">Bajo Rendimiento (Borrador)</option>
+                                <option value="LOW_PERFORMANCE">Bajo Rendimiento (Limpiar Antiguos)</option>
                                 <option value="ORPHAN_DB">Registros Huérfanos (Limpiar DB)</option>
                             </select>
                             <button onClick={handleSearchCleanup} disabled={isSearching} className="py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold flex items-center justify-center gap-2">
-                                {isSearching ? <Loader2 className="animate-spin" size={18}/> : <FileSearch size={18}/>} Escanear Basura
+                                {isSearching ? <Loader2 className="animate-spin" size={18}/> : <Trash size={18}/>} Escanear Basura
                             </button>
                         </div>
                     </div>
@@ -181,64 +153,80 @@ export default function AdminLocalFiles() {
             {activeTab === 'LIBRARIAN' && (
                 <div className="space-y-4 px-2 md:px-0">
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
-                        <div className="flex justify-between items-center mb-6">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center"><Move size={20}/></div>
-                                <div>
-                                    <h3 className="font-bold text-white">The Librarian V2</h3>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Consolidación Jerárquica</p>
-                                </div>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => setShowMapper(!showMapper)} className="p-2 bg-slate-800 text-indigo-400 rounded-lg hover:bg-slate-700 transition-colors"><Map size={20}/></button>
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center"><Move size={20}/></div>
+                            <div>
+                                <h3 className="font-bold text-white">The Librarian Engine V5</h3>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Mantenimiento y Organización Profunda</p>
                             </div>
                         </div>
 
                         <div className="bg-indigo-900/10 border border-indigo-500/30 rounded-xl p-4 mb-6 flex gap-4 items-start">
                             <Info size={24} className="text-indigo-400 shrink-0 mt-1"/>
                             <div className="text-xs text-slate-300 leading-relaxed">
-                                <strong className="text-indigo-300 block mb-1">Algoritmo de Consolidación Inteligente:</strong>
-                                Analiza archivos dispersos, detecta el nombre real del contenido ignorando capítulos y temporadas, y los agrupa en carpetas únicas. 
-                                Además, mueve archivos <strong>.nfo, .jpg y subtítulos</strong> automáticamente.
+                                <strong className="text-indigo-300 block mb-1">Algoritmo de Limpieza Multinivel:</strong>
+                                Ahora no solo organiza; el motor analiza la <strong>mejor calidad disponible</strong> para eliminar duplicados pesados, limpia metadatos de archivos borrados y poda directorios vacíos para mantener un árbol de archivos impecable.
                             </div>
                         </div>
 
-                        {showMapper && (
-                            <div className="mb-6 bg-slate-950 p-4 rounded-xl border border-slate-800 animate-in slide-in-from-top-2">
-                                <h4 className="text-[10px] font-black text-slate-500 uppercase mb-4 flex items-center gap-2"><Map size={14}/> Mapeador de Carpetas</h4>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {PAQUETE_CATEGORIES.map(cat => (
-                                        <div key={cat.id} className="space-y-1">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase">{cat.id} {cat.label}</label>
-                                            <input type="text" placeholder="Ruta personalizada" className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-xs text-white" />
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
                         <div className="space-y-4">
-                            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                                <h4 className="text-xs font-bold text-white mb-3 flex items-center gap-2 text-indigo-400"><ShieldAlert size={14}/> Opciones de Limpieza y Consolidación</h4>
-                                <div className="flex flex-wrap gap-4">
-                                    <label className="flex items-center gap-2 cursor-pointer group">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={deepCleanOptions.removeSamples}
-                                            onChange={e => setDeepCleanOptions({...deepCleanOptions, removeSamples: e.target.checked})}
-                                            className="w-4 h-4 accent-indigo-500" 
-                                        />
-                                        <span className="text-xs text-slate-300 group-hover:text-white transition-colors">Ignorar/Limpiar archivos menores a 20MB</span>
-                                    </label>
-                                </div>
+                            <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <label className="flex items-center gap-3 cursor-pointer group">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={libOptions.keepBestQuality}
+                                        onChange={e => setLibOptions({...libOptions, keepBestQuality: e.target.checked})}
+                                        className="w-5 h-5 rounded bg-slate-900 border-slate-700 accent-indigo-500" 
+                                    />
+                                    <div>
+                                        <span className="text-xs font-bold text-slate-200 block">Priorizar Mejor Calidad</span>
+                                        <span className="text-[9px] text-slate-500 uppercase">Borra duplicados de menor resolución (Ej: Borra 720p si existe 1080p)</span>
+                                    </div>
+                                </label>
+                                <label className="flex items-center gap-3 cursor-pointer group">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={libOptions.cleanOrphanMeta}
+                                        onChange={e => setLibOptions({...libOptions, cleanOrphanMeta: e.target.checked})}
+                                        className="w-5 h-5 rounded bg-slate-900 border-slate-700 accent-indigo-500" 
+                                    />
+                                    <div>
+                                        <span className="text-xs font-bold text-slate-200 block">Metadatos Huérfanos</span>
+                                        <span className="text-[9px] text-slate-500 uppercase">Elimina .nfo, .jpg y .srt sin video asociado</span>
+                                    </div>
+                                </label>
+                                <label className="flex items-center gap-3 cursor-pointer group">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={libOptions.removeSamples}
+                                        onChange={e => setLibOptions({...libOptions, removeSamples: e.target.checked})}
+                                        className="w-5 h-5 rounded bg-slate-900 border-slate-700 accent-indigo-500" 
+                                    />
+                                    <div>
+                                        <span className="text-xs font-bold text-slate-200 block">Samples de Paquete</span>
+                                        <span className="text-[9px] text-slate-500 uppercase">Ignorar/Eliminar archivos menores a 25MB</span>
+                                    </div>
+                                </label>
+                                <label className="flex items-center gap-3 cursor-pointer group">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={libOptions.pruneEmptyFolders}
+                                        onChange={e => setLibOptions({...libOptions, pruneEmptyFolders: e.target.checked})}
+                                        className="w-5 h-5 rounded bg-slate-900 border-slate-700 accent-indigo-500" 
+                                    />
+                                    <div>
+                                        <span className="text-xs font-bold text-slate-200 block">Auto-Pruning</span>
+                                        <span className="text-[9px] text-slate-500 uppercase">Eliminar carpetas vacías tras movimiento</span>
+                                    </div>
+                                </label>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <button onClick={() => runPaquete(true)} disabled={isOrganizing} className="py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-700 transition-all">
-                                    {isOrganizing ? <Loader2 className="animate-spin" size={20}/> : <Eye size={20}/>} Simular Consolidación
+                                <button onClick={() => runLibrarian(true)} disabled={isOrganizing} className="py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-700 transition-all">
+                                    {isOrganizing ? <Loader2 className="animate-spin" size={20}/> : <Eye size={20}/>} Auditar Cambios
                                 </button>
-                                <button onClick={() => runPaquete(false)} disabled={isOrganizing} className="py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-500/20 transition-all">
-                                    {isOrganizing ? <Loader2 className="animate-spin" size={20}/> : <Zap size={20}/>} Ejecutar Organización Real
+                                <button onClick={() => runLibrarian(false)} disabled={isOrganizing} className="py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-500/20 transition-all">
+                                    {isOrganizing ? <Loader2 className="animate-spin" size={20}/> : <Zap size={20}/>} Ejecutar Limpieza Real
                                 </button>
                             </div>
                         </div>
@@ -247,42 +235,50 @@ export default function AdminLocalFiles() {
                     {simPlan.length > 0 && (
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden animate-in zoom-in-95">
                             <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
-                                <h4 className="font-black text-[10px] text-amber-500 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={14}/> Plan de Consolidación Jerárquica</h4>
+                                <h4 className="font-black text-[10px] text-amber-500 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={14}/> Auditoría de Cambios Jerárquicos</h4>
                                 <button onClick={() => setSimPlan([])} className="text-slate-500 hover:text-white"><X size={16}/></button>
                             </div>
                             <div className="max-h-[500px] overflow-y-auto">
                                 <table className="w-full text-left text-xs border-collapse">
                                     <thead className="bg-slate-950/50 sticky top-0 text-slate-500 uppercase font-black text-[9px]">
                                         <tr>
-                                            <th className="p-4 border-b border-slate-800">Archivo Original (Fragmentado)</th>
+                                            <th className="p-4 border-b border-slate-800">Fragmento Original</th>
                                             <th className="p-4 border-b border-slate-800">Nombre Raíz Detectado</th>
-                                            <th className="p-4 border-b border-slate-800">Nueva Estructura Consolidada</th>
-                                            <th className="p-4 border-b border-slate-800">Acción</th>
+                                            <th className="p-4 border-b border-slate-800">Destino Jerárquico</th>
+                                            <th className="p-4 border-b border-slate-800">Acción Sugerida</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/50">
                                         {simPlan.map((p, i) => (
                                             <tr key={i} className="hover:bg-slate-800/30 transition-colors">
                                                 <td className="p-4">
-                                                    <div className="text-slate-500 font-mono text-[10px] truncate max-w-[150px]">{p.old}</div>
-                                                    <div className="text-slate-400 text-[10px] mt-0.5">{p.title}</div>
+                                                    <div className="text-slate-500 font-mono text-[10px] truncate max-w-[150px]">{p.old ? p.old.replace(/.*[\\\/]/, '') : p.file}</div>
                                                 </td>
                                                 <td className="p-4">
-                                                    <span className="bg-indigo-900/30 text-indigo-400 px-2 py-1 rounded font-bold text-[10px] uppercase border border-indigo-500/20">{p.root}</span>
+                                                    <span className="bg-indigo-900/30 text-indigo-400 px-2 py-1 rounded font-bold text-[10px] uppercase border border-indigo-500/20">{p.root || '-'}</span>
                                                 </td>
                                                 <td className="p-4">
-                                                    <div className="text-indigo-400 font-black text-[10px] uppercase mb-1">{p.category}</div>
-                                                    <div className="text-white font-bold text-[11px] leading-tight break-all max-w-[200px]">{p.new.replace(/.*[\\\/]/, '')}</div>
+                                                    {p.action === 'DELETE' ? (
+                                                        <span className="text-red-400 font-bold flex items-center gap-1"><Trash2 size={12}/> ELIMINACIÓN</span>
+                                                    ) : (
+                                                        <>
+                                                            <div className="text-indigo-400 font-black text-[10px] uppercase mb-1">{p.category}</div>
+                                                            <div className="text-white font-bold text-[11px] leading-tight break-all max-w-[200px]">{p.new ? p.new.replace(/.*[\\\/]/, '') : '-'}</div>
+                                                        </>
+                                                    )}
                                                 </td>
                                                 <td className="p-4">
-                                                    <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${
-                                                        p.action.includes('SKIP') ? 'bg-amber-900/30 text-amber-400' : 
-                                                        p.action.includes('OVERWRITE') ? 'bg-blue-900/30 text-blue-400' : 
-                                                        p.action === 'DELETE' ? 'bg-red-900/30 text-red-400' :
-                                                        'bg-emerald-900/30 text-emerald-400'
-                                                    }`}>
-                                                        {p.action}
-                                                    </span>
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className={`px-2 py-1 rounded text-[9px] font-black uppercase text-center ${
+                                                            p.action.includes('SKIP') ? 'bg-amber-900/30 text-amber-400' : 
+                                                            p.action.includes('OVERWRITE') ? 'bg-blue-900/30 text-blue-400' : 
+                                                            p.action === 'DELETE' ? 'bg-red-900/30 text-red-400' :
+                                                            'bg-emerald-900/30 text-emerald-400'
+                                                        }`}>
+                                                            {p.action}
+                                                        </span>
+                                                        {p.reason && <span className="text-[8px] text-slate-500 uppercase text-center font-bold">{p.reason}</span>}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -291,13 +287,6 @@ export default function AdminLocalFiles() {
                             </div>
                         </div>
                     )}
-                </div>
-            )}
-
-            {activeTab === 'CONVERTER' && (
-                <div className="py-20 text-center opacity-30 flex flex-col items-center gap-4">
-                    <PlayCircle size={64}/>
-                    <div className="font-bold text-sm uppercase tracking-widest">Conversor FFmpeg próximamente</div>
                 </div>
             )}
         </div>

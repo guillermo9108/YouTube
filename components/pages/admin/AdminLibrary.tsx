@@ -1,9 +1,8 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, Play, AlertCircle, Wand2, Database, Edit3, Sparkles } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, Play, AlertCircle, Wand2, Database, Edit3, Sparkles, Cpu, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -100,13 +99,17 @@ export default function AdminLibrary() {
     const [isOrganizing, setIsOrganizing] = useState(false);
     const [isRectifying, setIsRectifying] = useState(false);
     const [isAiProcessing, setIsAiProcessing] = useState(false);
+    const [isTranscoding, setIsTranscoding] = useState(false);
     const [scanLog, setScanLog] = useState<string[]>([]);
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
     const [currentScanIndex, setCurrentScanIndex] = useState(0);
-    const [organizeProgress, setOrganizeProgress] = useState({processed: 0, total: 0});
-    const [rectifyProgress, setRectifyProgress] = useState(0);
+    const [transcodeStats, setTranscodeStats] = useState({ processed: 0, remaining: 0 });
 
-    useEffect(() => { db.getSystemSettings().then(s => { if (s.localLibraryPath) setLocalPath(s.localLibraryPath); }); }, []);
+    useEffect(() => { 
+        db.getSystemSettings().then(s => { 
+            if (s.localLibraryPath) setLocalPath(s.localLibraryPath); 
+        }); 
+    }, []);
 
     const addToLog = (msg: string) => { setScanLog(prev => [`> ${msg}`, ...prev].slice(0, 100)); };
 
@@ -165,15 +168,12 @@ export default function AdminLibrary() {
 
     const handleSmartOrganize = async () => {
         setIsOrganizing(true);
-        setOrganizeProgress({processed: 0, total: 100}); 
         addToLog("Iniciando organización por lotes...");
         const processBatch = async () => {
             try {
                 const res = await db.smartOrganizeLibrary();
                 if (res.details) res.details.forEach((d: string) => addToLog(d));
                 if (res.remaining && res.remaining > 0) {
-                    const remaining = res.remaining || 0;
-                    setOrganizeProgress(prev => ({ processed: prev.processed + res.processed, total: prev.processed + res.processed + remaining }));
                     setTimeout(processBatch, 500);
                 } else {
                     addToLog("Organización Finalizada.");
@@ -187,34 +187,26 @@ export default function AdminLibrary() {
         processBatch();
     };
 
-    const handleRectifyTitles = async () => {
-        if (!confirm("Esto reanalizará librería actual. ¿Continuar?")) return;
-        setIsRectifying(true);
-        setRectifyProgress(0);
-        addToLog("Iniciando rectificación masiva...");
-        const processRectifyBatch = async (lastId = '') => {
+    const handleTranscodeQueue = async () => {
+        setIsTranscoding(true);
+        addToLog("Iniciando cola de transcodificación FFmpeg...");
+        const processTranscode = async () => {
             try {
-                const res = await db.rectifyLibraryTitles(lastId);
-                setRectifyProgress(prev => prev + res.processed);
-                if (!res.completed) { addToLog(`Procesados ${res.processed} videos...`); setTimeout(() => processRectifyBatch(res.lastId), 200); }
-                else { addToLog("Rectificación completada."); toast.success("Títulos actualizados"); setIsRectifying(false); db.invalidateCache('get_videos'); db.setHomeDirty(); }
-            } catch (e: any) { addToLog(`Error: ${e.message}`); setIsRectifying(false); }
+                const res = await db.request<any>('action=admin_transcode_batch');
+                if (res.processed > 0) {
+                    setTranscodeStats({ processed: transcodeStats.processed + res.processed, remaining: res.remaining });
+                    addToLog(`Transcodificados: ${res.processed} videos. Restantes: ${res.remaining}`);
+                }
+                if (!res.completed) {
+                    setTimeout(processTranscode, 1000);
+                } else {
+                    addToLog("Transcodificación masiva finalizada.");
+                    toast.success("Cola de conversión terminada");
+                    setIsTranscoding(false);
+                }
+            } catch (e: any) { addToLog(`Error Transcoding: ${e.message}`); setIsTranscoding(false); }
         };
-        processRectifyBatch();
-    };
-
-    const handleAiOrganize = async () => {
-        setIsAiProcessing(true);
-        addToLog("Contactando Gemini...");
-        const processAiBatch = async () => {
-            try {
-                const res = await db.organizeWithAi();
-                if (res.processed === 0) { addToLog("AI: Sin videos pendientes."); setIsAiProcessing(false); toast.success("IA Finalizada"); return; }
-                addToLog(`AI: Clasificados ${res.processed} videos.`);
-                setTimeout(processAiBatch, 1000); 
-            } catch (e: any) { addToLog(`Error AI: ${e.message}`); setIsAiProcessing(false); }
-        };
-        processAiBatch();
+        processTranscode();
     };
 
     return (
@@ -223,18 +215,20 @@ export default function AdminLibrary() {
                 <Database size={24} className="text-indigo-400"/>
                 <h2 className="text-2xl font-bold text-white">Gestión de Librería</h2>
             </div>
+            
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden group">
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-blue-500"></div>
                 <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><span className="bg-blue-500/20 text-blue-400 w-6 h-6 rounded flex items-center justify-center text-xs">1</span>Indexar Archivos</h3>{isIndexing && <Loader2 className="animate-spin text-blue-500"/>}</div>
-                <div className="flex gap-3"><input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-white" placeholder="/storage/..." /><button onClick={handleIndexLibrary} disabled={isIndexing || activeScan || isOrganizing || isRectifying || isAiProcessing} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2"><FolderSearch size={16}/> Escanear</button></div>
+                <div className="flex gap-3"><input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-white" placeholder="/storage/..." /><button onClick={handleIndexLibrary} disabled={isIndexing || activeScan || isOrganizing || isTranscoding} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2"><FolderSearch size={16}/> Escanear</button></div>
             </div>
+
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-emerald-500"></div>
-                <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><span className="bg-emerald-500/20 text-emerald-400 w-6 h-6 rounded flex items-center justify-center text-xs">2</span>Extracción y Organización Instantánea</h3></div>
+                <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><span className="bg-emerald-500/20 text-emerald-400 w-6 h-6 rounded flex items-center justify-center text-xs">2</span>Extracción Visual</h3></div>
                 {!activeScan ? (
                     <div className="flex gap-3 items-end">
                         <div className="flex-1"><label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block">Límite</label><input type="number" value={step2Limit} onChange={e => setStep2Limit(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" placeholder="Todos" /></div>
-                        <button onClick={startBrowserScan} disabled={isIndexing || isOrganizing || isRectifying || isAiProcessing} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold px-6 py-2 rounded-lg text-sm flex items-center gap-2 h-[38px]"><Film size={16}/> Iniciar Escáner</button>
+                        <button onClick={startBrowserScan} disabled={isIndexing || isOrganizing || isTranscoding} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold px-6 py-2 rounded-lg text-sm flex items-center gap-2 h-[38px]"><Film size={16}/> Iniciar Escáner</button>
                     </div>
                 ) : (
                     <div className="space-y-3">
@@ -243,25 +237,46 @@ export default function AdminLibrary() {
                     </div>
                 )}
             </div>
+
+            {/* NEW: TRANSCODER QUEUE SECTION */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-indigo-500"></div>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                        <span className="bg-indigo-500/20 text-indigo-400 w-6 h-6 rounded flex items-center justify-center text-xs">FF</span>
+                        Transcodificación WebReady (H.264)
+                    </h3>
+                </div>
+                
+                <div className="flex flex-col md:flex-row gap-4 items-center">
+                    <button onClick={handleTranscodeQueue} disabled={isIndexing || activeScan || isTranscoding} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold px-6 py-3 rounded-xl flex items-center justify-center gap-2 transition-all">
+                        {isTranscoding ? <RefreshCw className="animate-spin" size={18}/> : <Cpu size={18}/>}
+                        {isTranscoding ? 'Procesando Cola...' : 'Iniciar Conversión Masiva'}
+                    </button>
+                    
+                    {isTranscoding && (
+                        <div className="flex-1 w-full bg-slate-950 p-3 rounded-lg border border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <CheckCircle2 size={16} className="text-emerald-500"/>
+                                <span className="text-xs text-slate-400 font-bold">Restantes: <span className="text-white">{transcodeStats.remaining}</span></span>
+                            </div>
+                            <span className="text-[10px] text-indigo-400 font-mono animate-pulse uppercase font-black">FFmpeg Activado</span>
+                        </div>
+                    )}
+                </div>
+            </div>
+
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
                 <div className="absolute top-0 left-0 bottom-0 w-1 bg-purple-500"></div>
-                <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><span className="bg-purple-500/20 text-purple-400 w-6 h-6 rounded flex items-center justify-center text-xs">3</span>Mantenimiento por Lotes</h3></div>
-                <button onClick={handleSmartOrganize} disabled={isIndexing || activeScan || isRectifying || isAiProcessing} className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all"><Wand2 size={18}/> Re-Organizar Todo</button>
+                <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><span className="bg-purple-500/20 text-purple-400 w-6 h-6 rounded flex items-center justify-center text-xs">3</span>Mantenimiento Final</h3></div>
+                <button onClick={handleSmartOrganize} disabled={isIndexing || activeScan || isTranscoding} className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all"><Wand2 size={18}/> Organizar y Publicar</button>
             </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
-                <div className="absolute top-0 left-0 bottom-0 w-1 bg-amber-500"></div>
-                <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><span className="bg-amber-500/20 text-amber-400 w-6 h-6 rounded flex items-center justify-center text-xs">4</span>Rectificar Títulos</h3></div>
-                <button onClick={handleRectifyTitles} disabled={isIndexing || activeScan || isOrganizing || isAiProcessing} className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all"><Edit3 size={18}/> Forzar Renombrado</button>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
-                <div className="absolute top-0 left-0 bottom-0 w-1 bg-pink-500"></div>
-                <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-white flex items-center gap-2"><span className="bg-pink-500/20 text-pink-400 w-6 h-6 rounded flex items-center justify-center text-xs">5</span>Organizar con IA</h3></div>
-                <button onClick={handleAiOrganize} disabled={isIndexing || activeScan || isOrganizing || isRectifying} className="w-full bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg"><Sparkles size={18}/> Clasificar con Gemini</button>
-            </div>
+
             <div className="bg-black p-4 rounded-xl border border-slate-800 font-mono text-[10px] text-slate-300 h-48 overflow-y-auto shadow-inner relative">
                 <div className="absolute top-2 right-2 opacity-50"><Terminal size={14}/></div>
                 {scanLog.map((line, i) => (<div key={i} className="pb-0.5 border-b border-slate-900/50 truncate">{line}</div>))}
             </div>
+            
             {activeScan && scanQueue.length > 0 && (
                 <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur flex flex-col items-center justify-center p-4">
                     <div className="w-full max-w-md bg-slate-900 rounded-xl border border-slate-700 p-6 shadow-2xl">

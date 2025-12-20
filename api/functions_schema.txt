@@ -1,4 +1,3 @@
-
 <?php
 // DEFINICIÓN DEL ESQUEMA MAESTRO
 function getAppSchema() {
@@ -37,7 +36,9 @@ function getAppSchema() {
                 'duration' => 'INT DEFAULT 0',
                 'fileHash' => 'VARCHAR(32)',
                 'isLocal' => 'TINYINT(1) DEFAULT 0',
-                'processing_attempts' => 'INT DEFAULT 0'
+                'processing_attempts' => 'INT DEFAULT 0',
+                'needs_transcode' => 'TINYINT(1) DEFAULT 0',
+                'transcode_status' => "ENUM('NONE', 'WAITING', 'PROCESSING', 'DONE', 'FAILED') DEFAULT 'NONE'"
             ]
         ],
         'marketplace_items' => [
@@ -144,6 +145,8 @@ function getAppSchema() {
                 'geminiKey' => 'VARCHAR(255)',
                 'ytDlpPath' => 'VARCHAR(255)',
                 'enableYoutube' => 'TINYINT(1) DEFAULT 0',
+                'autoTranscode' => 'TINYINT(1) DEFAULT 0',
+                'transcodePreset' => "VARCHAR(20) DEFAULT 'superfast'",
                 'categoryPrices' => 'JSON DEFAULT NULL',
                 'customCategories' => 'JSON DEFAULT NULL',
                 'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
