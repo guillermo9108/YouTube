@@ -210,7 +210,7 @@ function admin_search_external($pdo, $input) {
 function admin_cleanup_system_files($pdo) {
     $counts = ['videos' => 0, 'thumbnails' => 0, 'avatars' => 0, 'market' => 0];
     
-    $clean = function($dir, $table, $column) use ($pdo, &$counts, $dirKey) {
+    $clean = function($dir, $table, $column, $dirKey) use ($pdo, &$counts) {
         if (!is_dir($dir)) return;
         $files = array_diff(scandir($dir), ['.', '..', 'default.jpg']);
         foreach ($files as $f) {
@@ -243,6 +243,7 @@ function admin_smart_cleaner_preview($pdo, $input) {
     $cat = $input['category'];
     $pct = intval($input['percentage']);
     $days = intval($input['safeHarborDays']);
+    $minSizeMB = intval($input['minSizeMB'] ?? 0);
     $cutoff = time() - ($days * 86400);
 
     $sql = "SELECT id, title, views, videoUrl FROM videos WHERE createdAt < $cutoff";
@@ -251,15 +252,34 @@ function admin_smart_cleaner_preview($pdo, $input) {
     
     $stmt = $pdo->query($sql);
     $all = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $limit = ceil(count($all) * ($pct / 100));
-    $preview = array_slice($all, 0, $limit);
+    
+    $filtered = [];
+    foreach ($all as $v) {
+        $path = rawurldecode($v['videoUrl']);
+        if (strpos($path, 'api/') === 0) $path = substr($path, 4);
+        
+        $size = 0;
+        if (file_exists($path)) {
+            $size = filesize($path);
+        }
+        
+        if ($minSizeMB > 0 && ($size / 1024 / 1024) < $minSizeMB) continue;
+        
+        $v['size_bytes'] = $size;
+        $filtered[] = $v;
+    }
+
+    $limit = ceil(count($filtered) * ($pct / 100));
+    $preview = array_slice($filtered, 0, $limit);
+    
+    $totalSpace = array_reduce($preview, function($acc, $item) { return $acc + $item['size_bytes']; }, 0);
 
     respond(true, [
         'preview' => $preview,
         'stats' => [
-            'totalVideos' => count($all),
+            'totalVideos' => count($filtered),
             'videosToDelete' => count($preview),
-            'spaceReclaimed' => 'Calculando...'
+            'spaceReclaimed' => round($totalSpace / 1024 / 1024 / 1024, 2) . ' GB'
         ]
     ]);
 }
@@ -317,7 +337,10 @@ function admin_file_cleanup_preview($pdo, $input) {
         while ($v = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $path = rawurldecode($v['videoUrl']);
             if (strpos($path, 'api/') === 0) $path = substr($path, 4);
-            if (!file_exists($path)) $results[] = $v;
+            if (!file_exists($path)) {
+                $v['size_bytes'] = 0;
+                $results[] = $v;
+            }
         }
     } else if ($type === 'LOW_PERFORMANCE') {
         $days = intval($input['days'] ?? 30);
@@ -325,7 +348,13 @@ function admin_file_cleanup_preview($pdo, $input) {
         $cutoff = time() - ($days * 86400);
         $stmt = $pdo->prepare("SELECT id, title, videoUrl, views FROM videos WHERE views <= ? AND createdAt < ? AND isLocal = 1");
         $stmt->execute([$views, $cutoff]);
-        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $r) {
+            $path = rawurldecode($r['videoUrl']);
+            if (strpos($path, 'api/') === 0) $path = substr($path, 4);
+            $r['size_bytes'] = file_exists($path) ? filesize($path) : 0;
+            $results[] = $r;
+        }
     }
     respond(true, $results);
 }
@@ -353,46 +382,73 @@ function admin_file_cleanup_execute($pdo, $input) {
     respond(true, ['deleted' => $deleted]);
 }
 
-function admin_organize_physical_files($pdo) {
+function admin_organize_physical_files($pdo, $input) {
     set_time_limit(300);
+    $strategy = $input['strategy'] ?? 'CATEGORY_FOLDERS'; // CATEGORY_FOLDERS or FLATTEN
+    $dryRun = !empty($input['dryRun']);
+    
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $basePath = rtrim($stmtS->fetchColumn(), '/\\');
     if (!$basePath || !is_dir($basePath) || !is_writable($basePath)) respond(false, null, "Ruta base no válida.");
     
     $stmt = $pdo->query("SELECT id, title, category, videoUrl FROM videos WHERE isLocal = 1 AND category NOT IN ('PENDING', 'PROCESSING')");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $moved = 0; $errors = [];
+    $moved = 0; $errors = []; $preview = [];
+
     foreach ($videos as $v) {
         $oldPath = rawurldecode($v['videoUrl']);
         if (strpos($oldPath, 'api/') === 0) $oldPath = substr($oldPath, 4);
         if (!file_exists($oldPath)) continue;
+        
         $ext = pathinfo($oldPath, PATHINFO_EXTENSION);
         $cleanTitle = preg_replace('/[^a-zA-Z0-9_\-]/', ' ', $v['title']);
-        $targetDir = $basePath . DIRECTORY_SEPARATOR . strtoupper($v['category']);
-        if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
+        
+        if ($strategy === 'FLATTEN') {
+            $targetDir = $basePath;
+        } else {
+            $targetDir = $basePath . DIRECTORY_SEPARATOR . strtoupper($v['category']);
+        }
+        
         $newPath = $targetDir . DIRECTORY_SEPARATOR . trim($cleanTitle) . '.' . $ext;
         if (realpath($oldPath) === realpath($newPath)) continue;
+
+        if ($dryRun) {
+            $preview[] = ['from' => $oldPath, 'to' => $newPath];
+            continue;
+        }
+
+        if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
         if (@rename($oldPath, $newPath)) {
             $pdo->prepare("UPDATE videos SET videoUrl = ? WHERE id = ?")->execute([str_replace('\\', '/', $newPath), $v['id']]);
             $moved++;
         } else { $errors[] = basename($oldPath); }
     }
-    respond(true, ['moved' => $moved, 'errors' => $errors]);
+    
+    respond(true, ['moved' => $moved, 'errors' => $errors, 'preview' => $preview]);
 }
 
 function admin_transcode_video($pdo, $input) {
     set_time_limit(0);
     $id = $input['id'];
+    $preset = $input['preset'] ?? 'fast'; // fast, medium, slow
+    
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $v = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$v) respond(false, null, "No encontrado");
+    
     $oldPath = rawurldecode($v['videoUrl']);
     if (strpos($oldPath, 'api/') === 0) $oldPath = substr($oldPath, 4);
     if (!file_exists($oldPath)) respond(false, null, "Archivo no existe");
+    
     $tempPath = dirname($oldPath) . DIRECTORY_SEPARATOR . pathinfo($oldPath, PATHINFO_FILENAME) . "_opt.mp4";
-    $cmd = "ffmpeg -i " . escapeshellarg($oldPath) . " -c:v libx264 -crf 23 -preset fast -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath) . " 2>&1";
+    
+    // Preset logic for FFmpeg
+    $crf = ($preset === 'slow') ? 20 : 23;
+    
+    $cmd = "ffmpeg -i " . escapeshellarg($oldPath) . " -c:v libx264 -crf $crf -preset $preset -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath) . " 2>&1";
     exec($cmd, $output, $returnVar);
+    
     if ($returnVar === 0 && file_exists($tempPath)) {
         @unlink($oldPath);
         $final = str_replace('_opt.mp4', '.mp4', $tempPath);
@@ -400,7 +456,7 @@ function admin_transcode_video($pdo, $input) {
         $pdo->prepare("UPDATE videos SET videoUrl = ? WHERE id = ?")->execute([str_replace('\\', '/', $final), $id]);
         respond(true);
     }
-    respond(false, null, "Falló FFmpeg");
+    respond(false, null, "Falló FFmpeg: " . implode(" ", array_slice($output, -1)));
 }
 
 function admin_ai_organize($pdo, $input) {

@@ -183,7 +183,7 @@ try {
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $_GET); break;
         case 'admin_file_cleanup_execute': admin_file_cleanup_execute($pdo, $input); break;
-        case 'admin_organize_physical_files': admin_organize_physical_files($pdo); break;
+        case 'admin_organize_physical_files': admin_organize_physical_files($pdo, $input); break;
         case 'admin_transcode_video': admin_transcode_video($pdo, $input); break;
 
         case 'has_purchased': interact_has_purchased($pdo, $_GET['userId'], $_GET['videoId']); break;
