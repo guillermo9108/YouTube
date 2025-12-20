@@ -5,7 +5,7 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     HardDrive, Trash2, Wand2, Loader2, Move, Settings2, PlayCircle, 
     Filter, ChevronRight, PieChart, Database, Save, Map, FileJson, 
-    Check, Eye, ShieldAlert, Zap, Layers, AlertTriangle, FileSearch, Trash, X
+    Check, Eye, ShieldAlert, Zap, Layers, AlertTriangle, FileSearch, Trash, X, FolderTree, Info
 } from 'lucide-react';
 
 const PAQUETE_CATEGORIES = [
@@ -34,12 +34,10 @@ export default function AdminLocalFiles() {
     // Janitor State
     const [cleanupType, setCleanupType] = useState<'ORPHAN_DB' | 'LOW_PERFORMANCE'>('LOW_PERFORMANCE');
     const [cleanupPreview, setCleanupPreview] = useState<Video[]>([]);
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isSearching, setIsSearching] = useState(false);
 
     // Librarian State
     const [isOrganizing, setIsOrganizing] = useState(false);
-    const [paqueteMapper, setPaqueteMapper] = useState<Record<string, string>>({});
     const [showMapper, setShowMapper] = useState(false);
     const [simPlan, setSimPlan] = useState<any[]>([]);
     const [deepCleanOptions, setDeepCleanOptions] = useState({ removeSamples: true });
@@ -47,7 +45,6 @@ export default function AdminLocalFiles() {
     // Converter State
     const [nonWebVideos, setNonWebVideos] = useState<Video[]>([]);
     const [isQueueRunning, setIsQueueRunning] = useState(false);
-    const [queue, setQueue] = useState<any[]>([]);
 
     const loadData = async () => {
         setLoading(true);
@@ -58,11 +55,10 @@ export default function AdminLocalFiles() {
             ]);
             setSettings(sRes);
             setStats(statRes);
-            setPaqueteMapper(sRes.paqueteMapper || {});
             const all = await db.getAllVideos();
             setNonWebVideos(all.filter(v => {
                 const ext = v.videoUrl.split('.').pop()?.toLowerCase();
-                return v.isLocal && ext && !['mp4', 'webm'].includes(ext);
+                return v.isLocal && ext && !['mp4', 'webm', 'mkv', 'avi'].includes(ext);
             }));
         } catch (e) { console.error(e); }
         finally { setLoading(false); }
@@ -81,7 +77,7 @@ export default function AdminLocalFiles() {
 
     const runPaquete = async (simulate: boolean) => {
         setIsOrganizing(true);
-        setSimPlan([]);
+        if (simulate) setSimPlan([]);
         try {
             const res = await db.request<any>(`action=admin_organize_paquete`, {
                 method: 'POST',
@@ -188,10 +184,22 @@ export default function AdminLocalFiles() {
                         <div className="flex justify-between items-center mb-6">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center"><Move size={20}/></div>
-                                <h3 className="font-bold text-white">The Librarian Engine</h3>
+                                <div>
+                                    <h3 className="font-bold text-white">The Librarian V2</h3>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Consolidación Jerárquica</p>
+                                </div>
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={() => setShowMapper(!showMapper)} className="p-2 bg-slate-800 text-indigo-400 rounded-lg hover:bg-slate-700 transition-colors"><Map size={20}/></button>
+                            </div>
+                        </div>
+
+                        <div className="bg-indigo-900/10 border border-indigo-500/30 rounded-xl p-4 mb-6 flex gap-4 items-start">
+                            <Info size={24} className="text-indigo-400 shrink-0 mt-1"/>
+                            <div className="text-xs text-slate-300 leading-relaxed">
+                                <strong className="text-indigo-300 block mb-1">Algoritmo de Consolidación Inteligente:</strong>
+                                Analiza archivos dispersos, detecta el nombre real del contenido ignorando capítulos y temporadas, y los agrupa en carpetas únicas. 
+                                Además, mueve archivos <strong>.nfo, .jpg y subtítulos</strong> automáticamente.
                             </div>
                         </div>
 
@@ -211,7 +219,7 @@ export default function AdminLocalFiles() {
 
                         <div className="space-y-4">
                             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                                <h4 className="text-xs font-bold text-white mb-3 flex items-center gap-2 text-indigo-400"><ShieldAlert size={14}/> Opciones de Limpieza Inteligente</h4>
+                                <h4 className="text-xs font-bold text-white mb-3 flex items-center gap-2 text-indigo-400"><ShieldAlert size={14}/> Opciones de Limpieza y Consolidación</h4>
                                 <div className="flex flex-wrap gap-4">
                                     <label className="flex items-center gap-2 cursor-pointer group">
                                         <input 
@@ -220,14 +228,14 @@ export default function AdminLocalFiles() {
                                             onChange={e => setDeepCleanOptions({...deepCleanOptions, removeSamples: e.target.checked})}
                                             className="w-4 h-4 accent-indigo-500" 
                                         />
-                                        <span className="text-xs text-slate-300 group-hover:text-white transition-colors">Eliminar "Samples" (&lt; 20MB)</span>
+                                        <span className="text-xs text-slate-300 group-hover:text-white transition-colors">Ignorar/Limpiar archivos menores a 20MB</span>
                                     </label>
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <button onClick={() => runPaquete(true)} disabled={isOrganizing} className="py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-700 transition-all">
-                                    {isOrganizing ? <Loader2 className="animate-spin" size={20}/> : <Eye size={20}/>} Simular Cambios
+                                    {isOrganizing ? <Loader2 className="animate-spin" size={20}/> : <Eye size={20}/>} Simular Consolidación
                                 </button>
                                 <button onClick={() => runPaquete(false)} disabled={isOrganizing} className="py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-500/20 transition-all">
                                     {isOrganizing ? <Loader2 className="animate-spin" size={20}/> : <Zap size={20}/>} Ejecutar Organización Real
@@ -239,26 +247,32 @@ export default function AdminLocalFiles() {
                     {simPlan.length > 0 && (
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden animate-in zoom-in-95">
                             <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
-                                <h4 className="font-black text-[10px] text-amber-500 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={14}/> Plan de Organización (Auditoría)</h4>
-                                {/* Added fix for missing X icon import */}
+                                <h4 className="font-black text-[10px] text-amber-500 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={14}/> Plan de Consolidación Jerárquica</h4>
                                 <button onClick={() => setSimPlan([])} className="text-slate-500 hover:text-white"><X size={16}/></button>
                             </div>
                             <div className="max-h-[500px] overflow-y-auto">
                                 <table className="w-full text-left text-xs border-collapse">
                                     <thead className="bg-slate-950/50 sticky top-0 text-slate-500 uppercase font-black text-[9px]">
                                         <tr>
-                                            <th className="p-4 border-b border-slate-800">Archivo Original</th>
-                                            <th className="p-4 border-b border-slate-800">Destino Calculado</th>
+                                            <th className="p-4 border-b border-slate-800">Archivo Original (Fragmentado)</th>
+                                            <th className="p-4 border-b border-slate-800">Nombre Raíz Detectado</th>
+                                            <th className="p-4 border-b border-slate-800">Nueva Estructura Consolidada</th>
                                             <th className="p-4 border-b border-slate-800">Acción</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/50">
                                         {simPlan.map((p, i) => (
                                             <tr key={i} className="hover:bg-slate-800/30 transition-colors">
-                                                <td className="p-4 text-slate-400 font-mono text-[10px] break-all max-w-[200px]">{p.old || p.file}</td>
                                                 <td className="p-4">
-                                                    <div className="text-white font-bold">{p.title}</div>
-                                                    <div className="text-[10px] text-indigo-400 uppercase font-black">{p.category}</div>
+                                                    <div className="text-slate-500 font-mono text-[10px] truncate max-w-[150px]">{p.old}</div>
+                                                    <div className="text-slate-400 text-[10px] mt-0.5">{p.title}</div>
+                                                </td>
+                                                <td className="p-4">
+                                                    <span className="bg-indigo-900/30 text-indigo-400 px-2 py-1 rounded font-bold text-[10px] uppercase border border-indigo-500/20">{p.root}</span>
+                                                </td>
+                                                <td className="p-4">
+                                                    <div className="text-indigo-400 font-black text-[10px] uppercase mb-1">{p.category}</div>
+                                                    <div className="text-white font-bold text-[11px] leading-tight break-all max-w-[200px]">{p.new.replace(/.*[\\\/]/, '')}</div>
                                                 </td>
                                                 <td className="p-4">
                                                     <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${

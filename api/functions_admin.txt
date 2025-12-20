@@ -48,23 +48,38 @@ function admin_update_settings($pdo, $input) {
     respond(true);
 }
 
-// --- 2. LIBRARIAN CORE: PAQUETE SEMANAL ENGINE ---
+// --- 2. LIBRARIAN V2: CONSOLIDACIÓN JERÁRQUICA INTELIGENTE ---
 
-function clean_paquete_filename($f) {
-    // Eliminar basura común de trackers y sitios web
-    $junk = [
-        '/www\.[a-z0-9-]+\.[a-z]+/i', '/\[.*?\]/i', '/\(.*?\)/i',
-        '/\b(h264|x264|h265|hevc|1080p|720p|bluray|web-dl|rip|dual|latino|esp|multi)\b/i',
-        '/[-_.]/i'
+function get_root_name($filename) {
+    // 1. Quitar extensión si existe
+    $name = pathinfo($filename, PATHINFO_FILENAME);
+    
+    // 2. Limpiar separadores comunes por espacios
+    $name = preg_replace('/[._-]/', ' ', $name);
+    
+    // 3. Regex para detectar tags de temporada/capítulo y truncar ahí
+    // Detecta: S01, T1, Cap 10, Ep 05, 1x04, etc.
+    $patterns = [
+        '/\s+(s\d+|t\d+|temporada|season|cap|ep|episode|capitulo|parte)\b.*/i',
+        '/\s+\d+x\d+.*/i', // 1x04
+        '/\s+\d{3,4}p\b.*/i', // 1080p
+        '/\b(h264|x264|h265|hevc|bluray|web-dl|webrip|hdrip)\b.*/i',
+        '/\s+\[.*\].*/', // Corchetes
+        '/\s+\(.*\).*/', // Paréntesis
     ];
-    $clean = preg_replace($junk, ' ', $f);
-    return trim(preg_replace('/\s+/', ' ', $clean));
+    
+    foreach ($patterns as $p) {
+        $name = preg_replace($p, '', $name);
+    }
+
+    // 4. Limpieza final de espacios y capitalización
+    return trim(ucwords(strtolower($name)));
 }
 
 function admin_organize_paquete($pdo, $input) {
     set_time_limit(0);
     $isSim = !empty($input['simulate']);
-    $removeSamples = !empty($input['removeSamples']); // < 20MB
+    $removeSamples = !empty($input['removeSamples']);
     
     $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     $basePath = rtrim($settings['localLibraryPath'], '/\\');
@@ -85,86 +100,102 @@ function admin_organize_paquete($pdo, $input) {
         $oldPath = rawurldecode($v['videoUrl']);
         if (strpos($oldPath, 'api/') === 0) $oldPath = substr($oldPath, 4);
         
-        if (!file_exists($oldPath)) {
-            if(!$isSim) $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]);
-            continue;
-        }
+        if (!file_exists($oldPath)) continue;
 
         $size = filesize($oldPath);
         $ext = strtolower(pathinfo($oldPath, PATHINFO_EXTENSION));
         $filename = pathinfo($oldPath, PATHINFO_FILENAME);
+        $oldDir = dirname($oldPath);
         
-        // Regla de Samples
-        if ($removeSamples && $size < 20 * 1024 * 1024 && in_array($ext, ['mp4', 'mkv', 'avi'])) {
-            $plan[] = ["file" => $v['title'], "action" => "DELETE", "reason" => "Sample (<20MB)"];
-            if (!$isSim) { @unlink($oldPath); $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$v['id']]); }
-            continue;
-        }
+        // 1. Detección de Raíz (Consolidación)
+        $rootName = get_root_name($filename);
+        if (empty($rootName)) $rootName = "VARIOS";
 
-        $cleanTitle = clean_paquete_filename($filename);
-        $prefix = "12"; $sub = "";
+        $prefix = "12"; // Default Variedades
+        $subFolder = "";
 
-        // Clasificación inteligente
+        // 2. Clasificación por Extensión / Palabras Clave
         if (in_array($ext, ['apk', 'exe', 'ipa'])) $prefix = "01";
         else if (in_array($ext, ['pdf', 'epub'])) $prefix = "06";
-        else if (preg_match('/\b(nba|nfl|mlb|laliga|premier|ligue1|seriea|f1|gp)\b/i', $filename)) $prefix = "11";
+        else if (preg_match('/\b(nba|laliga|f1|gp|mlb)\b/i', $filename)) $prefix = "11";
         else if (preg_match('/\b(clip|official video|ft|feat)\b/i', $filename)) {
             $prefix = "10";
-            $parts = explode('-', $cleanTitle);
-            if (count($parts) > 1) $sub = trim($parts[0]);
-        }
-        else {
-            // Series: S01E01 o 1x01
-            if (preg_match('/(.*?)\s*(S\d+|[0-9]+x\d+|Cap\s*\d+|Ep\s*\d+)/i', $filename, $m)) {
-                $prefix = "02";
-                $seriesName = clean_paquete_filename($m[1] ?: 'VARIOS');
-                preg_match('/S(\d+)|(\d+)x/i', $filename, $sm);
-                $sNum = $sm ? ($sm[1] ?: $sm[2]) : "01";
-                $sub = $seriesName . DIRECTORY_SEPARATOR . "Temporada " . $sNum;
-            } else if (preg_match('/\b(19|20)\d{2}\b/', $filename, $ym)) {
-                $prefix = ($ym[0] == $currentYear) ? "03" : "04";
+            $subFolder = $rootName;
+        } else {
+            // Detectar Series/Novelas por patrones numéricos de capítulos
+            if (preg_match('/(s\d+|t\d+|cap|ep|episode|\d+x)/i', $filename)) {
+                // Es una serie o novela
+                // Si el path original contiene "Novela" o el nombre está en una lista de keywords, prefix 07
+                if (stripos($oldPath, 'Novela') !== false || preg_match('/\b(novela|telenovela)\b/i', $filename)) {
+                    $prefix = "07";
+                } else {
+                    $prefix = "02";
+                }
+                
+                // Extraer Temporada para sub-organización
+                $season = "01";
+                if (preg_match('/s(\d+)|t(\d+)|temporada\s*(\d+)/i', $filename, $sm)) {
+                    $season = str_pad($sm[1] ?: $sm[2] ?: $sm[3], 2, "0", STR_PAD_LEFT);
+                }
+                $subFolder = $rootName . DIRECTORY_SEPARATOR . "Temporada " . $season;
+            } else {
+                // Cine: Buscar año
+                if (preg_match('/\b(19|20)\d{2}\b/', $filename, $ym)) {
+                    $prefix = ($ym[0] == $currentYear) ? "03" : "04";
+                    $subFolder = $rootName . " (" . $ym[0] . ")";
+                } else {
+                    $subFolder = $rootName;
+                }
             }
         }
 
         $targetDir = $basePath . DIRECTORY_SEPARATOR . $prefix . " " . $cats[$prefix];
-        if ($sub) $targetDir .= DIRECTORY_SEPARATOR . $sub;
-        $newPath = $targetDir . DIRECTORY_SEPARATOR . $cleanTitle . "." . $ext;
+        if ($subFolder) $targetDir .= DIRECTORY_SEPARATOR . $subFolder;
         
-        $action = "MOVE";
-        $conflict = "";
-
-        if (file_exists($newPath) && realpath($oldPath) !== realpath($newPath)) {
-            if ($size > filesize($newPath)) {
-                $action = "OVERWRITE (Better Quality)";
-            } else {
-                $action = "SKIP (Already Exists)";
-            }
+        $newPath = $targetDir . DIRECTORY_SEPARATOR . $filename . "." . $ext;
+        
+        $action = (realpath($oldPath) === realpath($newPath)) ? "SKIP (Correct Location)" : "MOVE";
+        
+        if (file_exists($newPath) && $action === "MOVE") {
+             $action = ($size > filesize($newPath)) ? "OVERWRITE (Better Quality)" : "SKIP (Duplicate)";
         }
 
         $plan[] = [
             "id" => $v['id'],
             "old" => $oldPath,
             "new" => $newPath,
-            "title" => $cleanTitle,
+            "title" => $filename,
+            "root" => $rootName,
             "action" => $action,
             "category" => $cats[$prefix]
         ];
 
         if (!$isSim && ($action === "MOVE" || $action === "OVERWRITE (Better Quality)")) {
             if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
+            
+            // Mover archivo principal
             if (@rename($oldPath, $newPath)) {
-                $pdo->prepare("UPDATE videos SET videoUrl = ?, title = ? WHERE id = ?")
-                    ->execute([str_replace('\\', '/', $newPath), $cleanTitle, $v['id']]);
+                // MOVER METADATOS (Mismo nombre base, diferente extensión)
+                $metaExts = ['nfo', 'jpg', 'png', 'srt', 'txt'];
+                foreach ($metaExts as $mext) {
+                    $oldMeta = $oldDir . DIRECTORY_SEPARATOR . $filename . "." . $mext;
+                    if (file_exists($oldMeta)) {
+                        @rename($oldMeta, $targetDir . DIRECTORY_SEPARATOR . $filename . "." . $mext);
+                    }
+                }
+                
+                $pdo->prepare("UPDATE videos SET videoUrl = ? WHERE id = ?")
+                    ->execute([str_replace('\\', '/', $newPath), $v['id']]);
                 $moved++;
             }
         }
     }
 
     if (!$isSim) {
-        // Generar index.json
+        // Generar index.json para el frontend
         $tree = generate_directory_tree($basePath);
-        file_put_contents($basePath . DIRECTORY_SEPARATOR . "index.json", json_encode($tree, JSON_PRETTY_PRINT));
-        // Limpiar vacías
+        file_put_contents($basePath . DIRECTORY_SEPARATOR . "index.json", json_encode($tree));
+        // Limpiar carpetas que quedaron vacías
         cleanup_empty_dirs($basePath);
     }
 
@@ -173,12 +204,13 @@ function admin_organize_paquete($pdo, $input) {
 
 function generate_directory_tree($dir) {
     $res = [];
-    $items = @array_diff(scandir($dir), ['.', '..']);
+    $items = @array_diff(scandir($dir), ['.', '..', 'index.json', 'Thumbs.db', '.DS_Store']);
     if(!$items) return [];
     foreach ($items as $item) {
         $path = $dir . DIRECTORY_SEPARATOR . $item;
         if (is_dir($path)) {
-            $res[] = ["n" => $item, "t" => "d", "c" => generate_directory_tree($path)];
+            $children = generate_directory_tree($path);
+            if (!empty($children)) $res[] = ["n" => $item, "t" => "d", "c" => $children];
         } else {
             $res[] = ["n" => $item, "t" => "f", "s" => filesize($path)];
         }
@@ -188,9 +220,14 @@ function generate_directory_tree($dir) {
 
 function cleanup_empty_dirs($dir) {
     if (!is_dir($dir)) return;
-    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
-    foreach ($it as $file) {
-        if ($file->isDir()) @rmdir($file->getRealPath());
+    $files = array_diff(scandir($dir), ['.', '..', 'Thumbs.db', '.DS_Store']);
+    foreach ($files as $file) {
+        $path = $dir . DIRECTORY_SEPARATOR . $file;
+        if (is_dir($path)) cleanup_empty_dirs($path);
+    }
+    $filesNow = array_diff(scandir($dir), ['.', '..', 'Thumbs.db', '.DS_Store']);
+    if (empty($filesNow) && $dir !== '.' && strlen($dir) > 5) {
+        @rmdir($dir);
     }
 }
 
