@@ -158,7 +158,8 @@ function getAppSchema() {
                 'tropipayClientId' => 'VARCHAR(255) DEFAULT NULL',
                 'tropipayClientSecret' => 'VARCHAR(255) DEFAULT NULL',
                 'currencyConversion' => 'DECIMAL(10, 2) DEFAULT 1.00',
-                'proxyUrl' => 'VARCHAR(255) DEFAULT NULL'
+                'proxyUrl' => 'VARCHAR(255) DEFAULT NULL',
+                'paqueteMapper' => 'JSON DEFAULT NULL'
             ]
         ],
         'subscriptions' => [
