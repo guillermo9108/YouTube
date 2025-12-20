@@ -255,7 +255,7 @@ function video_scan_local($pdo, $input) {
     $filesFound = [];
     try {
         $dirIterator = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveDirectoryIterator::SELF_FIRST);
         foreach ($iterator as $file) {
             if ($file->isFile()) {
                 $ext = strtolower($file->getExtension());
