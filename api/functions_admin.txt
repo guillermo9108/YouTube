@@ -144,7 +144,7 @@ function admin_handle_vip_request($pdo, $input) {
                 $stmtU->execute([$userId]);
                 $curr = intval($stmtU->fetchColumn());
                 $newStart = ($curr > $now) ? $curr : $now;
-                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newStart + $sec, $userId]);
+                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([newStart + $sec, $userId]);
             }
             
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, 0, ?, 'VIP_REVENUE')")
@@ -384,7 +384,7 @@ function admin_file_cleanup_execute($pdo, $input) {
 
 function admin_organize_physical_files($pdo, $input) {
     set_time_limit(300);
-    $strategy = $input['strategy'] ?? 'CATEGORY_FOLDERS'; // CATEGORY_FOLDERS or FLATTEN
+    $strategy = $input['strategy'] ?? 'CATEGORY_FOLDERS'; // CATEGORY_FOLDERS, FLATTEN or SERIES_NESTING
     $dryRun = !empty($input['dryRun']);
     
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
@@ -405,6 +405,11 @@ function admin_organize_physical_files($pdo, $input) {
         
         if ($strategy === 'FLATTEN') {
             $targetDir = $basePath;
+        } else if ($strategy === 'SERIES_NESTING') {
+            // Lógica inteligente: Si el título tiene patrones de series (E01, Cap 1), intenta extraer el nombre raíz
+            $rootName = trim(preg_replace('/\s*(?:E\d+|S\d+E\d+|Capitulo\s*\d+|Episodio\s*\d+|[\(\[]\d+[\)\]]).*/i', '', $v['title']));
+            if (empty($rootName) || strlen($rootName) < 3) $rootName = strtoupper($v['category']);
+            $targetDir = $basePath . DIRECTORY_SEPARATOR . $rootName;
         } else {
             $targetDir = $basePath . DIRECTORY_SEPARATOR . strtoupper($v['category']);
         }

@@ -1,5 +1,5 @@
 {
-  "name": "StreamPay PWA OFICIAL 1.1",
+  "name": "StreamPay PWA OFICIAL 1.2",
   "description": "A mobile-first Pay-Per-View video platform using an internal currency (Saldo).",
   "requestFramePermissions": [
     "camera"
