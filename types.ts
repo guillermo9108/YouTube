@@ -1,5 +1,6 @@
 
 
+
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -212,6 +213,9 @@ export interface SystemSettings {
   proxyUrl?: string; // NEW: For restricted regions
   // Added to support the Librarian feature in AdminLocalFiles.tsx
   paqueteMapper?: Record<string, string>;
+  // FFmpeg Transcode Settings
+  autoTranscode?: boolean;
+  transcodePreset?: string;
 }
 
 export interface OrganizeResult {
