@@ -53,30 +53,35 @@ function admin_update_settings($pdo, $input) {
 // --- 2. TRANSCODER ENGINE V2: AUTOMATIZADO ---
 
 function check_needs_transcode($filePath) {
-    // Si es una URL externa, no transcodificamos
     if (filter_var($filePath, FILTER_VALIDATE_URL)) return false;
     
+    // Decodificar ruta si viene con espacios/caracteres especiales
+    $realPath = rawurldecode($filePath);
+    if (strpos($realPath, 'api/') === 0) $realPath = substr($realPath, 4);
+    
+    if (!file_exists($realPath)) return false;
+
     $isWin = PHP_OS_FAMILY === 'Windows';
     $ffprobe = $isWin ? 'ffprobe.exe' : 'ffprobe';
     
-    // Comando para obtener codec de video
-    $cmd = "$ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($filePath);
+    // Comando para obtener codec de video de forma silenciosa
+    $cmd = "$ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath);
     $codec = trim(@shell_exec($cmd));
     
     // Si no es h264, necesita transcodificación para máxima compatibilidad web
-    return ($codec !== 'h264');
+    return ($codec !== 'h264' && !empty($codec));
 }
 
 function admin_transcode_batch($pdo) {
     set_time_limit(0);
-    $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+    $settings = $pdo->query("SELECT autoTranscode, transcodePreset FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     $preset = $settings['transcodePreset'] ?: 'superfast';
     
     // Buscar videos que necesiten transcodificación
-    $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE transcode_status = 'WAITING' LIMIT 3");
+    $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE transcode_status = 'WAITING' LIMIT 2");
     $queue = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    if (empty($queue)) respond(true, ['processed' => 0, 'completed' => true]);
+    if (empty($queue)) respond(true, ['processed' => 0, 'completed' => true, 'remaining' => 0]);
 
     $processed = 0;
     foreach ($queue as $v) {
@@ -92,7 +97,7 @@ function admin_transcode_batch($pdo) {
 
         $tempOut = dirname($path) . DIRECTORY_SEPARATOR . 'trans_' . uniqid() . '.mp4';
         
-        // H.264 + AAC + FastStart (Web Ready)
+        // H.264 + AAC + FastStart (Optimizado para Web/PWA)
         $cmd = "ffmpeg -i " . escapeshellarg($path) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempOut) . " 2>&1";
         
         exec($cmd, $output, $res);
@@ -118,7 +123,199 @@ function admin_transcode_batch($pdo) {
     respond(true, ['processed' => $processed, 'remaining' => $remaining, 'completed' => ($remaining == 0)]);
 }
 
-// --- 3. MANTENIMIENTO RESTANTE ---
+// --- 3. LIBRARIAN V5: CONSOLIDACIÓN Y LIMPIEZA ---
+
+function admin_organize_paquete($pdo, $input) {
+    $simulate = !empty($input['simulate']);
+    $options = $input['options'] ?? [];
+    
+    $settings = $pdo->query("SELECT localLibraryPath, customCategories FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+    $root = $settings['localLibraryPath'];
+    $customCats = json_decode($settings['customCategories'] ?? '[]', true);
+
+    if (!$root || !is_dir($root)) respond(false, null, "Ruta de librería no válida");
+
+    $plan = [];
+    $moved = 0;
+    $cleaned = 0;
+
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+    
+    foreach ($iterator as $file) {
+        if ($file->isDir()) continue;
+        
+        $filePath = $file->getPathname();
+        $ext = strtolower($file->getExtension());
+        $sizeMB = $file->getSize() / 1024 / 1024;
+
+        // 1. Limpieza de Samples (Archivos pequeños < 25MB)
+        if (!empty($options['removeSamples']) && in_array($ext, ['mp4', 'mkv', 'avi']) && $sizeMB < 25) {
+            if ($simulate) {
+                $plan[] = ['file' => $filePath, 'action' => 'DELETE', 'reason' => 'Sample detectado (<25MB)'];
+            } else {
+                @unlink($filePath);
+                $cleaned++;
+            }
+            continue;
+        }
+
+        // 2. Limpieza de Metadatos Huérfanos
+        if (!empty($options['cleanOrphanMeta']) && in_array($ext, ['nfo', 'jpg', 'srt', 'txt'])) {
+            $base = pathinfo($filePath, PATHINFO_FILENAME);
+            $dir = dirname($filePath);
+            $hasVideo = false;
+            foreach (['mp4', 'mkv', 'avi', 'mov'] as $vext) {
+                if (file_exists($dir . DIRECTORY_SEPARATOR . $base . '.' . $vext)) {
+                    $hasVideo = true; break;
+                }
+            }
+            if (!$hasVideo) {
+                if ($simulate) {
+                    $plan[] = ['file' => $filePath, 'action' => 'DELETE', 'reason' => 'Metadato huérfano'];
+                } else {
+                    @unlink($filePath);
+                    $cleaned++;
+                }
+                continue;
+            }
+        }
+
+        // 3. Organización Jerárquica
+        if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'ts'])) {
+            $parsed = smartParseFilename($filePath, null, $customCats);
+            $category = $parsed['category'] ?: 'GENERAL';
+            
+            // Proyectar nueva ruta: ROOT / CATEGORIA / TITULO.ext
+            $newDir = $root . DIRECTORY_SEPARATOR . $category;
+            $newName = $parsed['title'] . '.' . $ext;
+            $newPath = $newDir . DIRECTORY_SEPARATOR . $newName;
+
+            if ($filePath !== $newPath) {
+                if ($simulate) {
+                    $plan[] = ['old' => $filePath, 'new' => $newPath, 'action' => 'MOVE', 'category' => $category, 'root' => $parsed['title']];
+                } else {
+                    if (!is_dir($newDir)) @mkdir($newDir, 0777, true);
+                    if (@rename($filePath, $newPath)) {
+                        // Actualizar DB si ya estaba indexado
+                        $pdo->prepare("UPDATE videos SET videoUrl = ?, category = ? WHERE videoUrl = ?")
+                            ->execute([$newPath, $category, $filePath]);
+                        $moved++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Podar carpetas vacías si se solicita
+    if (!$simulate && !empty($options['pruneEmptyFolders'])) {
+        $dirs = array_reverse(iterator_to_array(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST)));
+        foreach ($dirs as $d) {
+            if ($d->isDir()) {
+                $content = array_diff(scandir($d->getPathname()), array('.', '..'));
+                if (empty($content)) @rmdir($d->getPathname());
+            }
+        }
+    }
+
+    respond(true, ['plan' => $plan, 'moved' => $moved, 'cleaned' => $cleaned]);
+}
+
+// --- 4. SMART CLEANER V6: FILTRADO MULTI-CRITERIO ---
+
+function admin_smart_cleaner_preview($pdo, $input) {
+    $cat = $input['category'] ?? 'ALL';
+    $minDays = intval($input['minDays'] ?? 30);
+    $maxViews = intval($input['maxViews'] ?? 10);
+    $minDislikes = intval($input['minDislikes'] ?? 5);
+    $operator = ($input['operator'] === 'AND') ? 'AND' : 'OR';
+    
+    $cutoff = time() - ($minDays * 86400);
+    
+    $params = [];
+    $sql = "SELECT id, title, views, dislikes, createdAt, category, videoUrl FROM videos WHERE isLocal = 1 AND ";
+    
+    if ($cat !== 'ALL') {
+        $sql .= "category = ? AND (";
+        $params[] = $cat;
+    }
+    
+    $sql .= "(createdAt < ? $operator views <= ? $operator dislikes >= ?)";
+    $params[] = $cutoff;
+    $params[] = $maxViews;
+    $params[] = $minDislikes;
+    
+    if ($cat !== 'ALL') $sql .= ")";
+
+    $sql .= " LIMIT 500";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $preview = [];
+    $totalReclaimed = 0;
+
+    foreach ($results as $v) {
+        $path = rawurldecode($v['videoUrl']);
+        if (strpos($path, 'api/') === 0) $path = substr($path, 4);
+        
+        $size = 0;
+        if (file_exists($path)) {
+            $size = filesize($path);
+            $totalReclaimed += $size;
+        }
+
+        $reasons = [];
+        if ($v['createdAt'] < $cutoff) $reasons[] = "Antiguo";
+        if ($v['views'] <= $maxViews) $reasons[] = "Bajas Vistas";
+        if ($v['dislikes'] >= $minDislikes) $reasons[] = "Desaprobado";
+
+        $preview[] = [
+            'id' => $v['id'],
+            'title' => $v['title'],
+            'views' => $v['views'],
+            'dislikes' => $v['dislikes'],
+            'category' => $v['category'],
+            'size_fmt' => round($size / 1024 / 1024, 2) . ' MB',
+            'reason' => implode(' + ', $reasons)
+        ];
+    }
+
+    respond(true, [
+        'preview' => $preview,
+        'stats' => [
+            'totalVideos' => count($preview),
+            'spaceReclaimed' => round($totalReclaimed / 1024 / 1024 / 1024, 2) . ' GB'
+        ]
+    ]);
+}
+
+function admin_smart_cleaner_execute($pdo, $input) {
+    $ids = $input['videoIds'] ?? [];
+    $deleted = 0;
+    
+    foreach ($ids as $id) {
+        $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
+        $stmt->execute([$id]);
+        $v = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($v) {
+            $vPath = str_replace('api/', '', rawurldecode($v['videoUrl']));
+            $tPath = str_replace('api/', '', rawurldecode($v['thumbnailUrl']));
+            
+            if (file_exists($vPath) && is_file($vPath)) @unlink($vPath);
+            if (file_exists($tPath) && is_file($tPath)) @unlink($tPath);
+            
+            $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+            $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
+            $pdo->prepare("DELETE FROM interactions WHERE videoId = ?")->execute([$id]);
+            $deleted++;
+        }
+    }
+    respond(true, ['deleted' => $deleted]);
+}
+
+// --- 5. OTROS MANTENIMIENTOS ---
 
 function admin_add_balance($pdo, $input) {
     $pdo->beginTransaction();

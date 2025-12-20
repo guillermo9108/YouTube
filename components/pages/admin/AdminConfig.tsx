@@ -191,8 +191,7 @@ export default function AdminConfig() {
                             <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Detecta y convierte videos no compatibles (WebReady)</p>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer">
-                            {/* FIX: Use functional state update to ensure settings is treated as non-null in the update callback and properties are known */}
-                            <input type="checkbox" checked={settings.autoTranscode || false} onChange={e => setSettings(p => p ? {...p, autoTranscode: e.target.checked} : null)} className="sr-only peer"/>
+                            <input type="checkbox" checked={settings.autoTranscode || false} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, autoTranscode: e.target.checked} : null)} className="sr-only peer"/>
                             <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                         </label>
                     </div>
@@ -201,8 +200,7 @@ export default function AdminConfig() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top-2">
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Cpu size={12}/> Preset de Velocidad</label>
-                                {/* FIX: Use functional state update to ensure properties are known to the SetStateAction type */}
-                                <select value={settings.transcodePreset || 'superfast'} onChange={e => setSettings(p => p ? {...p, transcodePreset: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
+                                <select value={settings.transcodePreset || 'superfast'} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, transcodePreset: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
                                     <option value="ultrafast">Ultrafast (CPU Bajo / Archivo Grande)</option>
                                     <option value="superfast">Superfast (Recomendado)</option>
                                     <option value="veryfast">Veryfast</option>
