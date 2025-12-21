@@ -15,8 +15,6 @@ function respond($success, $data = null, $error = null) {
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json; charset=utf-8');
     
-    // Usamos JSON_INVALID_UTF8_SUBSTITUTE para evitar que nombres de archivos locales
-    // con caracteres extraños rompan el JSON y causen error 500
     $json = json_encode([
         'success' => $success, 
         'data' => $data, 
@@ -80,10 +78,6 @@ $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_aut
 foreach ($required_files as $file) {
     if (file_exists($file)) {
         require_once $file;
-    } else {
-        if ($action !== 'initialize_system') {
-            // No bloqueamos el inicio si faltan archivos, pero avisamos en acciones que los necesiten
-        }
     }
 }
 
@@ -149,7 +143,6 @@ try {
 } catch (PDOException $e) { respond(false, null, 'DB Connection Error: ' . $e->getMessage()); }
 
 // --- 8. SWITCH DE ACCIONES ---
-// Verificamos dinámicamente si la función existe para evitar Errores 500 por funciones no definidas
 function call_safe($func, ...$args) {
     if (function_exists($func)) {
         return $func(...$args);
@@ -177,6 +170,7 @@ try {
         case 'upload_video': call_safe('video_upload', $pdo, $_POST, $_FILES); break;
         case 'delete_video': call_safe('video_delete', $pdo, $input); break;
         case 'scan_local_library': call_safe('video_scan_local', $pdo, $input); break;
+        case 'process_queue': call_safe('video_process_scan_batch', $pdo); break;
         case 'get_unprocessed_videos': call_safe('video_get_unprocessed', $pdo); break;
         case 'update_video_metadata': call_safe('video_update_metadata', $pdo, $_POST, $_FILES); break;
         case 'update_prices_bulk': call_safe('video_update_prices_bulk', $pdo, $input); break;

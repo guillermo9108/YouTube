@@ -48,7 +48,6 @@ function admin_update_settings($pdo, $input) {
             $fields[] = "$col = ?";
             $val = $s[$key];
             
-            // Tratamiento de tipos según MariaDB
             if (is_array($val)) {
                 $val = json_encode($val, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
             } else if (is_bool($val)) {
@@ -69,7 +68,6 @@ function admin_update_settings($pdo, $input) {
         $stmt->execute($params);
         respond(true);
     } catch (Exception $e) {
-        // Devolvemos el error específico de SQL para diagnóstico si falla
         respond(false, null, "Error al guardar en DB: " . $e->getMessage());
     }
 }
@@ -242,7 +240,6 @@ function admin_organize_paquete($pdo, $input) {
 
         $plan = []; $moved = 0; $cleaned = 0;
         
-        // Uso de CATCH_GET_CHILD para ignorar carpetas sin permisos (como /Android/data)
         $dir = new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS);
         $iterator = new RecursiveIteratorIterator($dir, RecursiveIteratorIterator::SELF_FIRST | RecursiveIteratorIterator::CATCH_GET_CHILD);
         
@@ -277,7 +274,7 @@ function admin_organize_paquete($pdo, $input) {
                         }
                     }
                 }
-            } catch (Exception $e) { continue; } // Ignorar errores individuales de archivos
+            } catch (Exception $e) { continue; } 
         }
         respond(true, ['plan' => $plan, 'moved' => $moved, 'cleaned' => $cleaned]);
     } catch (Exception $e) { respond(false, null, "Librarian Error: " . $e->getMessage()); }
