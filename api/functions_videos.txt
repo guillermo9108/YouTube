@@ -20,7 +20,7 @@ function video_get_all($pdo) {
 
 function video_get_one($pdo, $id) {
     $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id = ?");
-    $stmt->execute([id]);
+    $stmt->execute([$id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($video) {
         $vids = [$video];
@@ -102,28 +102,21 @@ function video_upload($pdo, $post, $files) {
 }
 
 function video_scan_local($pdo, $input) {
-    // CRÍTICO: Liberar el bloqueo de sesión de PHP para evitar "Empty Response" en el navegador
     if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
-    
-    set_time_limit(0); 
-    ini_set('memory_limit', '1024M');
+    set_time_limit(120); 
+    ini_set('memory_limit', '512M');
 
     $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
-    if (!$rawPath || !is_dir($rawPath)) {
-        respond(false, null, "Ruta inválida o no accesible.");
-    }
+    if (!$rawPath || !is_dir($rawPath)) respond(false, null, "Ruta inválida.");
 
     $rootPath = realpath($rawPath);
-    if (!$rootPath) respond(false, null, "No se pudo resolver la ruta real.");
-
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $addedCount = 0;
-    $totalFound = 0;
+    $totalScanned = 0;
     $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts'];
 
-    // Preparar sentencias una sola vez para rendimiento
-    $check = $pdo->prepare("SELECT id FROM videos WHERE videoUrl = ? OR id = ?");
-    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1)");
+    // Usamos INSERT IGNORE y omitimos el SELECT previo para ganar velocidad y evitar excepciones
+    $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1)");
 
     try {
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
@@ -131,35 +124,29 @@ function video_scan_local($pdo, $input) {
 
         foreach ($iterator as $file) {
             if (!$file->isFile()) continue;
-            
-            $ext = strtolower($file->getExtension());
-            if (!in_array($ext, $allowedExts)) continue;
+            if (!in_array(strtolower($file->getExtension()), $allowedExts)) continue;
 
-            $totalFound++;
+            $totalScanned++;
+            
+            // LÍMITE DE SEGURIDAD: Procesar máximo 1000 archivos por pulsación para evitar "Empty Response" (timeout de gateway)
+            if ($addedCount >= 1000) break;
+
             $fullPath = str_replace('\\', '/', $file->getPathname());
             $vidId = 'loc_' . md5($fullPath);
 
-            // Verificar existencia
-            $check->execute([$fullPath, $vidId]);
-            if ($check->rowCount() === 0) {
-                try {
-                    // Usamos try-catch interno para ignorar errores de duplicados (Integrity Constraint)
-                    $insert->execute([$vidId, basename($fullPath), $fullPath, $adminId, time()]);
-                    if ($insert->rowCount() > 0) $addedCount++;
-                } catch (PDOException $dbEx) {
-                    // Si es un error de duplicado (1062), simplemente lo saltamos
-                    if ($dbEx->getCode() == 23000) continue;
-                    // Otros errores sí podrían ser graves, pero seguimos escaneando
-                }
-            }
+            try {
+                $insert->execute([$vidId, basename($fullPath), $fullPath, $adminId, time()]);
+                if ($insert->rowCount() > 0) $addedCount++;
+            } catch (Exception $e) { continue; }
         }
     } catch (Exception $e) {
-        respond(false, null, "Error durante el recorrido: " . $e->getMessage());
+        respond(false, null, "Error: " . $e->getMessage());
     }
     
     respond(true, [
-        'totalFound' => $totalFound, 
-        'newToImport' => $addedCount
+        'totalScanned' => $totalScanned, 
+        'newToImport' => $addedCount,
+        'message' => ($totalScanned > 1000) ? "Procesados 1000 archivos. Pulsa escanear de nuevo para continuar con el resto." : "Escaneo completo."
     ]);
 }
 
