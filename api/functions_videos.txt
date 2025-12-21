@@ -29,15 +29,12 @@ function internal_organize_video($pdo, $vid, $settings, $customCategories) {
     }
 
     // 3. Parse Title & Category
-    // Usamos el nombre del archivo real si el título actual es genérico
     $pathForParser = str_replace('api/', '', $v['videoUrl']);
     $smart = smartParseFilename($pathForParser, null, $customCategories);
     
-    // Solo actualizamos el título si el actual parece ser solo un nombre de archivo
     $newTitle = (strpos($v['title'], '.') !== false) ? $smart['title'] : $v['title'];
     $newCat = $smart['category']; 
 
-    // Refinar categoría: si es PENDING/PROCESSING/OTHER, forzamos GENERAL
     if (!$newCat || in_array($newCat, ['OTHER', 'PROCESSING', 'PENDING'])) {
         $newCat = 'GENERAL';
     }
@@ -51,13 +48,13 @@ function internal_organize_video($pdo, $vid, $settings, $customCategories) {
         $currentDesc .= "\n\n📂 Ubicación: " . $displayPath;
     }
 
-    // 6. Update Final - Aquí es donde el video sale de la cola de mantenimiento
+    // 6. Update Final
     $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, description = ?, category = ?, price = ? WHERE id = ?");
     return $updateStmt->execute([$newTitle, $currentDesc, $newCat, $newPrice, $v['id']]);
 }
 
 function video_get_all($pdo) {
-    $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.createdAt DESC");
+    $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'PROCESSING') ORDER v.createdAt DESC");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
@@ -116,17 +113,21 @@ function video_upload($pdo, $post, $files) {
 
 function video_scan_local($pdo, $input) {
     set_time_limit(0);
-    // Limpiamos la ruta de posibles comillas o espacios extras
     $path = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
     
     if (!$path || !is_dir($path)) {
         respond(false, null, "La ruta no existe o no es un directorio: " . $path);
     }
 
+    if (!is_readable($path)) {
+        respond(false, null, "Sin permisos de lectura en la ruta: " . $path);
+    }
+
     $filesFound = [];
     try {
+        // Envolver constructor en try-catch para evitar Error 500 si la carpeta raíz falla
         $dirIterator = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveDirectoryIterator::SELF_FIRST | RecursiveDirectoryIterator::CATCH_GET_CHILD);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST | RecursiveIteratorIterator::CATCH_GET_CHILD);
         
         $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'];
         
@@ -138,9 +139,11 @@ function video_scan_local($pdo, $input) {
                         $filesFound[] = $file->getPathname();
                     }
                 }
-            } catch (Exception $e) { continue; }
+            } catch (Exception $e) { continue; } // Ignorar errores en subcarpetas específicas
         }
-    } catch (Exception $e) { respond(false, null, "Error de acceso: " . $e->getMessage()); }
+    } catch (Exception $e) { 
+        respond(false, null, "Error crítico al abrir el directorio: " . $e->getMessage()); 
+    }
 
     $adminIdStmt = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1");
     $adminId = $adminIdStmt->fetchColumn();
@@ -161,7 +164,6 @@ function video_scan_local($pdo, $input) {
 }
 
 function video_process_scan_batch($pdo) {
-    // Esta función maneja la cola de importación en servidor si fuera necesario
     $remaining = $pdo->query("SELECT COUNT(*) FROM videos WHERE category = 'PENDING'")->fetchColumn();
     respond(true, [
         'processed' => [],
@@ -197,8 +199,6 @@ function video_update_metadata($pdo, $post, $files) {
         return;
     }
 
-    // El video pasa de PENDING a PROCESSING. 
-    // IMPORTANTE: No llamamos a internal_organize todavía para que el Paso 3 tenga trabajo.
     $sql = "UPDATE videos SET category = 'PROCESSING', duration = ?, processing_attempts = 0";
     $params = [$duration];
     
@@ -223,7 +223,6 @@ function video_smart_organize($pdo) {
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
     
-    // Buscamos videos en estado PROCESSING (que ya pasaron el Paso 2)
     $stmt = $pdo->query("SELECT id FROM videos WHERE category = 'PROCESSING' LIMIT 50");
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     
