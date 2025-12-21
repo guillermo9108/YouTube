@@ -20,7 +20,7 @@ function video_get_all($pdo) {
 
 function video_get_one($pdo, $id) {
     $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id = ?");
-    $stmt->execute([$id]);
+    $stmt->execute([id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($video) {
         $vids = [$video];
@@ -102,58 +102,63 @@ function video_upload($pdo, $post, $files) {
 }
 
 function video_scan_local($pdo, $input) {
-    set_time_limit(600); // 10 minutos para escaneos grandes
-    $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
+    // CRÍTICO: Liberar el bloqueo de sesión de PHP para evitar "Empty Response" en el navegador
+    if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
     
+    set_time_limit(0); 
+    ini_set('memory_limit', '1024M');
+
+    $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
     if (!$rawPath || !is_dir($rawPath)) {
-        respond(false, null, "Ruta inválida o no accesible por el servidor.");
+        respond(false, null, "Ruta inválida o no accesible.");
     }
 
-    // Normalizar ruta absoluta para consistencia
-    $path = realpath($rawPath);
-    if (!$path) respond(false, null, "No se pudo resolver la ruta real.");
-
-    $filesFound = [];
-    try {
-        $dirIterator = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
-        $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts'];
-        
-        foreach ($iterator as $file) {
-            if ($file->isFile() && in_array(strtolower($file->getExtension()), $allowedExts)) {
-                // Guardamos la ruta con separadores uniformes (/)
-                $filesFound[] = str_replace('\\', '/', $file->getPathname());
-            }
-        }
-    } catch (Exception $e) {
-        respond(false, null, "Error recorriendo carpetas: " . $e->getMessage());
-    }
+    $rootPath = realpath($rawPath);
+    if (!$rootPath) respond(false, null, "No se pudo resolver la ruta real.");
 
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $addedCount = 0;
-    
-    // Preparar sentencias para velocidad
-    $check = $pdo->prepare("SELECT id FROM videos WHERE videoUrl = ? OR id = ?");
-    $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1)");
+    $totalFound = 0;
+    $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts'];
 
-    foreach ($filesFound as $fullPath) {
-        $vidId = 'loc_' . md5($fullPath);
-        
-        // Verificar si existe por ruta o por ID generado
-        $check->execute([$fullPath, $vidId]);
-        if ($check->rowCount() == 0) {
-            try {
-                $insert->execute([$vidId, basename($fullPath), $fullPath, $adminId, time()]);
-                if ($insert->rowCount() > 0) $addedCount++;
-            } catch (Exception $e) {
-                // Ignorar errores individuales para no detener el proceso completo
-                continue;
+    // Preparar sentencias una sola vez para rendimiento
+    $check = $pdo->prepare("SELECT id FROM videos WHERE videoUrl = ? OR id = ?");
+    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1)");
+
+    try {
+        $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
+
+        foreach ($iterator as $file) {
+            if (!$file->isFile()) continue;
+            
+            $ext = strtolower($file->getExtension());
+            if (!in_array($ext, $allowedExts)) continue;
+
+            $totalFound++;
+            $fullPath = str_replace('\\', '/', $file->getPathname());
+            $vidId = 'loc_' . md5($fullPath);
+
+            // Verificar existencia
+            $check->execute([$fullPath, $vidId]);
+            if ($check->rowCount() === 0) {
+                try {
+                    // Usamos try-catch interno para ignorar errores de duplicados (Integrity Constraint)
+                    $insert->execute([$vidId, basename($fullPath), $fullPath, $adminId, time()]);
+                    if ($insert->rowCount() > 0) $addedCount++;
+                } catch (PDOException $dbEx) {
+                    // Si es un error de duplicado (1062), simplemente lo saltamos
+                    if ($dbEx->getCode() == 23000) continue;
+                    // Otros errores sí podrían ser graves, pero seguimos escaneando
+                }
             }
         }
+    } catch (Exception $e) {
+        respond(false, null, "Error durante el recorrido: " . $e->getMessage());
     }
     
     respond(true, [
-        'totalFound' => count($filesFound), 
+        'totalFound' => $totalFound, 
         'newToImport' => $addedCount
     ]);
 }
@@ -204,7 +209,6 @@ function video_update_metadata($pdo, $post, $files) {
     
     $pdo->prepare($sql)->execute($params);
     
-    // Al completar metadatos, intentamos organizar este video específico inmediatamente
     $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     if ($settings) {
         $customCats = json_decode($settings['customCategories'] ?? '[]', true);
@@ -253,7 +257,6 @@ function video_delete($pdo, $input) {
     $id = $input['id'];
     $uid = $input['userId'];
     
-    // Verificar permisos
     $stmt = $pdo->prepare("SELECT creatorId, videoUrl, thumbnailUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -268,10 +271,8 @@ function video_delete($pdo, $input) {
         respond(false, null, "No tienes permiso para borrar este video");
     }
     
-    // Borrar de DB
     $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
     
-    // Opcional: Borrar archivos si son subidas locales (no librería externa)
     if (strpos($video['videoUrl'], 'uploads/videos/') !== false) {
         $vPath = str_replace('api/', '', $video['videoUrl']);
         if (file_exists($vPath)) @unlink($vPath);
