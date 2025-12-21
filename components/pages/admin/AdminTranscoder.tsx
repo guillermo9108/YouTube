@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../services/db';
 import { Cpu, RefreshCw, Play, CheckCircle2, AlertTriangle, Layers, ShieldCheck, Bug } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
@@ -6,6 +6,7 @@ import { useToast } from '../../../context/ToastContext';
 export default function AdminTranscoder() {
     const toast = useToast();
     const [isRunning, setIsRunning] = useState(false);
+    const isRunningRef = useRef(false); // Usar ref para controlar el bucle sin problemas de scope
     const [batchSize, setBatchSize] = useState(1);
     const [stats, setStats] = useState({ waiting: 0, processing: 0, failed: 0, done: 0 });
     const [ffmpegOk, setFfmpegOk] = useState<boolean | null>(null);
@@ -42,13 +43,16 @@ export default function AdminTranscoder() {
     };
 
     const runBatch = async () => {
-        if (isRunning) return;
+        if (isRunningRef.current) return;
         setIsRunning(true);
+        isRunningRef.current = true;
         addToLog(`Iniciando motor con lote de ${batchSize} video(s)...`);
         
         const loop = async () => {
-            if (!isRunning) return;
+            if (!isRunningRef.current) return;
+            
             try {
+                // Pasamos el limit explícitamente en la query
                 const res = await db.request<any>(`action=admin_transcode_batch&limit=${batchSize}`);
                 
                 if (res.processed > 0) {
@@ -60,17 +64,19 @@ export default function AdminTranscoder() {
                     res.errors.forEach((err: string) => addToLog(`ERROR: ${err}`));
                 }
                 
-                if (!res.completed && isRunning) {
+                if (!res.completed && isRunningRef.current) {
                     addToLog("Siguiente lote en 3 segundos...");
                     setTimeout(loop, 3000);
                 } else {
                     setIsRunning(false);
-                    addToLog("Cola de transcodificación finalizada.");
-                    toast.success("Conversión completada");
+                    isRunningRef.current = false;
+                    addToLog(res.completed ? "Cola de transcodificación finalizada." : "Proceso detenido.");
+                    if (res.completed) toast.success("Conversión completada");
                 }
             } catch (e: any) {
                 addToLog(`FALLO CRÍTICO: ${e.message}`);
                 setIsRunning(false);
+                isRunningRef.current = false;
             }
         };
         
@@ -78,6 +84,7 @@ export default function AdminTranscoder() {
     };
 
     const stopBatch = () => {
+        isRunningRef.current = false;
         setIsRunning(false);
         addToLog("Deteniendo procesos tras el lote actual...");
     };
@@ -93,8 +100,8 @@ export default function AdminTranscoder() {
                         <div>
                             <h3 className="text-xl font-bold text-white flex items-center gap-2">
                                 Transcodificador FFmpeg
-                                {ffmpegOk === true && <ShieldCheck size={16} className="text-emerald-500" title="FFmpeg OK" />}
-                                {ffmpegOk === false && <AlertTriangle size={16} className="text-red-500" title="FFmpeg No Encontrado" />}
+                                {ffmpegOk === true && <span title="FFmpeg OK"><ShieldCheck size={16} className="text-emerald-500" /></span>}
+                                {ffmpegOk === false && <span title="FFmpeg No Encontrado"><AlertTriangle size={16} className="text-red-500" /></span>}
                             </h3>
                             <p className="text-xs text-slate-500 uppercase font-bold tracking-widest">Optimización de Compatibilidad</p>
                         </div>
