@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft } from 'lucide-react';
 import { db } from '../../services/db';
@@ -13,15 +12,17 @@ interface ShortItemProps {
   isActive: boolean;
   shouldLoad: boolean; // TRUE only for current, prev, next
   preload: "auto" | "none" | "metadata";
+  hasFullAccess: boolean; // NEW: Passed from parent to optimize preloading
 }
 
 // MEMOIZED COMPONENT: This stops the entire list from re-rendering when you scroll 1px
-const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortItemProps) => {
+const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAccess }: ShortItemProps) => {
   const { user, refreshUser } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   
   // State
-  const [isUnlocked, setIsUnlocked] = useState(false);
+  // Optimization: If user has global access, start as unlocked to allow immediate preloading
+  const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
   const [isMuted, setIsMuted] = useState(false);
   const [purchasing, setPurchasing] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -38,14 +39,19 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
   useEffect(() => {
     if (user && shouldLoad) {
       db.getInteraction(user.id, video.id).then(setInteraction);
-      db.hasPurchased(user.id, video.id).then(setIsUnlocked);
+      
+      // If not already unlocked by VIP/Admin prop, check specific purchase
+      if (!hasFullAccess) {
+          db.hasPurchased(user.id, video.id).then(setIsUnlocked);
+      }
+
       // Lazy load comments and sub status
       if (isActive) {
           db.getComments(video.id).then(setComments);
           db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed).catch(() => setIsSubscribed(false));
       }
     }
-  }, [user, video.id, video.creatorId, shouldLoad, isActive]);
+  }, [user, video.id, video.creatorId, shouldLoad, isActive, hasFullAccess]);
 
   // --- AUTO PURCHASE LOGIC ---
   useEffect(() => {
@@ -99,7 +105,6 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
     }
     
     // Strict Cleanup for MEMORY, but loosely for DOM
-    // Only remove src if we are REALLY far away
     return () => {
         if (!shouldLoad && el) {
             el.pause();
@@ -178,7 +183,6 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
       );
   }
 
-  // --- CRITICAL PATH FIX ---
   // Ensure we rely on the stream proxy for local files to avoid browser security blocks
   const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
   const videoSrc = (isLocal && video.videoUrl && !video.videoUrl.includes('action=stream')) 
@@ -357,11 +361,13 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload }: ShortIte
     return (
         prev.isActive === next.isActive &&
         prev.shouldLoad === next.shouldLoad &&
-        prev.video.id === next.video.id
+        prev.video.id === next.video.id &&
+        prev.hasFullAccess === next.hasFullAccess
     );
 });
 
 export default function Shorts() {
+  const { user } = useAuth();
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -382,7 +388,6 @@ export default function Shorts() {
 
     db.getAllVideos().then((all: Video[]) => {
         const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
-        // Only update if significantly different to prevent reset
         setVideos(prev => (prev.length === 0 ? shorts : prev));
     });
   }, []);
@@ -411,6 +416,14 @@ export default function Shorts() {
     return () => observer.disconnect();
   }, [videos]);
 
+  // Determine if current user has full access (Admin or Active VIP)
+  const hasFullAccess = useMemo(() => {
+      if (!user) return false;
+      const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
+      const isVipActive = user.vipExpiry && user.vipExpiry > (Date.now() / 1000);
+      return Boolean(isAdmin || isVipActive);
+  }, [user]);
+
   return (
     <div 
       ref={containerRef}
@@ -431,9 +444,9 @@ export default function Shorts() {
           const isActive = idx === activeIndex;
           const isNext = idx === activeIndex + 1;
 
-          // Optimization: Fully preload the active video AND the next video.
+          // VIP Optimization: Preload the active video AND the next video if user has full access.
           // This ensures that when the user swipes up, the next video plays instantly.
-          const preloadStrategy = isActive || isNext ? "auto" : "none";
+          const preloadStrategy = (isActive || (hasFullAccess && isNext)) ? "auto" : "none";
 
           return (
             <div key={video.id} data-index={idx} className="w-full h-full snap-start snap-always">
@@ -442,6 +455,7 @@ export default function Shorts() {
                     isActive={isActive} 
                     shouldLoad={shouldLoad}
                     preload={preloadStrategy}
+                    hasFullAccess={hasFullAccess}
                  />
             </div>
           );

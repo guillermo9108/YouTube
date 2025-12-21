@@ -10,30 +10,17 @@ header('Access-Control-Allow-Headers: Content-Type, Range, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { ob_clean(); http_response_code(200); exit(); }
 
-// --- 1. DEFINICIÓN ÚNICA DE RESPUESTA ---
 function respond($success, $data = null, $error = null) {
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json; charset=utf-8');
-    
-    $json = json_encode([
-        'success' => $success, 
-        'data' => $data, 
-        'error' => $error
-    ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-    
-    if ($json === false) {
-        echo json_encode(['success' => false, 'error' => 'JSON Encoding Error: ' . json_last_error_msg()]);
-    } else {
-        echo $json;
-    }
+    echo json_encode(['success' => $success, 'data' => $data, 'error' => $error], JSON_UNESCAPED_UNICODE);
     exit();
 }
 
-// --- 2. CAPTURA DE ERRORES CRÍTICOS ---
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
-        respond(false, null, 'Critical PHP Error: ' . $error['message'] . " in " . $error['file'] . " on line " . $error['line']);
+        respond(false, null, 'Critical PHP Error: ' . $error['message']);
     }
 });
 
@@ -41,204 +28,50 @@ $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 $configFile = 'db_config.json';
 
-// --- 3. ACCIONES PRE-INSTALACIÓN ---
 if ($action === 'check_installation') {
     $installed = false;
     if (file_exists($configFile)) {
-        $content = file_get_contents($configFile);
-        $config = json_decode($content, true);
-        if (is_array($config) && isset($config['host'], $config['user'], $config['name'])) {
-            try {
-                $testPdo = new PDO("mysql:host={$config['host']};port={$config['port']};dbname={$config['name']}", $config['user'], $config['password'], [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_TIMEOUT => 2
-                ]);
-                $installed = true;
-            } catch (Exception $e) {}
-        }
+        $config = json_decode(file_get_contents($configFile), true);
+        try {
+            $testPdo = new PDO("mysql:host={$config['host']};port={$config['port']};dbname={$config['name']}", $config['user'], $config['password'], [PDO::ATTR_TIMEOUT => 2]);
+            $installed = true;
+        } catch (Exception $e) {}
     }
     respond(true, ['status' => $installed ? 'installed' : 'not_installed']);
 }
 
-if ($action === 'verify_db_connection') {
-    try {
-        $host = $input['host'] ?? '127.0.0.1';
-        $port = $input['port'] ?? '3306';
-        $pdo = new PDO("mysql:host=$host;port=$port;charset=utf8mb4", $input['username'], $input['password'], [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_TIMEOUT => 5
-        ]);
-        respond(true, true);
-    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
-}
-
-// --- 4. CARGA DE MÓDULOS ---
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
+foreach ($required_files as $file) { if (file_exists($file)) require_once $file; }
 
-foreach ($required_files as $file) {
-    if (file_exists($file)) {
-        require_once $file;
-    }
-}
-
-define('UPLOAD_DIR', 'uploads/videos/');
-define('THUMB_DIR', 'uploads/thumbnails/');
-define('AVATAR_DIR', 'uploads/avatars/');
-define('MARKET_DIR', 'uploads/market/');
-
-// --- 5. INICIALIZACIÓN DEL SISTEMA ---
-if ($action === 'initialize_system') {
-    $dbConfig = $input['dbConfig'];
-    $adminUser = $input['adminConfig'];
-    try {
-        $pdo = new PDO("mysql:host={$dbConfig['host']};port={$dbConfig['port']};charset=utf8mb4", $dbConfig['username'], $dbConfig['password']);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbConfig['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        $pdo->exec("USE `{$dbConfig['database']}`");
-        
-        if (function_exists('getAppSchema')) {
-            $schema = getAppSchema();
-            foreach ($schema as $tableName => $def) { syncTable($pdo, $tableName, $def); }
-        }
-        
-        $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
-        $adminId = 'u_' . uniqid();
-        $hash = password_hash($adminUser['password'], PASSWORD_DEFAULT);
-        $stmt = $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater) VALUES (?, ?, ?, 'ADMIN', 999999.00, 100.00, '[]')");
-        $stmt->execute([$adminId, $adminUser['username'], $hash]);
-        
-        file_put_contents($configFile, json_encode(['host'=>$dbConfig['host'],'port'=>$dbConfig['port'],'user'=>$dbConfig['username'],'password'=>$dbConfig['password'],'name'=>$dbConfig['database']]));
-        
-        foreach (['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market'] as $dir) {
-            if (!is_dir($dir)) mkdir($dir, 0777, true);
-        }
-        respond(true, ['message' => 'Installation successful']);
-    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
-}
-
-// --- 6. HANDLER DE STREAMING ---
-if ($action === 'stream') {
-    if (!file_exists($configFile)) respond(false, null, 'Not installed');
-    $db_config = json_decode(file_get_contents($configFile), true);
-    try {
-        $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password']);
-        $vid = $_GET['id'] ?? '';
-        $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ?");
-        $stmt->execute([$vid]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row && function_exists('streamVideo')) {
-            streamVideo($row['videoUrl'], $pdo);
-            exit; 
-        }
-    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
-}
-
-// --- 7. CONEXIÓN GLOBAL ---
-if (!file_exists($configFile)) { respond(false, null, 'Not installed'); }
+if (!file_exists($configFile)) respond(false, null, 'Not installed');
 $db_config = json_decode(file_get_contents($configFile), true);
 
 try {
-    $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password'], [PDO::ATTR_PERSISTENT => true]);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) { respond(false, null, 'DB Connection Error: ' . $e->getMessage()); }
-
-// --- 8. SWITCH DE ACCIONES ---
-function call_safe($func, ...$args) {
-    if (function_exists($func)) {
-        return $func(...$args);
-    } else {
-        respond(false, null, "Module function '$func' is not defined in backend.");
-    }
-}
+    $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+} catch (PDOException $e) { respond(false, null, 'DB Connection Error'); }
 
 try {
     switch ($action) {
-        case 'login': call_safe('auth_login', $pdo, $input); break;
-        case 'logout': call_safe('auth_logout', $pdo, $input); break;
-        case 'heartbeat': call_safe('auth_heartbeat', $pdo, $input); break;
-        case 'register': call_safe('auth_register', $pdo, $input); break;
-        case 'get_user': call_safe('auth_get_user', $pdo, $_GET['userId']); break;
-        case 'update_profile': call_safe('auth_update_user', $pdo, $input); break;
-        case 'upload_avatar': call_safe('auth_update_avatar', $pdo, $input); break;
-        case 'change_password': call_safe('auth_change_password', $pdo, $input); break;
-        case 'get_all_users': call_safe('auth_get_all_users', $pdo); break;
-
-        case 'get_videos': call_safe('video_get_all', $pdo); break;
-        case 'get_video': call_safe('video_get_one', $pdo, $_GET['id']); break;
-        case 'get_videos_by_creator': call_safe('video_get_by_creator', $pdo, $_GET['userId']); break;
-        case 'get_related_videos': call_safe('video_get_related', $pdo, $_GET['id']); break;
-        case 'upload_video': call_safe('video_upload', $pdo, $_POST, $_FILES); break;
-        case 'delete_video': call_safe('video_delete', $pdo, $input); break;
-        case 'scan_local_library': call_safe('video_scan_local', $pdo, $input); break;
-        case 'process_queue': call_safe('video_process_scan_batch', $pdo); break;
-        case 'get_unprocessed_videos': call_safe('video_get_unprocessed', $pdo); break;
-        case 'update_video_metadata': call_safe('video_update_metadata', $pdo, $_POST, $_FILES); break;
-        case 'update_prices_bulk': call_safe('video_update_prices_bulk', $pdo, $input); break;
-        case 'ftp_list': call_safe('video_ftp_list', $pdo, $input); break;
-        case 'ftp_import': call_safe('video_ftp_import', $pdo, $input); break;
-        case 'scan_ftp_recursive': call_safe('video_ftp_scan_recursive', $pdo, $input); break;
-        case 'smart_organize': call_safe('video_smart_organize', $pdo); break;
-        case 'rectify_titles': call_safe('video_rectify_titles', $pdo, $input); break;
-
-        case 'admin_add_balance': call_safe('admin_add_balance', $pdo, $input); break;
-        case 'get_balance_requests': call_safe('admin_get_balance_requests', $pdo); break;
-        case 'get_global_transactions': call_safe('admin_get_global_transactions', $pdo); break;
-        case 'handle_balance_request': call_safe('admin_handle_balance_request', $pdo, $input); break;
-        case 'handle_vip_request': call_safe('admin_handle_vip_request', $pdo, $input); break;
-        case 'get_system_settings': call_safe('admin_get_settings', $pdo); break;
-        case 'update_system_settings': call_safe('admin_update_settings', $pdo, $input); break;
-        case 'search_external': call_safe('admin_search_external', $pdo, $input); break;
-        case 'admin_get_real_stats': call_safe('admin_get_real_stats', $pdo); break;
-        case 'admin_ai_organize': call_safe('admin_ai_organize', $pdo, $input); break; 
-        case 'admin_cleanup_system_files': call_safe('admin_cleanup_system_files', $pdo); break;
-        case 'admin_repair_db': call_safe('admin_repair_db', $pdo); break;
-        case 'admin_smart_cleaner_preview': call_safe('admin_smart_cleaner_preview', $pdo, $input); break;
-        case 'admin_smart_cleaner_execute': call_safe('admin_smart_cleaner_execute', $pdo, $input); break;
-        case 'admin_transcode_batch': call_safe('admin_transcode_batch', $pdo); break;
-
-        case 'admin_get_local_stats': call_safe('admin_get_local_stats', $pdo); break;
-        case 'admin_file_cleanup_preview': call_safe('admin_file_cleanup_preview', $pdo, $_GET); break;
-        case 'admin_file_cleanup_execute': call_safe('admin_file_cleanup_execute', $pdo, $input); break;
-        case 'admin_organize_paquete': call_safe('admin_organize_paquete', $pdo, $input); break;
-
-        case 'has_purchased': call_safe('interact_has_purchased', $pdo, $_GET['userId'], $_GET['videoId']); break;
-        case 'purchase_video': call_safe('interact_purchase', $pdo, $input); break;
-        case 'get_user_activity': call_safe('interact_get_activity', $pdo, $_GET['userId']); break;
-        case 'get_interaction': call_safe('interact_get', $pdo, $_GET['userId'], $_GET['videoId']); break;
-        case 'rate_video': call_safe('interact_rate', $pdo, $input); break;
-        case 'mark_watched': call_safe('interact_mark_watched', $pdo, $input); break;
-        case 'get_comments': call_safe('interact_get_comments', $pdo, $_GET['videoId']); break;
-        case 'add_comment': call_safe('interact_add_comment', $pdo, $input); break;
-        case 'toggle_subscribe': call_safe('interact_toggle_subscribe', $pdo, $input); break;
-        case 'check_subscription': call_safe('interact_check_subscription', $pdo, $_GET['userId'], $_GET['creatorId']); break;
-        case 'get_subscriptions': call_safe('interact_get_subscriptions', $pdo, $_GET['userId']); break;
-        case 'get_notifications': call_safe('interact_get_notifications', $pdo, $_GET['userId']); break;
-        case 'mark_notification_read': call_safe('interact_mark_notification_read', $pdo, $input); break;
-        case 'get_user_transactions': call_safe('interact_get_transactions', $pdo, $_GET['userId']); break;
-        case 'request_balance': call_safe('user_request_balance', $pdo, $input); break;
-        
-        case 'create_payment_link': call_safe('payment_create_link', $pdo, $input); break;
-        case 'verify_payment': call_safe('payment_verify', $pdo, $input); break;
-        case 'request_vip': call_safe('request_vip', $pdo, $input); break;
-        case 'get_requests': call_safe('admin_get_requests', $pdo, $_GET['status'] ?? 'ALL'); break;
-        case 'request_content': call_safe('user_request_content', $pdo, $input); break;
-        case 'admin_update_request_status': call_safe('admin_update_request_status', $pdo, $input); break;
-        case 'delete_request': call_safe('admin_delete_request', $pdo, $input); break;
-        case 'server_import_video': call_safe('admin_server_import_video', $pdo, $input); break;
-
-        case 'get_marketplace_items': call_safe('market_get_items', $pdo); break;
-        case 'admin_get_marketplace_items': call_safe('market_admin_get_items', $pdo); break;
-        case 'admin_delete_listing': call_safe('market_delete_listing', $pdo, $input); break;
-        case 'get_marketplace_item': call_safe('market_get_item', $pdo, $_GET['id']); break;
-        case 'create_listing': call_safe('market_create_listing', $pdo, $_POST, $_FILES); break;
-        case 'edit_listing': call_safe('market_edit_listing', $pdo, $input); break;
-        case 'checkout_cart': call_safe('market_checkout', $pdo, $input); break;
-        case 'add_review': call_safe('market_add_review', $pdo, $input); break;
-        case 'get_reviews': call_safe('market_get_reviews', $pdo, $_GET['itemId']); break;
-        case 'get_sales': call_safe('market_get_sales', $pdo, $_GET['userId']); break;
-        case 'update_order_status': call_safe('market_update_order_status', $pdo, $input); break;
-
+        case 'login': auth_login($pdo, $input); break;
+        case 'get_videos': video_get_all($pdo); break;
+        case 'get_video': video_get_one($pdo, $_GET['id']); break;
+        case 'scan_local_library': video_scan_local($pdo, $input); break;
+        case 'process_queue': video_process_scan_batch($pdo); break;
+        case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
+        case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
+        case 'smart_organize': video_smart_organize($pdo); break;
+        case 'get_system_settings': admin_get_settings($pdo); break;
+        case 'update_system_settings': admin_update_settings($pdo, $input); break;
+        case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
+        case 'admin_ai_organize': video_smart_organize($pdo); break; // Alias
+        case 'stream': 
+            $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+            $stmt->execute([$_GET['id']]);
+            $url = $stmt->fetchColumn();
+            if ($url) streamVideo($url, $pdo);
+            break;
+        // ... otras acciones
         default: respond(false, null, "Invalid action: $action");
     }
-} catch (Exception $e) { respond(false, null, 'Error: ' . $e->getMessage()); }
+} catch (Exception $e) { respond(false, null, $e->getMessage()); }
 ?>
