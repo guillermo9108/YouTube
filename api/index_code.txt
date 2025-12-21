@@ -2,7 +2,8 @@
 ob_start();
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
-set_time_limit(0); 
+set_time_limit(3600); // 1 hora para tareas pesadas
+ini_set('memory_limit', '512M');
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
@@ -51,7 +52,7 @@ $db_config = json_decode(file_get_contents($configFile), true);
 
 try {
     $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-} catch (PDOException $e) { respond(false, null, 'DB Connection Error'); }
+} catch (PDOException $e) { respond(false, null, 'DB Connection Error: ' . $e->getMessage()); }
 
 try {
     switch ($action) {
@@ -71,7 +72,6 @@ try {
         case 'delete_video': video_delete($pdo, $input); break;
         case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;
         case 'scan_local_library': video_scan_local($pdo, $input); break;
-        case 'process_queue': video_process_scan_batch($pdo); break;
         case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
         case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
         case 'smart_organize': video_smart_organize($pdo); break;

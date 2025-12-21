@@ -1,4 +1,3 @@
-
 import { 
     User, Video, Transaction, Comment, UserInteraction, 
     ContentRequest, BalanceRequest, SystemSettings, 
@@ -22,20 +21,31 @@ class DBService {
                 headers: { ...headers }
             });
 
-            if (!response.ok) throw new Error(`Network response was not ok: ${response.statusText}`);
-            
             const text = await response.text();
+            
+            if (!response.ok) {
+                throw new Error(`Error de servidor (${response.status}): ${text.substring(0, 100)}`);
+            }
+            
+            if (!text || text.trim() === "") {
+                throw new Error("El servidor devolvió una respuesta vacía. Posible timeout o error fatal de PHP.");
+            }
+
             try {
                 const json = JSON.parse(text);
-                if (json.success === false) throw new Error(json.error || json.message || "API Error");
+                if (json.success === false) throw new Error(json.error || json.message || "Error en la operación API");
                 return json.data as T;
             } catch (e: any) {
-                throw new Error(e.message || "Invalid JSON response");
+                // Si falla el parseo, el texto no es JSON (probablemente un error PHP visible)
+                console.error("Respuesta no-JSON recibida:", text);
+                throw new Error("Respuesta del servidor corrupta o inválida. Revisa los logs del servidor.");
             }
-        } catch (error) {
+        } catch (error: any) {
+            // Manejo de caché offline si es una petición GET de videos
             if (!options || options.method === 'GET' || !options.method) {
                 if (query.includes('action=get_videos')) {
-                    return this.getOfflineVideos() as any;
+                    const cached = this.getOfflineVideos();
+                    if (cached.length > 0) return cached as any;
                 }
             }
             throw error;
@@ -334,11 +344,9 @@ class DBService {
         try {
             return await this.request<{status: string}>(`action=check_installation`);
         } catch (e: any) {
-            // Si el backend responde con error 404 o el mensaje "Not installed", asumimos not_installed
             if (e.message && e.message.includes('Not installed')) {
                 return { status: 'not_installed' };
             }
-            // En caso de error de red, asumimos instalado para no bloquear el modo offline si existe caché
             return { status: 'installed' }; 
         }
     }
@@ -442,8 +450,9 @@ class DBService {
         });
     }
 
+    // Fix: Added missing processScanBatch method for ServerTaskContext
     public async processScanBatch(): Promise<any> {
-        return this.request<any>(`action=process_queue`, { method: 'POST' });
+        return this.request<any>(`action=process_scan_batch`, { method: 'POST' });
     }
 
     public async getUnprocessedVideos(limit: number, mode: 'normal' | 'random'): Promise<Video[]> {
@@ -466,15 +475,23 @@ class DBService {
         return this.request<OrganizeResult>(`action=smart_organize`, { method: 'POST' });
     }
 
-    public async rectifyLibraryTitles(lastId: string): Promise<{processed: number, completed: boolean, lastId: string}> {
-        return this.request<any>(`action=rectify_titles`, { 
+    // Fix: Added missing FTP methods for AdminFtp
+    public async listFtpFiles(path: string): Promise<FtpFile[]> {
+        return this.request<FtpFile[]>(`action=list_ftp_files&path=${encodeURIComponent(path)}`);
+    }
+
+    public async importFtpFile(path: string): Promise<void> {
+        return this.request<void>(`action=import_ftp_file`, {
             method: 'POST',
-            body: JSON.stringify({ lastId })
+            body: JSON.stringify({ path })
         });
     }
 
-    public async organizeWithAi(): Promise<{processed: number}> {
-        return this.request<{processed: number}>(`action=admin_ai_organize`, { method: 'POST' });
+    public async scanFtpRecursive(path: string): Promise<{scanned: number, added: number}> {
+        return this.request<{scanned: number, added: number}>(`action=scan_ftp_recursive`, {
+            method: 'POST',
+            body: JSON.stringify({ path })
+        });
     }
 
     // External Requests
@@ -517,28 +534,6 @@ class DBService {
         });
     }
 
-    // FTP
-    public async listFtpFiles(path: string): Promise<FtpFile[]> {
-        return this.request<FtpFile[]>(`action=ftp_list`, {
-            method: 'POST',
-            body: JSON.stringify({ path })
-        });
-    }
-
-    public async importFtpFile(path: string): Promise<void> {
-        return this.request<void>(`action=ftp_import`, {
-            method: 'POST',
-            body: JSON.stringify({ path })
-        });
-    }
-
-    public async scanFtpRecursive(path: string): Promise<{scanned: number, added: number}> {
-        return this.request<any>(`action=scan_ftp_recursive`, {
-            method: 'POST',
-            body: JSON.stringify({ path })
-        });
-    }
-
     // Notifications
     public async getNotifications(userId: string): Promise<AppNotification[]> {
         return this.request<AppNotification[]>(`action=get_notifications&userId=${userId}`);
@@ -560,11 +555,12 @@ class DBService {
         this.homeDirty = true;
     }
 
+    // Offline / LocalStorage logic
+    // Fix: Added missing enableDemoMode method for Setup
     public enableDemoMode(): void {
         localStorage.setItem('sp_demo_mode', 'true');
     }
 
-    // Offline / LocalStorage logic
     public saveOfflineUser(user: User): void {
         localStorage.setItem('sp_offline_user', JSON.stringify(user));
     }
