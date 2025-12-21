@@ -29,16 +29,20 @@ function internal_organize_video($pdo, $vid, $settings, $customCategories) {
     }
 
     // 3. Parse Title & Category
+    // Usamos el nombre del archivo real si el título actual es genérico
     $pathForParser = str_replace('api/', '', $v['videoUrl']);
     $smart = smartParseFilename($pathForParser, null, $customCategories);
-    $newTitle = $smart['title'];
+    
+    // Solo actualizamos el título si el actual parece ser solo un nombre de archivo
+    $newTitle = (strpos($v['title'], '.') !== false) ? $smart['title'] : $v['title'];
     $newCat = $smart['category']; 
 
-    if (!$newCat || $newCat === 'OTHER' || $newCat === 'PROCESSING' || $newCat === 'PENDING') {
+    // Refinar categoría: si es PENDING/PROCESSING/OTHER, forzamos GENERAL
+    if (!$newCat || in_array($newCat, ['OTHER', 'PROCESSING', 'PENDING'])) {
         $newCat = 'GENERAL';
     }
     
-    // 4. Get Price
+    // 4. Get Price based on category
     $newPrice = getPriceForCategory($newCat, $settings);
     
     // 5. Build Description
@@ -47,13 +51,13 @@ function internal_organize_video($pdo, $vid, $settings, $customCategories) {
         $currentDesc .= "\n\n📂 Ubicación: " . $displayPath;
     }
 
-    // 6. Update Final
+    // 6. Update Final - Aquí es donde el video sale de la cola de mantenimiento
     $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, description = ?, category = ?, price = ? WHERE id = ?");
     return $updateStmt->execute([$newTitle, $currentDesc, $newCat, $newPrice, $v['id']]);
 }
 
 function video_get_all($pdo) {
-    $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id ORDER BY v.createdAt DESC");
+    $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.createdAt DESC");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
@@ -104,75 +108,52 @@ function video_upload($pdo, $post, $files) {
         $thumbPath = "api/" . $targetThumb;
     }
 
-    $settingsStmt = $pdo->query("SELECT autoTranscode FROM system_settings WHERE id = 1");
-    $settings = $settingsStmt->fetch(PDO::FETCH_ASSOC);
-    $needsTrans = 0; $tStatus = 'NONE';
+    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
+    $stmt->execute([$vidId, $title, $desc, $price, $thumbPath, $finalPath, $creatorId, time(), $category, $duration]);
     
-    if (!empty($settings['autoTranscode'])) {
-        if (function_exists('check_needs_transcode')) {
-            $realPath = UPLOAD_DIR . $vidName;
-            if (check_needs_transcode($realPath)) {
-                $needsTrans = 1;
-                $tStatus = 'WAITING';
-            }
-        }
-    }
-
-    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, needs_transcode, transcode_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)");
-    $stmt->execute([$vidId, $title, $desc, $price, $thumbPath, $finalPath, $creatorId, time(), $category, $duration, $needsTrans, $tStatus]);
-    
-    respond(true, ['id' => $vidId, 'needs_transcode' => (bool)$needsTrans]);
+    respond(true, ['id' => $vidId]);
 }
 
 function video_scan_local($pdo, $input) {
     set_time_limit(0);
-    $path = $input['path'] ?? '';
+    // Limpiamos la ruta de posibles comillas o espacios extras
+    $path = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
     
-    if (!$path || !is_dir($path) || !is_readable($path)) {
-        respond(false, null, "Ruta de librería inválida o sin permisos: $path");
+    if (!$path || !is_dir($path)) {
+        respond(false, null, "La ruta no existe o no es un directorio: " . $path);
     }
 
     $filesFound = [];
     try {
         $dirIterator = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
         $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveDirectoryIterator::SELF_FIRST | RecursiveDirectoryIterator::CATCH_GET_CHILD);
+        
+        $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'];
+        
         foreach ($iterator as $file) {
             try {
                 if ($file->isFile()) {
                     $ext = strtolower($file->getExtension());
-                    if (in_array($ext, ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', 'ts'])) {
+                    if (in_array($ext, $allowedExts)) {
                         $filesFound[] = $file->getPathname();
                     }
                 }
             } catch (Exception $e) { continue; }
         }
-    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
+    } catch (Exception $e) { respond(false, null, "Error de acceso: " . $e->getMessage()); }
 
     $adminIdStmt = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1");
     $adminId = $adminIdStmt->fetchColumn();
     
-    $settingsStmt = $pdo->query("SELECT autoTranscode FROM system_settings WHERE id = 1");
-    $settings = $settingsStmt->fetch(PDO::FETCH_ASSOC);
-    
     $addedCount = 0;
-    
     $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
-    $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, needs_transcode, transcode_status) VALUES (?, ?, ?, 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, ?, ?)");
+    $insert = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1)");
 
     foreach ($filesFound as $fullPath) {
         $check->execute([$fullPath]);
         if ($check->fetchColumn() == 0) {
             $vidId = 'loc_' . md5($fullPath);
-            $needsTrans = 0; $tStatus = 'NONE';
-            
-            if (!empty($settings['autoTranscode']) && function_exists('check_needs_transcode')) {
-                if (check_needs_transcode($fullPath)) {
-                    $needsTrans = 1;
-                    $tStatus = 'WAITING';
-                }
-            }
-
-            $insert->execute([$vidId, basename($fullPath), "Local Library", $fullPath, $adminId, time(), $needsTrans, $tStatus]);
+            $insert->execute([$vidId, basename($fullPath), "Librería Local", $fullPath, $adminId, time()]);
             $addedCount++;
         }
     }
@@ -180,31 +161,17 @@ function video_scan_local($pdo, $input) {
 }
 
 function video_process_scan_batch($pdo) {
-    // Esta función maneja la cola de importación en servidor
-    $stmt = $pdo->query("SELECT id, title, category FROM videos WHERE category = 'PENDING' LIMIT 5");
-    $pending = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $processed = [];
-    foreach ($pending as $v) {
-        // En modo servidor ligero, simplemente los marcamos listos para el navegador
-        // o si hay FFmpeg disponible, podrías procesar aquí.
-        $processed[] = [
-            'id' => $v['id'],
-            'title' => $v['title'],
-            'category' => 'PENDING'
-        ];
-    }
-    
+    // Esta función maneja la cola de importación en servidor si fuera necesario
     $remaining = $pdo->query("SELECT COUNT(*) FROM videos WHERE category = 'PENDING'")->fetchColumn();
     respond(true, [
-        'processed' => $processed,
+        'processed' => [],
         'remaining' => $remaining,
         'completed' => ($remaining == 0)
     ]);
 }
 
 function video_get_unprocessed($pdo) {
-    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
+    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 0;
     $mode = $_GET['mode'] ?? 'normal';
     $orderBy = ($mode === 'random') ? 'RAND()' : 'id ASC';
     
@@ -222,7 +189,7 @@ function video_update_metadata($pdo, $post, $files) {
     $duration = isset($post['duration']) ? floatval($post['duration']) : 0;
     $isSuccess = isset($post['success']) && ($post['success'] === 'true' || $post['success'] === '1');
     
-    if (!$id) respond(false, null, 'Missing ID');
+    if (!$id) respond(false, null, 'ID de video faltante');
 
     if (!$isSuccess) {
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1 WHERE id = ?")->execute([$id]);
@@ -230,10 +197,13 @@ function video_update_metadata($pdo, $post, $files) {
         return;
     }
 
+    // El video pasa de PENDING a PROCESSING. 
+    // IMPORTANTE: No llamamos a internal_organize todavía para que el Paso 3 tenga trabajo.
     $sql = "UPDATE videos SET category = 'PROCESSING', duration = ?, processing_attempts = 0";
     $params = [$duration];
     
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
+        if (!is_dir(THUMB_DIR)) mkdir(THUMB_DIR, 0777, true);
         $thumbPath = THUMB_DIR . "{$id}.jpg";
         if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) {
             $sql .= ", thumbnailUrl = ?";
@@ -244,12 +214,7 @@ function video_update_metadata($pdo, $post, $files) {
     $params[] = $id;
     $pdo->prepare($sql)->execute($params);
 
-    $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
-    $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
-    $customCats = json_decode($settings['customCategories'] ?? '[]', true);
-    internal_organize_video($pdo, $id, $settings, $customCats);
-
-    respond(true, ['status' => 'organized']);
+    respond(true, ['status' => 'metadata_updated']);
 }
 
 function video_smart_organize($pdo) {
@@ -258,6 +223,7 @@ function video_smart_organize($pdo) {
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
     
+    // Buscamos videos en estado PROCESSING (que ya pasaron el Paso 2)
     $stmt = $pdo->query("SELECT id FROM videos WHERE category = 'PROCESSING' LIMIT 50");
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     
@@ -265,7 +231,7 @@ function video_smart_organize($pdo) {
     foreach ($ids as $vid) {
         if (internal_organize_video($pdo, $vid, $settings, $customCats)) {
             $stats['processed']++;
-            $stats['details'][] = "Organizado video ID: $vid";
+            $stats['details'][] = "Video publicado con éxito: $vid";
         }
     }
     

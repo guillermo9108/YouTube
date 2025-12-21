@@ -1,5 +1,4 @@
 <?php
-// RESPOND removed from here as it is now in index.php to avoid "Cannot redeclare" error.
 
 function fix_url($url) {
     if (!empty($url) && strpos($url, 'uploads/') === 0) {
@@ -10,107 +9,35 @@ function fix_url($url) {
 
 function get_youtube_video($query, $config) {
     putenv("LC_ALL=C.UTF-8"); 
-    $apiDir = __DIR__;
-    $rootDir = dirname(__DIR__);
-    $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+    $bin = $config['ytDlpPath'] ?: 'yt-dlp';
     
-    $candidates = [
-        $config['ytDlpPath'] ?? '',
-        $apiDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'), 
-        $rootDir . ($isWin ? '/yt-dlp.exe' : '/yt-dlp'),
-        $isWin ? 'yt-dlp.exe' : '/usr/local/bin/yt-dlp',
-        $isWin ? 'yt-dlp' : '/usr/bin/yt-dlp'
-    ];
-
-    $bin = null;
-    foreach ($candidates as $c) {
-        if (!empty($c) && file_exists($c)) {
-            $bin = $c;
-            break;
-        }
-    }
-
-    if (!$bin && !empty($config['ytDlpPath'])) $bin = $config['ytDlpPath'];
-    if (!$bin) $bin = $isWin ? 'yt-dlp.exe' : 'yt-dlp';
-
-    if (!$isWin && file_exists($bin) && !is_dir($bin)) {
-        if (!is_executable($bin)) @chmod($bin, 0755); 
-    }
-
     $safeQuery = escapeshellarg($query);
     $isUrl = filter_var($query, FILTER_VALIDATE_URL) && strpos($query, 'youtube.com') !== false;
     $searchArg = $isUrl ? $safeQuery : escapeshellarg("ytsearch12:$query");
     
-    $flags = "--dump-json --no-warnings --ignore-config --no-check-certificate --compat-options no-youtube-unavailable-videos";
+    $cmd = "\"$bin\" $searchArg --dump-json --no-warnings --no-check-certificate 2>&1";
+    exec($cmd, $output, $res);
 
-    $strategies = [];
-    $strategies[] = "\"$bin\" $searchArg $flags 2>&1";
-    
-    if (!$isWin) {
-        $pythonCandidates = ['python3', '/usr/local/bin/python3', '/usr/bin/python3'];
-        foreach ($pythonCandidates as $py) {
-            $ver = shell_exec("$py --version 2>&1");
-            if (preg_match('/Python (\d+\.\d+)/', $ver, $matches) && version_compare($matches[1], '3.7', '>=')) {
-                $strategies[] = "$py \"$bin\" $searchArg $flags 2>&1";
-            }
-        }
-    } else {
-        $strategies[] = "python \"$bin\" $searchArg $flags 2>&1";
-    }
-
-    $output = [];
-    $returnVar = -1;
-    $errors = [];
-    $success = false;
-
-    foreach ($strategies as $cmd) {
-        $output = [];
-        exec($cmd, $output, $returnVar);
-        if ($returnVar === 0 && !empty($output) && strpos(trim($output[0]), '{') === 0) {
-            $success = true;
-            break;
-        }
-        $errLine = !empty($output) ? substr(implode(" | ", array_slice($output, -2)), 0, 150) : "Exit Code $returnVar";
-        $simpleCmd = (strpos($cmd, $bin) !== false) ? str_replace($bin, 'yt-dlp', $cmd) : $cmd;
-        $errors[] = "[$simpleCmd] -> $errLine";
-    }
-
-    if (!$success) {
-        $debugMsg = implode("\n", $errors);
-        throw new Exception("Error buscando videos. Detalles:\n$debugMsg");
-    }
+    if ($res !== 0) throw new Exception("yt-dlp error: " . implode(" ", $output));
     
     $results = [];
     foreach ($output as $line) {
         $data = json_decode($line, true);
-        if ($data && isset($data['id']) && isset($data['title'])) {
-            $thumb = $data['thumbnail'] ?? '';
-            if (isset($data['thumbnails']) && is_array($data['thumbnails'])) {
-                $last = end($data['thumbnails']);
-                if (isset($last['url'])) $thumb = $last['url'];
-            }
-
+        if ($data && isset($data['id'])) {
             $results[] = [
-                'id' => $data['id'],
-                'source' => 'YouTube',
-                'thumbnail' => $thumb,
-                'title' => $data['title'],
-                'duration' => $data['duration'] ?? 0,
-                'downloadUrl' => $data['webpage_url'] ?? "https://www.youtube.com/watch?v={$data['id']}",
-                'author' => $data['uploader'] ?? 'YouTube'
+                'id' => $data['id'], 'source' => 'YouTube',
+                'thumbnail' => $data['thumbnail'] ?? '',
+                'title' => $data['title'], 'duration' => $data['duration'] ?? 0,
+                'downloadUrl' => $data['webpage_url'], 'author' => $data['uploader'] ?? 'YouTube'
             ];
         }
     }
     return $results;
 }
 
-function detectCategoryFromDuration($duration) {
-    return 'GENERAL';
-}
-
 function getPriceForCategory($cat, $settings) {
-    $prices = json_decode($settings['categoryPrices'] ?? '{}', true);
-    return isset($prices[$cat]) ? $prices[$cat] : 1; 
+    $prices = is_array($settings['categoryPrices']) ? $settings['categoryPrices'] : json_decode($settings['categoryPrices'] ?? '{}', true);
+    return isset($prices[$cat]) ? floatval($prices[$cat]) : 1.00; 
 }
 
 function smartParseFilename($fullPath, $existingCategory = null, $customCategories = []) {
@@ -118,8 +45,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
     $pathParts = explode('/', dirname($fullPathNormalized));
     
-    $genericFolders = ['videos', 'uploads', 'torrents', 'storage', 'public', 'media', 'completed', 'downloads', '4k', '1080p'];
-
     $junkPatterns = [
         '/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i',
         '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i',
@@ -127,220 +52,79 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
         '/\b(hdr|hdr10|dv|dolby|vision|10bit|8bit|sdr)\b/i',
         '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i',
         '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i',
-        '/\b(mkv|mp4|avi|mov)\b/i',
+        '/\b(mkv|mp4|avi|mov|wmv|flv|ts)\b/i',
         '/www\.[a-z0-9-]+\.[a-z]+/i'
     ];
 
     $cleanText = function($txt) use ($junkPatterns) {
         $t = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $txt);
-        foreach ($junkPatterns as $p) { if($p) $t = preg_replace($p, '', $t); }
-        $t = trim(preg_replace('/\s+/', ' ', $t));
-        return ucwords(strtolower($t));
+        foreach ($junkPatterns as $p) { $t = preg_replace($p, '', $t); }
+        return trim(preg_replace('/\s+/', ' ', $t));
     };
 
     $cleanName = $cleanText($filename);
     if (strlen($cleanName) < 2) $cleanName = $filename;
 
-    $parentFolder = end($pathParts);
-    $cleanParent = '';
-    
-    if ($parentFolder && !in_array(strtolower($parentFolder), $genericFolders)) {
-        $cleanParent = $cleanText($parentFolder);
-        if (strcasecmp($cleanParent, $cleanName) === 0) $cleanParent = '';
-    }
+    // Prioridad de Categoría: Carpetas del path
+    $detectedCategory = 'GENERAL';
+    $ancestors = array_reverse($pathParts);
 
-    $finalTitle = $cleanName;
-    if (!empty($cleanParent)) {
-        $finalTitle = "$cleanName - $cleanParent";
-    }
-
-    $detectedCategory = null;
-    $ancestors = array_reverse(array_slice($pathParts, -3)); 
-
-    $normalizeForCat = function($str) {
-        $str = mb_strtolower($str, 'UTF-8');
-        $unwanted = ['á'=>'a', 'é'=>'e', 'í'=>'i', 'ó'=>'o', 'ú'=>'u', 'ñ'=>'n'];
-        $str = strtr($str, $unwanted);
-        $str = preg_replace('/[^a-z0-9 ]/', '', $str);
-        $str = trim($str);
-        if (strlen($str) > 3 && substr($str, -1) === 's') {
-            $str = substr($str, 0, -1);
+    foreach ($ancestors as $folder) {
+        $folderUpper = strtoupper(trim($folder));
+        if (in_array($folderUpper, $customCategories)) {
+            $detectedCategory = $folderUpper;
+            break;
         }
-        return $str;
-    };
-
-    if (!empty($customCategories)) {
-        foreach ($ancestors as $folder) {
-            $folderBase = $normalizeForCat($folder);
-            foreach ($customCategories as $customCat) {
-                $catBase = $normalizeForCat($customCat);
-                if ($folderBase === $catBase || (strlen($folderBase) > 3 && strpos($folderBase, $catBase) !== false)) {
-                    $detectedCategory = $customCat; 
-                    break 2;
-                }
+        // Búsqueda parcial si no es exacta
+        foreach ($customCategories as $cc) {
+            if (strpos($folderUpper, $cc) !== false) {
+                $detectedCategory = $cc;
+                break 2;
             }
         }
     }
 
-    if (!$detectedCategory) {
-        if ($existingCategory && $existingCategory !== 'PENDING' && $existingCategory !== 'PROCESSING' && $existingCategory !== 'OTHER') {
-            $detectedCategory = $existingCategory;
-        } else {
-            $detectedCategory = 'GENERAL'; 
-        }
-    }
-    
     return [
-        'title' => $finalTitle,
+        'title' => ucwords(strtolower($cleanName)),
         'category' => $detectedCategory
     ];
 }
 
 function streamVideo($filePath, $pdo) {
-    if (function_exists('ini_set')) {
-        ini_set('zlib.output_compression', 'Off');
-        ini_set('display_errors', 0);
-    }
-    error_reporting(0);
-    set_time_limit(0);
-
-    // CRITICAL: Clean aggressively. 
     while (ob_get_level()) ob_end_clean();
     
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, HEAD, OPTIONS');
-    header('Access-Control-Expose-Headers: Content-Length, Content-Range, Content-Type');
-    header('Connection: close');
+    $realPath = rawurldecode($filePath);
+    if (strpos($realPath, 'api/') === 0) $realPath = substr($realPath, 4);
+
+    if (!file_exists($realPath)) {
+        header("HTTP/1.0 404 Not Found");
+        exit;
+    }
     
-    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(0); }
+    $fileSize = sprintf("%u", filesize($realPath));
+    $fp = fopen($realPath, 'rb');
+    
+    header('Content-Type: video/mp4');
+    header('Accept-Ranges: bytes');
 
-    // Logic to determine real path
-    $realPath = $filePath;
-    $isLocal = 1;
-
-    // Check if ID passed directly (edge case)
-    if (strpos($filePath, '/') === false && strlen($filePath) > 10) {
-         $stmt = $pdo->prepare("SELECT videoUrl, isLocal FROM videos WHERE id = ? LIMIT 1");
-         $stmt->execute([$filePath]);
-         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-         if ($row) {
-             $realPath = $row['videoUrl'];
-             $isLocal = $row['isLocal'];
-         }
-    }
-
-    // Strip api/ prefix if present
-    if (strpos($realPath, 'api/') === 0) {
-        $realPath = substr($realPath, 4);
-    }
-
-    if ($isLocal == 2) {
-        // FTP LOGIC
-        $sStmt = $pdo->query("SELECT ftpSettings FROM system_settings LIMIT 1");
-        $json = $sStmt->fetchColumn();
-        $s = json_decode($json, true);
-        
-        if (!$s || empty($s['host'])) { http_response_code(500); exit; }
-        
-        $authUrl = "ftp://" . urlencode($s['user']) . ":" . urlencode($s['pass']) . "@" . $s['host'] . ":" . ($s['port']??21) . $filePath;
-        $context = stream_context_create(['ftp' => ['overwrite' => true]]);
-        $resource = @fopen($authUrl, 'rb', false, $context);
-        
-        if (!$resource) { http_response_code(404); exit; }
-        
-        header('Content-Type: video/mp4');
-        while (!feof($resource)) {
-            echo fread($resource, 8192);
-            flush();
-            if (connection_aborted()) { fclose($resource); exit; }
-        }
-        fclose($resource);
-        exit;
+    if (isset($_SERVER['HTTP_RANGE'])) {
+        preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
+        $offset = intval($matches[1]);
+        $end = isset($matches[2]) ? intval($matches[2]) : $fileSize - 1;
+        header('HTTP/1.1 206 Partial Content');
+        header("Content-Range: bytes $offset-$end/$fileSize");
+        header("Content-Length: " . ($end - $offset + 1));
+        fseek($fp, $offset);
     } else {
-        // LOCAL FILE LOGIC
-        
-        // Try multiple path variations to find the file on disk
-        $candidates = [
-            $realPath, 
-            rawurldecode($realPath), // Essential for paths with spaces %20
-            $filePath, // Original input
-            '../' . $realPath, // Attempt parent dir if inside subfolder
-            basename($realPath) // Just filename as last resort
-        ];
-
-        $finalPath = null;
-        foreach ($candidates as $c) {
-            // Check direct existence
-            if (file_exists($c) && !is_dir($c)) {
-                $finalPath = $c;
-                break;
-            }
-            // Check absolute decoded path (for Synology volume paths)
-            $decoded = rawurldecode($c);
-            if (file_exists($decoded) && !is_dir($decoded)) {
-                $finalPath = $decoded;
-                break;
-            }
-        }
-
-        if (!$finalPath) {
-            header("HTTP/1.0 404 Not Found");
-            exit;
-        }
-        
-        $fileSize = sprintf("%u", filesize($finalPath));
-        
-        // Mime Type Detection
-        $ext = strtolower(pathinfo($finalPath, PATHINFO_EXTENSION));
-        $mimeTypes = [
-            'mp4' => 'video/mp4', 'webm' => 'video/webm', 'mkv' => 'video/mp4', 
-            'mov' => 'video/mp4', 'avi' => 'video/mp4', 'mp3' => 'audio/mpeg',
-            'm4v' => 'video/mp4', 'mpg' => 'video/mpeg', 'mpeg' => 'video/mpeg', 'ts' => 'video/mp2t'
-        ];
-        $contentType = isset($mimeTypes[$ext]) ? $mimeTypes[$ext] : 'video/mp4';
-        
-        header('Content-Type: ' . $contentType);
-        header('Accept-Ranges: bytes');
-
-        $offset = 0;
-        $length = $fileSize;
-
-        if (isset($_SERVER['HTTP_RANGE'])) {
-            if (preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches)) {
-                $offset = intval($matches[1]);
-                $end = isset($matches[2]) && $matches[2] !== '' ? intval($matches[2]) : $fileSize - 1;
-                if ($offset >= $fileSize || $end >= $fileSize || $offset > $end) {
-                    header('HTTP/1.1 416 Requested Range Not Satisfiable');
-                    header("Content-Range: bytes */$fileSize");
-                    exit;
-                }
-                $length = $end - $offset + 1;
-                header('HTTP/1.1 206 Partial Content');
-                header("Content-Range: bytes $offset-$end/$fileSize");
-            }
-        } else {
-            header("Content-Length: $fileSize");
-        }
-        
-        // FINAL BUFFER CLEAN BEFORE OUTPUT
-        while (ob_get_level()) ob_end_clean();
-        if (headers_sent()) exit;
-
-        $fp = fopen($finalPath, 'rb');
-        if ($offset > 0) fseek($fp, $offset);
-        
-        $buffer = 1024 * 256; // 256KB Chunks
-        while (!feof($fp) && ($p = ftell($fp)) <= $offset + $length) {
-            if ($p + $buffer > $offset + $length) $buffer = $offset + $length - $p + 1;
-            echo fread($fp, $buffer);
-            flush();
-            if (connection_aborted()) {
-                fclose($fp);
-                exit;
-            }
-        }
-        fclose($fp);
-        exit;
+        header("Content-Length: $fileSize");
     }
+
+    while (!feof($fp)) {
+        echo fread($fp, 1024 * 128);
+        flush();
+        if (connection_aborted()) break;
+    }
+    fclose($fp);
+    exit;
 }
 ?>
