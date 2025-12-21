@@ -1,8 +1,6 @@
-
 import React, { useState } from 'react';
-import { User as UserIcon, Wallet, Store, Settings, Database, Wrench, TrendingUp, Network, DownloadCloud, HardDrive } from 'lucide-react';
+import { User as UserIcon, Wallet, Store, Settings, Database, Wrench, TrendingUp, Network, DownloadCloud, HardDrive, Cpu } from 'lucide-react';
 
-// Sub Components
 import AdminUsers from './AdminUsers';
 import AdminFinance from './AdminFinance';
 import AdminMarket from './AdminMarket';
@@ -13,9 +11,9 @@ import AdminAnalytics from './AdminAnalytics';
 import AdminFtp from './AdminFtp';
 import AdminRequests from './AdminRequests';
 import AdminLocalFiles from './AdminLocalFiles';
+import AdminTranscoder from './AdminTranscoder';
 
-// Define explicit type for Tabs to avoid "string is not assignable to type..." errors
-type TabID = 'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'FILES' | 'FTP' | 'MAINTENANCE' | 'ANALYTICS' | 'REQUESTS';
+type TabID = 'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'FILES' | 'FTP' | 'MAINTENANCE' | 'ANALYTICS' | 'REQUESTS' | 'TRANSCODER';
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<TabID>('USERS');
@@ -26,6 +24,7 @@ export default function Admin() {
        { id: 'MARKET', icon: Store, label: 'Market' },
        { id: 'REQUESTS', icon: DownloadCloud, label: 'Requests' },
        { id: 'LIBRARY', icon: Database, label: 'Library' },
+       { id: 'TRANSCODER', icon: Cpu, label: 'Conversión' },
        { id: 'FILES', icon: HardDrive, label: 'Storage' },
        { id: 'FTP', icon: Network, label: 'FTP' },
        { id: 'ANALYTICS', icon: TrendingUp, label: 'Stats' },
@@ -54,6 +53,7 @@ export default function Admin() {
           {activeTab === 'REQUESTS' && <AdminRequests />}
           {activeTab === 'CONFIG' && <AdminConfig />}
           {activeTab === 'LIBRARY' && <AdminLibrary />}
+          {activeTab === 'TRANSCODER' && <AdminTranscoder />}
           {activeTab === 'FILES' && <AdminLocalFiles />}
           {activeTab === 'FTP' && <AdminFtp />}
           {activeTab === 'MAINTENANCE' && <AdminMaintenance />}
