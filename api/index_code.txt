@@ -1,18 +1,18 @@
 <?php
 /**
- * StreamPay - Core Controller V3 (Resilient Edition)
- * Garantiza respuestas JSON puras eliminando cualquier salida accidental.
+ * StreamPay - Core Controller V4 (Nuclear Shield)
+ * Blindaje total contra errores de PHP para evitar respuestas corruptas.
  */
 
-// 1. Silenciar visualización de errores que rompen el JSON
+// 1. Silenciar salida directa de errores
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 error_reporting(E_ALL & ~E_NOTICE & ~E_STRICT & ~E_DEPRECATED);
 
-// 2. Control de búfer desde el inicio absoluto
+// 2. Iniciar búfer de salida inmediatamente
 if (ob_get_level() == 0) ob_start();
 
-// 3. Límites extendidos para tareas de servidor local
+// 3. Ajustes de rendimiento para NAS (Synology/QNAP)
 set_time_limit(0); 
 ini_set('memory_limit', '1024M');
 
@@ -32,30 +32,29 @@ if (session_status() === PHP_SESSION_NONE) {
 session_write_close(); 
 
 /**
- * Función de respuesta maestra: Limpia CUALQUIER texto previo para asegurar JSON puro.
+ * Función de respuesta maestra: Limpia el búfer y envía JSON puro.
  */
 function respond($success, $data = null, $error = null) {
-    // Limpiar todos los niveles de búfer para descartar basura accidental (Warnings/Notices)
+    // Descartar cualquier warning o error que se haya colado en el búfer
     while (ob_get_level() > 0) {
         ob_end_clean();
     }
     
     header('Content-Type: application/json; charset=utf-8');
-    $response = [
+    echo json_encode([
         'success' => $success, 
         'data' => $data, 
         'error' => $error
-    ];
-    
-    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    ], JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     exit();
 }
 
-// Manejador de errores fatales: convierte crasheos de PHP en respuestas JSON legibles
+// Manejador de errores fatales de emergencia
 register_shutdown_function(function() {
     $error = error_get_last();
-    if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR || $error['type'] === E_COMPILE_ERROR)) {
-        respond(false, null, 'PHP Fatal Error: ' . $error['message'] . ' en ' . $error['file'] . ':' . $error['line']);
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        // Si hay un error fatal, respondemos con JSON en lugar de dejar que PHP imprima el error
+        respond(false, null, 'Error Crítico PHP: ' . $error['message'] . ' en ' . $error['file'] . ':' . $error['line']);
     }
 });
 
@@ -78,7 +77,7 @@ if ($action === 'check_installation') {
     respond(true, ['status' => $installed ? 'installed' : 'not_installed']);
 }
 
-// Cargar librerías
+// Cargar librerías modulares
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
 foreach ($required_files as $file) { 
     if (file_exists($file)) { require_once $file; }
@@ -92,11 +91,12 @@ try {
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
-} catch (PDOException $e) { respond(false, null, 'Error de conexión MariaDB: ' . $e->getMessage()); }
+} catch (PDOException $e) { 
+    respond(false, null, 'Error MariaDB: ' . $e->getMessage()); 
+}
 
 try {
     switch ($action) {
-        // ... (resto de casos idénticos, invocando las funciones de las librerías)
         case 'login': auth_login($pdo, $input); break;
         case 'register': auth_register($pdo, $input); break;
         case 'logout': auth_logout($pdo, $input); break;
@@ -186,5 +186,7 @@ try {
             break;
         default: respond(false, null, "Acción desconocida: $action");
     }
-} catch (Exception $e) { respond(false, null, $e->getMessage()); }
+} catch (Exception $e) { 
+    respond(false, null, $e->getMessage()); 
+}
 ?>
