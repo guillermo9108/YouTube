@@ -70,7 +70,6 @@ function admin_transcode_batch($pdo) {
 
     $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 1;
     
-    // FIX: LIMIT requiere enteros puros en PDO
     $stmt = $pdo->prepare("SELECT id, videoUrl FROM videos WHERE transcode_status = 'WAITING' LIMIT :limit");
     $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
     $stmt->execute();
@@ -112,6 +111,45 @@ function admin_transcode_batch($pdo) {
     
     $rem = (int)$pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'WAITING'")->fetchColumn();
     respond(true, ['processed' => $processed, 'remaining' => $rem, 'completed' => ($rem == 0)]);
+}
+
+/**
+ * Escanea la DB marcando videos según filtros para transcodificar.
+ */
+function admin_transcode_scan_filters($pdo, $input) {
+    $days = (int)($input['days'] ?? 0);
+    $onlyNonMp4 = (bool)($input['onlyNonMp4'] ?? false);
+    $onlyIncompatible = (bool)($input['onlyIncompatible'] ?? false);
+    $mode = $input['mode'] ?? 'PREVIEW'; // PREVIEW o EXECUTE
+
+    $conditions = ["transcode_status NOT IN ('PROCESSING', 'WAITING', 'DONE')"];
+    $params = [];
+
+    if ($days > 0) {
+        $cutoff = time() - ($days * 86400);
+        $conditions[] = "createdAt >= ?";
+        $params[] = $cutoff;
+    }
+
+    if ($onlyNonMp4) {
+        $conditions[] = "videoUrl NOT LIKE '%.mp4'";
+    }
+
+    if ($onlyIncompatible) {
+        $conditions[] = "needs_transcode = 1";
+    }
+
+    $where = implode(' AND ', $conditions);
+    
+    if ($mode === 'PREVIEW') {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE $where");
+        $stmt->execute($params);
+        respond(true, ['count' => (int)$stmt->fetchColumn()]);
+    } else {
+        $stmt = $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING', needs_transcode = 1 WHERE $where");
+        $stmt->execute($params);
+        respond(true, ['affected' => $stmt->rowCount()]);
+    }
 }
 
 // --- 3. LIBRARIAN & TOOLS ---

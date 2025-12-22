@@ -1,7 +1,7 @@
 <?php
 /**
- * StreamPay - Core Controller V6 (Full Restoration + Bugfix)
- * Blindaje total + Restauración completa + Corrección de funciones de ruta.
+ * StreamPay - Core Controller V6.1
+ * Soporte avanzado para Transcodificador segmentado y persistente.
  */
 
 ini_set('display_errors', 0);
@@ -55,7 +55,6 @@ $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 $configFile = 'db_config.json';
 
-// Carga de librerías (Silenciada para evitar basura en salida)
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
 foreach ($required_files as $file) { 
     if (file_exists($file)) { @require_once $file; }
@@ -147,6 +146,7 @@ try {
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
+        case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
         case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
         case 'admin_add_balance': admin_add_balance($input['adminId'], $input['targetUserId'], $input['amount']); break;
