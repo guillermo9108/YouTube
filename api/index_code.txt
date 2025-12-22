@@ -1,12 +1,13 @@
 <?php
-// Silenciar visualización directa de errores que ensucian el JSON
+// 1. Silenciar visualización de errores que rompen el JSON
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
-// Iniciar búfer de salida para capturar cualquier warning inesperado
+// 2. Control total del búfer
 if (ob_get_level() == 0) ob_start();
 
-set_time_limit(3600);
+// 3. Aumentar límites para tareas administrativas pesadas
+set_time_limit(600); // 10 minutos
 ini_set('memory_limit', '1024M');
 
 header('Access-Control-Allow-Origin: *');
@@ -19,10 +20,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(); 
 }
 
+// 4. DESBLOQUEO MAESTRO DE SESIÓN
+// Iniciamos y cerramos sesión inmediatamente para liberar el bloqueo de archivo
+// pero manteniendo los datos de sesión disponibles en $_SESSION si se necesitan.
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+session_write_close(); 
+
 function respond($success, $data = null, $error = null) {
-    // LIMPIEZA AGRESIVA: Elimina cualquier texto previo generado (warnings, notices)
     while (ob_get_level() > 0) ob_end_clean();
-    
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'success' => $success, 
@@ -32,11 +39,10 @@ function respond($success, $data = null, $error = null) {
     exit();
 }
 
-// CAPTURA DE MUERTE DEL SCRIPT (Timeout, Out of Memory)
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
-        respond(false, null, 'Error Crítico del Servidor: ' . $error['message']);
+        respond(false, null, 'Error Crítico: ' . $error['message']);
     }
 });
 
