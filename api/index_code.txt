@@ -1,9 +1,15 @@
 <?php
+/**
+ * StreamPay - Core Controller
+ * Garantiza respuestas JSON puras incluso si hay warnings de sistema
+ */
+
 // 1. Silenciar visualización de errores que rompen el JSON
 ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 error_reporting(E_ALL);
 
-// 2. Control total del búfer
+// 2. Control total del búfer desde el inicio
 if (ob_get_level() == 0) ob_start();
 
 // 3. Aumentar límites para tareas pesadas
@@ -20,27 +26,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(); 
 }
 
-// 4. DESBLOQUEO MAESTRO DE SESIÓN
+// 4. Desbloqueo de sesión para peticiones concurrentes
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 session_write_close(); 
 
+/**
+ * Función de respuesta maestra: Limpia CUALQUIER texto previo (warnings, notices)
+ * para asegurar que solo se envíe el JSON.
+ */
 function respond($success, $data = null, $error = null) {
-    while (ob_get_level() > 0) ob_end_clean();
+    // Limpiar TODOS los niveles de búfer para descartar basura accidental
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'success' => $success, 
         'data' => $data, 
         'error' => $error
-    ], JSON_UNESCAPED_UNICODE);
+    ], JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     exit();
 }
 
+// Manejador de errores fatales
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
-        respond(false, null, 'Error Crítico: ' . $error['message']);
+        respond(false, null, 'Error Crítico de PHP: ' . $error['message'] . ' en ' . $error['file'] . ':' . $error['line']);
     }
 });
 
