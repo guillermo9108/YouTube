@@ -71,18 +71,28 @@ function check_ffmpeg_available() {
 
 function check_needs_transcode($filePath) {
     if (filter_var($filePath, FILTER_VALIDATE_URL)) return false;
+    
+    // Limpieza de ruta para PHP y FFmpeg
     $realPath = rawurldecode($filePath);
     if (strpos($realPath, 'api/') === 0) $realPath = substr($realPath, 4);
-    if (!file_exists($realPath) || !is_readable($realPath)) return false;
+
+    if (!file_exists($realPath) || !is_readable($realPath)) {
+        return false;
+    }
+
+    $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    
+    // Si no es MP4, forzar conversión siempre para compatibilidad PWA
+    if ($ext !== 'mp4') return true;
 
     $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
     $ffprobe = $isWin ? 'ffprobe.exe' : 'ffprobe';
     
-    // Comando para obtener el códec de video
+    // Comando para obtener el códec de video y perfil
     $cmd = "$ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath);
     $codec = trim(@shell_exec($cmd));
     
-    // Si no es h264, necesita transcodificación para compatibilidad web
+    // Si no es h264, necesita transcodificación
     return ($codec !== 'h264' && !empty($codec));
 }
 
@@ -117,11 +127,16 @@ function admin_transcode_batch($pdo) {
             $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$v['id']]);
             $tempOut = dirname($path) . DIRECTORY_SEPARATOR . 'trans_' . uniqid() . '.mp4';
             
-            $cmd = "ffmpeg -y -i " . escapeshellarg($path) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempOut) . " 2>&1";
+            // Forzamos H.264 High Profile con FastStart para streaming web
+            $cmd = "ffmpeg -y -i " . escapeshellarg($path) . " -c:v libx264 -preset $preset -crf 23 -profile:v high -level 4.1 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempOut) . " 2>&1";
             exec($cmd, $output, $resultCode);
 
             if ($resultCode === 0 && file_exists($tempOut)) {
-                @unlink($path);
+                // Si el archivo original no es el mismo que el destino, lo borramos (solo si está en uploads)
+                if ($path !== $tempOut && strpos($path, 'uploads/') !== false) {
+                    @unlink($path);
+                }
+                
                 $finalName = dirname($path) . DIRECTORY_SEPARATOR . pathinfo($path, PATHINFO_FILENAME) . '.mp4';
                 @rename($tempOut, $finalName);
                 
@@ -152,8 +167,9 @@ function admin_scan_incompatible($pdo, $input) {
     $source = $input['source'] ?? 'ALL';
     $onlyNonMp4 = isset($input['onlyNonMp4']) ? (bool)$input['onlyNonMp4'] : false;
 
-    // Queremos escanear videos que no estén ya en cola exitosa o en proceso
-    $where = ["transcode_status IN ('NONE', 'FAILED')"];
+    // CONSULTA INCLUSIVA:
+    // Buscamos cualquier video que no esté ya en la cola o procesado, incluyendo NULLs de versiones anteriores.
+    $where = ["(transcode_status NOT IN ('WAITING', 'PROCESSING', 'DONE') OR transcode_status IS NULL)"];
     $params = [];
 
     if ($days > 0) {
@@ -177,16 +193,26 @@ function admin_scan_incompatible($pdo, $input) {
         
         $markedCount = 0;
         foreach ($videos as $v) {
-            // check_needs_transcode es la función que usa ffprobe realmente
+            // Verificación física del códec
             if (check_needs_transcode($v['videoUrl'])) {
                 $pdo->prepare("UPDATE videos SET needs_transcode = 1, transcode_status = 'WAITING' WHERE id = ?")
                     ->execute([$v['id']]);
                 $markedCount++;
+            } else {
+                // Si el archivo ya es compatible, lo marcamos como DONE para no volver a escanearlo
+                $pdo->prepare("UPDATE videos SET transcode_status = 'DONE', needs_transcode = 0 WHERE id = ?")
+                    ->execute([$v['id']]);
             }
         }
-        respond(true, ['marked' => $markedCount, 'scanned' => count($videos)]);
+        respond(true, [
+            'marked' => $markedCount, 
+            'scanned' => count($videos),
+            'total_in_db' => $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn()
+        ]);
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
+
+// ... (resto de funciones stubs e implementaciones previas permanecen igual)
 
 function admin_add_balance($adminId, $targetId, $amount) {
     global $pdo;
@@ -297,7 +323,7 @@ function admin_get_balance_requests($pdo) {
     respond(true, ['balance' => $balance, 'vip' => $vip, 'activeVip' => $activeVip]);
 }
 
-// Stubs para evitar errores si las funciones son llamadas pero no están implementadas
+// Stubs
 function admin_smart_cleaner_preview($pdo, $input) { respond(true, ['preview' => [], 'stats' => ['totalVideos'=>0, 'videosToDelete'=>0, 'spaceReclaimed'=>'0 B']]); }
 function admin_smart_cleaner_execute($pdo, $input) { respond(true, ['deleted' => 0]); }
 function admin_file_cleanup_preview($pdo, $input) { respond(true, []); }
