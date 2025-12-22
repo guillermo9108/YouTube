@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
@@ -43,7 +44,7 @@ export default function AdminLocalFiles() {
         setIsSearching(true);
         try {
             const res = await db.request<Video[]>(`action=admin_file_cleanup_preview&type=${cleanupType}`);
-            setCleanupPreview(res);
+            setCleanupPreview(res || []);
         } catch (e: any) { toast.error(e.message); }
         finally { setIsSearching(false); }
     };
@@ -57,8 +58,9 @@ export default function AdminLocalFiles() {
                 body: JSON.stringify({ simulate, options: libOptions })
             });
             if (simulate) {
-                setSimPlan(res.plan);
-                toast.info(`Auditoría completa: ${res.plan.length} cambios proyectados.`);
+                // FALLBACK: Si no hay plan, poner array vacío para no crashear React
+                setSimPlan(res?.plan || []);
+                toast.info(`Auditoría completa: ${(res?.plan || []).length} cambios proyectados.`);
             } else {
                 toast.success(`Consolidación terminada. Movidos: ${res.moved}. Limpiados: ${res.cleaned}`);
                 loadData();
@@ -95,19 +97,19 @@ export default function AdminLocalFiles() {
                                 <div className="relative w-20 h-20 shrink-0">
                                     <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
                                         <circle cx="18" cy="18" r="16" fill="none" className="stroke-slate-800" strokeWidth="3" />
-                                        <circle cx="18" cy="18" r="16" fill="none" className="stroke-indigo-500" strokeWidth="3" strokeDasharray={`${Math.round((stats?.disk_free / stats?.disk_total) * 100)}, 100`} />
+                                        <circle cx="18" cy="18" r="16" fill="none" className="stroke-indigo-500" strokeWidth="3" strokeDasharray={`${Math.round((stats?.disk_free / (stats?.disk_total || 1)) * 100)}, 100`} />
                                     </svg>
-                                    <div className="absolute inset-0 flex items-center justify-center font-black text-white text-xs">{Math.round((stats?.disk_free / stats?.disk_total) * 100)}%</div>
+                                    <div className="absolute inset-0 flex items-center justify-center font-black text-white text-xs">{Math.round((stats?.disk_free / (stats?.disk_total || 1)) * 100)}%</div>
                                 </div>
                                 <div>
-                                    <div className="text-3xl font-black text-white">{stats?.disk_free} GB</div>
-                                    <div className="text-[10px] text-slate-500 uppercase font-bold">Libres de {stats?.disk_total} GB</div>
+                                    <div className="text-3xl font-black text-white">{stats?.disk_free || 0} GB</div>
+                                    <div className="text-[10px] text-slate-500 uppercase font-bold">Libres de {stats?.disk_total || 0} GB</div>
                                 </div>
                             </div>
                         </div>
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-center">
                             <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Database size={18} className="text-emerald-500"/> Videos en Biblioteca</h4>
-                            <div className="text-4xl font-black text-white">{stats?.db_videos}</div>
+                            <div className="text-4xl font-black text-white">{stats?.db_videos || 0}</div>
                             <div className="text-[10px] font-bold text-slate-500 uppercase">Registrados como locales</div>
                         </div>
                     </div>
@@ -161,66 +163,7 @@ export default function AdminLocalFiles() {
                             </div>
                         </div>
 
-                        <div className="bg-indigo-900/10 border border-indigo-500/30 rounded-xl p-4 mb-6 flex gap-4 items-start">
-                            <Info size={24} className="text-indigo-400 shrink-0 mt-1"/>
-                            <div className="text-xs text-slate-300 leading-relaxed">
-                                <strong className="text-indigo-300 block mb-1">Algoritmo de Limpieza Multinivel:</strong>
-                                Ahora no solo organiza; el motor analiza la <strong>mejor calidad disponible</strong> para eliminar duplicados pesados, limpia metadatos de archivos borrados y poda directorios vacíos para mantener un árbol de archivos impecable.
-                            </div>
-                        </div>
-
                         <div className="space-y-4">
-                            <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <label className="flex items-center gap-3 cursor-pointer group">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={libOptions.keepBestQuality}
-                                        onChange={e => setLibOptions({...libOptions, keepBestQuality: e.target.checked})}
-                                        className="w-5 h-5 rounded bg-slate-900 border-slate-700 accent-indigo-500" 
-                                    />
-                                    <div>
-                                        <span className="text-xs font-bold text-slate-200 block">Priorizar Mejor Calidad</span>
-                                        <span className="text-[9px] text-slate-500 uppercase">Borra duplicados de menor resolución (Ej: Borra 720p si existe 1080p)</span>
-                                    </div>
-                                </label>
-                                <label className="flex items-center gap-3 cursor-pointer group">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={libOptions.cleanOrphanMeta}
-                                        onChange={e => setLibOptions({...libOptions, cleanOrphanMeta: e.target.checked})}
-                                        className="w-5 h-5 rounded bg-slate-900 border-slate-700 accent-indigo-500" 
-                                    />
-                                    <div>
-                                        <span className="text-xs font-bold text-slate-200 block">Metadatos Huérfanos</span>
-                                        <span className="text-[9px] text-slate-500 uppercase">Elimina .nfo, .jpg y .srt sin video asociado</span>
-                                    </div>
-                                </label>
-                                <label className="flex items-center gap-3 cursor-pointer group">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={libOptions.removeSamples}
-                                        onChange={e => setLibOptions({...libOptions, removeSamples: e.target.checked})}
-                                        className="w-5 h-5 rounded bg-slate-900 border-slate-700 accent-indigo-500" 
-                                    />
-                                    <div>
-                                        <span className="text-xs font-bold text-slate-200 block">Samples de Paquete</span>
-                                        <span className="text-[9px] text-slate-500 uppercase">Ignorar/Eliminar archivos menores a 25MB</span>
-                                    </div>
-                                </label>
-                                <label className="flex items-center gap-3 cursor-pointer group">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={libOptions.pruneEmptyFolders}
-                                        onChange={e => setLibOptions({...libOptions, pruneEmptyFolders: e.target.checked})}
-                                        className="w-5 h-5 rounded bg-slate-900 border-slate-700 accent-indigo-500" 
-                                    />
-                                    <div>
-                                        <span className="text-xs font-bold text-slate-200 block">Auto-Pruning</span>
-                                        <span className="text-[9px] text-slate-500 uppercase">Eliminar carpetas vacías tras movimiento</span>
-                                    </div>
-                                </label>
-                            </div>
-
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <button onClick={() => runLibrarian(true)} disabled={isOrganizing} className="py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-700 transition-all">
                                     {isOrganizing ? <Loader2 className="animate-spin" size={20}/> : <Eye size={20}/>} Auditar Cambios
@@ -235,50 +178,25 @@ export default function AdminLocalFiles() {
                     {simPlan.length > 0 && (
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden animate-in zoom-in-95">
                             <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
-                                <h4 className="font-black text-[10px] text-amber-500 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={14}/> Auditoría de Cambios Jerárquicos</h4>
+                                <h4 className="font-black text-[10px] text-amber-500 uppercase tracking-widest flex items-center gap-2"><AlertTriangle size={14}/> Auditoría de Cambios</h4>
                                 <button onClick={() => setSimPlan([])} className="text-slate-500 hover:text-white"><X size={16}/></button>
                             </div>
                             <div className="max-h-[500px] overflow-y-auto">
                                 <table className="w-full text-left text-xs border-collapse">
                                     <thead className="bg-slate-950/50 sticky top-0 text-slate-500 uppercase font-black text-[9px]">
                                         <tr>
-                                            <th className="p-4 border-b border-slate-800">Fragmento Original</th>
-                                            <th className="p-4 border-b border-slate-800">Nombre Raíz Detectado</th>
-                                            <th className="p-4 border-b border-slate-800">Destino Jerárquico</th>
-                                            <th className="p-4 border-b border-slate-800">Acción Sugerida</th>
+                                            <th className="p-4 border-b border-slate-800">Archivo</th>
+                                            <th className="p-4 border-b border-slate-800">Acción</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/50">
                                         {simPlan.map((p, i) => (
                                             <tr key={i} className="hover:bg-slate-800/30 transition-colors">
+                                                <td className="p-4 text-white font-medium">{p.file}</td>
                                                 <td className="p-4">
-                                                    <div className="text-slate-500 font-mono text-[10px] truncate max-w-[150px]">{p.old ? p.old.replace(/.*[\\\/]/, '') : p.file}</div>
-                                                </td>
-                                                <td className="p-4">
-                                                    <span className="bg-indigo-900/30 text-indigo-400 px-2 py-1 rounded font-bold text-[10px] uppercase border border-indigo-500/20">{p.root || '-'}</span>
-                                                </td>
-                                                <td className="p-4">
-                                                    {p.action === 'DELETE' ? (
-                                                        <span className="text-red-400 font-bold flex items-center gap-1"><Trash2 size={12}/> ELIMINACIÓN</span>
-                                                    ) : (
-                                                        <>
-                                                            <div className="text-indigo-400 font-black text-[10px] uppercase mb-1">{p.category}</div>
-                                                            <div className="text-white font-bold text-[11px] leading-tight break-all max-w-[200px]">{p.new ? p.new.replace(/.*[\\\/]/, '') : '-'}</div>
-                                                        </>
-                                                    )}
-                                                </td>
-                                                <td className="p-4">
-                                                    <div className="flex flex-col gap-1">
-                                                        <span className={`px-2 py-1 rounded text-[9px] font-black uppercase text-center ${
-                                                            p.action.includes('SKIP') ? 'bg-amber-900/30 text-amber-400' : 
-                                                            p.action.includes('OVERWRITE') ? 'bg-blue-900/30 text-blue-400' : 
-                                                            p.action === 'DELETE' ? 'bg-red-900/30 text-red-400' :
-                                                            'bg-emerald-900/30 text-emerald-400'
-                                                        }`}>
-                                                            {p.action}
-                                                        </span>
-                                                        {p.reason && <span className="text-[8px] text-slate-500 uppercase text-center font-bold">{p.reason}</span>}
-                                                    </div>
+                                                    <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${p.action === 'DELETE' ? 'bg-red-900/30 text-red-400' : 'bg-emerald-900/30 text-emerald-400'}`}>
+                                                        {p.action}
+                                                    </span>
                                                 </td>
                                             </tr>
                                         ))}
