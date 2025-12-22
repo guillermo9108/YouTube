@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../services/db';
-import { Cpu, RefreshCw, Play, CheckCircle2, AlertTriangle, Layers, ShieldCheck, Bug } from 'lucide-react';
+import { Cpu, RefreshCw, Play, CheckCircle2, AlertTriangle, Layers, ShieldCheck, Bug, Search } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 
 export default function AdminTranscoder() {
@@ -11,6 +11,7 @@ export default function AdminTranscoder() {
     const [stats, setStats] = useState({ waiting: 0, processing: 0, failed: 0, done: 0 });
     const [ffmpegOk, setFfmpegOk] = useState<boolean | null>(null);
     const [log, setLog] = useState<string[]>([]);
+    const [isScanningIncompatible, setIsScanningIncompatible] = useState(false);
 
     const loadStats = async () => {
         try {
@@ -40,6 +41,27 @@ export default function AdminTranscoder() {
 
     const addToLog = (msg: string) => { 
         setLog(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 50)); 
+    };
+
+    const handleScanIncompatible = async () => {
+        if (isScanningIncompatible) return;
+        setIsScanningIncompatible(true);
+        addToLog("Iniciando escaneo masivo de archivos para detectar incompatibilidades...");
+        try {
+            const res = await db.request<any>('action=admin_scan_incompatible');
+            addToLog(`Escaneo finalizado. Se han marcado ${res.marked} video(s) para transcodificación.`);
+            if (res.marked > 0) {
+                toast.success(`${res.marked} videos añadidos a la cola.`);
+                loadStats();
+            } else {
+                toast.info("No se encontraron nuevos videos incompatibles.");
+            }
+        } catch (e: any) {
+            addToLog(`ERROR EN ESCANEO: ${e.message}`);
+            toast.error("Fallo al escanear videos");
+        } finally {
+            setIsScanningIncompatible(false);
+        }
     };
 
     const runBatch = async () => {
@@ -107,38 +129,49 @@ export default function AdminTranscoder() {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-4 bg-slate-950 p-2 rounded-xl border border-slate-800">
-                        <div className="px-3">
-                            <label className="block text-[9px] uppercase font-black text-slate-500 mb-1">Simultáneos</label>
-                            <div className="flex items-center gap-3">
-                                <Layers size={14} className="text-indigo-400"/>
-                                <select 
-                                    value={batchSize} 
-                                    onChange={(e) => setBatchSize(parseInt(e.target.value))}
-                                    disabled={isRunning}
-                                    className="bg-transparent text-white font-bold outline-none cursor-pointer"
-                                >
-                                    {[1, 2, 3, 4, 5, 10].map(n => <option key={n} value={n} className="bg-slate-900">{n}</option>)}
-                                </select>
+                    <div className="flex flex-wrap items-center gap-4">
+                        <button 
+                            onClick={handleScanIncompatible}
+                            disabled={isScanningIncompatible || isRunning || ffmpegOk === false}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-lg font-bold flex items-center gap-2 transition-all border border-slate-700"
+                        >
+                            {isScanningIncompatible ? <RefreshCw className="animate-spin" size={16}/> : <Search size={16}/>}
+                            Escanear No Compatibles
+                        </button>
+
+                        <div className="flex items-center gap-4 bg-slate-950 p-2 rounded-xl border border-slate-800">
+                            <div className="px-3">
+                                <label className="block text-[9px] uppercase font-black text-slate-500 mb-1">Simultáneos</label>
+                                <div className="flex items-center gap-3">
+                                    <Layers size={14} className="text-indigo-400"/>
+                                    <select 
+                                        value={batchSize} 
+                                        onChange={(e) => setBatchSize(parseInt(e.target.value))}
+                                        disabled={isRunning}
+                                        className="bg-transparent text-white font-bold outline-none cursor-pointer"
+                                    >
+                                        {[1, 2, 3, 4, 5, 10].map(n => <option key={n} value={n} className="bg-slate-900">{n}</option>)}
+                                    </select>
+                                </div>
                             </div>
+                            <div className="w-px h-8 bg-slate-800"></div>
+                            {!isRunning ? (
+                                <button 
+                                    onClick={runBatch} 
+                                    disabled={stats.waiting === 0 || ffmpegOk === false}
+                                    className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-lg font-bold flex items-center gap-2 transition-all shadow-lg active:scale-95"
+                                >
+                                    <Play size={18}/> Iniciar
+                                </button>
+                            ) : (
+                                <button 
+                                    onClick={stopBatch} 
+                                    className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold flex items-center gap-2 transition-all shadow-lg animate-pulse"
+                                >
+                                    <RefreshCw className="animate-spin" size={18}/> Detener
+                                </button>
+                            )}
                         </div>
-                        <div className="w-px h-8 bg-slate-800"></div>
-                        {!isRunning ? (
-                            <button 
-                                onClick={runBatch} 
-                                disabled={stats.waiting === 0 || ffmpegOk === false}
-                                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-lg font-bold flex items-center gap-2 transition-all shadow-lg active:scale-95"
-                            >
-                                <Play size={18}/> Iniciar
-                            </button>
-                        ) : (
-                            <button 
-                                onClick={stopBatch} 
-                                className="px-6 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold flex items-center gap-2 transition-all shadow-lg animate-pulse"
-                            >
-                                <RefreshCw className="animate-spin" size={18}/> Detener
-                            </button>
-                        )}
                     </div>
                 </div>
 
@@ -192,8 +225,8 @@ export default function AdminTranscoder() {
                     <div className="flex-1 bg-blue-900/10 border border-blue-500/20 rounded-xl p-4 flex gap-4 items-start">
                         <Bug size={20} className="text-blue-400 shrink-0 mt-0.5"/>
                         <div className="text-xs text-slate-400 leading-relaxed">
-                            <strong className="text-blue-200 block mb-1">¿No sucede nada?</strong>
-                            Si el botón no inicia acciones, pulsa en "Configuración" y verifica que la opción "Auto Transcode" esté activa y que FFmpeg esté correctamente instalado en tu servidor local.
+                            <strong className="text-blue-200 block mb-1">Botón Escanear:</strong>
+                            Utiliza "Escanear No Compatibles" para revisar todos los videos existentes en el servidor. Esto marcará aquellos que no estén en formato H.264 para que el motor de conversión pueda procesarlos y asegurar que se reproduzcan correctamente en móviles y navegadores.
                         </div>
                     </div>
                 </div>

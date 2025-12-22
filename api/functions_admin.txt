@@ -147,6 +147,33 @@ function admin_transcode_batch($pdo) {
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
+function admin_scan_incompatible($pdo) {
+    if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+    set_time_limit(0);
+    ini_set('memory_limit', '1024M');
+
+    if (!check_ffmpeg_available()) {
+        respond(false, null, "FFmpeg no está instalado en el servidor.");
+    }
+
+    try {
+        // Buscamos videos publicados o locales que no estén en cola de transcodificación
+        $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE category NOT IN ('PENDING', 'PROCESSING') AND transcode_status IN ('NONE', 'FAILED')");
+        $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $markedCount = 0;
+        foreach ($videos as $v) {
+            if (check_needs_transcode($v['videoUrl'])) {
+                $pdo->prepare("UPDATE videos SET needs_transcode = 1, transcode_status = 'WAITING' WHERE id = ?")
+                    ->execute([$v['id']]);
+                $markedCount++;
+            }
+        }
+        
+        respond(true, ['marked' => $markedCount]);
+    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
+}
+
 function admin_add_balance($adminId, $targetId, $amount) {
     global $pdo;
     
