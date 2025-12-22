@@ -71,20 +71,20 @@ function check_ffmpeg_available() {
 }
 
 function resolve_video_path($url) {
+    if (!$url) return false;
     $rawPath = rawurldecode($url);
-    // 1. Si el archivo existe tal cual (Rutas absolutas de escaneo local)
-    if (file_exists($rawPath)) return $rawPath;
     
-    // 2. Si es una ruta relativa de uploads (api/uploads/...)
+    // Eliminar prefijo de la API si existe
+    $cleanPath = $rawPath;
     if (strpos($rawPath, 'api/') === 0) {
-        $trimmed = substr($rawPath, 4);
-        if (file_exists($trimmed)) return $trimmed;
+        $cleanPath = substr($rawPath, 4);
     }
+
+    // 1. Verificar ruta relativa al script (uploads/...)
+    if (file_exists($cleanPath)) return realpath($cleanPath);
     
-    // 3. Intento desesperado: buscar solo el nombre del archivo en uploads
-    $filename = basename($rawPath);
-    $search = 'uploads/videos/' . $filename;
-    if (file_exists($search)) return $search;
+    // 2. Verificar ruta absoluta (NAS/Local)
+    if (file_exists($rawPath)) return realpath($rawPath);
 
     return false;
 }
@@ -97,31 +97,32 @@ function check_needs_transcode($filePath) {
 
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     
-    // Formatos web no nativos: siempre convertir
-    if (in_array($ext, ['mkv', 'avi', 'mov', 'flv', 'ts', 'm4v'])) return true;
+    // Formatos que siempre requieren conversión para PWA
+    if (in_array($ext, ['mkv', 'avi', 'mov', 'flv', 'ts', 'm4v', 'wmv'])) return true;
 
-    if (!function_exists('exec')) return false;
+    if (!check_ffmpeg_available()) return false;
 
     $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
     $ffprobe = $isWin ? 'ffprobe.exe' : 'ffprobe';
     
-    // Obtener códec de video
+    // Obtener códec de video de forma silenciosa
     $cmd = "$ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath);
     @exec($cmd, $output, $resultCode);
     $codec = isset($output[0]) ? trim($output[0]) : '';
     
-    // Si no es h264, necesita transcodificación para compatibilidad PWA
     return ($codec !== 'h264' && !empty($codec));
 }
 
 function admin_transcode_batch($pdo) {
-    // Evitar timeouts y buffering que rompan el JSON
+    // Bloqueo absoluto de salida accidental
+    while (ob_get_level()) ob_end_clean();
+    ob_start();
+
     set_time_limit(0);
     ini_set('memory_limit', '512M');
-    if (ob_get_level()) ob_end_clean(); 
 
     if (!check_ffmpeg_available()) {
-        respond(false, null, "FFmpeg no disponible o exec() deshabilitado en el servidor.");
+        respond(false, null, "FFmpeg no disponible en el servidor.");
     }
 
     try {
@@ -129,6 +130,7 @@ function admin_transcode_batch($pdo) {
         $preset = $settings['transcodePreset'] ?? 'superfast';
         $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 1;
 
+        // Buscar videos esperando
         $stmt = $pdo->prepare("SELECT id, videoUrl FROM videos WHERE transcode_status = 'WAITING' LIMIT ?");
         $stmt->execute([$limit]);
         $queue = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -137,7 +139,7 @@ function admin_transcode_batch($pdo) {
             respond(true, ['processed' => 0, 'completed' => true, 'remaining' => 0]);
         }
 
-        $processed = 0;
+        $processedCount = 0;
         foreach ($queue as $v) {
             $path = resolve_video_path($v['videoUrl']);
             
@@ -146,42 +148,53 @@ function admin_transcode_batch($pdo) {
                 continue;
             }
 
+            // Marcar como en proceso
             $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$v['id']]);
             
-            // Generar nombre de salida temporal
             $dir = dirname($path);
-            $filename = pathinfo($path, PATHINFO_FILENAME);
-            $tempOut = $dir . DIRECTORY_SEPARATOR . 'tmp_' . uniqid() . '.mp4';
-            
-            // Comando FFmpeg: H.264 + AAC + FastStart
-            $cmd = "ffmpeg -y -i " . escapeshellarg($path) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempOut) . " 2>&1";
-            
-            @exec($cmd, $output, $resultCode);
+            if (!is_writable($dir)) {
+                $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED' WHERE id = ?")->execute([$v['id']]);
+                continue;
+            }
 
-            if ($resultCode === 0 && file_exists($tempOut)) {
-                // Si el original era un archivo de sistema (uploads), lo borramos
-                if (strpos($path, 'uploads' . DIRECTORY_SEPARATOR . 'videos') !== false) {
+            $filename = pathinfo($path, PATHINFO_FILENAME);
+            $tempOut = $dir . DIRECTORY_SEPARATOR . 'trans_' . uniqid() . '.mp4';
+            
+            // COMANDO REFORZADO:
+            // -loglevel error: Evita basura en stdout
+            // -y: Sobrescribe
+            // -movflags +faststart: Crítico para PWA
+            $cmd = "ffmpeg -loglevel error -y -i " . escapeshellarg($path) . " -c:v libx264 -preset $preset -crf 23 -profile:v high -level 4.1 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempOut);
+            
+            @exec($cmd, $ffmpegOutput, $resultCode);
+
+            if ($resultCode === 0 && file_exists($tempOut) && filesize($tempOut) > 0) {
+                // Si es un archivo de la carpeta uploads, podemos borrar el original para ahorrar espacio
+                if (strpos($path, 'uploads') !== false) {
                     @unlink($path);
                     $finalPath = $dir . DIRECTORY_SEPARATOR . $filename . '.mp4';
                 } else {
-                    // Si es un archivo local/NAS, guardamos la versión convertida al lado con .mp4
+                    // Si es NAS/Local, guardamos el MP4 al lado
                     $finalPath = $dir . DIRECTORY_SEPARATOR . $filename . '.mp4';
-                    // Si ya existía un .mp4 con ese nombre, añadimos sufijo
                     if (file_exists($finalPath) && $finalPath !== $path) {
-                         $finalPath = $dir . DIRECTORY_SEPARATOR . $filename . '_web.mp4';
+                        $finalPath = $dir . DIRECTORY_SEPARATOR . $filename . '_web.mp4';
                     }
                 }
                 
                 @rename($tempOut, $finalPath);
                 
-                // Normalizar URL para la DB
+                // Normalizar ruta para DB
                 $newUrl = str_replace('\\', '/', $finalPath);
-                if (strpos($newUrl, 'uploads/') === 0) $newUrl = 'api/' . $newUrl;
+                // Si está en uploads, asegurar prefijo api/
+                if (strpos($newUrl, 'uploads/') !== false && strpos($newUrl, 'api/') === false) {
+                    $newUrl = 'api/' . $newUrl;
+                }
                 
                 $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE', needs_transcode = 0 WHERE id = ?")
                     ->execute([$newUrl, $v['id']]);
-                $processed++;
+                $processedCount++;
             } else {
+                // Falló la conversión
                 $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED' WHERE id = ?")->execute([$v['id']]);
                 if (file_exists($tempOut)) @unlink($tempOut);
             }
@@ -189,24 +202,24 @@ function admin_transcode_batch($pdo) {
 
         $remaining = $pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'WAITING'")->fetchColumn();
         
-        // Finalizar siempre con un JSON limpio
+        // Respuesta limpia garantizada
         respond(true, [
-            'processed' => $processed, 
+            'processed' => $processedCount, 
             'remaining' => (int)$remaining, 
             'completed' => ($remaining == 0)
         ]);
 
     } catch (Exception $e) {
-        respond(false, null, "Error en motor: " . $e->getMessage());
+        respond(false, null, "Excepción en Motor: " . $e->getMessage());
     }
 }
 
 function admin_scan_incompatible($pdo, $input) {
-    if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
-    set_time_limit(0);
+    while (ob_get_level()) ob_end_clean();
+    ob_start();
 
     if (!check_ffmpeg_available()) {
-        respond(false, null, "FFmpeg no instalado o permisos insuficientes.");
+        respond(false, null, "FFmpeg no instalado.");
     }
 
     $days = isset($input['days']) ? intval($input['days']) : 0;
@@ -246,10 +259,7 @@ function admin_scan_incompatible($pdo, $input) {
                     ->execute([$v['id']]);
             }
         }
-        respond(true, [
-            'marked' => $markedCount, 
-            'scanned' => count($videos)
-        ]);
+        respond(true, ['marked' => $markedCount, 'scanned' => count($videos)]);
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
