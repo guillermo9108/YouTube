@@ -60,47 +60,47 @@ function admin_update_settings($pdo, $input) {
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
-// --- 2. TRANSCODER ENGINE ---
+// --- 2. TRANSCODER ENGINE (SYNOLOGY OPTIMIZED) ---
+
+/**
+ * Busca la ruta del binario de FFmpeg específicamente en Synology y Linux estándar
+ */
+function get_ffmpeg_path() {
+    $paths = [
+        '/usr/bin/ffmpeg',                                    // Synology DSM 7 / Linux Standard
+        '/var/packages/VideoStation/target/bin/ffmpeg',        // Synology VideoStation
+        '/var/packages/CodecPack/target/bin/ffmpeg',           // Synology Advanced Media Extensions
+        '/usr/local/bin/ffmpeg',                              // SynoCommunity / Custom
+        'ffmpeg'                                              // System PATH
+    ];
+
+    foreach ($paths as $path) {
+        $cmd = "$path -version 2>&1";
+        $output = [];
+        @exec($cmd, $output, $resultCode);
+        if ($resultCode === 0) return $path;
+    }
+    return false;
+}
 
 function safe_shell_arg($arg) {
     if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
-        // En Windows, eliminamos comillas existentes para evitar inyección y asegurar el path
         return '"' . str_replace('"', '', $arg) . '"';
     }
     return escapeshellarg($arg);
 }
 
-function check_ffmpeg_available() {
-    // Verificamos si la función exec existe y no está bloqueada por php.ini
-    if (!function_exists('exec') || strpos(ini_get('disable_functions'), 'exec') !== false) {
-        return false;
-    }
-    
-    $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
-    $cmd = $isWin ? 'ffmpeg -version 2>&1' : 'ffmpeg -version 2>&1';
-    
-    $output = [];
-    $resultCode = -1;
-    @exec($cmd, $output, $resultCode);
-    
-    return ($resultCode === 0);
-}
-
 function resolve_video_path($url) {
     if (!$url) return false;
     $rawPath = rawurldecode($url);
-    
-    // Limpiar prefijo de API
     $cleanPath = $rawPath;
     if (strpos($rawPath, 'api/') === 0) {
         $cleanPath = substr($rawPath, 4);
     }
 
-    // Probar rutas relativas y absolutas
     if (file_exists($cleanPath)) return realpath($cleanPath);
     if (file_exists($rawPath)) return realpath($rawPath);
     
-    // Intento en carpeta de uploads
     $apiUploads = dirname(__DIR__) . DIRECTORY_SEPARATOR . $cleanPath;
     if (file_exists($apiUploads)) return $apiUploads;
 
@@ -115,14 +115,13 @@ function check_needs_transcode($filePath) {
 
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     
-    // Extensiones web no nativas
+    // Formatos no compatibles con PWA
     if (in_array($ext, ['mkv', 'avi', 'mov', 'flv', 'ts', 'm4v', 'wmv'])) return true;
 
-    if (!check_ffmpeg_available()) return false;
+    $ffmpeg = get_ffmpeg_path();
+    if (!$ffmpeg) return false;
 
-    $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
-    $ffprobe = $isWin ? 'ffprobe.exe' : 'ffprobe';
-    
+    $ffprobe = str_replace('ffmpeg', 'ffprobe', $ffmpeg);
     $cmd = "$ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 " . safe_shell_arg($realPath);
     $output = [];
     @exec($cmd, $output);
@@ -132,12 +131,16 @@ function check_needs_transcode($filePath) {
 }
 
 function admin_transcode_batch($pdo) {
+    // Garantizar que no hay nada en los búferes que ensucie la respuesta
+    while (ob_get_level()) ob_end_clean();
+    ob_start();
+
     set_time_limit(0);
     ini_set('memory_limit', '1024M');
 
-    // Validación temprana de FFmpeg
-    if (!check_ffmpeg_available()) {
-        respond(false, null, "FFmpeg no está instalado, no está en el PATH o exec() está deshabilitado en php.ini.");
+    $ffmpeg = get_ffmpeg_path();
+    if (!$ffmpeg) {
+        respond(false, null, "FFmpeg no encontrado en Synology. Instale 'Video Station' o 'Media Converter'.");
     }
 
     try {
@@ -168,8 +171,10 @@ function admin_transcode_batch($pdo) {
             $filename = pathinfo($path, PATHINFO_FILENAME);
             $tempOut = $dir . DIRECTORY_SEPARATOR . 'tr_' . uniqid() . '.mp4';
             
-            // Comando FFmpeg reforzado: -loglevel error para no ensuciar la salida
-            $cmd = "ffmpeg -loglevel error -y -i " . safe_shell_arg($path) . " -c:v libx264 -preset $preset -crf 23 -profile:v high -level 4.1 -c:a aac -b:a 128k -movflags +faststart " . safe_shell_arg($tempOut);
+            // Comando optimizado para Synology: libx264 es estándar.
+            // Redireccionamos stderr a un archivo temporal si necesitamos depurar, 
+            // pero para producción usamos loglevel error.
+            $cmd = "$ffmpeg -loglevel error -y -i " . safe_shell_arg($path) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . safe_shell_arg($tempOut) . " 2>&1";
             
             $outputArr = [];
             $resultCode = -1;
@@ -178,7 +183,7 @@ function admin_transcode_batch($pdo) {
             if ($resultCode === 0 && file_exists($tempOut) && filesize($tempOut) > 0) {
                 $finalPath = $dir . DIRECTORY_SEPARATOR . $filename . '.mp4';
                 
-                // Si el archivo original no era mp4, podemos borrarlo si está en uploads
+                // Si el original no es mp4 y está en uploads, borrar para liberar espacio en el NAS
                 if (strtolower(pathinfo($path, PATHINFO_EXTENSION)) !== 'mp4' && strpos($path, 'uploads') !== false) {
                      @unlink($path);
                 } else if ($path !== $finalPath && file_exists($path)) {
@@ -196,6 +201,8 @@ function admin_transcode_batch($pdo) {
                     ->execute([$newUrl, $v['id']]);
                 $processedCount++;
             } else {
+                // Si falló, guardamos el error para el log pero no rompemos el JSON
+                $errorMsg = implode(" ", $outputArr);
                 $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED' WHERE id = ?")->execute([$v['id']]);
                 if (file_exists($tempOut)) @unlink($tempOut);
             }
@@ -210,12 +217,12 @@ function admin_transcode_batch($pdo) {
         ]);
 
     } catch (Exception $e) {
-        respond(false, null, "Error fatal en el motor: " . $e->getMessage());
+        respond(false, null, "Error en Synology Transcoder: " . $e->getMessage());
     }
 }
 
 function admin_scan_incompatible($pdo, $input) {
-    if (!check_ffmpeg_available()) {
+    if (!get_ffmpeg_path()) {
         respond(false, null, "FFmpeg no disponible.");
     }
 
@@ -277,12 +284,14 @@ function admin_add_balance($adminId, $targetId, $amount) {
 function admin_get_local_stats($pdo) {
     try {
         $path = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1")->fetchColumn() ?: '';
+        $ffmpeg = get_ffmpeg_path();
         $stats = [
             'path' => $path, 
             'disk_total' => 0, 
             'disk_free' => 0, 
             'db_videos' => $pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal = 1")->fetchColumn(), 
-            'ffmpeg_available' => check_ffmpeg_available()
+            'ffmpeg_available' => ($ffmpeg !== false),
+            'ffmpeg_path' => $ffmpeg
         ];
         if ($path && is_dir($path)) {
             $stats['disk_total'] = round(disk_total_space($path) / 1073741824, 2);
