@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../services/db';
-import { Cpu, RefreshCw, Play, CheckCircle2, AlertTriangle, Bug, X, Copy, Terminal, Layers, Clock, FileVideo, ShieldCheck, Zap, Pause } from 'lucide-react';
+import { Cpu, RefreshCw, Play, CheckCircle2, AlertTriangle, Bug, X, Copy, Terminal, Layers, Clock, FileVideo, ShieldCheck, Zap, Pause, Filter, History } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 
 export default function AdminTranscoder() {
@@ -11,11 +11,14 @@ export default function AdminTranscoder() {
     const [isRunning, setIsRunning] = useState(() => localStorage.getItem('sp_tr_running') === 'true');
     const [batchSize, setBatchSize] = useState(() => parseInt(localStorage.getItem('sp_tr_batch') || '1'));
     
-    // -- Filtros --
-    const [filters, setFilters] = useState({
-        days: 0,
-        onlyNonMp4: true,
-        onlyIncompatible: true
+    // -- Filtros Persistentes --
+    const [filters, setFilters] = useState(() => {
+        const saved = localStorage.getItem('sp_tr_filters');
+        return saved ? JSON.parse(saved) : {
+            days: 0,
+            onlyNonMp4: true,
+            onlyIncompatible: true
+        };
     });
 
     // -- Datos del Servidor --
@@ -27,6 +30,7 @@ export default function AdminTranscoder() {
     // -- UI Helpers --
     const [showDiagnostic, setShowDiagnostic] = useState(false);
     const isRunningRef = useRef(isRunning);
+    const loopActive = useRef(false);
 
     const loadStats = async () => {
         try {
@@ -39,13 +43,17 @@ export default function AdminTranscoder() {
         } catch (e) {}
     };
 
-    // Al cargar el componente
+    // Al cargar el componente y persistir filtros
     useEffect(() => { 
         loadStats(); 
         if (isRunning) {
             runBatch();
         }
     }, []);
+
+    useEffect(() => {
+        localStorage.setItem('sp_tr_filters', JSON.stringify(filters));
+    }, [filters]);
 
     // Sincronizar estados con Ref y LocalStorage
     useEffect(() => {
@@ -72,50 +80,56 @@ export default function AdminTranscoder() {
                 body: JSON.stringify({ ...filters, mode: 'PREVIEW' })
             });
             setScanResult(res.count);
-            toast.info(`Escaneo completado: ${res.count} videos coinciden.`);
+            toast.info(`Escaneo: ${res.count} videos cumplen los criterios.`);
         } catch (e: any) { toast.error(e.message); }
         finally { setIsScanning(false); }
     };
 
     const handleAddFilteredToQueue = async () => {
-        if (!confirm(`¿Deseas agregar ${scanResult} videos a la cola de conversión?`)) return;
+        if (!confirm(`¿Confirmas agregar ${scanResult} videos a la cola?`)) return;
         try {
             const res = await db.request<{affected: number}>(`action=admin_transcode_scan_filters`, {
                 method: 'POST',
                 body: JSON.stringify({ ...filters, mode: 'EXECUTE' })
             });
-            toast.success(`${res.affected} videos añadidos a la cola.`);
+            toast.success(`${res.affected} videos listos para convertir.`);
             setScanResult(null);
             loadStats();
         } catch (e: any) { toast.error(e.message); }
     };
 
     const runBatch = async () => {
-        if (isRunning && !isRunningRef.current) return; // Ya está corriendo un bucle
+        if (loopActive.current) return;
         
+        loopActive.current = true;
         setIsRunning(true);
-        addToLog(`Motor iniciado. Lote: ${batchSize} video(s).`);
+        addToLog(`Motor activado. Procesando en lotes de ${batchSize}...`);
         
         const loop = async () => {
-            if (!isRunningRef.current) return;
+            if (!isRunningRef.current) {
+                loopActive.current = false;
+                return;
+            }
             
             try {
                 const res = await db.request<any>(`action=admin_transcode_batch&limit=${batchSize}`);
                 if (res.processed > 0) {
-                    addToLog(`Éxito: ${res.processed} procesado(s).`);
+                    addToLog(`Éxito: ${res.processed} video(s) convertidos.`);
                     loadStats();
                 }
                 
                 if (!res.completed && isRunningRef.current) {
-                    setTimeout(loop, 3000); // Pausa de 3s entre peticiones para respirar
+                    // Pequeña pausa para no saturar el event loop
+                    setTimeout(loop, 2000); 
                 } else {
                     setIsRunning(false);
-                    addToLog(res.completed ? "Cola terminada." : "Motor detenido por el usuario.");
+                    loopActive.current = false;
+                    addToLog(res.completed ? "Procesamiento finalizado." : "Motor detenido.");
                 }
             } catch (e: any) {
-                addToLog(`FALLO CRÍTICO: ${e.message}`);
+                addToLog(`FALLO: ${e.message}`);
                 setIsRunning(false);
-                if (e.message.includes('CORRUPTA')) toast.error("Error de comunicación servidor.");
+                loopActive.current = false;
             }
         };
         loop();
@@ -123,73 +137,82 @@ export default function AdminTranscoder() {
 
     const stopBatch = () => {
         setIsRunning(false);
-        addToLog("Deteniendo al finalizar lote actual...");
+        addToLog("Solicitud de pausa enviada...");
     };
 
     const totalInvolved = stats.waiting + stats.done + stats.processing;
     const progressPercent = totalInvolved > 0 ? Math.round((stats.done / totalInvolved) * 100) : 0;
 
     return (
-        <div className="space-y-6 animate-in fade-in max-w-5xl mx-auto pb-20">
+        <div className="space-y-6 animate-in fade-in max-w-6xl mx-auto pb-24">
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 
-                {/* PANEL IZQUIERDO: CONFIG & FILTROS */}
+                {/* COLUMNA FILTROS */}
                 <div className="lg:col-span-1 space-y-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl">
                         <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                            <Layers size={18} className="text-indigo-400"/> Escáner de Incompatibilidad
+                            <Filter size={18} className="text-indigo-400"/> Segmentación
                         </h3>
                         
-                        <div className="space-y-4">
+                        <div className="space-y-5">
                             <div>
-                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Días desde creación</label>
-                                <input 
-                                    type="number" 
-                                    min="0"
-                                    value={filters.days} 
-                                    onChange={e => setFilters({...filters, days: parseInt(e.target.value) || 0})}
-                                    placeholder="0 = Todos los tiempos"
-                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm"
-                                />
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-1.5 tracking-widest">Días desde el registro</label>
+                                <div className="relative">
+                                    <Clock className="absolute left-3 top-2.5 text-slate-500" size={14}/>
+                                    <input 
+                                        type="number" 
+                                        min="0"
+                                        value={filters.days} 
+                                        onChange={e => setFilters({...filters, days: parseInt(e.target.value) || 0})}
+                                        placeholder="0 = Todos"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-white text-sm focus:border-indigo-500 outline-none"
+                                    />
+                                </div>
                             </div>
 
-                            <div className="flex flex-col gap-2">
+                            <div className="space-y-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
                                 <label className="flex items-center gap-3 cursor-pointer group">
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${filters.onlyNonMp4 ? 'bg-indigo-600 border-indigo-500' : 'bg-slate-900 border-slate-700'}`}>
+                                        {filters.onlyNonMp4 && <CheckCircle2 size={12} className="text-white" />}
+                                    </div>
                                     <input 
                                         type="checkbox" 
+                                        hidden
                                         checked={filters.onlyNonMp4} 
                                         onChange={e => setFilters({...filters, onlyNonMp4: e.target.checked})}
-                                        className="w-4 h-4 accent-indigo-500"
                                     />
-                                    <span className="text-xs text-slate-300 group-hover:text-white transition-colors">Solo formatos no-MP4</span>
+                                    <span className="text-xs text-slate-400 group-hover:text-white">Formatos no-MP4</span>
                                 </label>
                                 <label className="flex items-center gap-3 cursor-pointer group">
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${filters.onlyIncompatible ? 'bg-indigo-600 border-indigo-500' : 'bg-slate-900 border-slate-700'}`}>
+                                        {filters.onlyIncompatible && <CheckCircle2 size={12} className="text-white" />}
+                                    </div>
                                     <input 
                                         type="checkbox" 
+                                        hidden
                                         checked={filters.onlyIncompatible} 
                                         onChange={e => setFilters({...filters, onlyIncompatible: e.target.checked})}
-                                        className="w-4 h-4 accent-indigo-500"
                                     />
-                                    <span className="text-xs text-slate-300 group-hover:text-white transition-colors">Solo marcados como incompatibles</span>
+                                    <span className="text-xs text-slate-400 group-hover:text-white">Incompatibles</span>
                                 </label>
                             </div>
 
                             <button 
                                 onClick={handlePreScan}
                                 disabled={isScanning}
-                                className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-2 border border-slate-700"
+                                className="w-full bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 font-bold py-3 rounded-xl text-xs flex items-center justify-center gap-2 border border-indigo-500/20 transition-all active:scale-95"
                             >
-                                {isScanning ? <RefreshCw className="animate-spin" size={14}/> : <Zap size={14}/>}
+                                {isScanning ? <RefreshCw className="animate-spin" size={14}/> : <Layers size={14}/>}
                                 Pre-Escanear Videos
                             </button>
 
                             {scanResult !== null && (
-                                <div className="bg-indigo-900/20 border border-indigo-500/30 p-3 rounded-xl animate-in zoom-in-95">
-                                    <p className="text-xs text-indigo-300 text-center mb-2 font-medium">Se encontraron <strong>{scanResult}</strong> videos.</p>
+                                <div className="bg-emerald-900/10 border border-emerald-500/20 p-4 rounded-xl animate-in zoom-in-95 text-center">
+                                    <p className="text-xs text-emerald-400 mb-3 font-medium">Encontrados: <strong>{scanResult}</strong></p>
                                     <button 
                                         onClick={handleAddFilteredToQueue}
-                                        className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-lg text-[10px] uppercase"
+                                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-2.5 rounded-lg text-[10px] uppercase tracking-tighter shadow-lg shadow-emerald-900/20"
                                     >
                                         Agregar a la cola
                                     </button>
@@ -200,137 +223,160 @@ export default function AdminTranscoder() {
 
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
                         <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                            <Clock size={18} className="text-emerald-400"/> Configuración de Lote
+                            <Zap size={18} className="text-amber-400"/> Potencia de Lote
                         </h3>
                         <div className="space-y-4">
-                            <div>
-                                <div className="flex justify-between mb-1">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Videos por petición</label>
-                                    <span className="text-xs font-bold text-emerald-400">{batchSize}</span>
-                                </div>
-                                <input 
-                                    type="range" 
-                                    min="1" max="10" 
-                                    value={batchSize} 
-                                    onChange={e => setBatchSize(parseInt(e.target.value))}
-                                    className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                                />
-                                <p className="text-[9px] text-slate-500 mt-2 italic leading-relaxed">
-                                    * Aumentar el lote acelera el proceso pero puede saturar el CPU de tu NAS. Recomendado: 1-2.
+                            <div className="flex justify-between items-center px-1">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase">Simultáneos</span>
+                                <span className="text-sm font-black text-amber-400">{batchSize}</span>
+                            </div>
+                            <input 
+                                type="range" 
+                                min="1" max="10" 
+                                value={batchSize} 
+                                onChange={e => setBatchSize(parseInt(e.target.value))}
+                                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                            />
+                            <div className="bg-amber-900/10 p-3 rounded-lg border border-amber-500/10">
+                                <p className="text-[9px] text-amber-500/70 italic leading-snug">
+                                    Nota: Valores altos aceleran la cola pero aumentan drásticamente la carga de CPU de tu NAS.
                                 </p>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* PANEL CENTRAL: PROGRESO & MOTOR */}
-                <div className="lg:col-span-2 space-y-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                {/* COLUMNA DASHBOARD PRINCIPAL */}
+                <div className="lg:col-span-3 space-y-6">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
                         
-                        {/* Background Decor */}
+                        {/* Efecto decorativo de CPU de fondo */}
                         <div className="absolute -top-10 -right-10 opacity-5 pointer-events-none text-indigo-500">
-                            <Cpu size={200} />
+                            <Cpu size={250} />
                         </div>
 
-                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
-                            <div className="flex items-center gap-3">
-                                <div className={`p-3 rounded-2xl ${isRunning ? 'bg-indigo-600 shadow-lg shadow-indigo-500/20' : 'bg-slate-800'}`}>
-                                    <Cpu size={24} className={isRunning ? 'text-white animate-spin' : 'text-slate-500'} />
+                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-10 gap-6">
+                            <div className="flex items-center gap-5">
+                                <div className={`p-5 rounded-3xl transition-all duration-500 ${isRunning ? 'bg-indigo-600 shadow-[0_0_30px_rgba(79,70,229,0.4)]' : 'bg-slate-800'}`}>
+                                    <Cpu size={32} className={isRunning ? 'text-white animate-spin-slow' : 'text-slate-500'} />
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-bold text-white">Estado del Motor</h3>
-                                    <div className="flex items-center gap-2">
-                                        <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
-                                        <span className={`text-[10px] font-black uppercase tracking-widest ${isRunning ? 'text-emerald-400' : 'text-red-400'}`}>
-                                            {isRunning ? 'Ejecutando Cola' : 'Motor en Pausa'}
+                                    <h3 className="text-2xl font-black text-white tracking-tight">Estado del Motor</h3>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className={`w-2.5 h-2.5 rounded-full ${isRunning ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                        <span className={`text-xs font-black uppercase tracking-[0.2em] ${isRunning ? 'text-emerald-400' : 'text-red-400'}`}>
+                                            {isRunning ? 'Procesando activamente' : 'Motor en Standby'}
                                         </span>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-2 w-full md:w-auto">
+                            <div className="flex items-center gap-3 w-full md:w-auto">
                                 {!isRunning ? (
-                                    <button onClick={runBatch} className="flex-1 md:flex-none px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xl shadow-indigo-900/20 active:scale-95 transition-all">
-                                        <Play size={18} fill="currentColor"/> Iniciar Procesos
+                                    <button onClick={runBatch} className="flex-1 md:flex-none px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black flex items-center justify-center gap-3 shadow-2xl shadow-indigo-900/40 active:scale-95 transition-all">
+                                        <Play size={20} fill="currentColor"/> INICIAR MOTOR
                                     </button>
                                 ) : (
-                                    <button onClick={stopBatch} className="flex-1 md:flex-none px-8 py-3 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 rounded-xl font-bold flex items-center justify-center gap-2 transition-all">
-                                        <Pause size={18} fill="currentColor"/> Pausar Motor
+                                    <button onClick={stopBatch} className="flex-1 md:flex-none px-10 py-4 bg-slate-800 hover:bg-red-900/20 text-slate-300 hover:text-red-400 border border-slate-700 hover:border-red-500/30 rounded-2xl font-black flex items-center justify-center gap-3 transition-all">
+                                        <Pause size={20} fill="currentColor"/> PAUSAR COLA
                                     </button>
                                 )}
                             </div>
                         </div>
 
-                        {/* Barra de Progreso */}
-                        <div className="mb-8">
-                            <div className="flex justify-between items-end mb-2">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Progreso de la Cola Actual</span>
-                                <span className="text-xl font-black text-white">{progressPercent}%</span>
+                        {/* BARRA DE PROGRESO INTEGRAL */}
+                        <div className="mb-10 bg-slate-950/50 p-6 rounded-3xl border border-slate-800">
+                            <div className="flex justify-between items-end mb-3 px-1">
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Sincronización Total</span>
+                                    <span className="text-xs text-slate-400 font-bold">{stats.done} de {totalInvolved} completados</span>
+                                </div>
+                                <span className="text-3xl font-black text-white tabular-nums">{progressPercent}%</span>
                             </div>
-                            <div className="h-4 bg-slate-950 border border-slate-800 rounded-full p-0.5 overflow-hidden">
+                            <div className="h-5 bg-slate-900 border border-slate-800 rounded-full p-1 overflow-hidden">
                                 <div 
-                                    className="h-full bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-500 rounded-full transition-all duration-1000 shadow-[0_0_15px_rgba(79,70,229,0.4)]"
+                                    className="h-full bg-gradient-to-r from-indigo-600 via-purple-500 to-indigo-400 rounded-full transition-all duration-1000 shadow-[0_0_20px_rgba(79,70,229,0.3)] relative"
                                     style={{ width: `${progressPercent}%` }}
-                                ></div>
-                            </div>
-                            <div className="flex justify-between mt-2 text-[10px] font-bold text-slate-500">
-                                <span>TOTAL: {totalInvolved}</span>
-                                <span className="text-emerald-400">LISTOS: {stats.done}</span>
+                                >
+                                    <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Stats Cards Mini */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-                            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 flex flex-col items-center">
-                                <div className="text-[9px] text-slate-500 font-black uppercase mb-1">En Espera</div>
-                                <div className="text-lg font-bold text-amber-500">{stats.waiting}</div>
+                        {/* GRID DE ESTADÍSTICAS */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+                            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/50 flex flex-col items-center group hover:border-amber-500/30 transition-colors">
+                                <div className="text-[10px] text-slate-500 font-black uppercase mb-1.5 tracking-tighter">En Cola</div>
+                                <div className="text-2xl font-black text-amber-500">{stats.waiting}</div>
                             </div>
-                            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 flex flex-col items-center">
-                                <div className="text-[9px] text-slate-500 font-black uppercase mb-1">Procesando</div>
-                                <div className="text-lg font-bold text-blue-400">{stats.processing}</div>
+                            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/50 flex flex-col items-center group hover:border-blue-500/30 transition-colors">
+                                <div className="text-[10px] text-slate-500 font-black uppercase mb-1.5 tracking-tighter">Activos</div>
+                                <div className="text-2xl font-black text-blue-400">{stats.processing}</div>
                             </div>
-                            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 flex flex-col items-center">
-                                <div className="text-[9px] text-slate-500 font-black uppercase mb-1">Finalizados</div>
-                                <div className="text-lg font-bold text-emerald-400">{stats.done}</div>
+                            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/50 flex flex-col items-center group hover:border-emerald-500/30 transition-colors">
+                                <div className="text-[10px] text-slate-500 font-black uppercase mb-1.5 tracking-tighter">Finalizados</div>
+                                <div className="text-2xl font-black text-emerald-400">{stats.done}</div>
                             </div>
-                            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 flex flex-col items-center">
-                                <div className="text-[9px] text-slate-500 font-black uppercase mb-1">Errores</div>
-                                <div className="text-lg font-bold text-red-500">{stats.failed}</div>
+                            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800/50 flex flex-col items-center group hover:border-red-500/30 transition-colors">
+                                <div className="text-[10px] text-slate-500 font-black uppercase mb-1.5 tracking-tighter">Errores</div>
+                                <div className="text-2xl font-black text-red-500">{stats.failed}</div>
                             </div>
                         </div>
 
-                        {/* Terminal Log */}
-                        <div className="space-y-2">
-                            <div className="flex justify-between items-center px-1">
-                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Terminal size={12}/> Eventos en Tiempo Real</span>
+                        {/* TERMINAL DE REGISTROS */}
+                        <div className="space-y-3">
+                            <div className="flex justify-between items-center px-2">
+                                <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] flex items-center gap-2">
+                                    <Terminal size={14}/> Consola de Eventos
+                                </span>
                                 {db.lastRawResponse && (
-                                    <button onClick={() => setShowDiagnostic(true)} className="text-[10px] font-bold text-amber-500 hover:underline">Ver Diagnóstico</button>
+                                    <button onClick={() => setShowDiagnostic(true)} className="text-[10px] font-black text-amber-500/70 hover:text-amber-500 transition-colors uppercase">Depuración Avanzada</button>
                                 )}
                             </div>
-                            <div className="bg-black/90 rounded-xl p-4 font-mono text-[11px] h-32 overflow-y-auto space-y-1.5 scrollbar-hide border border-slate-800">
+                            <div className="bg-black/95 rounded-2xl p-5 font-mono text-[11px] h-40 overflow-y-auto space-y-2 scrollbar-hide border border-slate-800/50 shadow-inner">
                                 {log.map((line, i) => (
-                                    <div key={i} className={`flex gap-2 ${line.includes('FALLO') || line.includes('Fallo') ? 'text-red-400' : 'text-slate-400'}`}>
-                                        <span className="opacity-30">#</span>
-                                        <span>{line}</span>
+                                    <div key={i} className={`flex gap-3 ${line.includes('FALLO') || line.includes('Error') ? 'text-red-400' : 'text-slate-400'}`}>
+                                        <span className="opacity-20 shrink-0 select-none">{">"}</span>
+                                        <span className="leading-relaxed">{line}</span>
                                     </div>
                                 ))}
-                                {log.length === 0 && <div className="opacity-20 italic">Esperando actividad del motor...</div>}
+                                {log.length === 0 && <div className="opacity-20 italic text-center py-10">Esperando comunicación con el motor local...</div>}
                             </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-indigo-600/5 border border-indigo-500/20 p-6 rounded-3xl flex items-center gap-4">
+                        <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400">
+                            <History size={24}/>
+                        </div>
+                        <div>
+                            <h4 className="text-white font-bold text-sm">Estado Persistente Activado</h4>
+                            <p className="text-xs text-slate-400">Puedes cerrar esta pestaña o la sesión; los videos en cola continuarán procesándose siempre que dejes el motor encendido.</p>
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* Modal de Diagnóstico Crudo */}
+            {/* MODAL DE DIAGNÓSTICO CRUDO */}
             {showDiagnostic && (
-                <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col shadow-2xl">
-                        <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
-                            <h3 className="text-white font-bold flex items-center gap-2"><Bug size={18} className="text-amber-500"/> Debugger de Salida</h3>
-                            <button onClick={() => setShowDiagnostic(false)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400"><X size={18}/></button>
+                <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-3xl overflow-hidden flex flex-col shadow-2xl">
+                        <div className="p-5 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+                            <h3 className="text-white font-black text-sm uppercase tracking-widest flex items-center gap-3">
+                                <Bug size={18} className="text-amber-500"/> Auditoría de Respuestas PHP
+                            </h3>
+                            <button onClick={() => setShowDiagnostic(false)} className="p-2 hover:bg-slate-800 rounded-xl text-slate-500 transition-colors"><X size={20}/></button>
                         </div>
-                        <div className="flex-1 p-6 overflow-y-auto bg-black font-mono text-[10px] text-emerald-500 whitespace-pre-wrap">
-                            {db.lastRawResponse}
+                        <div className="flex-1 p-8 overflow-y-auto bg-black font-mono text-[10px] text-emerald-500 whitespace-pre-wrap selection:bg-emerald-500 selection:text-black">
+                            {db.lastRawResponse || "No hay respuestas registradas aún."}
+                        </div>
+                        <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end">
+                            <button 
+                                onClick={() => { navigator.clipboard.writeText(db.lastRawResponse); toast.success("Copiado"); }}
+                                className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2"
+                            >
+                                <Copy size={14}/> Copiar Log
+                            </button>
                         </div>
                     </div>
                 </div>
