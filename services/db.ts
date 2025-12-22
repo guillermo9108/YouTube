@@ -24,24 +24,24 @@ class DBService {
             const text = await response.text();
             
             if (!response.ok) {
-                throw new Error(`Error de servidor (${response.status}): ${text.substring(0, 100)}`);
+                const snippet = text.substring(0, 500);
+                throw new Error(`Servidor (${response.status}): ${snippet.includes('<!DOCTYPE') ? 'Fallo crítico (HTML)' : snippet}`);
             }
             
             if (!text || text.trim() === "") {
-                throw new Error("El servidor devolvió una respuesta vacía. Posible timeout o error fatal de PHP.");
+                throw new Error("El servidor no respondió. Posible timeout o bloqueo de sesión en PHP.");
             }
 
             try {
                 const json = JSON.parse(text);
-                if (json.success === false) throw new Error(json.error || json.message || "Error en la operación API");
+                if (json.success === false) throw new Error(json.error || json.message || "Error en la API");
                 return json.data as T;
             } catch (e: any) {
-                // Si falla el parseo, el texto no es JSON (probablemente un error PHP visible)
-                console.error("Respuesta no-JSON recibida:", text);
-                throw new Error("Respuesta del servidor corrupta o inválida. Revisa los logs del servidor.");
+                console.error("Respuesta no válida del servidor:", text);
+                throw new Error("Respuesta corrupta. Revisa el log de errores de PHP.");
             }
         } catch (error: any) {
-            // Manejo de caché offline si es una petición GET de videos
+            // Fallback offline para videos
             if (!options || options.method === 'GET' || !options.method) {
                 if (query.includes('action=get_videos')) {
                     const cached = this.getOfflineVideos();
@@ -175,11 +175,11 @@ class DBService {
                         if (res.success) resolve();
                         else reject(new Error(res.error || res.message));
                     } catch (e) {
-                        reject(new Error("Invalid response"));
+                        reject(new Error("Respuesta inválida"));
                     }
-                } else reject(new Error("Upload failed"));
+                } else reject(new Error("Subida fallida"));
             };
-            xhr.onerror = () => reject(new Error("Network error"));
+            xhr.onerror = () => reject(new Error("Error de red"));
             xhr.send(formData);
         });
     }
@@ -344,7 +344,7 @@ class DBService {
         try {
             return await this.request<{status: string}>(`action=check_installation`);
         } catch (e: any) {
-            if (e.message && e.message.includes('Not installed')) {
+            if (e.message && e.message.includes('No instalado')) {
                 return { status: 'not_installed' };
             }
             return { status: 'installed' }; 
@@ -450,7 +450,6 @@ class DBService {
         });
     }
 
-    // Fix: Added missing processScanBatch method for ServerTaskContext
     public async processScanBatch(): Promise<any> {
         return this.request<any>(`action=process_scan_batch`, { method: 'POST' });
     }
@@ -475,7 +474,6 @@ class DBService {
         return this.request<OrganizeResult>(`action=smart_organize`, { method: 'POST' });
     }
 
-    // Fix: Added missing FTP methods for AdminFtp
     public async listFtpFiles(path: string): Promise<FtpFile[]> {
         return this.request<FtpFile[]>(`action=list_ftp_files&path=${encodeURIComponent(path)}`);
     }
@@ -555,8 +553,6 @@ class DBService {
         this.homeDirty = true;
     }
 
-    // Offline / LocalStorage logic
-    // Fix: Added missing enableDemoMode method for Setup
     public enableDemoMode(): void {
         localStorage.setItem('sp_demo_mode', 'true');
     }

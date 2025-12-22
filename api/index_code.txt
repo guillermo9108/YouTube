@@ -1,9 +1,9 @@
 <?php
-// Desactivar visualización de errores para que no rompan el JSON
+// Silenciar visualización directa de errores que ensucian el JSON
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
-// Búfer de salida para limpiar cualquier salida accidental
+// Iniciar búfer de salida para capturar cualquier warning inesperado
 ob_start();
 
 set_time_limit(3600);
@@ -20,17 +20,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 function respond($success, $data = null, $error = null) {
-    // Limpiar cualquier basura del búfer antes de enviar el JSON
+    // LIMPIEZA AGRESIVA: Elimina cualquier texto previo generado (warnings, notices)
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['success' => $success, 'data' => $data, 'error' => $error], JSON_UNESCAPED_UNICODE);
     exit();
 }
 
+// CAPTURA DE MUERTE DEL SCRIPT (Timeout, Out of Memory)
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
-        respond(false, null, 'Critical PHP Error: ' . $error['message']);
+        respond(false, null, 'Error Crítico del Servidor: ' . $error['message']);
     }
 });
 
@@ -56,7 +57,7 @@ if ($action === 'check_installation') {
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
 foreach ($required_files as $file) { if (file_exists($file)) require_once $file; }
 
-if (!file_exists($configFile)) respond(false, null, 'Not installed');
+if (!file_exists($configFile)) respond(false, null, 'No instalado');
 $db_config = json_decode(file_get_contents($configFile), true);
 
 try {
@@ -64,7 +65,7 @@ try {
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
-} catch (PDOException $e) { respond(false, null, 'DB Connection Error: ' . $e->getMessage()); }
+} catch (PDOException $e) { respond(false, null, 'Error de Conexión MariaDB: ' . $e->getMessage()); }
 
 try {
     switch ($action) {
@@ -154,7 +155,7 @@ try {
             $url = $stmt->fetchColumn();
             if ($url) streamVideo($url, $pdo);
             break;
-        default: respond(false, null, "Invalid action: $action");
+        default: respond(false, null, "Acción desconocida: $action");
     }
 } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 ?>
