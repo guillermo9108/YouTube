@@ -102,26 +102,28 @@ function video_upload($pdo, $post, $files) {
 }
 
 function video_scan_local($pdo, $input) {
-    // CRÍTICO: Liberar el bloqueo de sesión de PHP para permitir que otras peticiones del navegador
-    // (como el heartbeat o navegación) sigan funcionando mientras el escaneo corre.
-    if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+    // CORRECCIÓN CRÍTICA: Liberar el bloqueo de sesión de PHP para evitar congelar el servidor
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
     
-    set_time_limit(600); // 10 minutos para escaneos masivos
+    // Aumentar límites para procesos largos
+    set_time_limit(300); 
     ini_set('memory_limit', '512M');
 
     $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
-    if (!$rawPath || !is_dir($rawPath)) respond(false, null, "Ruta inválida.");
+    if (!$rawPath || !is_dir($rawPath)) {
+        respond(false, null, "La ruta no es un directorio válido o accesible.");
+    }
 
-    // Normalización absoluta: evita duplicados por "/" vs "\" según el OS
-    $rootPath = str_replace('\\', '/', realpath($rawPath));
-    if (!$rootPath) respond(false, null, "No se pudo resolver la ruta real.");
+    $rootPath = realpath($rawPath);
+    if (!$rootPath) respond(false, null, "No se pudo resolver la ruta real del directorio.");
 
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $addedCount = 0;
     $totalScanned = 0;
     $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts'];
 
-    // Usamos INSERT IGNORE pero también un try-catch interno por si PDO está en modo excepción
     $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1)");
 
     try {
@@ -130,32 +132,36 @@ function video_scan_local($pdo, $input) {
 
         foreach ($iterator as $file) {
             if (!$file->isFile()) continue;
-            if (!in_array(strtolower($file->getExtension()), $allowedExts)) continue;
+            
+            $ext = strtolower($file->getExtension());
+            if (!in_array($ext, $allowedExts)) continue;
 
             $totalScanned++;
-            // Límite de seguridad para evitar que el servidor web corte la conexión por tiempo
+            
+            // Límite de seguridad por petición para evitar timeouts de Apache/Nginx
             if ($addedCount >= 1000) break; 
 
-            // Normalizar ruta del archivo para generar el ID único (md5)
             $fullPath = str_replace('\\', '/', $file->getPathname());
             $vidId = 'loc_' . md5($fullPath); 
 
             try {
                 $insert->execute([$vidId, basename($fullPath), $fullPath, $adminId, time()]);
-                if ($insert->rowCount() > 0) $addedCount++;
-            } catch (PDOException $e) {
-                // Si el error es 23000 (Integrity constraint - Duplicado), lo ignoramos silenciosamente
-                if ($e->getCode() != '23000') throw $e; 
+                if ($insert->rowCount() > 0) {
+                    $addedCount++;
+                }
+            } catch (PDOException $dbErr) {
+                // Ignorar errores de duplicados si ocurren a pesar de INSERT IGNORE
+                continue;
             }
         }
     } catch (Exception $e) {
-        respond(false, null, "Fallo durante el escaneo: " . $e->getMessage());
+        respond(false, null, "Error durante el recorrido de archivos: " . $e->getMessage());
     }
     
     respond(true, [
         'totalFound' => $totalScanned, 
         'newToImport' => $addedCount,
-        'message' => ($totalScanned > 1000) ? "Lote de 1000 procesado. Pulsa de nuevo para continuar." : "Escaneo finalizado."
+        'message' => ($totalScanned >= 1000) ? "Procesado lote inicial de 1000. Ejecute de nuevo para continuar." : "Escaneo finalizado."
     ]);
 }
 
