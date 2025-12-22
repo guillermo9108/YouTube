@@ -1,24 +1,21 @@
 <?php
 /**
- * StreamPay - Core Controller V6 (Full Restoration)
- * Blindaje total + Restauración de todas las funcionalidades del sistema.
+ * StreamPay - Core Controller V6 (Full Restoration + Bugfix)
+ * Blindaje total + Restauración completa + Corrección de funciones de ruta.
  */
 
-// 1. Silenciar salida estándar y capturar internamente
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 error_reporting(E_ALL);
 
 if (ob_get_level() == 0) ob_start();
 
-// Manejador de errores no-fatales
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     if (!(error_reporting() & $errno)) return false;
     $GLOBALS['php_warnings'][] = "[$errno] $errstr en $errfile:$errline";
     return true;
 });
 
-// Manejador de errores fatales
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
@@ -58,7 +55,7 @@ $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 $configFile = 'db_config.json';
 
-// Carga de librerías
+// Carga de librerías (Silenciada para evitar basura en salida)
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
 foreach ($required_files as $file) { 
     if (file_exists($file)) { @require_once $file; }
@@ -75,7 +72,7 @@ try {
     $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password'], [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false // Crucial para que LIMIT ? funcione como entero
+        PDO::ATTR_EMULATE_PREPARES => false
     ]);
 } catch (PDOException $e) { 
     respond(false, null, 'Error DB: ' . $e->getMessage()); 
@@ -150,9 +147,6 @@ try {
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
-        case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
-        case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
-        case 'admin_organize_paquete': admin_organize_paquete($pdo, $input); break;
         case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
         case 'admin_add_balance': admin_add_balance($input['adminId'], $input['targetUserId'], $input['amount']); break;

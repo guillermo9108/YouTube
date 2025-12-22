@@ -1,5 +1,38 @@
 <?php
 
+/**
+ * Traduce una URL o ruta relativa a una ruta absoluta del sistema de archivos.
+ * Crucial para que FFmpeg pueda encontrar los archivos en el disco del NAS.
+ */
+function resolve_video_path($pathOrUrl) {
+    // 1. Si es una ruta absoluta existente (típico de escaneos en NAS)
+    if (file_exists($pathOrUrl)) {
+        return realpath($pathOrUrl);
+    }
+
+    // 2. Si la ruta empieza con 'api/', limpiar el prefijo
+    $cleanPath = $pathOrUrl;
+    if (strpos($cleanPath, 'api/') === 0) {
+        $cleanPath = substr($cleanPath, 4);
+    }
+
+    // 3. Buscar relativo al directorio actual (donde vive functions_utils.php)
+    if (file_exists($cleanPath)) {
+        return realpath($cleanPath);
+    }
+
+    // 4. Intentar reconstruir si es una ruta de uploads
+    if (strpos($cleanPath, 'uploads/') !== false) {
+        $baseDir = dirname(__DIR__); // Asumiendo que estamos en /api/
+        $fullPath = $baseDir . DIRECTORY_SEPARATOR . $cleanPath;
+        if (file_exists($fullPath)) {
+            return realpath($fullPath);
+        }
+    }
+
+    return false;
+}
+
 function fix_url($url) {
     if (!empty($url) && strpos($url, 'uploads/') === 0) {
         return 'api/' . $url;
@@ -65,7 +98,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     $cleanName = $cleanText($filename);
     if (strlen($cleanName) < 2) $cleanName = $filename;
 
-    // Prioridad de Categoría: Carpetas del path
     $detectedCategory = 'GENERAL';
     $ancestors = array_reverse($pathParts);
 
@@ -75,7 +107,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
             $detectedCategory = $folderUpper;
             break;
         }
-        // Búsqueda parcial si no es exacta
         foreach ($customCategories as $cc) {
             if (strpos($folderUpper, $cc) !== false) {
                 $detectedCategory = $cc;
