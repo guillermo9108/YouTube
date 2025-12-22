@@ -14,7 +14,7 @@ header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Range, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { 
-    while (ob_get_level()) ob_end_clean();
+    while (ob_get_level() > 0) ob_end_clean();
     http_response_code(200); 
     exit(); 
 }
@@ -36,7 +36,7 @@ function respond($success, $data = null, $error = null) {
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR)) {
-        respond(false, null, 'Error Crítico del Servidor (Fatal): ' . $error['message']);
+        respond(false, null, 'Error Crítico del Servidor: ' . $error['message']);
     }
 });
 

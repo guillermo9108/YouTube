@@ -443,7 +443,8 @@ class DBService {
     }
 
     // Library & Local
-    public async scanLocalLibrary(path: string): Promise<{success: boolean, totalFound: number, newToImport: number, errors?: string[], error?: string}> {
+    /* Added 'message' property to the return type of scanLocalLibrary to fix TypeScript errors in AdminLibrary.tsx */
+    public async scanLocalLibrary(path: string): Promise<{success: boolean, totalFound: number, newToImport: number, errors?: string[], error?: string, message?: string}> {
         return this.request<any>(`action=scan_local_library`, { 
             method: 'POST',
             body: JSON.stringify({ path })

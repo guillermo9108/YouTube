@@ -88,7 +88,11 @@ export default function AdminLibrary() {
         try {
             await db.updateSystemSettings({ localLibraryPath: localPath });
             const res = await db.scanLocalLibrary(localPath);
+            
+            // Mostrar mensaje detallado del backend
+            if (res.message) addToLog(res.message);
             addToLog(`Escaneo completado. Encontrados: ${res.totalFound}. Nuevos: ${res.newToImport}`);
+            
             toast.success("Paso 1 Finalizado");
             loadStats();
         } catch (e: any) { addToLog(`ERROR: ${e.message}`); }
