@@ -8,6 +8,9 @@ function video_process_rows(&$rows) {
             $v['videoUrl'] = "api/index.php?action=stream&id=" . $v['id'];
         }
         if (isset($v['thumbnailUrl'])) $v['thumbnailUrl'] = fix_url($v['thumbnailUrl']);
+        
+        // Exponer el estado de transcodificación para el frontend
+        if (!isset($v['transcode_status'])) $v['transcode_status'] = 'NONE';
     }
 }
 
@@ -102,12 +105,10 @@ function video_upload($pdo, $post, $files) {
 }
 
 function video_scan_local($pdo, $input) {
-    // CRÍTICO: Liberar el bloqueo de sesión de PHP inmediatamente para permitir concurrencia
     if (session_status() === PHP_SESSION_ACTIVE) {
         session_write_close();
     }
 
-    // Aumentar límites para evitar "Empty Response"
     set_time_limit(300);
     ini_set('memory_limit', '1024M');
 
@@ -122,8 +123,7 @@ function video_scan_local($pdo, $input) {
     $totalScanned = 0;
     $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts'];
 
-    // Usamos INSERT IGNORE para eficiencia máxima
-    $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1)");
+    $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
 
     try {
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
@@ -137,7 +137,6 @@ function video_scan_local($pdo, $input) {
 
             $totalScanned++;
             
-            // Límite por lote para no exceder el timeout del gateway del servidor (ej. Nginx/Apache)
             if ($addedCount >= 1000) {
                 respond(true, [
                     'totalFound' => $totalScanned, 
@@ -155,7 +154,7 @@ function video_scan_local($pdo, $input) {
                     $addedCount++;
                 }
             } catch (PDOException $e) {
-                continue; // Ignorar duplicados
+                continue; 
             }
         }
     } catch (Exception $e) {
@@ -173,7 +172,7 @@ function video_get_unprocessed($pdo) {
     $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
     $mode = $_GET['mode'] ?? 'normal';
     
-    $sql = "SELECT id, videoUrl, title, thumbnailUrl, isLocal FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 ";
+    $sql = "SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 ";
     if ($mode === 'random') $sql .= "ORDER BY RAND() ";
     else $sql .= "ORDER BY createdAt ASC ";
     $sql .= "LIMIT $limit";
@@ -197,6 +196,11 @@ function video_update_metadata($pdo, $post, $files) {
         return;
     }
 
+    // 1. Obtener la URL actual para el chequeo de transcodificación
+    $stmtVid = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+    $stmtVid->execute([$id]);
+    $videoUrl = $stmtVid->fetchColumn();
+
     $sql = "UPDATE videos SET category = 'PROCESSING', duration = ?, processing_attempts = 0";
     $params = [$duration];
     
@@ -210,15 +214,29 @@ function video_update_metadata($pdo, $post, $files) {
         }
     }
     
+    // 2. Lógica de Transcodificación Automática para videos locales escaneados
+    $stmtSettings = $pdo->query("SELECT autoTranscode FROM system_settings WHERE id = 1");
+    $settings = $stmtSettings->fetch(PDO::FETCH_ASSOC);
+    
+    if ($settings && $settings['autoTranscode'] && $videoUrl) {
+        require_once 'functions_admin.php';
+        if (check_needs_transcode($videoUrl)) {
+            $sql .= ", needs_transcode = 1, transcode_status = 'WAITING'";
+        } else {
+            $sql .= ", needs_transcode = 0, transcode_status = 'NONE'";
+        }
+    }
+
     $sql .= " WHERE id = ?";
     $params[] = $id;
     
     $pdo->prepare($sql)->execute($params);
     
-    $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
-    if ($settings) {
-        $customCats = json_decode($settings['customCategories'] ?? '[]', true);
-        internal_organize_video($pdo, $id, $settings, $customCats);
+    // Organizar después de actualizar metadatos
+    $settingsFull = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+    if ($settingsFull) {
+        $customCats = json_decode($settingsFull['customCategories'] ?? '[]', true);
+        internal_organize_video($pdo, $id, $settingsFull, $customCats);
     }
 
     respond(true, ['status' => 'published']);

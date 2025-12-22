@@ -7,7 +7,7 @@ error_reporting(E_ALL);
 if (ob_get_level() == 0) ob_start();
 
 // 3. Aumentar límites para tareas administrativas pesadas
-set_time_limit(600); // 10 minutos
+set_time_limit(600); 
 ini_set('memory_limit', '1024M');
 
 header('Access-Control-Allow-Origin: *');
@@ -21,8 +21,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // 4. DESBLOQUEO MAESTRO DE SESIÓN
-// Iniciamos y cerramos sesión inmediatamente para liberar el bloqueo de archivo
-// pero manteniendo los datos de sesión disponibles en $_SESSION si se necesitan.
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -140,6 +138,10 @@ try {
         case 'get_balance_requests': admin_get_balance_requests($pdo); break;
         case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;
         case 'handle_vip_request': admin_handle_vip_request($pdo, $input); break;
+        case 'admin_add_balance': 
+            // CORRECCIÓN: Usar los campos del objeto $input para evitar variables indefinidas
+            admin_add_balance($input['adminId'], $input['targetUserId'], $input['amount']); 
+            break;
         case 'get_global_transactions': admin_get_global_transactions($pdo); break;
         case 'get_real_stats': admin_get_real_stats($pdo); break;
         case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;

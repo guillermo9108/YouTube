@@ -77,8 +77,12 @@ function check_needs_transcode($filePath) {
 
     $isWin = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
     $ffprobe = $isWin ? 'ffprobe.exe' : 'ffprobe';
+    
+    // Comando para obtener el códec de video de la primera pista
     $cmd = "$ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath);
     $codec = trim(@shell_exec($cmd));
+    
+    // Si no es h264, necesita transcodificación para compatibilidad web óptima
     return ($codec !== 'h264' && !empty($codec));
 }
 
@@ -86,7 +90,6 @@ function admin_transcode_batch($pdo) {
     set_time_limit(0);
     ignore_user_abort(true);
     
-    // Asegurar que la sesión está liberada
     if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 
     if (!check_ffmpeg_available()) {
@@ -116,12 +119,14 @@ function admin_transcode_batch($pdo) {
 
             $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$v['id']]);
             $tempOut = dirname($path) . DIRECTORY_SEPARATOR . 'trans_' . uniqid() . '.mp4';
+            
+            // Transcodificación a H.264 / AAC con FastStart para streaming
             $cmd = "ffmpeg -y -i " . escapeshellarg($path) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempOut) . " 2>&1";
             
             exec($cmd, $output, $resultCode);
 
             if ($resultCode === 0 && file_exists($tempOut)) {
-                @unlink($path);
+                @unlink($path); // Borrar original
                 $finalName = dirname($path) . DIRECTORY_SEPARATOR . pathinfo($path, PATHINFO_FILENAME) . '.mp4';
                 @rename($tempOut, $finalName);
                 
@@ -142,8 +147,28 @@ function admin_transcode_batch($pdo) {
     } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
+function admin_add_balance($adminId, $targetId, $amount) {
+    global $pdo;
+    
+    if (!$targetId || !$amount) respond(false, null, "Datos de recarga incompletos.");
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
+        
+        $tid = uniqid('tx_man_');
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")
+            ->execute([$tid, $targetId, $amount, time()]);
+        
+        $pdo->commit();
+        respond(true, ['newBalance' => $amount]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        respond(false, null, $e->getMessage());
+    }
+}
+
 function admin_get_local_stats($pdo) {
-    // Liberar sesión para que el UI no se congele al entrar en Storage
     if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
     
     try {
@@ -185,7 +210,6 @@ function admin_cleanup_system_files($pdo) {
     $deletedVideos = 0;
     $deletedThumbs = 0;
     
-    // 1. Limpiar videos huérfanos en uploads/videos
     $files = glob('uploads/videos/*');
     foreach ($files as $file) {
         $url = 'api/' . $file;
@@ -197,7 +221,6 @@ function admin_cleanup_system_files($pdo) {
         }
     }
     
-    // 2. Limpiar miniaturas huérfanas
     $thumbs = glob('uploads/thumbnails/*');
     foreach ($thumbs as $t) {
         if (strpos($t, 'default.jpg') !== false) continue;
@@ -248,16 +271,6 @@ function admin_handle_balance_request($pdo, $input) {
     respond(true);
 }
 
-function admin_add_balance($adminId, $targetId, $amount) {
-    // Implementación rápida para AdminUsers.tsx
-    global $pdo;
-    $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
-    $tid = uniqid('tx_man_');
-    $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")
-        ->execute([$tid, $targetId, $amount, time()]);
-    respond(true);
-}
-
 function admin_get_global_transactions($pdo) {
     if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
     $sql = "SELECT t.*, u.username as buyerName, v.title as videoTitle, m.title as itemTitle 
@@ -269,14 +282,12 @@ function admin_get_global_transactions($pdo) {
     $stmt = $pdo->query($sql);
     $history = $stmt->fetchAll();
     
-    // Revenue total de comisiones (adminFee acumulado)
     $revenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
     
     respond(true, ['history' => $history, 'systemRevenue' => floatval($revenue)]);
 }
 
 function admin_handle_vip_request($pdo, $input) {
-    // Implementación para AdminFinance.tsx
     $reqId = $input['requestId'];
     $action = $input['action'];
     if ($action === 'APPROVED') {
@@ -310,7 +321,6 @@ function admin_get_balance_requests($pdo) {
     respond(true, ['balance' => $balance, 'vip' => $vip, 'activeVip' => $activeVip]);
 }
 
-// Stubs para evitar errores de llamada
 function admin_smart_cleaner_preview($pdo, $input) { respond(true, ['preview' => [], 'stats' => ['totalVideos'=>0, 'videosToDelete'=>0, 'spaceReclaimed'=>'0 B']]); }
 function admin_smart_cleaner_execute($pdo, $input) { respond(true, ['deleted' => 0]); }
 function admin_file_cleanup_preview($pdo, $input) { respond(true, []); }
