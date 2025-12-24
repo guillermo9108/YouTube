@@ -33,8 +33,6 @@ function admin_update_settings($pdo, $input) {
     respond(true);
 }
 
-// --- TRANSCODER ENGINE RESTAURADO ---
-
 function get_ffmpeg_path() {
     $paths = ['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'C:/ffmpeg/bin/ffmpeg.exe'];
     foreach ($paths as $path) {
@@ -118,7 +116,79 @@ function admin_transcode_scan_filters($pdo, $input) {
     }
 }
 
-// --- RESTO DE FUNCIONES DE MANTENIMIENTO ---
+function admin_get_local_stats($pdo) {
+    $path = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1")->fetchColumn() ?: '';
+    
+    // Estadísticas generales
+    $totalVids = (int)$pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal = 1")->fetchColumn();
+    
+    // Detectar Vínculos Rotos (DB apunta a archivo que no existe)
+    $brokenCount = 0;
+    $sampleVids = $pdo->query("SELECT id, videoUrl FROM videos WHERE isLocal = 1 LIMIT 1000")->fetchAll();
+    foreach($sampleVids as $v) {
+        if (!resolve_video_path($v['videoUrl'])) $brokenCount++;
+    }
+
+    $stats = [
+        'disk_total' => 0,
+        'disk_free' => 0,
+        'db_videos' => $totalVids,
+        'broken_links' => $brokenCount,
+        'path_exists' => is_dir($path)
+    ];
+
+    if ($path && is_dir($path)) {
+        $stats['disk_total'] = round(disk_total_space($path) / 1073741824, 2);
+        $stats['disk_free'] = round(disk_free_space($path) / 1073741824, 2);
+    }
+    
+    respond(true, $stats);
+}
+
+function admin_file_cleanup_preview($pdo, $input) {
+    $type = $input['type'] ?? 'LOW_PERFORMANCE';
+    
+    if ($type === 'ORPHAN_DB') {
+        // Encontrar videos en la DB que no tienen archivo físico
+        $all = $pdo->query("SELECT id, title, videoUrl, category FROM videos WHERE isLocal = 1")->fetchAll();
+        $orphans = [];
+        foreach ($all as $v) {
+            if (!resolve_video_path($v['videoUrl'])) {
+                $v['reason'] = 'Archivo Físico Desaparecido';
+                $orphans[] = $v;
+            }
+        }
+        respond(true, $orphans);
+    } 
+    
+    if ($type === 'LOW_ROI') {
+        // Videos que ocupan mucho espacio y tienen pocas vistas/likes (Relación Coste/Beneficio)
+        // Como no tenemos el tamaño en la DB, lo calculamos para los últimos 200 videos
+        $stmt = $pdo->query("SELECT id, title, videoUrl, views, likes, dislikes, category FROM videos WHERE isLocal = 1 ORDER BY views ASC LIMIT 200");
+        $candidates = $stmt->fetchAll();
+        $results = [];
+        foreach ($candidates as $v) {
+            $path = resolve_video_path($v['videoUrl']);
+            if ($path && file_exists($path)) {
+                $size = filesize($path);
+                if ($size > 100 * 1024 * 1024) { // Solo videos > 100MB
+                    $v['size_fmt'] = round($size / (1024 * 1024), 1) . ' MB';
+                    $v['reason'] = 'Inversión Ineficiente (Pocas Vistas vs Tamaño)';
+                    $results[] = $v;
+                }
+            }
+        }
+        respond(true, $results);
+    }
+
+    // Default: Low Performance
+    $cutoff = time() - (90 * 86400);
+    $stmt = $pdo->prepare("SELECT id, title, videoUrl, views, category FROM videos WHERE isLocal = 1 AND createdAt < ? AND views < 5 ORDER BY views ASC LIMIT 100");
+    $stmt->execute([$cutoff]);
+    $res = $stmt->fetchAll();
+    foreach($res as &$v) $v['reason'] = 'Sin vistas en 90 días';
+    respond(true, $res);
+}
 
 function admin_smart_cleaner_preview($pdo, $input) {
     $minDays = (int)($input['minDays'] ?? 30);
@@ -159,19 +229,6 @@ function admin_smart_cleaner_execute($pdo, $input) {
     respond(true, ['deleted' => $deleted]);
 }
 
-function admin_file_cleanup_preview($pdo, $input) {
-    $type = $input['type'] ?? 'LOW_PERFORMANCE';
-    if ($type === 'ORPHAN_DB') {
-        $all = $pdo->query("SELECT id, title, videoUrl FROM videos WHERE isLocal = 1")->fetchAll();
-        $orphans = []; foreach ($all as $v) if (!resolve_video_path($v['videoUrl'])) $orphans[] = $v;
-        respond(true, $orphans);
-    } else {
-        $cutoff = time() - (90 * 86400);
-        $stmt = $pdo->prepare("SELECT id, title, views FROM videos WHERE createdAt < ? AND views < 5 ORDER BY views ASC LIMIT 100");
-        $stmt->execute([$cutoff]); respond(true, $stmt->fetchAll());
-    }
-}
-
 function admin_organize_paquete($pdo, $input) {
     $simulate = (bool)($input['simulate'] ?? true); $plan = []; $cleaned = 0;
     $stmt = $pdo->query("SELECT id, title, videoUrl FROM videos WHERE category != 'PENDING'");
@@ -187,17 +244,6 @@ function admin_organize_paquete($pdo, $input) {
     respond(true, ['plan' => $plan, 'moved' => 0, 'cleaned' => $cleaned]);
 }
 
-function admin_get_local_stats($pdo) {
-    $path = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1")->fetchColumn() ?: '';
-    $db_count = (int)$pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal = 1")->fetchColumn();
-    $stats = ['disk_total' => 0, 'disk_free' => 0, 'db_videos' => $db_count];
-    if ($path && is_dir($path)) {
-        $stats['disk_total'] = round(disk_total_space($path) / 1073741824, 2);
-        $stats['disk_free'] = round(disk_free_space($path) / 1073741824, 2);
-    }
-    respond(true, $stats);
-}
-
 function admin_repair_db($pdo) { 
     require_once 'functions_schema.php'; foreach (getAppSchema() as $t => $d) syncTable($pdo, $t, $d); respond(true); 
 }
@@ -206,7 +252,6 @@ function admin_cleanup_system_files($pdo) {
     $tDir = 'uploads/thumbnails/'; $deleted = 0;
     if (is_dir($tDir)) {
         foreach (glob($tDir . '*') as $f) {
-            // COMPROBACIÓN CRÍTICA: Solo borrar si es un ARCHIVO, no un directorio (NAS genera @eaDir)
             if (!is_file($f)) continue;
             if (basename($f) === 'default.jpg') continue;
             $id = pathinfo($f, PATHINFO_FILENAME);
