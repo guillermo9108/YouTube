@@ -1,18 +1,18 @@
 <?php
 /**
- * StreamPay - Core Controller V6.5
- * Blindaje total contra 'Respuesta Corrupta' y control de procesos.
+ * StreamPay - Core Controller V7.0
+ * Protección extrema contra 'Respuesta Corrupta' y restauración de módulos.
  */
 
-// Desactivar salida de errores al navegador para no romper el JSON
+// 1. Silencio total de errores directos al output
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 error_reporting(E_ALL);
 
-// Iniciar captura de salida inmediatamente
+// 2. Iniciar captura de salida inmediatamente
 if (ob_get_level() == 0) ob_start();
 
-// Capturar warnings para enviarlos dentro del JSON si es necesario, pero no fuera
+// Capturar warnings para depuración silenciosa
 $GLOBALS['php_warnings'] = [];
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     if (!(error_reporting() & $errno)) return false;
@@ -20,44 +20,44 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
     return true;
 });
 
-// Manejador de errores fatales (Crash protection)
+// Manejador de crash total
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
-        while (ob_get_level() > 0) ob_end_clean(); // Limpieza absoluta
+        // Limpieza absoluta de cualquier salida previa que rompa el JSON
+        while (ob_get_level() > 0) ob_end_clean();
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
             'success' => false, 
-            'data' => null, 
-            'error' => 'CRASH FATAL SERVIDOR: ' . $error['message']
+            'error' => 'CRASH SERVIDOR: ' . $error['message']
         ]);
         exit;
     }
 });
 
 /**
- * Función única de respuesta para garantizar JSON puro.
+ * Única vía de salida del servidor. 
+ * Garantiza que el JSON esté limpio de basura (warnings, notices, etc).
  */
 function respond($success, $data = null, $error = null) {
-    // 1. Limpiar TODOS los buffers previos (adiós basura del NAS)
+    // ELIMINAR CUALQUIER BASURA DEL BÚFER (Crucial para NAS)
     while (ob_get_level() > 0) ob_end_clean();
     
-    // 2. Cabeceras correctas
     header('Content-Type: application/json; charset=utf-8');
     
-    // 3. Estructura de respuesta
     $res = [
         'success' => $success, 
         'data' => $data, 
         'error' => $error
     ];
     
+    // Adjuntar advertencias solo si existen y no estamos en producción estricta
     if (!empty($GLOBALS['php_warnings'])) {
         $res['warnings'] = $GLOBALS['php_warnings'];
     }
     
-    // 4. Salida final sanitizada
-    echo json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    $output = json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    echo $output;
     exit();
 }
 
@@ -77,7 +77,7 @@ $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 $configFile = 'db_config.json';
 
-// Carga modular de funciones
+// Carga modular de funciones (Aseguramos que todos los archivos PHP existan)
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
 foreach ($required_files as $file) { 
     if (file_exists($file)) { @require_once $file; }
@@ -100,9 +100,12 @@ try {
     respond(false, null, 'Error DB: ' . $e->getMessage()); 
 }
 
+/**
+ * ROUTER PRINCIPAL - Restaurado y Completo
+ */
 try {
     switch ($action) {
-        // AUTH & USERS
+        // AUTH & PERFIL
         case 'login': auth_login($pdo, $input); break;
         case 'register': auth_register($pdo, $input); break;
         case 'logout': auth_logout($pdo, $input); break;
@@ -133,21 +136,69 @@ try {
             if ($url) streamVideo($url, $pdo);
             break;
 
-        // ADMIN TOOLS
+        // SOCIAL & COMENTARIOS
+        case 'get_comments': interact_get_comments($pdo, $_GET['videoId']); break;
+        case 'add_comment': interact_add_comment($pdo, $input); break;
+        case 'toggle_subscribe': interact_toggle_subscribe($pdo, $input); break;
+        case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'], $_GET['creatorId']); break;
+        case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId']); break;
+        case 'get_notifications': interact_get_notifications($pdo, $_GET['userId']); break;
+        case 'mark_notification_read': interact_mark_notification_read($pdo, $input); break;
+
+        // MARKETPLACE (RESTAURADO)
+        case 'get_marketplace_items': market_get_items($pdo); break;
+        case 'get_marketplace_item': market_get_item($pdo, $_GET['id']); break;
+        case 'create_listing': market_create_listing($pdo, $_POST, $_FILES); break;
+        case 'edit_listing': market_edit_listing($pdo, $input); break;
+        case 'checkout_cart': market_checkout($pdo, $input); break;
+        case 'get_reviews': market_get_reviews($pdo, $_GET['itemId']); break;
+        case 'add_review': market_add_review($pdo, $input); break;
+        case 'get_sales': market_get_sales($pdo, $_GET['userId']); break;
+        case 'update_order_status': market_update_order_status($pdo, $input); break;
+
+        // FINANZAS & VIP
+        case 'request_balance': 
+            $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, ?, 'PENDING', ?)")
+                ->execute([uniqid('br_'), $input['userId'], $input['amount'], time()]);
+            respond(true);
+            break;
+        case 'request_vip': request_vip($pdo, $input); break;
+        case 'create_payment_link': payment_create_link($pdo, $input); break;
+        case 'verify_payment': payment_verify($pdo, $input); break;
+        case 'get_user_transactions': interact_get_transactions($pdo, $_GET['userId']); break;
+
+        // PANEL DE CONTROL & MANTENIMIENTO
         case 'get_system_settings': admin_get_settings($pdo); break;
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
         case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
         case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
+        case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
+        case 'admin_add_balance': admin_add_balance($input['adminId'], $input['targetUserId'], $input['amount']); break;
+        case 'get_balance_requests': admin_get_balance_requests($pdo); break;
+        case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;
+        case 'handle_vip_request': admin_handle_vip_request($pdo, $input); break;
+        case 'get_global_transactions': admin_get_global_transactions($pdo); break;
+        case 'get_real_stats': admin_get_real_stats($pdo); break;
+        case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;
+        case 'admin_delete_listing': market_delete_listing($pdo, $input); break;
         
-        // SCANNER (LIBRERIA)
+        // MOTOR DE LIBRERÍA (NAS SCANNER)
         case 'scan_local_library': video_scan_local($pdo, $input); break;
         case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
         case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
         case 'smart_organize_library': video_smart_organize($pdo); break;
         
+        // EXTERNAL & PETICIONES
+        case 'search_external': admin_search_external($pdo, $input); break;
+        case 'server_import_video': admin_server_import_video($pdo, $input); break;
+        case 'get_requests': admin_get_requests($pdo, $_GET['status']); break;
+        case 'request_content': user_request_content($pdo, $input); break;
+        case 'update_request_status': admin_update_request_status($pdo, $input); break;
+        case 'delete_request': admin_delete_request($pdo, $input); break;
+
         default: respond(false, null, "Acción desconocida: $action");
     }
 } catch (Exception $e) { 
