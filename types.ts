@@ -1,6 +1,8 @@
 
 
 
+
+
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -216,6 +218,8 @@ export interface SystemSettings {
   // FFmpeg Transcode Settings
   autoTranscode?: boolean;
   transcodePreset?: string;
+  // Fix: Added is_transcoder_active to SystemSettings to match usage in AdminTranscoder.tsx
+  is_transcoder_active?: boolean;
 }
 
 export interface OrganizeResult {
