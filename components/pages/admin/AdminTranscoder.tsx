@@ -25,7 +25,7 @@ export default function AdminTranscoder() {
     const loopActive = useRef(false);
     const stopRequested = useRef(false);
 
-    const loadStats = async () => {
+    const loadStats = async (showSyncMessage = false) => {
         try {
             const all = await db.getAllVideos();
             const waiting = all.filter((v: any) => v.transcode_status === 'WAITING').length;
@@ -36,28 +36,30 @@ export default function AdminTranscoder() {
             setStats({ waiting, processing: processingCount, failed, done });
             setIsBusyServer(processingCount > 0);
 
-            // Sincronización: Si el servidor está procesando, nosotros debemos mostrar "Pausar"
+            // Sincronización real con el servidor
             const settings = await db.getSystemSettings();
-            if (settings.is_transcoder_active || processingCount > 0) {
+            if (settings.is_transcoder_active) {
                 if (!isRunning) {
                     setIsRunning(true);
                     stopRequested.current = false;
-                    addToLog("Sincronización: Detectada tarea activa en el servidor.");
+                    if (showSyncMessage) addToLog("Motor sincronizado: Recuperando estado activo.");
                 }
-            } else if (!settings.is_transcoder_active && !loopActive.current) {
-                setIsRunning(false);
+            } else {
+                if (isRunning && !loopActive.current) {
+                    setIsRunning(false);
+                }
             }
         } catch (e) {}
     };
 
-    // Al cargar y cada 10s
+    // Inicialización y refresco periódico cada 15s
     useEffect(() => { 
-        loadStats(); 
-        const interval = setInterval(loadStats, 10000);
+        loadStats(true); 
+        const interval = setInterval(() => loadStats(false), 15000);
         return () => clearInterval(interval);
     }, []);
 
-    // Manejar el bucle de procesamiento
+    // Monitor del bucle infinito (Motor)
     useEffect(() => {
         if (isRunning && !loopActive.current) {
             runBatchLoop();
@@ -87,18 +89,19 @@ export default function AdminTranscoder() {
                 body: JSON.stringify({ ...filters, mode: 'PREVIEW' })
             });
             setScanResult(res.count);
+            toast.info(`Escaneo completado: ${res.count} videos.`);
         } catch (e: any) { toast.error(e.message); }
         finally { setIsScanning(false); }
     };
 
     const handleAddFilteredToQueue = async () => {
-        if (!confirm(`¿Confirmas agregar ${scanResult} videos a la cola?`)) return;
+        if (!confirm(`¿Confirmas agregar ${scanResult} videos a la cola de conversión?`)) return;
         try {
             const res = await db.request<{affected: number}>(`action=admin_transcode_scan_filters`, {
                 method: 'POST',
                 body: JSON.stringify({ ...filters, mode: 'EXECUTE' })
             });
-            toast.success(`${res.affected} videos añadidos.`);
+            toast.success(`${res.affected} videos añadidos a la cola.`);
             setScanResult(null);
             loadStats();
         } catch (e: any) { toast.error(e.message); }
@@ -107,24 +110,25 @@ export default function AdminTranscoder() {
     const startMotor = async () => {
         if (isRunning) return;
         try {
+            // Primero avisamos al servidor que encienda el semáforo
             await db.updateSystemSettings({ is_transcoder_active: true });
-            setIsRunning(true);
             stopRequested.current = false;
-            addToLog("Iniciando motor de conversión...");
+            setIsRunning(true);
+            addToLog("Encendiendo motor de conversión...");
         } catch (e: any) { toast.error(e.message); }
     };
 
     const stopMotor = async () => {
         try {
             addToLog("Solicitando detención total al servidor...");
-            // Llamar a la nueva acción de parada física
-            await db.request(`action=admin_stop_transcoder`);
             stopRequested.current = true;
+            // Acción física: El servidor matará el proceso FFmpeg inmediatamente
+            await db.request(`action=admin_stop_transcoder`);
             setIsRunning(false);
             loopActive.current = false;
+            toast.success("Motor detenido y CPU liberado.");
+            addToLog("Motor apagado correctamente.");
             loadStats();
-            toast.success("Motor detenido y CPU liberado");
-            addToLog("Motor apagado.");
         } catch (e: any) { toast.error(e.message); }
     };
 
@@ -133,40 +137,43 @@ export default function AdminTranscoder() {
         loopActive.current = true;
 
         const loop = async () => {
+            // Verificación previa local
             if (stopRequested.current) {
                 loopActive.current = false;
+                setIsRunning(false);
                 return;
             }
 
             try {
-                // Solicitar proceso de 1 video (Atomic Batch)
+                // Solicitar procesamiento de un lote atómico (1 solo video para evitar timeouts)
                 const res = await db.request<any>(`action=admin_transcode_batch`);
                 
                 if (res.processed > 0) {
-                    addToLog(`Procesado: 1 video completado.`);
+                    addToLog(`Éxito: 1 video convertido correctamente.`);
                     loadStats();
                 }
 
-                if (res.message === 'Servidor ocupado con otra conversión') {
-                    // Si ya hay un proceso, esperamos un poco más antes de reintentar
-                    setTimeout(loop, 8000);
+                // Si el servidor está ocupado, esperamos un poco más antes de la siguiente petición
+                if (res.message === 'Servidor ocupado. Evitando saturación.') {
+                    setTimeout(loop, 10000); 
                     return;
                 }
 
+                // Verificar si el servidor apagó el motor (ej: terminó la cola)
                 const settings = await db.getSystemSettings();
                 if (!settings.is_transcoder_active || res.completed) {
                     setIsRunning(false);
                     loopActive.current = false;
-                    addToLog(res.completed ? "Cola finalizada." : "Motor apagado.");
+                    addToLog(res.completed ? "Librería al día. Cola finalizada." : "Motor detenido por el sistema.");
                     return;
                 }
 
-                // Siguiente iteración
+                // Siguiente iteración tras pausa de respiro para el disco
                 setTimeout(loop, 4000);
             } catch (e: any) {
-                addToLog(`Error: ${e.message}`);
-                // Reintento tras error
-                setTimeout(loop, 10000);
+                addToLog(`Error Servidor: ${e.message}`);
+                // Si hay un error de conexión, esperamos 15s antes de reintentar
+                setTimeout(loop, 15000);
             }
         };
         loop();
@@ -180,6 +187,7 @@ export default function AdminTranscoder() {
             
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 
+                {/* FILTROS */}
                 <div className="lg:col-span-1 space-y-4">
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl">
                         <h3 className="font-bold text-white mb-4 flex items-center gap-2">
@@ -225,6 +233,7 @@ export default function AdminTranscoder() {
                     </div>
                 </div>
 
+                {/* DASHBOARD */}
                 <div className="lg:col-span-3 space-y-6">
                     <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
                         <div className="absolute -top-10 -right-10 opacity-5 pointer-events-none text-indigo-500"><Cpu size={250} /></div>
@@ -239,7 +248,7 @@ export default function AdminTranscoder() {
                                     <div className="flex items-center gap-2 mt-1">
                                         <span className={`w-2.5 h-2.5 rounded-full ${isRunning ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
                                         <span className={`text-xs font-black uppercase tracking-[0.2em] ${isRunning ? 'text-emerald-400' : 'text-red-400'}`}>
-                                            {isRunning ? 'Ejecutando proceso' : 'Motor en Standby'}
+                                            {isRunning ? 'Ejecutando lote' : 'Motor en Standby'}
                                         </span>
                                     </div>
                                 </div>
@@ -252,25 +261,25 @@ export default function AdminTranscoder() {
                                     </button>
                                 ) : (
                                     <button onClick={stopMotor} className="flex-1 md:flex-none px-10 py-4 bg-red-600 hover:bg-red-500 text-white rounded-2xl font-black flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all">
-                                        <Pause size={20} fill="currentColor"/> DETENER TODO
+                                        <Pause size={20} fill="currentColor"/> DETENER MOTOR
                                     </button>
                                 )}
                             </div>
                         </div>
 
                         {/* Banner de Servidor Ocupado */}
-                        {isBusyServer && isRunning && (
+                        {isBusyServer && (
                             <div className="mb-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex items-center gap-3 text-amber-400 text-sm animate-pulse">
                                 <AlertCircle size={18}/>
-                                <span>El servidor está procesando un video. El motor esperará a que termine para seguir con el siguiente.</span>
+                                <span>El servidor está procesando activamente un archivo. El motor esperará su turno automáticamente.</span>
                             </div>
                         )}
 
                         <div className="mb-10 bg-slate-950/50 p-6 rounded-3xl border border-slate-800">
                             <div className="flex justify-between items-end mb-3 px-1">
                                 <div className="flex flex-col">
-                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Progreso de Conversión</span>
-                                    <span className="text-xs text-slate-400 font-bold">{stats.done} archivos listos</span>
+                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Progreso de Librería</span>
+                                    <span className="text-xs text-slate-400 font-bold">{stats.done} archivos convertidos</span>
                                 </div>
                                 <span className="text-3xl font-black text-white tabular-nums">{progressPercent}%</span>
                             </div>
@@ -299,7 +308,7 @@ export default function AdminTranscoder() {
                         </div>
 
                         <div className="space-y-3">
-                            <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] flex items-center gap-2 px-2"><Terminal size={14}/> Consola de Eventos</span>
+                            <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] flex items-center gap-2 px-2"><Terminal size={14}/> Log de Eventos Real</span>
                             <div className="bg-black/95 rounded-2xl p-5 font-mono text-[11px] h-40 overflow-y-auto space-y-2 border border-slate-800/50 shadow-inner scrollbar-hide">
                                 {log.map((line, i) => (
                                     <div key={i} className={`flex gap-3 ${line.includes('Error') ? 'text-red-400' : 'text-slate-400'}`}>
@@ -307,7 +316,7 @@ export default function AdminTranscoder() {
                                         <span className="leading-relaxed">{line}</span>
                                     </div>
                                 ))}
-                                {log.length === 0 && <div className="text-slate-700 italic">Esperando actividad...</div>}
+                                {log.length === 0 && <div className="text-slate-700 italic">Esperando inicio de motor...</div>}
                             </div>
                         </div>
                     </div>
@@ -315,8 +324,8 @@ export default function AdminTranscoder() {
                     <div className="bg-indigo-600/5 border border-indigo-500/20 p-6 rounded-3xl flex items-center gap-4">
                         <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400"><History size={24}/></div>
                         <div>
-                            <h4 className="text-white font-bold text-sm">Control Anti-Saturación NAS</h4>
-                            <p className="text-xs text-slate-400 leading-relaxed">El motor detecta automáticamente si el servidor está trabajando. Al pulsar "DETENER TODO" se liberan los recursos del CPU inmediatamente.</p>
+                            <h4 className="text-white font-bold text-sm">Prevención de Saturación Activa</h4>
+                            <p className="text-xs text-slate-400 leading-relaxed">Al pulsar "DETENER MOTOR", se envía una señal de terminación inmediata al servidor. El estado se conserva aunque refresques la pestaña.</p>
                         </div>
                     </div>
                 </div>

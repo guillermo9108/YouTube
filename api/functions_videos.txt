@@ -78,20 +78,21 @@ function video_upload($pdo, $post, $files) {
 }
 
 /**
- * ESCÁNER LOCAL ULTRA-SEGURO V5 (Anti-Respuesta Corrupta)
+ * ESCÁNER LOCAL ULTRA-SEGURO V6
+ * Blindado contra errores de codificación y archivos protegidos del NAS.
  */
 function video_scan_local($pdo, $input) {
-    // 1. Aislamiento total: Solo respondemos lo que queremos
-    while (ob_get_level()) ob_end_clean();
+    // 1. Aislamiento total de buffers accidentales
+    while (ob_get_level() > 0) ob_end_clean();
     ob_start();
 
     try {
-        set_time_limit(900); 
+        set_time_limit(900); // 15 minutos máximo
         ini_set('memory_limit', '1024M');
 
         $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
         if (!$rawPath || !is_dir($rawPath)) {
-            throw new Exception("Ruta no accesible: " . $rawPath);
+            throw new Exception("La ruta no es un directorio válido o accesible: " . $rawPath);
         }
 
         $rootPath = realpath($rawPath);
@@ -99,11 +100,13 @@ function video_scan_local($pdo, $input) {
         $addedCount = 0;
         $totalScanned = 0;
         $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'flv'];
-        $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store', 'System Volume Information'];
+        
+        // Carpetas de sistema que suelen bloquear el escaneo o ensuciar el JSON
+        $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store', 'System Volume Information', '$RECYCLE.BIN'];
 
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
 
-        // Usamos CATCH_GET_CHILD para ignorar carpetas sin permiso sin lanzar errores PHP
+        // Usamos CATCH_GET_CHILD para que PHP no explote si una carpeta no tiene permisos
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
         $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
 
@@ -111,7 +114,7 @@ function video_scan_local($pdo, $input) {
             try {
                 $pathName = $file->getPathname();
                 
-                // Filtrar carpetas de sistema NAS
+                // Filtrado por nombre de carpeta
                 foreach ($ignoreFolders as $ignore) {
                     if (strpos($pathName, $ignore) !== false) continue 2;
                 }
@@ -123,37 +126,44 @@ function video_scan_local($pdo, $input) {
 
                 $totalScanned++;
                 
-                // Limpieza total de caracteres no-UTF8 que rompen JSON
+                // NORMALIZACIÓN UTF-8 AGRESIVA (Crucial para evitar JSON corrupto en NAS)
                 $fullPath = str_replace('\\', '/', $pathName);
                 $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'UTF-8');
+                // Eliminar cualquier caracter no imprimible o ilegal en JSON
                 $fullPath = preg_replace('/[\x00-\x1F\x7F]/u', '', $fullPath); 
                 
                 $title = mb_convert_encoding(basename($fullPath), 'UTF-8', 'UTF-8');
                 $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
                 
+                // ID basado en MD5 de la ruta para evitar duplicados reales
                 $vidId = 'loc_' . md5($fullPath); 
 
                 $insert->execute([$vidId, $title, $fullPath, $adminId, time()]);
-                if ($insert->rowCount() > 0) $addedCount++;
+                if ($insert->rowCount() > 0) {
+                    $addedCount++;
+                }
 
-                if ($addedCount >= 1000) break;
+                // Límite de seguridad por petición
+                if ($addedCount >= 2000) break;
 
-            } catch (Exception $inner) { continue; }
+            } catch (Exception $inner) { 
+                // Ignorar errores individuales de archivos
+                continue; 
+            }
         }
 
-        // Limpiar cualquier basura residual del buffer
-        while (ob_get_level() > 1) ob_end_clean();
-        ob_end_clean();
+        // Limpiar cualquier basura residual del buffer antes de la respuesta final
+        while (ob_get_level() > 0) ob_end_clean();
 
         respond(true, [
             'totalFound' => $totalScanned, 
             'newToImport' => $addedCount,
-            'message' => "Escaneo listo. $addedCount registrados."
+            'message' => "Escaneo completado. Se registraron $addedCount archivos nuevos de $totalScanned analizados."
         ]);
 
     } catch (Exception $e) {
-        while (ob_get_level()) ob_end_clean();
-        respond(false, null, "Error motor escaneo: " . $e->getMessage());
+        while (ob_get_level() > 0) ob_end_clean();
+        respond(false, null, "Error fatal en el motor de escaneo: " . $e->getMessage());
     }
 }
 

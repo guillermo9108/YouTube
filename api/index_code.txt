@@ -1,24 +1,30 @@
 <?php
 /**
- * StreamPay - Core Controller V6.2
- * Soporte para detención física de procesos y prevención de duplicidad.
+ * StreamPay - Core Controller V6.3
+ * Blindaje total contra 'Respuesta Corrupta' y control de procesos.
  */
 
+// Desactivar salida de errores al navegador para no romper el JSON
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 error_reporting(E_ALL);
 
+// Iniciar captura de salida inmediatamente
 if (ob_get_level() == 0) ob_start();
 
+// Capturar warnings para enviarlos dentro del JSON si es necesario, pero no fuera
+$GLOBALS['php_warnings'] = [];
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     if (!(error_reporting() & $errno)) return false;
     $GLOBALS['php_warnings'][] = "[$errno] $errstr en $errfile:$errline";
     return true;
 });
 
+// Manejador de errores fatales
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        // Limpiar cualquier salida previa
         while (ob_get_level() > 0) ob_end_clean();
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
@@ -30,12 +36,35 @@ register_shutdown_function(function() {
     }
 });
 
+/**
+ * Función única de respuesta para garantizar JSON puro.
+ */
 function respond($success, $data = null, $error = null) {
+    // 1. Limpiar todos los buffers (adiós warnings accidentales)
     while (ob_get_level() > 0) ob_end_clean();
+    
+    // 2. Cabeceras correctas
     header('Content-Type: application/json; charset=utf-8');
-    $res = ['success' => $success, 'data' => $data, 'error' => $error];
-    if (!empty($GLOBALS['php_warnings'])) $res['warnings'] = $GLOBALS['php_warnings'];
-    echo json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    
+    // 3. Estructura de respuesta
+    $res = [
+        'success' => $success, 
+        'data' => $data, 
+        'error' => $error
+    ];
+    
+    // 4. Adjuntar warnings solo si estamos en modo debug o hay algo crítico
+    if (!empty($GLOBALS['php_warnings'])) {
+        $res['warnings'] = $GLOBALS['php_warnings'];
+    }
+    
+    // 5. Salida final
+    $output = json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    if ($output === false) {
+        echo json_encode(['success' => false, 'error' => 'Error al codificar JSON: ' . json_last_error_msg()]);
+    } else {
+        echo $output;
+    }
     exit();
 }
 
@@ -55,6 +84,7 @@ $action = $_GET['action'] ?? null;
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 $configFile = 'db_config.json';
 
+// Carga modular de funciones
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
 foreach ($required_files as $file) { 
     if (file_exists($file)) { @require_once $file; }
