@@ -113,8 +113,17 @@ function video_scan_local($pdo, $input) {
         $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'flv'];
         $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store'];
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Local', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
-        $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveDirectoryIterator::SELF_FIRST, RecursiveDirectoryIterator::CATCH_GET_CHILD);
+        
+        /**
+         * COMPATIBILIDAD SYNOLOGY NAS:
+         * Usamos enteros literales para las banderas de los iteradores.
+         * 4608 = SKIP_DOTS (4096) | FOLLOW_SYMLINKS (512)
+         * 1 = SELF_FIRST
+         * 16 = CATCH_GET_CHILD
+         */
+        $dirIterator = new RecursiveDirectoryIterator($rootPath, 4608);
+        $iterator = new RecursiveIteratorIterator($dirIterator, 1, 16);
+        
         foreach ($iterator as $file) {
             try {
                 $pathName = $file->getPathname();

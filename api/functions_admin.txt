@@ -206,6 +206,8 @@ function admin_cleanup_system_files($pdo) {
     $tDir = 'uploads/thumbnails/'; $deleted = 0;
     if (is_dir($tDir)) {
         foreach (glob($tDir . '*') as $f) {
+            // COMPROBACIÓN CRÍTICA: Solo borrar si es un ARCHIVO, no un directorio (NAS genera @eaDir)
+            if (!is_file($f)) continue;
             if (basename($f) === 'default.jpg') continue;
             $id = pathinfo($f, PATHINFO_FILENAME);
             $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE id = ?"); $check->execute([$id]);
