@@ -104,67 +104,72 @@ function video_upload($pdo, $post, $files) {
     respond(true, ['id' => $id]);
 }
 
+/**
+ * ESCÁNER LOCAL RESILIENTE V2
+ * Ignora carpetas sin permiso y asegura UTF-8 para evitar errores de JSON.
+ */
 function video_scan_local($pdo, $input) {
-    if (session_status() === PHP_SESSION_ACTIVE) {
-        session_write_close();
-    }
+    if (session_status() === PHP_SESSION_ACTIVE) { session_write_close(); }
 
-    set_time_limit(300);
+    set_time_limit(600); 
     ini_set('memory_limit', '1024M');
 
     $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
     if (!$rawPath || !is_dir($rawPath)) {
-        respond(false, null, "La ruta especificada no existe o no es accesible.");
+        respond(false, null, "La ruta especificada no existe o no es accesible: " . $rawPath);
     }
 
     $rootPath = realpath($rawPath);
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $addedCount = 0;
     $totalScanned = 0;
-    $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts'];
+    $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'flv'];
 
     $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
 
     try {
+        // Usamos RecursiveDirectoryIterator con banderas para ignorar errores de acceso
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
 
         foreach ($iterator as $file) {
-            if (!$file->isFile()) continue;
-            
-            $ext = strtolower($file->getExtension());
-            if (!in_array($ext, $allowedExts)) continue;
-
-            $totalScanned++;
-            
-            if ($addedCount >= 1000) {
-                respond(true, [
-                    'totalFound' => $totalScanned, 
-                    'newToImport' => $addedCount,
-                    'message' => "Lote de 1000 procesado. Pulsa 'Escanear' otra vez para continuar."
-                ]);
-            }
-
-            $fullPath = str_replace('\\', '/', $file->getPathname());
-            $vidId = 'loc_' . md5($fullPath); 
-
             try {
-                $insert->execute([$vidId, basename($fullPath), $fullPath, $adminId, time()]);
+                if (!$file->isFile()) continue;
+                
+                $ext = strtolower($file->getExtension());
+                if (!in_array($ext, $allowedExts)) continue;
+
+                $totalScanned++;
+                
+                $fullPathRaw = $file->getPathname();
+                // Limpiar ruta para BD y asegurar UTF-8 para evitar que json_encode explote
+                $fullPath = str_replace('\\', '/', $fullPathRaw);
+                $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'UTF-8');
+                
+                $title = mb_convert_encoding(basename($fullPath), 'UTF-8', 'UTF-8');
+                $vidId = 'loc_' . md5($fullPath); 
+
+                $insert->execute([$vidId, $title, $fullPath, $adminId, time()]);
                 if ($insert->rowCount() > 0) {
                     $addedCount++;
                 }
-            } catch (PDOException $e) {
-                continue; 
+
+                // Límite de seguridad por lote para evitar saturar la memoria en NAS
+                if ($addedCount >= 2000) break;
+
+            } catch (Exception $innerEx) {
+                // Si un archivo falla por codificación o acceso, seguimos con el siguiente
+                continue;
             }
         }
     } catch (Exception $e) {
-        respond(false, null, "Error de escaneo: " . $e->getMessage());
+        respond(false, null, "Fallo crítico en el motor de escaneo: " . $e->getMessage());
     }
     
     respond(true, [
         'totalFound' => $totalScanned, 
         'newToImport' => $addedCount,
-        'message' => "Escaneo finalizado satisfactoriamente."
+        'message' => "Escaneo completado. $addedCount videos nuevos añadidos."
     ]);
 }
 
