@@ -32,9 +32,32 @@ function video_get_one($pdo, $id) {
 }
 
 /**
- * SUBIDA MANUAL DE VIDEOS
- * Restaurada para v1.8.0
+ * Obtener videos relacionados (Mismo creador o misma categoría)
  */
+function video_get_related($pdo, $id) {
+    $stmt = $pdo->prepare("SELECT creatorId, category FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $base = $stmt->fetch();
+    if (!$base) respond(true, []);
+
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.creatorId = ? OR v.category = ?) AND v.category NOT IN ('PENDING', 'PROCESSING') LIMIT 12");
+    $stmt->execute([$id, $base['creatorId'], $base['category']]);
+    $vids = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($vids);
+    respond(true, $vids);
+}
+
+/**
+ * Obtener videos de un creador específico
+ */
+function video_get_by_creator($pdo, $userId) {
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.createdAt DESC");
+    $stmt->execute([$userId]);
+    $vids = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($vids);
+    respond(true, $vids);
+}
+
 function video_upload($pdo, $post, $files) {
     $id = 'v_' . uniqid();
     $title = $post['title'] ?? 'Sin título';
@@ -42,7 +65,9 @@ function video_upload($pdo, $post, $files) {
     $price = floatval($post['price'] ?? 0);
     $cat = $post['category'] ?? 'GENERAL';
     $dur = intval($post['duration'] ?? 0);
-    $uid = $post['userId'];
+    $uid = $post['userId'] ?? '';
+
+    if (!$uid) respond(false, null, 'ID de usuario faltante');
 
     $videoUrl = null;
     $thumbUrl = 'api/uploads/thumbnails/default.jpg';
@@ -89,7 +114,7 @@ function video_scan_local($pdo, $input) {
         $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store'];
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Local', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveDirectoryIterator::SELF_FIRST, RecursiveDirectoryIterator::CATCH_GET_CHILD);
         foreach ($iterator as $file) {
             try {
                 $pathName = $file->getPathname();
@@ -183,8 +208,9 @@ function internal_organize_video($pdo, $id, $settings, $customCategories) {
 }
 
 function video_delete($pdo, $input) {
-    $id = $input['id'];
-    $uid = $input['userId'];
+    $id = $input['id'] ?? '';
+    $uid = $input['userId'] ?? '';
+    if (!$id || !$uid) respond(false, null, 'ID o Usuario faltante');
     $stmt = $pdo->prepare("SELECT creatorId, videoUrl, thumbnailUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
