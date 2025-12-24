@@ -163,7 +163,6 @@ function admin_file_cleanup_preview($pdo, $input) {
     
     if ($type === 'LOW_ROI') {
         // Videos que ocupan mucho espacio y tienen pocas vistas/likes (Relación Coste/Beneficio)
-        // Como no tenemos el tamaño en la DB, lo calculamos para los últimos 200 videos
         $stmt = $pdo->query("SELECT id, title, videoUrl, views, likes, dislikes, category FROM videos WHERE isLocal = 1 ORDER BY views ASC LIMIT 200");
         $candidates = $stmt->fetchAll();
         $results = [];
@@ -171,9 +170,10 @@ function admin_file_cleanup_preview($pdo, $input) {
             $path = resolve_video_path($v['videoUrl']);
             if ($path && file_exists($path)) {
                 $size = filesize($path);
-                if ($size > 100 * 1024 * 1024) { // Solo videos > 100MB
+                // Si el archivo pesa > 200MB y tiene pocas vistas, es ineficiente
+                if ($size > 200 * 1024 * 1024 && $v['views'] < 50) { 
                     $v['size_fmt'] = round($size / (1024 * 1024), 1) . ' MB';
-                    $v['reason'] = 'Inversión Ineficiente (Pocas Vistas vs Tamaño)';
+                    $v['reason'] = 'Baja Rentabilidad (Size vs Vistas)';
                     $results[] = $v;
                 }
             }
@@ -181,12 +181,18 @@ function admin_file_cleanup_preview($pdo, $input) {
         respond(true, $results);
     }
 
-    // Default: Low Performance
+    // Default: Low Performance (Sin vistas en 90 días)
     $cutoff = time() - (90 * 86400);
     $stmt = $pdo->prepare("SELECT id, title, videoUrl, views, category FROM videos WHERE isLocal = 1 AND createdAt < ? AND views < 5 ORDER BY views ASC LIMIT 100");
     $stmt->execute([$cutoff]);
     $res = $stmt->fetchAll();
-    foreach($res as &$v) $v['reason'] = 'Sin vistas en 90 días';
+    foreach($res as &$v) {
+        $v['reason'] = 'Sin vistas en 90 días';
+        $path = resolve_video_path($v['videoUrl']);
+        if ($path && file_exists($path)) {
+            $v['size_fmt'] = round(filesize($path) / (1024 * 1024), 1) . ' MB';
+        }
+    }
     respond(true, $res);
 }
 

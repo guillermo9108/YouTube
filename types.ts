@@ -1,8 +1,3 @@
-
-
-
-
-
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
@@ -112,6 +107,9 @@ export interface Video {
   fileHash?: string; 
   creatorAvatarUrl?: string;
   isLocal?: boolean; 
+  // Propiedades para mantenimiento y almacenamiento
+  reason?: string;
+  size_fmt?: string;
 }
 
 export interface Transaction {

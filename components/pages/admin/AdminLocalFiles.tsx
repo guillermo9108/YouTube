@@ -5,7 +5,6 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     HardDrive, Trash2, Wand2, Loader2, Move, PlayCircle, 
     PieChart, Database, Eye, ShieldAlert, Zap, AlertTriangle, X, Info, Trash, FolderTree, CheckCircle, Shield, TrendingDown, Activity, Filter, Search,
-    /* Added Check to fix the missing import error */
     Check
 } from 'lucide-react';
 
@@ -225,7 +224,7 @@ export default function AdminLocalFiles() {
                                                     </span>
                                                 </td>
                                                 <td className="p-4 text-right">
-                                                    <span className="font-mono text-xs text-slate-400 font-bold">{(v as any).size_fmt || 'N/A'}</span>
+                                                    <span className="font-mono text-xs text-slate-400 font-bold">{v.size_fmt || 'N/A'}</span>
                                                 </td>
                                             </tr>
                                         ))}
