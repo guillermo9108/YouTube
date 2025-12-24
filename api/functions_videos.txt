@@ -32,21 +32,21 @@ function video_get_one($pdo, $id) {
 }
 
 /**
- * ESCÁNER LOCAL ULTRA-RESILIENTE V9
- * Sanitización profunda de nombres para evitar 'Respuesta Corrupta' en NAS.
+ * ESCÁNER LOCAL ULTRA-SILENCIOSO V10
+ * Diseñado para no emitir NADA a la salida estándar y registrar todo en debug_log.txt.
  */
 function video_scan_local($pdo, $input) {
-    // Limpieza de buffer inicial
+    // Silencio absoluto
     while (ob_get_level() > 0) ob_end_clean();
     ob_start();
 
     try {
-        set_time_limit(900); 
+        set_time_limit(1200); 
         ini_set('memory_limit', '1024M');
 
         $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
         if (!$rawPath || !is_dir($rawPath)) {
-            throw new Exception("Ruta inaccesible o inválida.");
+            throw new Exception("Ruta inaccesible: " . ($rawPath ?: 'VACÍA'));
         }
 
         $rootPath = realpath($rawPath);
@@ -55,20 +55,18 @@ function video_scan_local($pdo, $input) {
         $totalScanned = 0;
         $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'flv'];
         
-        // Carpetas que lanzan warnings de permisos en Synology/QNAP
+        // Carpetas que el NAS Synology/QNAP bloquea
         $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store', 'System Volume Information', '$RECYCLE.BIN'];
 
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Local', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
 
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
-        // CATCH_GET_CHILD evita que PHP se detenga si no puede leer una carpeta
         $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
 
         foreach ($iterator as $file) {
             try {
                 $pathName = $file->getPathname();
                 
-                // Filtrado por carpeta prohibida
                 foreach ($ignoreFolders as $ignore) {
                     if (strpos($pathName, $ignore) !== false) continue 2;
                 }
@@ -80,13 +78,12 @@ function video_scan_local($pdo, $input) {
 
                 $totalScanned++;
                 
-                // NORMALIZACIÓN AGRESIVA PARA JSON
+                // Normalización UTF-8 forzada para nombres de archivos con acentos/emojis
                 $fullPath = str_replace('\\', '/', $pathName);
-                $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'UTF-8');
-                // Eliminar caracteres de control y binarios que rompen JSON
+                $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'auto');
                 $fullPath = preg_replace('/[\x00-\x1F\x7F]/u', '', $fullPath); 
                 
-                $title = mb_convert_encoding(basename($fullPath), 'UTF-8', 'UTF-8');
+                $title = mb_convert_encoding(basename($fullPath), 'UTF-8', 'auto');
                 $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
                 
                 $vidId = 'loc_' . md5($fullPath); 
@@ -94,24 +91,27 @@ function video_scan_local($pdo, $input) {
                 $insert->execute([$vidId, $title, $fullPath, $adminId, time()]);
                 if ($insert->rowCount() > 0) $addedCount++;
 
-                // Límite de seguridad para no saturar memoria en el primer escaneo
-                if ($addedCount >= 2000) break;
+                if ($addedCount >= 1000) break; // Lote máximo de seguridad
 
-            } catch (Exception $inner) { continue; }
+            } catch (Exception $inner) { 
+                file_debug_log("SCANNER_FILE_ERROR", $inner->getMessage());
+                continue; 
+            }
         }
 
-        // Limpiar buffer residual antes de la respuesta final
+        // Limpieza final de buffer antes del respond()
         while (ob_get_level() > 0) ob_end_clean();
 
         respond(true, [
             'totalFound' => $totalScanned, 
             'newToImport' => $addedCount,
-            'message' => "Escaneo listo. Se registraron $addedCount archivos nuevos de $totalScanned analizados."
+            'message' => "Escaneo completado. Se registraron $addedCount archivos nuevos."
         ]);
 
     } catch (Exception $e) {
+        file_debug_log("SCANNER_FATAL", $e->getMessage());
         while (ob_get_level() > 0) ob_end_clean();
-        respond(false, null, "Error fatal en escáner: " . $e->getMessage());
+        respond(false, null, "Error motor escaneo: " . $e->getMessage());
     }
 }
 
@@ -168,9 +168,9 @@ function video_smart_organize($pdo) {
     respond(true, ['processed' => $processed, 'remaining' => $remaining]);
 }
 
-function internal_organize_video($pdo, $vid, $settings, $customCategories) {
+function internal_organize_video($pdo, $id, $settings, $customCategories) {
     $stmt = $pdo->prepare("SELECT id, title, videoUrl FROM videos WHERE id = ?");
-    $stmt->execute([$vid]);
+    $stmt->execute([$id]);
     $v = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$v) return false;
     $smart = smartParseFilename($v['videoUrl'], null, $customCategories);
