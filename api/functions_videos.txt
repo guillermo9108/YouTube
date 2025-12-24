@@ -78,11 +78,11 @@ function video_upload($pdo, $post, $files) {
 }
 
 /**
- * ESCÁNER LOCAL ULTRA-SEGURO V6
- * Blindado contra errores de codificación y archivos protegidos del NAS.
+ * ESCÁNER LOCAL ULTRA-SEGURO V7
+ * Blindado contra errores de codificación y buffers de salida accidentales del NAS.
  */
 function video_scan_local($pdo, $input) {
-    // 1. Aislamiento total de buffers accidentales
+    // 1. Limpieza absoluta de buffers antes de empezar
     while (ob_get_level() > 0) ob_end_clean();
     ob_start();
 
@@ -101,12 +101,12 @@ function video_scan_local($pdo, $input) {
         $totalScanned = 0;
         $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'flv'];
         
-        // Carpetas de sistema que suelen bloquear el escaneo o ensuciar el JSON
+        // Carpetas críticas que el NAS suele bloquear o que contienen basura
         $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store', 'System Volume Information', '$RECYCLE.BIN'];
 
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
 
-        // Usamos CATCH_GET_CHILD para que PHP no explote si una carpeta no tiene permisos
+        // CATCH_GET_CHILD es vital para NAS con permisos restringidos
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
         $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
 
@@ -114,7 +114,6 @@ function video_scan_local($pdo, $input) {
             try {
                 $pathName = $file->getPathname();
                 
-                // Filtrado por nombre de carpeta
                 foreach ($ignoreFolders as $ignore) {
                     if (strpos($pathName, $ignore) !== false) continue 2;
                 }
@@ -126,16 +125,14 @@ function video_scan_local($pdo, $input) {
 
                 $totalScanned++;
                 
-                // NORMALIZACIÓN UTF-8 AGRESIVA (Crucial para evitar JSON corrupto en NAS)
+                // NORMALIZACIÓN UTF-8 AGRESIVA (Anti-JSON corrupto)
                 $fullPath = str_replace('\\', '/', $pathName);
                 $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'UTF-8');
-                // Eliminar cualquier caracter no imprimible o ilegal en JSON
                 $fullPath = preg_replace('/[\x00-\x1F\x7F]/u', '', $fullPath); 
                 
                 $title = mb_convert_encoding(basename($fullPath), 'UTF-8', 'UTF-8');
                 $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
                 
-                // ID basado en MD5 de la ruta para evitar duplicados reales
                 $vidId = 'loc_' . md5($fullPath); 
 
                 $insert->execute([$vidId, $title, $fullPath, $adminId, time()]);
@@ -143,16 +140,12 @@ function video_scan_local($pdo, $input) {
                     $addedCount++;
                 }
 
-                // Límite de seguridad por petición
                 if ($addedCount >= 2000) break;
 
-            } catch (Exception $inner) { 
-                // Ignorar errores individuales de archivos
-                continue; 
-            }
+            } catch (Exception $inner) { continue; }
         }
 
-        // Limpiar cualquier basura residual del buffer antes de la respuesta final
+        // Limpiar cualquier basura residual del buffer antes del respond()
         while (ob_get_level() > 0) ob_end_clean();
 
         respond(true, [

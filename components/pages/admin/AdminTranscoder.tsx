@@ -154,7 +154,7 @@ export default function AdminTranscoder() {
                 }
 
                 // Si el servidor está ocupado, esperamos un poco más antes de la siguiente petición
-                if (res.message === 'Servidor ocupado. Evitando saturación.') {
+                if (res.message === 'Servidor Ocupado') {
                     setTimeout(loop, 10000); 
                     return;
                 }

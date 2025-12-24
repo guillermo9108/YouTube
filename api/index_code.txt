@@ -1,7 +1,7 @@
 <?php
 /**
- * StreamPay - Core Controller V6.3
- * Blindaje total contra 'Respuesta Corrupta' y control de procesos.
+ * StreamPay - Core Controller V6.4
+ * Blindaje total contra 'Respuesta Corrupta' y control de procesos redundantes.
  */
 
 // Desactivar salida de errores al navegador para no romper el JSON
@@ -24,7 +24,7 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
-        // Limpiar cualquier salida previa
+        // Limpiar cualquier salida previa (warnings accidentales)
         while (ob_get_level() > 0) ob_end_clean();
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
@@ -40,7 +40,7 @@ register_shutdown_function(function() {
  * Función única de respuesta para garantizar JSON puro.
  */
 function respond($success, $data = null, $error = null) {
-    // 1. Limpiar todos los buffers (adiós warnings accidentales)
+    // 1. Limpiar todos los buffers (adiós warnings accidentales del NAS)
     while (ob_get_level() > 0) ob_end_clean();
     
     // 2. Cabeceras correctas
@@ -53,18 +53,13 @@ function respond($success, $data = null, $error = null) {
         'error' => $error
     ];
     
-    // 4. Adjuntar warnings solo si estamos en modo debug o hay algo crítico
     if (!empty($GLOBALS['php_warnings'])) {
         $res['warnings'] = $GLOBALS['php_warnings'];
     }
     
-    // 5. Salida final
+    // 4. Salida final sanitizada
     $output = json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
-    if ($output === false) {
-        echo json_encode(['success' => false, 'error' => 'Error al codificar JSON: ' . json_last_error_msg()]);
-    } else {
-        echo $output;
-    }
+    echo $output;
     exit();
 }
 
