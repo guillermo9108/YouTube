@@ -78,17 +78,16 @@ function video_upload($pdo, $post, $files) {
 }
 
 /**
- * ESCÁNER LOCAL ULTRA-SEGURO V4
- * Diseñado específicamente para NAS Synology/QNAP con caracteres especiales.
+ * ESCÁNER LOCAL ULTRA-SEGURO V5 (Anti-Respuesta Corrupta)
  */
 function video_scan_local($pdo, $input) {
-    // Aislamiento total: Solo respondemos lo que queremos
+    // 1. Aislamiento total: Solo respondemos lo que queremos
     while (ob_get_level()) ob_end_clean();
     ob_start();
 
     try {
-        set_time_limit(600); 
-        ini_set('memory_limit', '512M');
+        set_time_limit(900); 
+        ini_set('memory_limit', '1024M');
 
         $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
         if (!$rawPath || !is_dir($rawPath)) {
@@ -104,12 +103,15 @@ function video_scan_local($pdo, $input) {
 
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Importado localmente', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
 
+        // Usamos CATCH_GET_CHILD para ignorar carpetas sin permiso sin lanzar errores PHP
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
         $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
 
         foreach ($iterator as $file) {
             try {
                 $pathName = $file->getPathname();
+                
+                // Filtrar carpetas de sistema NAS
                 foreach ($ignoreFolders as $ignore) {
                     if (strpos($pathName, $ignore) !== false) continue 2;
                 }
@@ -121,12 +123,14 @@ function video_scan_local($pdo, $input) {
 
                 $totalScanned++;
                 
-                // Limpieza agresiva de caracteres no-UTF8 que rompen JSON
+                // Limpieza total de caracteres no-UTF8 que rompen JSON
                 $fullPath = str_replace('\\', '/', $pathName);
                 $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'UTF-8');
-                $fullPath = preg_replace('/[\x00-\x1F\x7F]/u', '', $fullPath); // Eliminar caracteres de control
+                $fullPath = preg_replace('/[\x00-\x1F\x7F]/u', '', $fullPath); 
                 
                 $title = mb_convert_encoding(basename($fullPath), 'UTF-8', 'UTF-8');
+                $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
+                
                 $vidId = 'loc_' . md5($fullPath); 
 
                 $insert->execute([$vidId, $title, $fullPath, $adminId, time()]);
@@ -137,14 +141,14 @@ function video_scan_local($pdo, $input) {
             } catch (Exception $inner) { continue; }
         }
 
-        // Limpiar cualquier basura del buffer antes de enviar JSON
+        // Limpiar cualquier basura residual del buffer
         while (ob_get_level() > 1) ob_end_clean();
         ob_end_clean();
 
         respond(true, [
             'totalFound' => $totalScanned, 
             'newToImport' => $addedCount,
-            'message' => "Escaneo listo. $addedCount videos nuevos registrados."
+            'message' => "Escaneo listo. $addedCount registrados."
         ]);
 
     } catch (Exception $e) {

@@ -1,7 +1,7 @@
 <?php
 /**
- * StreamPay - Core Controller V6.1
- * Soporte avanzado para Transcodificador segmentado y persistente.
+ * StreamPay - Core Controller V6.2
+ * Soporte para detención física de procesos y prevención de duplicidad.
  */
 
 ini_set('display_errors', 0);
@@ -146,6 +146,7 @@ try {
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
+        case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
         case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
         case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;

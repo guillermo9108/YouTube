@@ -54,7 +54,7 @@ function admin_update_settings($pdo, $input) {
     respond(true);
 }
 
-// --- 2. TRANSCODER CON SEMÁFORO ---
+// --- 2. TRANSCODER CON SEMÁFORO INTELIGENTE ---
 
 function get_ffmpeg_path() {
     $paths = ['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'C:/ffmpeg/bin/ffmpeg.exe'];
@@ -65,24 +65,44 @@ function get_ffmpeg_path() {
     return false;
 }
 
+function admin_stop_transcoder($pdo) {
+    // 1. Apagar el motor en DB
+    $pdo->query("UPDATE system_settings SET is_transcoder_active = 0 WHERE id = 1");
+    
+    // 2. Intentar matar procesos FFmpeg activos (Solo Linux/NAS)
+    if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+        @exec("pkill -9 ffmpeg");
+    }
+    
+    // 3. Resetear videos que estaban en PROCESSING a WAITING para que no se queden bloqueados
+    $pdo->query("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'PROCESSING'");
+    
+    respond(true, ['message' => 'Motor detenido y procesos limpiados']);
+}
+
 function admin_transcode_batch($pdo) {
     // 1. Verificar si el motor está encendido globalmente
     $stmtS = $pdo->query("SELECT is_transcoder_active FROM system_settings WHERE id = 1");
     $settings = $stmtS->fetch();
     if (!$settings || !$settings['is_transcoder_active']) {
-        respond(true, ['processed' => 0, 'completed' => false, 'message' => 'Motor apagado en servidor']);
+        respond(true, ['processed' => 0, 'completed' => false, 'message' => 'Motor apagado']);
+    }
+
+    // 2. PREVENCIÓN DE DUPLICIDAD: Verificar si ya hay un video PROCESANDO actualmente
+    $isBusy = $pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'PROCESSING'")->fetchColumn();
+    if ($isBusy > 0) {
+        respond(true, ['processed' => 0, 'completed' => false, 'message' => 'Servidor ocupado con otra conversión']);
     }
 
     $ffmpeg = get_ffmpeg_path();
     if (!$ffmpeg) respond(false, null, "FFmpeg no disponible en este servidor.");
 
-    // 2. Limitar a 1 por petición para evitar saturación de CPU y timeouts
+    // 3. Obtener el siguiente video en cola
     $stmt = $pdo->prepare("SELECT id, videoUrl FROM videos WHERE transcode_status = 'WAITING' LIMIT 1");
     $stmt->execute();
     $video = $stmt->fetch();
 
     if (!$video) {
-        // Si no hay nada que hacer, apagamos el motor para ahorrar recursos
         $pdo->query("UPDATE system_settings SET is_transcoder_active = 0 WHERE id = 1");
         respond(true, ['processed' => 0, 'completed' => true, 'remaining' => 0]);
     }
@@ -93,18 +113,22 @@ function admin_transcode_batch($pdo) {
         respond(true, ['processed' => 0, 'completed' => false, 'error' => 'Ruta no válida']);
     }
     
-    // Marcar como procesando ANTES de empezar para que otros procesos no lo tomen
+    // Marcar como PROCESANDO antes de empezar
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$video['id']]);
     
     $dir = dirname($path);
     $filename = pathinfo($path, PATHINFO_FILENAME);
     $tempOut = $dir . DIRECTORY_SEPARATOR . 'tr_' . uniqid() . '.mp4';
     
-    // Ejecución de FFmpeg con prioridad baja
+    // Ejecución de FFmpeg
     $cmd = "$ffmpeg -loglevel error -y -i " . escapeshellarg($path) . " -c:v libx264 -preset superfast -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempOut) . " 2>&1";
     @exec($cmd, $output, $res);
 
-    if ($res === 0 && file_exists($tempOut) && filesize($tempOut) > 0) {
+    // Verificar si el motor se apagó durante la ejecución (Pausa del usuario)
+    $stmtS = $pdo->query("SELECT is_transcoder_active FROM system_settings WHERE id = 1");
+    $isActiveNow = $stmtS->fetchColumn();
+
+    if ($res === 0 && file_exists($tempOut) && filesize($tempOut) > 0 && $isActiveNow) {
         $finalPath = $dir . DIRECTORY_SEPARATOR . $filename . '.mp4';
         if ($path !== $finalPath && file_exists($path)) @unlink($path);
         @rename($tempOut, $finalPath);
@@ -118,9 +142,15 @@ function admin_transcode_batch($pdo) {
         $rem = (int)$pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'WAITING'")->fetchColumn();
         respond(true, ['processed' => 1, 'remaining' => $rem, 'completed' => ($rem == 0)]);
     } else {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED' WHERE id = ?")->execute([$video['id']]);
+        // Si falló o fue cancelado
+        if (!$isActiveNow) {
+            // Fue cancelado por el usuario
+            $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$video['id']]);
+        } else {
+            $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED' WHERE id = ?")->execute([$video['id']]);
+        }
         if (file_exists($tempOut)) @unlink($tempOut);
-        respond(false, null, "FFmpeg falló en el archivo: " . $video['videoUrl']);
+        respond(true, ['processed' => 0, 'message' => 'Conversión interrumpida o fallida']);
     }
 }
 

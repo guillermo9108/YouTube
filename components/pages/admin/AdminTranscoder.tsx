@@ -1,23 +1,22 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../services/db';
-import { Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, Filter, History } from 'lucide-react';
+import { Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, Filter, History, AlertCircle } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 
 export default function AdminTranscoder() {
     const toast = useToast();
     
-    // -- Estados Persistentes (localStorage) --
+    // -- Estados --
     const [isRunning, setIsRunning] = useState(false);
+    const [isBusyServer, setIsBusyServer] = useState(false);
     const [batchSize, setBatchSize] = useState(() => parseInt(localStorage.getItem('sp_tr_batch') || '1'));
     
-    // -- Filtros Persistentes --
     const [filters, setFilters] = useState(() => {
         const saved = localStorage.getItem('sp_tr_filters');
         return saved ? JSON.parse(saved) : { days: 0, onlyNonMp4: true, onlyIncompatible: true };
     });
 
-    // -- Datos del Servidor --
     const [stats, setStats] = useState({ waiting: 0, processing: 0, failed: 0, done: 0 });
     const [log, setLog] = useState<string[]>([]);
     const [scanResult, setScanResult] = useState<number | null>(null);
@@ -30,30 +29,35 @@ export default function AdminTranscoder() {
         try {
             const all = await db.getAllVideos();
             const waiting = all.filter((v: any) => v.transcode_status === 'WAITING').length;
-            const processing = all.filter((v: any) => v.transcode_status === 'PROCESSING').length;
+            const processingCount = all.filter((v: any) => v.transcode_status === 'PROCESSING').length;
             const failed = all.filter((v: any) => v.transcode_status === 'FAILED').length;
             const done = all.filter((v: any) => v.transcode_status === 'DONE').length;
-            setStats({ waiting, processing, failed, done });
+            
+            setStats({ waiting, processing: processingCount, failed, done });
+            setIsBusyServer(processingCount > 0);
 
-            // Verificar estado del motor en el servidor
+            // Sincronización: Si el servidor está procesando, nosotros debemos mostrar "Pausar"
             const settings = await db.getSystemSettings();
-            if (settings.is_transcoder_active) {
+            if (settings.is_transcoder_active || processingCount > 0) {
                 if (!isRunning) {
                     setIsRunning(true);
-                    addToLog("Motor detectado como ACTIVO en el servidor. Sincronizando...");
+                    stopRequested.current = false;
+                    addToLog("Sincronización: Detectada tarea activa en el servidor.");
                 }
-            } else {
+            } else if (!settings.is_transcoder_active && !loopActive.current) {
                 setIsRunning(false);
             }
         } catch (e) {}
     };
 
-    // Al cargar el componente
+    // Al cargar y cada 10s
     useEffect(() => { 
         loadStats(); 
+        const interval = setInterval(loadStats, 10000);
+        return () => clearInterval(interval);
     }, []);
 
-    // Monitorear cambios en isRunning para manejar el bucle
+    // Manejar el bucle de procesamiento
     useEffect(() => {
         if (isRunning && !loopActive.current) {
             runBatchLoop();
@@ -103,20 +107,24 @@ export default function AdminTranscoder() {
     const startMotor = async () => {
         if (isRunning) return;
         try {
-            // Avisar al servidor que el motor debe encenderse
             await db.updateSystemSettings({ is_transcoder_active: true });
             setIsRunning(true);
             stopRequested.current = false;
-            addToLog("Encendiendo motor global...");
+            addToLog("Iniciando motor de conversión...");
         } catch (e: any) { toast.error(e.message); }
     };
 
     const stopMotor = async () => {
         try {
-            // Avisar al servidor que el motor debe apagarse
-            await db.updateSystemSettings({ is_transcoder_active: false });
+            addToLog("Solicitando detención total al servidor...");
+            // Llamar a la nueva acción de parada física
+            await db.request(`action=admin_stop_transcoder`);
             stopRequested.current = true;
-            addToLog("Señal de parada enviada. El motor se detendrá al finalizar el video actual.");
+            setIsRunning(false);
+            loopActive.current = false;
+            loadStats();
+            toast.success("Motor detenido y CPU liberado");
+            addToLog("Motor apagado.");
         } catch (e: any) { toast.error(e.message); }
     };
 
@@ -125,40 +133,40 @@ export default function AdminTranscoder() {
         loopActive.current = true;
 
         const loop = async () => {
-            // 1. Verificar si el usuario pidió parar desde el frontend
             if (stopRequested.current) {
                 loopActive.current = false;
-                setIsRunning(false);
-                addToLog("Motor detenido exitosamente.");
                 return;
             }
 
             try {
-                // Solicitar proceso de 1 video (batchSize 1 para evitar saturación)
-                const res = await db.request<any>(`action=admin_transcode_batch&limit=1`);
+                // Solicitar proceso de 1 video (Atomic Batch)
+                const res = await db.request<any>(`action=admin_transcode_batch`);
                 
                 if (res.processed > 0) {
-                    addToLog(`Éxito: Video convertido correctamente.`);
+                    addToLog(`Procesado: 1 video completado.`);
                     loadStats();
                 }
 
-                // 2. Verificar si el servidor apagó el motor (ej: cola vacía)
-                const settings = await db.getSystemSettings();
-                if (!settings.is_transcoder_active) {
-                    setIsRunning(false);
-                    loopActive.current = false;
-                    addToLog(res.completed ? "Procesamiento finalizado (Cola vacía)." : "Motor apagado por servidor.");
+                if (res.message === 'Servidor ocupado con otra conversión') {
+                    // Si ya hay un proceso, esperamos un poco más antes de reintentar
+                    setTimeout(loop, 8000);
                     return;
                 }
 
-                // Continuar bucle
+                const settings = await db.getSystemSettings();
+                if (!settings.is_transcoder_active || res.completed) {
+                    setIsRunning(false);
+                    loopActive.current = false;
+                    addToLog(res.completed ? "Cola finalizada." : "Motor apagado.");
+                    return;
+                }
+
+                // Siguiente iteración
                 setTimeout(loop, 4000);
             } catch (e: any) {
                 addToLog(`Error: ${e.message}`);
-                // Si hay error, apagamos por seguridad
-                await db.updateSystemSettings({ is_transcoder_active: false });
-                setIsRunning(false);
-                loopActive.current = false;
+                // Reintento tras error
+                setTimeout(loop, 10000);
             }
         };
         loop();
@@ -243,18 +251,26 @@ export default function AdminTranscoder() {
                                         <Play size={20} fill="currentColor"/> INICIAR MOTOR
                                     </button>
                                 ) : (
-                                    <button onClick={stopMotor} className="flex-1 md:flex-none px-10 py-4 bg-slate-800 hover:bg-red-900/20 text-slate-300 hover:text-red-400 border border-slate-700 hover:border-red-500/30 rounded-2xl font-black flex items-center justify-center gap-3 transition-all">
-                                        <Pause size={20} fill="currentColor"/> PAUSAR MOTOR
+                                    <button onClick={stopMotor} className="flex-1 md:flex-none px-10 py-4 bg-red-600 hover:bg-red-500 text-white rounded-2xl font-black flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all">
+                                        <Pause size={20} fill="currentColor"/> DETENER TODO
                                     </button>
                                 )}
                             </div>
                         </div>
 
+                        {/* Banner de Servidor Ocupado */}
+                        {isBusyServer && isRunning && (
+                            <div className="mb-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl flex items-center gap-3 text-amber-400 text-sm animate-pulse">
+                                <AlertCircle size={18}/>
+                                <span>El servidor está procesando un video. El motor esperará a que termine para seguir con el siguiente.</span>
+                            </div>
+                        )}
+
                         <div className="mb-10 bg-slate-950/50 p-6 rounded-3xl border border-slate-800">
                             <div className="flex justify-between items-end mb-3 px-1">
                                 <div className="flex flex-col">
-                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Estado de la Cola</span>
-                                    <span className="text-xs text-slate-400 font-bold">{stats.done} completados</span>
+                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Progreso de Conversión</span>
+                                    <span className="text-xs text-slate-400 font-bold">{stats.done} archivos listos</span>
                                 </div>
                                 <span className="text-3xl font-black text-white tabular-nums">{progressPercent}%</span>
                             </div>
@@ -283,7 +299,7 @@ export default function AdminTranscoder() {
                         </div>
 
                         <div className="space-y-3">
-                            <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] flex items-center gap-2 px-2"><Terminal size={14}/> Log de Eventos</span>
+                            <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] flex items-center gap-2 px-2"><Terminal size={14}/> Consola de Eventos</span>
                             <div className="bg-black/95 rounded-2xl p-5 font-mono text-[11px] h-40 overflow-y-auto space-y-2 border border-slate-800/50 shadow-inner scrollbar-hide">
                                 {log.map((line, i) => (
                                     <div key={i} className={`flex gap-3 ${line.includes('Error') ? 'text-red-400' : 'text-slate-400'}`}>
@@ -291,6 +307,7 @@ export default function AdminTranscoder() {
                                         <span className="leading-relaxed">{line}</span>
                                     </div>
                                 ))}
+                                {log.length === 0 && <div className="text-slate-700 italic">Esperando actividad...</div>}
                             </div>
                         </div>
                     </div>
@@ -298,8 +315,8 @@ export default function AdminTranscoder() {
                     <div className="bg-indigo-600/5 border border-indigo-500/20 p-6 rounded-3xl flex items-center gap-4">
                         <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400"><History size={24}/></div>
                         <div>
-                            <h4 className="text-white font-bold text-sm">Prevención de Saturación</h4>
-                            <p className="text-xs text-slate-400 leading-relaxed">El motor usa semáforos en base de datos. Solo un video se procesa a la vez independientemente de cuántas pestañas tengas abiertas.</p>
+                            <h4 className="text-white font-bold text-sm">Control Anti-Saturación NAS</h4>
+                            <p className="text-xs text-slate-400 leading-relaxed">El motor detecta automáticamente si el servidor está trabajando. Al pulsar "DETENER TODO" se liberan los recursos del CPU inmediatamente.</p>
                         </div>
                     </div>
                 </div>
