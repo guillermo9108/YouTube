@@ -12,22 +12,18 @@ interface ShortItemProps {
   isActive: boolean;
   shouldLoad: boolean; // TRUE only for current, prev, next
   preload: "auto" | "none" | "metadata";
-  hasFullAccess: boolean; // NEW: Passed from parent to optimize preloading
+  hasFullAccess: boolean; 
 }
 
-// MEMOIZED COMPONENT: This stops the entire list from re-rendering when you scroll 1px
-const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAccess }: ShortItemProps) => {
+const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: ShortItemProps) => {
   const { user, refreshUser } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   
-  // State
-  // Optimization: If user has global access, start as unlocked to allow immediate preloading
   const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   
-  // Social State
   const [interaction, setInteraction] = useState<UserInteraction | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [showComments, setShowComments] = useState(false);
@@ -35,17 +31,12 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
   const [likeCount, setLikeCount] = useState(video.likes);
   const [isSubscribed, setIsSubscribed] = useState(false);
 
-  // Load Interaction Data only when item is close to viewport
   useEffect(() => {
     if (user && shouldLoad) {
       db.getInteraction(user.id, video.id).then(setInteraction);
-      
-      // If not already unlocked by VIP/Admin prop, check specific purchase
       if (!hasFullAccess) {
           db.hasPurchased(user.id, video.id).then(setIsUnlocked);
       }
-
-      // Lazy load comments and sub status
       if (isActive) {
           db.getComments(video.id).then(setComments);
           db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed).catch(() => setIsSubscribed(false));
@@ -53,21 +44,17 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
     }
   }, [user, video.id, video.creatorId, shouldLoad, isActive, hasFullAccess]);
 
-  // --- AUTO PURCHASE LOGIC ---
   useEffect(() => {
-      // Only run if active, not unlocked, not currently purchasing, and user exists
       if (isActive && !isUnlocked && !purchasing && user && video.price > 0) {
           const price = Number(video.price);
           const limit = Number(user.autoPurchaseLimit);
           const balance = Number(user.balance);
-
-          // Check limits and balance
           if (price <= limit && balance >= price) {
               setPurchasing(true);
               db.purchaseVideo(user.id, video.id)
                   .then(() => {
                       setIsUnlocked(true);
-                      refreshUser(); // Update context balance
+                      refreshUser(); 
                   })
                   .catch(e => console.error("Auto-buy failed", e))
                   .finally(() => setPurchasing(false));
@@ -75,46 +62,38 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
       }
   }, [isActive, isUnlocked, purchasing, user, video.price, video.id]);
 
-  // Handle Play/Pause & Cleanup
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
 
-    if (isActive) {
-        // Active Slide
-        if (isUnlocked) {
-            const playPromise = el.play();
-            if (playPromise !== undefined) {
-                playPromise
-                .then(() => {
-                    setIsMuted(el.muted);
-                    setIsBuffering(false);
-                })
-                .catch(() => {
-                    // Autoplay blocked, mute and retry
-                    el.muted = true;
-                    setIsMuted(true);
-                    el.play().catch(() => {});
-                });
-            }
+    if (isActive && isUnlocked) {
+        const playPromise = el.play();
+        if (playPromise !== undefined) {
+            playPromise
+            .then(() => {
+                setIsMuted(el.muted);
+                setIsBuffering(false);
+            })
+            .catch(() => {
+                el.muted = true;
+                setIsMuted(true);
+                el.play().catch(() => {});
+            });
         }
     } else {
-        // Inactive Slide
         el.pause();
-        el.currentTime = 0; // Reset to start
+        el.currentTime = 0; 
     }
     
-    // Strict Cleanup for MEMORY, but loosely for DOM
     return () => {
         if (!shouldLoad && el) {
             el.pause();
-            el.removeAttribute('src'); // Force drop buffer
+            el.removeAttribute('src'); 
             el.load();
         }
     };
   }, [isActive, isUnlocked, shouldLoad]);
 
-  // Actions
   const handlePurchase = async () => {
     if (!user) return;
     setPurchasing(true);
@@ -165,6 +144,7 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
     }
   };
 
+  // Fixed the missing 'React' namespace error by ensuring React is imported
   const postComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !newComment.trim()) return;
@@ -173,7 +153,6 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
     setNewComment('');
   };
 
-  // If not in window, render placeholder to keep scroll height correct but save memory
   if (!shouldLoad) {
       return (
           <div className="w-full h-full snap-start snap-always shrink-0 bg-black flex items-center justify-center relative">
@@ -183,33 +162,26 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
       );
   }
 
-  // Ensure we rely on the stream proxy for local files to avoid browser security blocks
-  const isLocal = Boolean(video.isLocal) || (video as any).isLocal === 1 || (video as any).isLocal === "1";
-  const videoSrc = (isLocal && video.videoUrl && !video.videoUrl.includes('action=stream')) 
-        ? `api/index.php?action=stream&id=${video.id}` 
-        : video.videoUrl;
-
   return (
     <div className="relative w-full h-[100dvh] md:h-full snap-start snap-always shrink-0 flex items-center justify-center bg-black overflow-hidden video-container">
-      
-      {/* Video Layer */}
       <div className="absolute inset-0 z-0 bg-black">
         {isUnlocked ? (
           <>
             <video
                 ref={videoRef}
-                src={videoSrc}
+                src={video.videoUrl}
                 poster={video.thumbnailUrl}
                 className="w-full h-full object-cover"
                 loop
                 playsInline
+                autoPlay={isActive}
                 preload={preload}
                 muted={isMuted}
                 onClick={toggleMute}
                 onWaiting={() => setIsBuffering(true)}
                 onPlaying={() => setIsBuffering(false)}
                 crossOrigin="anonymous"
-                onTimeUpdate={(e: React.SyntheticEvent<HTMLVideoElement>) => { 
+                onTimeUpdate={(e) => { 
                     if (e.currentTarget.currentTime / e.currentTarget.duration > 0.30 && interaction && !interaction.isWatched && user) { 
                         db.markWatched(user.id, video.id); 
                         setInteraction({...interaction, isWatched: true}); 
@@ -237,15 +209,8 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
                             <div className="text-xs uppercase font-bold text-amber-200 tracking-widest mb-6">Saldo Required</div>
                         </div>
                     )}
-                    
                     {!purchasing && (
-                        <button 
-                        onClick={handlePurchase}
-                        disabled={purchasing}
-                        className="w-full bg-white text-black font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-xl"
-                        >
-                            Unlock Now
-                        </button>
+                        <button onClick={handlePurchase} className="w-full bg-white text-black font-bold py-3 px-8 rounded-full flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-xl">Unlock Now</button>
                     )}
                  </div>
               </div>
@@ -255,22 +220,16 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
       
       <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/90 pointer-events-none z-10" />
 
-      {/* Controls */}
       {isUnlocked && (
         <button onClick={toggleMute} className="absolute top-16 right-4 z-30 bg-black/40 backdrop-blur-md p-2 rounded-full text-white hover:bg-black/60 transition-colors">
           {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
         </button>
       )}
 
-      {/* Side Actions */}
       <div className="absolute right-2 bottom-20 z-30 flex flex-col items-center gap-5 pb-safe">
         <Link to={`/channel/${video.creatorId}`} className="relative group mb-2">
             <div className="w-12 h-12 rounded-full border-2 border-white p-0.5 overflow-hidden bg-black transition-transform active:scale-90 shadow-lg">
-                {video.creatorAvatarUrl ? (
-                    <img src={video.creatorAvatarUrl} className="w-full h-full rounded-full object-cover" />
-                ) : (
-                    <div className="w-full h-full rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white">{video.creatorName[0]}</div>
-                )}
+                {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full rounded-full object-cover" /> : <div className="w-full h-full rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white">{video.creatorName[0]}</div>}
             </div>
             {!isSubscribed && (
                 <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-600 text-white rounded-full p-0.5 border border-black shadow-sm transform scale-110 cursor-pointer" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSubscribe(); }}>
@@ -308,21 +267,17 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
         </div>
       </div>
 
-      {/* Metadata */}
       <div className="absolute bottom-4 left-3 right-16 z-20 text-white flex flex-col items-start text-left pointer-events-none pb-safe">
          <div className="pointer-events-auto w-full">
              <div className="flex items-center gap-3 mb-2">
                 <Link to={`/channel/${video.creatorId}`} className="font-bold text-base md:text-lg drop-shadow-md hover:underline">@{video.creatorName}</Link>
-                <button onClick={handleSubscribe} className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${isSubscribed ? 'bg-transparent text-white/80 border-white/40' : 'bg-red-600 text-white border-transparent'}`}>
-                   {isSubscribed ? 'Subscribed' : 'Subscribe'}
-                </button>
+                <button onClick={handleSubscribe} className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${isSubscribed ? 'bg-transparent text-white/80 border-white/40' : 'bg-red-600 text-white border-transparent'}`}>{isSubscribed ? 'Subscribed' : 'Subscribe'}</button>
              </div>
              <h2 className="text-sm md:text-base font-semibold leading-tight mb-1 drop-shadow-md">{video.title}</h2>
              <p className="text-xs md:text-sm text-slate-100 line-clamp-2 opacity-90 drop-shadow-sm font-medium pr-4">{video.description}</p>
          </div>
       </div>
 
-      {/* Comments Drawer */}
       {showComments && (
         <div className="fixed inset-0 z-[100] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="w-full bg-slate-900 rounded-t-2xl h-[65%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom duration-300" onClick={(e) => e.stopPropagation()}>
@@ -354,17 +309,9 @@ const ShortItem = React.memo(({ video, isActive, shouldLoad, preload, hasFullAcc
            <div className="absolute inset-0 -z-10" onClick={() => setShowComments(false)}></div>
         </div>
       )}
-
     </div>
   );
-}, (prev, next) => {
-    return (
-        prev.isActive === next.isActive &&
-        prev.shouldLoad === next.shouldLoad &&
-        prev.video.id === next.video.id &&
-        prev.hasFullAccess === next.hasFullAccess
-    );
-});
+};
 
 export default function Shorts() {
   const { user } = useAuth();
@@ -372,9 +319,7 @@ export default function Shorts() {
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // Initialize
   useEffect(() => {
-    // Attempt to get cached videos first for instant load
     const cached = localStorage.getItem('sp_cache_get_videos');
     if (cached) {
         try {
@@ -392,7 +337,6 @@ export default function Shorts() {
     });
   }, []);
 
-  // Optimized Intersection Observer for Slide Detection
   useEffect(() => {
     const container = containerRef.current;
     if (!container || videos.length === 0) return;
@@ -408,7 +352,7 @@ export default function Shorts() {
         });
     }, {
         root: container,
-        threshold: 0.55 // Threshold to trigger slide change
+        threshold: 0.5
     });
 
     Array.from(container.children).forEach((child) => observer.observe(child as Element));
@@ -416,7 +360,6 @@ export default function Shorts() {
     return () => observer.disconnect();
   }, [videos]);
 
-  // Determine if current user has full access (Admin or Active VIP)
   const hasFullAccess = useMemo(() => {
       if (!user) return false;
       const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
@@ -437,16 +380,11 @@ export default function Shorts() {
       </div>
 
       {videos.map((video, idx) => {
-          // Window Logic - Widened window for smoother scroll experience
           const distance = Math.abs(idx - activeIndex);
           const shouldLoad = distance <= 2; 
-          
           const isActive = idx === activeIndex;
           const isNext = idx === activeIndex + 1;
-
-          // VIP Optimization: Preload the active video AND the next video if user has full access.
-          // This ensures that when the user swipes up, the next video plays instantly.
-          const preloadStrategy = (isActive || (hasFullAccess && isNext)) ? "auto" : "none";
+          const preloadStrategy = isActive ? "auto" : (isNext ? "metadata" : "none");
 
           return (
             <div key={video.id} data-index={idx} className="w-full h-full snap-start snap-always">

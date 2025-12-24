@@ -5,7 +5,9 @@
  * Crucial para que FFmpeg pueda encontrar los archivos en el disco del NAS.
  */
 function resolve_video_path($pathOrUrl) {
-    // 1. Si es una ruta absoluta existente (típico de escaneos en NAS)
+    if (!$pathOrUrl) return false;
+
+    // 1. Si es una ruta absoluta existente
     if (file_exists($pathOrUrl)) {
         return realpath($pathOrUrl);
     }
@@ -16,14 +18,14 @@ function resolve_video_path($pathOrUrl) {
         $cleanPath = substr($cleanPath, 4);
     }
 
-    // 3. Buscar relativo al directorio actual (donde vive functions_utils.php)
+    // 3. Buscar relativo al directorio actual
     if (file_exists($cleanPath)) {
         return realpath($cleanPath);
     }
 
     // 4. Intentar reconstruir si es una ruta de uploads
     if (strpos($cleanPath, 'uploads/') !== false) {
-        $baseDir = dirname(__DIR__); // Asumiendo que estamos en /api/
+        $baseDir = dirname(__DIR__); 
         $fullPath = $baseDir . DIRECTORY_SEPARATOR . $cleanPath;
         if (file_exists($fullPath)) {
             return realpath($fullPath);
@@ -121,14 +123,29 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     ];
 }
 
-function streamVideo($filePath, $pdo) {
+/**
+ * Streamer robusto que soporta Range Requests y resolución de IDs.
+ */
+function streamVideo($id, $pdo) {
     while (ob_get_level()) ob_end_clean();
-    
-    $realPath = rawurldecode($filePath);
-    if (strpos($realPath, 'api/') === 0) $realPath = substr($realPath, 4);
 
-    if (!file_exists($realPath)) {
+    // 1. Buscar el video por ID para obtener su URL real
+    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $videoUrl = $stmt->fetchColumn();
+
+    if (!$videoUrl) {
         header("HTTP/1.0 404 Not Found");
+        echo "Video no encontrado en base de datos.";
+        exit;
+    }
+
+    // 2. Resolver la ruta absoluta en el servidor
+    $realPath = resolve_video_path($videoUrl);
+
+    if (!$realPath || !file_exists($realPath)) {
+        header("HTTP/1.0 404 Not Found");
+        echo "Archivo fisico no encontrado: " . $videoUrl;
         exit;
     }
     
@@ -137,6 +154,7 @@ function streamVideo($filePath, $pdo) {
     
     header('Content-Type: video/mp4');
     header('Accept-Ranges: bytes');
+    header('Cache-Control: public, max-age=3600');
 
     if (isset($_SERVER['HTTP_RANGE'])) {
         preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
@@ -150,8 +168,9 @@ function streamVideo($filePath, $pdo) {
         header("Content-Length: $fileSize");
     }
 
+    // Buffer optimizado de 128KB por fragmento
     while (!feof($fp)) {
-        echo fread($fp, 1024 * 128);
+        echo fread($fp, 131072);
         flush();
         if (connection_aborted()) break;
     }
