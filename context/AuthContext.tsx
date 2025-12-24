@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User } from '../types';
 import { db } from '../services/db';
+import { useToast } from './ToastContext';
 
 interface AuthContextType {
   user: User | null;
@@ -23,34 +24,47 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const heartbeatRef = useRef<number | null>(null);
+  const toast = useToast();
   
+  const logout = () => {
+    if (user) {
+        try { db.logout(user.id).catch(() => {}); } catch(e){}
+    }
+    setUser(null);
+    localStorage.removeItem('sp_current_user_id');
+    localStorage.removeItem('sp_session_token');
+    localStorage.removeItem('sp_offline_user');
+    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+    window.dispatchEvent(new Event('sp_logout'));
+  };
+
   useEffect(() => {
+    // ESCUCHADOR GLOBAL DE EXPIRACIÓN (Opción B)
+    const handleExpired = () => {
+        toast.warning("Sesión cerrada: Has iniciado sesión en otro dispositivo.");
+        logout();
+    };
+    window.addEventListener('sp_session_expired', handleExpired);
+
     const savedId = localStorage.getItem('sp_current_user_id');
     const savedToken = localStorage.getItem('sp_session_token');
 
     const initAuth = async () => {
         if (savedId && savedToken) {
             try {
-                // Try network first
                 const u = await db.getUser(savedId);
                 if (u) {
                     u.sessionToken = savedToken;
                     u.balance = Number(u.balance);
                     setUser(u);
-                    db.saveOfflineUser(u); // Backup for offline
+                    db.saveOfflineUser(u);
                 } else {
-                    // Invalid user from server (e.g. deleted)
                     logout();
                 }
             } catch (err) {
-                console.warn("Network auth check failed, trying offline backup:", err);
-                // Fallback to offline user
                 const offlineUser = db.getOfflineUser();
                 if (offlineUser && offlineUser.id === savedId) {
                     setUser(offlineUser);
-                } else {
-                    // Do not logout immediately on network error, keep loading state or retry?
-                    // Better to let them be "logged in" visually but with stale data if no backup
                 }
             } finally {
                 setIsLoading(false);
@@ -61,36 +75,21 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     };
 
     initAuth();
+    return () => window.removeEventListener('sp_session_expired', handleExpired);
   }, []);
 
-  // Heartbeat Logic - Tolerant to network failures
   useEffect(() => {
     if (user && user.sessionToken) {
-        // Update offline cache on every user state change
         db.saveOfflineUser(user);
 
         if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
         
-        // Initial beat
-        db.heartbeat(user.id, user.sessionToken);
-
-        // Beat every 30 seconds
+        // HEARTBEAT (Netflix-Style Check)
+        // Cada 30 segundos verificamos si este dispositivo sigue siendo el activo.
         heartbeatRef.current = window.setInterval(async () => {
-            if (user && user.sessionToken) {
-                try {
-                    const isValid = await db.heartbeat(user.id, user.sessionToken);
-                    if (!isValid) {
-                        // Only logout if server explicitly says session is invalid (and we could reach it)
-                        // Note: db.heartbeat catches errors and returns false only on explicit failure or logic error.
-                        // We need to ensure db.heartbeat doesn't return false on NETWORK ERROR.
-                        // Implemented in db.ts to handle this, but double check logic here if needed.
-                        // console.warn("Session invalid.");
-                        // logout(); 
-                        // NOTE: To be safe in offline mode, we disable auto-logout on heartbeat fail for now
-                    }
-                } catch (e) {
-                    // Network error - ignore, keep logged in
-                }
+            if (user) {
+                const isValid = await db.heartbeat(user.id);
+                // Si isValid es false, el interceptor de db.ts ya habrá disparado 'sp_session_expired'
             }
         }, 30000);
     } else {
@@ -115,7 +114,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
                 setUser(refreshed);
                 db.saveOfflineUser(refreshed);
             }
-        }).catch(e => console.log("Refresh failed (offline)"));
+        }).catch(() => {});
      }
   };
 
@@ -145,18 +144,6 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     } finally {
         setIsLoading(false);
     }
-  };
-
-  const logout = () => {
-    if (user) {
-        try { db.logout(user.id).catch(console.error); } catch(e){}
-    }
-    setUser(null);
-    localStorage.removeItem('sp_current_user_id');
-    localStorage.removeItem('sp_session_token');
-    localStorage.removeItem('sp_offline_user'); // Clear offline cache on explicit logout
-    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
-    window.dispatchEvent(new Event('sp_logout'));
   };
 
   return (

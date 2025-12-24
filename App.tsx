@@ -1,4 +1,3 @@
-
 import React, { Suspense, useState, useEffect } from 'react';
 // Page Imports
 import Login from './components/pages/Login';
@@ -6,7 +5,6 @@ import Home from './components/pages/Home';
 import Watch from './components/pages/Watch';
 import Upload from './components/pages/Upload';
 import Profile from './components/pages/Profile';
-// Correct import path for Admin component (located in subfolder)
 import Admin from './components/pages/admin/Admin';
 import Shorts from './components/pages/Shorts';
 import Setup from './components/pages/Setup';
@@ -71,7 +69,6 @@ const ProtectedRoute = ({ children }: { children?: React.ReactNode }) => {
 const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
   if (isLoading) return null;
-  // Case-insensitive check for ADMIN role with strict trimming
   if (!user || user.role?.trim().toUpperCase() !== 'ADMIN') return <Navigate to="/" replace />;
   return <>{children}</>;
 };
@@ -89,7 +86,6 @@ const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
          setCheckDone(true);
       })
       .catch(() => {
-         // En caso de error crítico, asumimos que no está instalado para mostrar el Setup
          setNeedsSetup(true);
          setCheckDone(true);
       });
@@ -107,8 +103,8 @@ const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ToastProvider>
+    <ToastProvider>
+      <AuthProvider>
         <UploadProvider>
             <ServerTaskProvider>
                 <CartProvider>
@@ -133,16 +129,12 @@ export default function App() {
                                 <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
-                                
-                                {/* Marketplace Routes - Specific routes MUST come before generic :id routes */}
                                 <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
-                                
                                 <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
-                                
                                 <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
                             </Route>
 
@@ -154,7 +146,7 @@ export default function App() {
                 </CartProvider>
             </ServerTaskProvider>
         </UploadProvider>
-      </ToastProvider>
-    </AuthProvider>
+      </AuthProvider>
+    </ToastProvider>
   );
 }

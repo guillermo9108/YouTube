@@ -2,73 +2,108 @@
 function auth_login($pdo, $input) {
     $user = $input['username'] ?? '';
     $pass = $input['password'] ?? '';
+    $deviceId = $input['deviceId'] ?? 'unknown';
+
     $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
     $stmt->execute([$user]);
     $u = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($u && password_verify($pass, $u['password_hash'])) {
+        // OPCIÓN B (Dinámica): Generamos un nuevo token único para esta sesión.
+        // Esto invalida automáticamente cualquier sesión previa en otro dispositivo.
         $token = bin2hex(random_bytes(32));
-        $pdo->prepare("UPDATE users SET currentSessionId = ?, lastActive = ? WHERE id = ?")->execute([$token, time(), $u['id']]);
+        
+        $pdo->prepare("UPDATE users SET currentSessionId = ?, lastActive = ?, lastDeviceId = ? WHERE id = ?")
+            ->execute([$token, time(), $deviceId, $u['id']]);
+        
         $u['sessionToken'] = $token;
+        $u['lastDeviceId'] = $deviceId;
+        
         unset($u['password_hash']);
         $u['watchLater'] = json_decode($u['watchLater'] ?? '[]', true);
         $u['defaultPrices'] = json_decode($u['defaultPrices'] ?? '{}', true);
         $u['shippingDetails'] = json_decode($u['shippingDetails'] ?? '{}', true);
         $u['avatarUrl'] = fix_url($u['avatarUrl']);
+        
         respond(true, $u);
     }
     respond(false, null, 'Credenciales incorrectas');
 }
 
 function auth_logout($pdo, $input) {
-    if (isset($input['userId'])) $pdo->prepare("UPDATE users SET currentSessionId = NULL WHERE id = ?")->execute([$input['userId']]);
+    if (isset($input['userId'])) {
+        $pdo->prepare("UPDATE users SET currentSessionId = NULL WHERE id = ?")->execute([$input['userId']]);
+    }
     respond(true);
 }
 
 function auth_heartbeat($pdo, $input) {
     $uid = $input['userId'] ?? null;
-    $headers = getallheaders();
-    $auth = $headers['Authorization'] ?? $headers['authorization'] ?? '';
-    $token = trim(str_replace('Bearer', '', $auth));
-
-    if (!$uid || !$token) respond(false, null, 'Sesión inválida (Missing Params)');
-
-    $stmt = $pdo->prepare("SELECT currentSessionId FROM users WHERE id = ?");
-    $stmt->execute([$uid]);
-    $sid = $stmt->fetchColumn();
     
-    if ($sid === $token) {
-        $pdo->prepare("UPDATE users SET lastActive = ? WHERE id = ?")->execute([time(), $uid]);
-        respond(true);
+    // Extraer token de las cabeceras Authorization: Bearer <token>
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    $token = trim(str_replace('Bearer', '', $authHeader));
+
+    if (!$uid || !$token) {
+        http_response_code(401);
+        respond(false, null, 'Sesión no proporcionada');
     }
+
+    $stmt = $pdo->prepare("SELECT currentSessionId, lastDeviceId FROM users WHERE id = ?");
+    $stmt->execute([$uid]);
+    $session = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    // VALIDACIÓN CRÍTICA:
+    // Si el token enviado NO coincide con el almacenado en la DB, 
+    // significa que otro dispositivo ha iniciado sesión después.
+    if ($session && $session['currentSessionId'] === $token) {
+        $pdo->prepare("UPDATE users SET lastActive = ? WHERE id = ?")->execute([time(), $uid]);
+        respond(true, ['deviceId' => $session['lastDeviceId']]);
+    }
+
+    // Si llegamos aquí, la sesión ha sido revocada.
     http_response_code(401);
-    respond(false, null, 'Session invalid');
+    respond(false, null, 'Sesión cerrada: Se ha iniciado sesión en otro dispositivo.');
 }
 
 function auth_register($pdo, $input) {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
+    $deviceId = $_POST['deviceId'] ?? 'unknown';
+
     if (!$username || !$password) respond(false, null, 'Campos incompletos');
+    
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
     $stmt->execute([$username]);
-    if ($stmt->fetchColumn() > 0) respond(false, null, 'Usuario ya existe');
+    if ($stmt->fetchColumn() > 0) respond(false, null, 'El nombre de usuario ya está en uso');
 
     $id = 'u_' . uniqid();
     $hash = password_hash($password, PASSWORD_DEFAULT);
     $avatarUrl = null;
+    
     if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
         $ext = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION));
         $name = "av_{$id}.{$ext}";
+        if (!is_dir(AVATAR_DIR)) mkdir(AVATAR_DIR, 0777, true);
         move_uploaded_file($_FILES['avatar']['tmp_name'], AVATAR_DIR . $name);
         $avatarUrl = AVATAR_DIR . $name;
     }
 
     $token = bin2hex(random_bytes(32));
     $ts = time();
-    $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, avatarUrl, currentSessionId, lastActive, watchLater) VALUES (?, ?, ?, 'USER', 0, ?, ?, ?, '[]')")
-        ->execute([$id, $username, $hash, $avatarUrl, $token, $ts]);
+    $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, avatarUrl, currentSessionId, lastActive, lastDeviceId, watchLater) VALUES (?, ?, ?, 'USER', 0, ?, ?, ?, ?, '[]')")
+        ->execute([$id, $username, $hash, $avatarUrl, $token, $ts, $deviceId]);
 
-    respond(true, ['id' => $id, 'username' => $username, 'role' => 'USER', 'balance' => 0, 'avatarUrl' => fix_url($avatarUrl), 'sessionToken' => $token]);
+    respond(true, [
+        'id' => $id, 
+        'username' => $username, 
+        'role' => 'USER', 
+        'balance' => 0, 
+        'avatarUrl' => fix_url($avatarUrl), 
+        'sessionToken' => $token,
+        'lastDeviceId' => $deviceId
+    ]);
 }
 
 function auth_get_user($pdo, $id) {
@@ -76,23 +111,26 @@ function auth_get_user($pdo, $id) {
     $stmt->execute([$id]);
     $u = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($u) {
-        unset($u['password_hash'], $u['currentSessionId']);
+        unset($u['password_hash']);
+        // No enviamos el currentSessionId por seguridad, solo lo usamos para validar
         $u['watchLater'] = json_decode($u['watchLater'] ?? '[]', true);
         $u['defaultPrices'] = json_decode($u['defaultPrices'] ?? '{}', true);
         $u['shippingDetails'] = json_decode($u['shippingDetails'] ?? '{}', true);
         $u['avatarUrl'] = fix_url($u['avatarUrl']);
         respond(true, $u);
     }
-    respond(false, null, 'No encontrado');
+    respond(false, null, 'Usuario no encontrado');
 }
 
 function auth_get_all_users($pdo) {
-    $stmt = $pdo->query("SELECT id, username, role, balance, avatarUrl, lastActive FROM users ORDER BY lastActive DESC");
+    $stmt = $pdo->query("SELECT id, username, role, balance, avatarUrl, lastActive, lastDeviceId FROM users ORDER BY lastActive DESC");
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($users as &$u) $u['avatarUrl'] = fix_url($u['avatarUrl']);
+    foreach ($users as &$u) {
+        $u['avatarUrl'] = fix_url($u['avatarUrl']);
+    }
     respond(true, $users);
 }
-// Stub para evitar error
+
 function auth_update_user($pdo, $input) { respond(true); }
 function auth_update_avatar($pdo, $input) { respond(true); }
 function auth_change_password($pdo, $input) { respond(true); }

@@ -1,9 +1,9 @@
+
 export enum UserRole {
   USER = 'USER',
   ADMIN = 'ADMIN'
 }
 
-// Categorías limpias. El administrador agregará las suyas.
 export enum VideoCategory {
   GENERAL = 'GENERAL',
   OTHER = 'OTHER'
@@ -13,9 +13,9 @@ export interface VipPlan {
     id: string;
     name: string;
     price: number;
-    type: 'ACCESS' | 'BALANCE'; // ACCESS = Dias ilimitados, BALANCE = Saldo extra
-    durationDays?: number; // Solo para ACCESS
-    bonusPercent?: number; // Solo para BALANCE
+    type: 'ACCESS' | 'BALANCE';
+    durationDays?: number;
+    bonusPercent?: number;
     description?: string;
     highlight?: boolean;
 }
@@ -27,7 +27,7 @@ export interface VipRequest {
     planSnapshot: VipPlan;
     status: 'PENDING' | 'APPROVED' | 'REJECTED';
     createdAt: number;
-    paymentRef?: string; // ID de transacción externa
+    paymentRef?: string;
 }
 
 export interface MarketplaceItem {
@@ -35,9 +35,9 @@ export interface MarketplaceItem {
   title: string;
   description: string;
   price: number;
-  originalPrice?: number; // Para mostrar tachado
-  discountPercent?: number; // % de descuento
-  stock: number; // Cantidad disponible
+  originalPrice?: number;
+  discountPercent?: number;
+  stock: number;
   images: string[];
   sellerId: string;
   sellerName: string;
@@ -46,7 +46,7 @@ export interface MarketplaceItem {
   condition: 'NUEVO' | 'USADO' | 'REACONDICIONADO';
   createdAt: number;
   status: 'ACTIVO' | 'VENDIDO' | 'ELIMINADO' | 'AGOTADO';
-  rating?: number; // Promedio de estrellas
+  rating?: number;
   reviewCount?: number;
 }
 
@@ -56,7 +56,7 @@ export interface MarketplaceReview {
   userId: string;
   username: string;
   userAvatarUrl?: string;
-  rating: number; // 1-5
+  rating: number;
   comment: string;
   timestamp: number;
 }
@@ -77,7 +77,8 @@ export interface User {
   sessionToken?: string; 
   avatarUrl?: string; 
   lastActive?: number;
-  vipExpiry?: number; // Timestamp de expiración VIP (0 o null si no es VIP)
+  lastDeviceId?: string;
+  vipExpiry?: number;
   defaultPrices?: Record<string, number>; 
   shippingDetails?: {
       fullName: string;
@@ -107,9 +108,11 @@ export interface Video {
   fileHash?: string; 
   creatorAvatarUrl?: string;
   isLocal?: boolean; 
-  // Propiedades para mantenimiento y almacenamiento
+  // Mantenimiento y Transcodificación
   reason?: string;
   size_fmt?: string;
+  transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'DONE' | 'FAILED';
+  needs_transcode?: boolean;
 }
 
 export interface Transaction {
@@ -119,7 +122,7 @@ export interface Transaction {
   videoId: string | null; 
   marketplaceItemId?: string; 
   amount: number;
-  adminFee?: number; // Nueva: Comisión cobrada
+  adminFee?: number;
   timestamp: number;
   type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP';
   shippingData?: {
@@ -195,46 +198,25 @@ export interface SystemSettings {
   maxResolution: number;     
   pexelsKey: string;
   pixabayKey: string;
-  geminiKey: string; // NEW: Google AI
+  geminiKey: string;
   ytDlpPath: string;    
   enableYoutube: boolean; 
   categoryPrices: Record<string, number>; 
   customCategories: string[]; 
   localLibraryPath: string; 
   ftpSettings?: FtpSettings;
-  videoCommission: number; // Percentage (0-100)
-  marketCommission: number; // Percentage (0-100)
+  videoCommission: number;
+  marketCommission: number;
   vipPlans?: VipPlan[];
   paymentInstructions?: string;
-  // Gateways
   tropipayClientId?: string;
   tropipayClientSecret?: string;
-  currencyConversion?: number; // 1 USD/EUR = X Saldo
-  proxyUrl?: string; // NEW: For restricted regions
-  // Added to support the Librarian feature in AdminLocalFiles.tsx
+  currencyConversion?: number;
+  proxyUrl?: string;
   paqueteMapper?: Record<string, string>;
-  // FFmpeg Transcode Settings
   autoTranscode?: boolean;
   transcodePreset?: string;
-  // Fix: Added is_transcoder_active to SystemSettings to match usage in AdminTranscoder.tsx
   is_transcoder_active?: boolean;
-}
-
-export interface OrganizeResult {
-  processed: number;
-  renamed: number;
-  categorized: number;
-  details: string[];
-  remaining?: number;
-}
-
-export interface SmartCleanerResult {
-  preview: Video[];
-  stats: {
-    totalVideos: number;
-    videosToDelete: number;
-    spaceReclaimed: string; 
-  }
 }
 
 export interface Notification {
@@ -283,4 +265,18 @@ export interface FtpFile {
     type: 'dir' | 'file';
     size: string;
     path: string;
+}
+
+// Fixed missing export for OrganizeResult interface
+export interface OrganizeResult {
+    processed: number;
+    remaining: number;
+}
+
+// Fixed missing export for SmartCleanerResult interface
+export interface SmartCleanerResult {
+    preview: Video[];
+    stats: {
+        spaceReclaimed: string;
+    };
 }
