@@ -32,86 +32,88 @@ function video_get_one($pdo, $id) {
 }
 
 /**
- * ESCÁNER LOCAL ULTRA-SILENCIOSO V10
- * Diseñado para no emitir NADA a la salida estándar y registrar todo en debug_log.txt.
+ * SUBIDA MANUAL DE VIDEOS
+ * Restaurada para v1.8.0
  */
+function video_upload($pdo, $post, $files) {
+    $id = 'v_' . uniqid();
+    $title = $post['title'] ?? 'Sin título';
+    $desc = $post['description'] ?? '';
+    $price = floatval($post['price'] ?? 0);
+    $cat = $post['category'] ?? 'GENERAL';
+    $dur = intval($post['duration'] ?? 0);
+    $uid = $post['userId'];
+
+    $videoUrl = null;
+    $thumbUrl = 'api/uploads/thumbnails/default.jpg';
+
+    if (isset($files['video']) && $files['video']['error'] === UPLOAD_ERR_OK) {
+        $vDir = 'uploads/videos/';
+        if (!is_dir($vDir)) mkdir($vDir, 0777, true);
+        $ext = pathinfo($files['video']['name'], PATHINFO_EXTENSION);
+        $vPath = "{$vDir}{$id}.{$ext}";
+        if (move_uploaded_file($files['video']['tmp_name'], $vPath)) {
+            $videoUrl = "api/" . $vPath;
+        }
+    }
+
+    if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
+        $tDir = 'uploads/thumbnails/';
+        if (!is_dir($tDir)) mkdir($tDir, 0777, true);
+        $tPath = "{$tDir}{$id}.jpg";
+        if (move_uploaded_file($files['thumbnail']['tmp_name'], $tPath)) {
+            $thumbUrl = "api/" . $tPath;
+        }
+    }
+
+    if (!$videoUrl) respond(false, null, 'Fallo al mover video');
+
+    $sql = "INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)";
+    $pdo->prepare($sql)->execute([$id, $title, $desc, $price, $thumbUrl, $videoUrl, $uid, time(), $cat, $dur]);
+    
+    respond(true, ['id' => $id]);
+}
+
 function video_scan_local($pdo, $input) {
-    // Silencio absoluto
     while (ob_get_level() > 0) ob_end_clean();
     ob_start();
-
     try {
         set_time_limit(1200); 
         ini_set('memory_limit', '1024M');
-
         $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
-        if (!$rawPath || !is_dir($rawPath)) {
-            throw new Exception("Ruta inaccesible: " . ($rawPath ?: 'VACÍA'));
-        }
-
+        if (!$rawPath || !is_dir($rawPath)) throw new Exception("Ruta inaccesible");
         $rootPath = realpath($rawPath);
         $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
-        $addedCount = 0;
-        $totalScanned = 0;
+        $addedCount = 0; $totalScanned = 0;
         $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'flv'];
-        
-        // Carpetas que el NAS Synology/QNAP bloquea
-        $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store', 'System Volume Information', '$RECYCLE.BIN'];
-
+        $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store'];
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Local', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
-
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
         $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
-
         foreach ($iterator as $file) {
             try {
                 $pathName = $file->getPathname();
-                
-                foreach ($ignoreFolders as $ignore) {
-                    if (strpos($pathName, $ignore) !== false) continue 2;
-                }
-
+                foreach ($ignoreFolders as $ignore) if (strpos($pathName, $ignore) !== false) continue 2;
                 if (!$file->isFile()) continue;
-                
                 $ext = strtolower($file->getExtension());
                 if (!in_array($ext, $allowedExts)) continue;
-
                 $totalScanned++;
-                
-                // Normalización UTF-8 forzada para nombres de archivos con acentos/emojis
                 $fullPath = str_replace('\\', '/', $pathName);
                 $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'auto');
                 $fullPath = preg_replace('/[\x00-\x1F\x7F]/u', '', $fullPath); 
-                
                 $title = mb_convert_encoding(basename($fullPath), 'UTF-8', 'auto');
                 $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
-                
                 $vidId = 'loc_' . md5($fullPath); 
-
                 $insert->execute([$vidId, $title, $fullPath, $adminId, time()]);
                 if ($insert->rowCount() > 0) $addedCount++;
-
-                if ($addedCount >= 1000) break; // Lote máximo de seguridad
-
-            } catch (Exception $inner) { 
-                file_debug_log("SCANNER_FILE_ERROR", $inner->getMessage());
-                continue; 
-            }
+                if ($addedCount >= 1000) break;
+            } catch (Exception $inner) { continue; }
         }
-
-        // Limpieza final de buffer antes del respond()
         while (ob_get_level() > 0) ob_end_clean();
-
-        respond(true, [
-            'totalFound' => $totalScanned, 
-            'newToImport' => $addedCount,
-            'message' => "Escaneo completado. Se registraron $addedCount archivos nuevos."
-        ]);
-
+        respond(true, ['totalFound' => $totalScanned, 'newToImport' => $addedCount, 'message' => "Registrados $addedCount nuevos."]);
     } catch (Exception $e) {
-        file_debug_log("SCANNER_FATAL", $e->getMessage());
         while (ob_get_level() > 0) ob_end_clean();
-        respond(false, null, "Error motor escaneo: " . $e->getMessage());
+        respond(false, null, "Error escaneo: " . $e->getMessage());
     }
 }
 
@@ -131,8 +133,7 @@ function video_update_metadata($pdo, $post, $files) {
     if (!$id) respond(false, null, 'ID faltante');
     if (!$isSuccess) {
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, category = IF(processing_attempts >= 2, 'FAILED_METADATA', 'PENDING') WHERE id = ?")->execute([$id]);
-        respond(true, ['status' => 'error_logged']);
-        return;
+        respond(true, ['status' => 'error_logged']); return;
     }
     $sql = "UPDATE videos SET category = 'PROCESSING', duration = ?, processing_attempts = 0";
     $params = [$duration];
@@ -145,8 +146,7 @@ function video_update_metadata($pdo, $post, $files) {
             $params[] = "api/" . $thumbPath; 
         }
     }
-    $sql .= " WHERE id = ?";
-    $params[] = $id;
+    $sql .= " WHERE id = ?"; $params[] = $id;
     $pdo->prepare($sql)->execute($params);
     $settingsFull = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     if ($settingsFull) {
