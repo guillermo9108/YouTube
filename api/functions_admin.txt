@@ -72,8 +72,8 @@ function admin_repair_db($pdo) {
 }
 
 function admin_cleanup_stale_transcodes($pdo) {
-    // Si un video lleva más de 2 horas en PROCESSING, asumimos que el proceso murió por reinicio del server
-    $staleTime = time() - 7200;
+    // Si un video lleva más de 4 horas en PROCESSING, lo devolvemos a espera
+    $staleTime = time() - 14400;
     $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'PROCESSING' AND createdAt < ?")
         ->execute([$staleTime]);
 }
@@ -85,8 +85,8 @@ function admin_transcode_batch($pdo) {
     // 1. Verificar si ffmpeg está disponible
     exec("which ffmpeg", $ffmpegPath, $ffmpegCode);
     if ($ffmpegCode !== 0) {
-        file_debug_log("ERROR CRÍTICO", "ffmpeg no encontrado en el sistema. Verifica la instalación en el servidor.");
-        respond(false, null, "FFmpeg no instalado o no accesible.");
+        file_debug_log("ERROR CRÍTICO", "ffmpeg no encontrado.");
+        respond(false, null, "FFmpeg no instalado.");
     }
 
     // 2. Buscar video en espera (WAITING)
@@ -100,28 +100,31 @@ function admin_transcode_batch($pdo) {
     // 3. Resolver ruta física
     $sourcePath = resolve_video_path($video['videoUrl']);
     if (!$sourcePath || !file_exists($sourcePath)) {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no encontrado físicamente' WHERE id = ?")->execute([$video['id']]);
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no encontrado fisicamente' WHERE id = ?")->execute([$video['id']]);
         respond(false, null, "Archivo no encontrado: " . $video['videoUrl']);
     }
 
-    // 4. Marcar inicio real de procesamiento
+    // 4. Marcar inicio real
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', createdAt = ? WHERE id = ?")
         ->execute([time(), $video['id']]);
 
-    // Ruta para el archivo temporal de salida
-    $tempPath = $sourcePath . ".transcoding.tmp";
-    
-    // Limpiar cualquier residuo previo para evitar que ffmpeg se bloquee preguntando si sobrescribir
+    // Usar extensión .mp4.tmp para que FFmpeg sepa que el contenedor es MP4
+    $tempPath = $sourcePath . ".transcoded.mp4.tmp";
     if (file_exists($tempPath)) @unlink($tempPath);
 
-    $preset = 'superfast';
+    $preset = 'ultrafast';
     $stmtS = $pdo->query("SELECT transcodePreset FROM system_settings WHERE id = 1");
     $dbPreset = $stmtS->fetchColumn();
     if ($dbPreset) $preset = $dbPreset;
 
-    // Comando FFmpeg balanceado para PWA (H.264 + AAC + FastStart)
-    // El flag -y obliga a sobrescribir sin preguntar
-    $cmd = "ffmpeg -y -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath) . " 2>&1";
+    /**
+     * COMANDO MEJORADO:
+     * -f mp4: Fuerza el formato de salida a MP4 independientemente de la extensión.
+     * -movflags +faststart: Optimiza para reproducción web (PWA).
+     * -threads 0: Usa todo el CPU disponible.
+     * -pix_fmt yuv420p: Asegura compatibilidad con navegadores antiguos.
+     */
+    $cmd = "ffmpeg -y -threads 0 -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -ac 2 -movflags +faststart -f mp4 " . escapeshellarg($tempPath) . " 2>&1";
     
     file_debug_log("EJECUTANDO FFMPEG", ["video" => $video['title'], "cmd" => $cmd]);
     
@@ -130,8 +133,9 @@ function admin_transcode_batch($pdo) {
     exec($cmd, $output, $resultCode);
 
     if ($resultCode === 0 && file_exists($tempPath) && filesize($tempPath) > 0) {
-        // Éxito: Intercambiar archivos
         $backupPath = $sourcePath . ".old";
+        // Si el archivo original no es .mp4, querremos que el nuevo archivo sí lo sea en la base de datos
+        // Pero para no romper rutas del NAS, mantenemos el nombre original pero con contenido MP4
         if (@rename($sourcePath, $backupPath)) {
             if (@rename($tempPath, $sourcePath)) {
                 @unlink($backupPath);
@@ -139,24 +143,28 @@ function admin_transcode_batch($pdo) {
                 file_debug_log("CONVERSIÓN EXITOSA", $video['title']);
                 respond(true, ['processed' => 1, 'completed' => false, 'videoId' => $video['id']]);
             } else {
-                @rename($backupPath, $sourcePath); // Revertir si falló el rename final
+                @rename($backupPath, $sourcePath); 
             }
         }
     }
 
-    // Manejo de Error si no salió bien
+    // Manejo de Error real
     if (file_exists($tempPath)) @unlink($tempPath);
-    $errorMsg = "Error en FFmpeg (Code $resultCode)";
+    
+    // Capturar el error real de la salida de FFmpeg para el admin
+    $lastLine = count($output) > 0 ? end($output) : "Unknown Error";
+    $errorMsg = "FFmpeg Code $resultCode: $lastLine";
+    
     $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = ? WHERE id = ?")
         ->execute([$errorMsg, $video['id']]);
         
     file_debug_log("CONVERSIÓN FALLIDA", [
         "video" => $video['title'], 
         "result" => $resultCode,
-        "output" => array_slice($output, -10)
+        "error" => $lastLine
     ]);
     
-    respond(false, null, "Error en la conversión del video: " . $errorMsg);
+    respond(false, null, "Error en conversión: " . $errorMsg);
 }
 
 function admin_get_local_stats($pdo) {
@@ -200,7 +208,6 @@ function admin_cleanup_system_files($pdo) {
         foreach ($files as $f) {
             if (in_array($f, $ignore)) continue;
             
-            // ELIMINACIÓN DE TEMPORALES HUÉRFANOS DE CONVERSIONES ABORTADAS
             if (strpos($f, '.tmp') !== false || strpos($f, '_transcoding') !== false) {
                 if (@unlink($videosDir . $f)) $deletedVideos++;
                 continue;

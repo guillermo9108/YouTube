@@ -92,14 +92,18 @@ export default function Home() {
       const usedIds = new Set<string>();
       const addToUsed = (vids: Video[]) => vids.forEach(v => usedIds.add(v.id));
       const getUnused = (pool: Video[]) => pool.filter(v => !usedIds.has(v.id));
+      
       let topCategories: string[] = [];
       let subCreatorIds: string[] = [];
+
       if (userId) {
           try {
               const [activity, subs] = await Promise.all([db.getUserActivity(userId), db.getSubscriptions(userId)]);
               subCreatorIds = subs || [];
+              
               const categoryScores: Record<string, number> = {};
               const interactIds = [...(activity.liked || []), ...(activity.watched || [])];
+              
               interactIds.forEach(id => {
                   const vid = videos.find(v => v.id === id);
                   if (vid) {
@@ -107,19 +111,45 @@ export default function Home() {
                       categoryScores[vid.category] = (categoryScores[vid.category] || 0) + score;
                   }
               });
-              topCategories = Object.entries(categoryScores).sort(([,a], [,b]) => b - a).map(([cat]) => cat);
+              
+              topCategories = Object.entries(categoryScores)
+                .sort(([,a], [,b]) => b - a)
+                .map(([cat]) => cat);
           } catch(e) {}
       }
-      const subs = getUnused(availableVideos.filter(v => subCreatorIds.includes(v.creatorId))).sort((a,b) => b.createdAt - a.createdAt).slice(0, 10);
+
+      // 1. Suscripciones
+      const subs = getUnused(availableVideos.filter(v => subCreatorIds.includes(v.creatorId)))
+        .sort((a,b) => b.createdAt - a.createdAt)
+        .slice(0, 10);
       addToUsed(subs);
+
+      // 2. Gustos Recientes
       const oneWeekAgo = Date.now()/1000 - (7 * 86400);
-      const tasteNew = getUnused(availableVideos.filter(v => v.createdAt > oneWeekAgo && topCategories.includes(v.category))).sort((a,b) => b.createdAt - a.createdAt).slice(0, 10);
+      const tasteNew = getUnused(availableVideos.filter(v => v.createdAt > oneWeekAgo && topCategories.includes(v.category)))
+        .sort((a,b) => b.createdAt - a.createdAt)
+        .slice(0, 10);
       addToUsed(tasteNew);
-      const trending = getUnused(availableVideos).sort((a,b) => b.views - a.views).slice(0, 10);
+
+      // 3. Tendencias
+      const trending = getUnused(availableVideos)
+        .sort((a,b) => b.views - a.views)
+        .slice(0, 10);
       addToUsed(trending);
-      const discovery = getUnused(availableVideos);
+
+      // 4. Pool de Descubrimiento Inteligente (EL RESTO ORDENADO POR RELEVANCIA)
+      // Aquí aplicamos el mismo "método de lista inteligente" al pool infinito
+      const discoveryPool = getUnused(availableVideos).sort((a, b) => {
+          const scoreA = topCategories.indexOf(a.category) !== -1 ? (100 - topCategories.indexOf(a.category)) : 0;
+          const scoreB = topCategories.indexOf(b.category) !== -1 ? (100 - topCategories.indexOf(b.category)) : 0;
+          
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return b.createdAt - a.createdAt; // Desempate por fecha
+      });
+
       const heroCandidate = videos.filter(v => v.price > 0).sort((a,b) => b.createdAt - a.createdAt)[0] || videos[0];
-      return { tasteNew, trending, subs, discovery, hero: heroCandidate };
+
+      return { tasteNew, trending, subs, discovery: discoveryPool, hero: heroCandidate };
   };
 
   useEffect(() => {
@@ -129,12 +159,15 @@ export default function Home() {
             const all = await db.getAllVideos();
             const validVideos = all.filter(v => v.category !== 'PENDING' && v.category !== 'PROCESSING' && v.category !== 'FAILED_METADATA');
             setAllVideos(validVideos);
+            
             if (user) {
                 const act = await db.getUserActivity(user.id);
                 setWatchedIds(act.watched || []);
             }
+            
             const smartData = await generateSmartFeed(validVideos, user?.id);
             setFeed(smartData);
+
             const settings = await db.getSystemSettings();
             const catStats: Record<string, { count: number, views: number }> = {};
             validVideos.forEach(v => {
@@ -143,11 +176,14 @@ export default function Home() {
                 catStats[c].count++;
                 catStats[c].views += Number(v.views || 0);
             });
+
             let allConfiguredCats = ['GENERAL', ...(settings.customCategories || [])];
             allConfiguredCats = Array.from(new Set(allConfiguredCats));
+            
             const sortedCats = allConfiguredCats
                 .filter(cat => catStats[cat] && catStats[cat].count > 0)
                 .sort((a, b) => (catStats[b]?.views || 0) - (catStats[a]?.views || 0));
+
             setCategories(['ALL', ...sortedCats]);
         } catch (e) {} finally { setLoading(false); }
     };
@@ -170,22 +206,33 @@ export default function Home() {
   const loadMore = useCallback(() => {
       if (isMoreLoading) return;
       const pool = isFilteredMode ? filteredList : (feed?.discovery || []);
+      
       if (visibleCount < pool.length) {
           setIsMoreLoading(true);
+          // Simular pequeño retraso para suavidad visual
           setTimeout(() => {
               setVisibleCount(prev => prev + 12);
               setIsMoreLoading(false);
-          }, 300);
+          }, 400);
       }
   }, [isFilteredMode, filteredList.length, feed?.discovery, visibleCount, isMoreLoading]);
 
   useEffect(() => {
       const observer = new IntersectionObserver((entries) => {
-          if (entries[0].isIntersecting) { loadMore(); }
-      }, { threshold: 0.1, rootMargin: '1000px' });
-      if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+          if (entries[0].isIntersecting) {
+              loadMore();
+          }
+      }, { 
+          threshold: 0.1, 
+          rootMargin: '1200px' // DETECCIÓN PROACTIVA: Carga mucho antes de llegar al final
+      });
+
+      if (loadMoreRef.current) {
+          observer.observe(loadMoreRef.current);
+      }
+      
       return () => observer.disconnect();
-  }, [loadMore, visibleCount]); // Añadido visibleCount como dependencia
+  }, [loadMore, visibleCount]); // Actualizar observer cuando cambie el conteo
 
   const displayList = isFilteredMode ? filteredList : (feed?.discovery || []);
 
@@ -225,6 +272,7 @@ export default function Home() {
       ) : (
           <div className="space-y-10 animate-in fade-in">
               {!isFilteredMode && <HeroSection video={feed?.hero} />}
+              
               {!isFilteredMode && (
                   <>
                     {feed?.subs?.length > 0 && (
@@ -233,12 +281,14 @@ export default function Home() {
                             <HorizontalScroll>{feed.subs.map((v: Video) => <div key={v.id} className="w-64 md:w-72 flex-shrink-0 snap-start"><VideoCard video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)}/></div>)}</HorizontalScroll>
                         </section>
                     )}
+
                     {feed?.tasteNew?.length > 0 && (
                         <section>
                             <SectionHeader title="Nuevos para ti" icon={Sparkles} />
                             <HorizontalScroll>{feed.tasteNew.map((v: Video) => <div key={v.id} className="w-72 md:w-80 flex-shrink-0 snap-start"><VideoCard video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)}/></div>)}</HorizontalScroll>
                         </section>
                     )}
+
                     {feed?.trending?.length > 0 && (
                         <section>
                             <SectionHeader title="Tendencias" icon={Flame} />
@@ -247,24 +297,29 @@ export default function Home() {
                     )}
                   </>
               )}
+
               <section className={!isFilteredMode ? "pt-4 border-t border-slate-800" : ""}>
-                  <SectionHeader title={isFilteredMode ? "Resultados encontrados" : "Descubrimiento"} icon={isFilteredMode ? Filter : Shuffle} />
+                  <SectionHeader title={isFilteredMode ? "Resultados encontrados" : "Descubrimiento Inteligente"} icon={isFilteredMode ? Filter : Shuffle} />
+                  
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-8 gap-x-4">
                       {displayList.slice(0, visibleCount).map((v: Video) => (
                           <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)} />
                       ))}
                   </div>
+
+                  {/* Refuerzo visual del scroll infinito */}
                   <div ref={loadMoreRef} className="h-40 flex flex-col justify-center items-center">
                       {visibleCount < displayList.length ? (
                           <div className="flex flex-col items-center gap-3">
                               <RefreshCw className="animate-spin text-indigo-500" size={24}/>
-                              <span className="text-[10px] uppercase font-black text-slate-600 tracking-widest">Cargando más contenido</span>
+                              <span className="text-[10px] uppercase font-black text-slate-600 tracking-widest">Sincronizando más contenido relevante</span>
                           </div>
                       ) : displayList.length > 0 && (
-                          <div className="text-[10px] uppercase font-black text-slate-700 tracking-[0.3em] border-t border-slate-900 pt-8 w-full text-center">Has llegado al final de la biblioteca</div>
+                          <div className="text-[10px] uppercase font-black text-slate-700 tracking-[0.3em] border-t border-slate-900 pt-8 w-full text-center">Has explorado toda la biblioteca</div>
                       )}
                   </div>
               </section>
+
               {!isFilteredMode && <AIConcierge videos={allVideos} />}
           </div>
       )}
