@@ -89,7 +89,7 @@ function admin_transcode_batch($pdo) {
         respond(false, null, "FFmpeg no instalado o no accesible.");
     }
 
-    // 2. Buscar video en espera
+    // 2. Buscar video en espera (WAITING)
     $stmt = $pdo->query("SELECT id, videoUrl, title FROM videos WHERE transcode_status = 'WAITING' LIMIT 1");
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -100,15 +100,18 @@ function admin_transcode_batch($pdo) {
     // 3. Resolver ruta física
     $sourcePath = resolve_video_path($video['videoUrl']);
     if (!$sourcePath || !file_exists($sourcePath)) {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no encontrado' WHERE id = ?")->execute([$video['id']]);
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no encontrado físicamente' WHERE id = ?")->execute([$video['id']]);
         respond(false, null, "Archivo no encontrado: " . $video['videoUrl']);
     }
 
-    // 4. Marcar inicio real
+    // 4. Marcar inicio real de procesamiento
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', createdAt = ? WHERE id = ?")
         ->execute([time(), $video['id']]);
 
+    // Ruta para el archivo temporal de salida
     $tempPath = $sourcePath . ".transcoding.tmp";
+    
+    // Limpiar cualquier residuo previo para evitar que ffmpeg se bloquee preguntando si sobrescribir
     if (file_exists($tempPath)) @unlink($tempPath);
 
     $preset = 'superfast';
@@ -117,6 +120,7 @@ function admin_transcode_batch($pdo) {
     if ($dbPreset) $preset = $dbPreset;
 
     // Comando FFmpeg balanceado para PWA (H.264 + AAC + FastStart)
+    // El flag -y obliga a sobrescribir sin preguntar
     $cmd = "ffmpeg -y -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath) . " 2>&1";
     
     file_debug_log("EJECUTANDO FFMPEG", ["video" => $video['title'], "cmd" => $cmd]);
@@ -131,16 +135,16 @@ function admin_transcode_batch($pdo) {
         if (@rename($sourcePath, $backupPath)) {
             if (@rename($tempPath, $sourcePath)) {
                 @unlink($backupPath);
-                $pdo->prepare("UPDATE videos SET transcode_status = 'DONE' WHERE id = ?")->execute([$video['id']]);
+                $pdo->prepare("UPDATE videos SET transcode_status = 'DONE', reason = NULL WHERE id = ?")->execute([$video['id']]);
                 file_debug_log("CONVERSIÓN EXITOSA", $video['title']);
                 respond(true, ['processed' => 1, 'completed' => false, 'videoId' => $video['id']]);
             } else {
-                @rename($backupPath, $sourcePath); // Revertir
+                @rename($backupPath, $sourcePath); // Revertir si falló el rename final
             }
         }
     }
 
-    // Manejo de Error
+    // Manejo de Error si no salió bien
     if (file_exists($tempPath)) @unlink($tempPath);
     $errorMsg = "Error en FFmpeg (Code $resultCode)";
     $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = ? WHERE id = ?")
@@ -149,10 +153,10 @@ function admin_transcode_batch($pdo) {
     file_debug_log("CONVERSIÓN FALLIDA", [
         "video" => $video['title'], 
         "result" => $resultCode,
-        "output" => array_slice($output, -10) // Últimas 10 líneas del log de FFmpeg
+        "output" => array_slice($output, -10)
     ]);
     
-    respond(false, null, "Error en la conversión del video. Revisa el log de incidentes.");
+    respond(false, null, "Error en la conversión del video: " . $errorMsg);
 }
 
 function admin_get_local_stats($pdo) {
@@ -196,7 +200,7 @@ function admin_cleanup_system_files($pdo) {
         foreach ($files as $f) {
             if (in_array($f, $ignore)) continue;
             
-            // ELIMINACIÓN DE TEMPORALES HUÉRFANOS
+            // ELIMINACIÓN DE TEMPORALES HUÉRFANOS DE CONVERSIONES ABORTADAS
             if (strpos($f, '.tmp') !== false || strpos($f, '_transcoding') !== false) {
                 if (@unlink($videosDir . $f)) $deletedVideos++;
                 continue;

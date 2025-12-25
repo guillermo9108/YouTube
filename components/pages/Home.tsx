@@ -169,7 +169,6 @@ export default function Home() {
 
   const loadMore = useCallback(() => {
       if (isMoreLoading) return;
-      // Usamos el listado de descubrimiento si no hay filtros activos
       const pool = isFilteredMode ? filteredList : (feed?.discovery || []);
       if (visibleCount < pool.length) {
           setIsMoreLoading(true);
@@ -183,10 +182,10 @@ export default function Home() {
   useEffect(() => {
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) { loadMore(); }
-      }, { threshold: 0.1, rootMargin: '1200px' });
+      }, { threshold: 0.1, rootMargin: '1000px' });
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
-  }, [loadMore]);
+  }, [loadMore, visibleCount]); // Añadido visibleCount como dependencia
 
   const displayList = isFilteredMode ? filteredList : (feed?.discovery || []);
 
