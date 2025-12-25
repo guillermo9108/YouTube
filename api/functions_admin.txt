@@ -67,72 +67,56 @@ function admin_update_settings($pdo, $input) {
 
 function admin_cleanup_stale_transcodes($pdo) {
     $now = time();
-    $gracePeriod = 60; // 1 minuto de margen para que el proceso arranque
+    $gracePeriod = 120; // Aumentado a 2 minutos para dar tiempo al SO
     
     $stmt = $pdo->query("SELECT id, videoUrl, title, createdAt FROM videos WHERE transcode_status = 'PROCESSING'");
     $processingInDb = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($processingInDb as $v) {
-        // REGLA DE ORO: Si acaba de empezar, NO tocarlo.
-        if (($now - (int)$v['createdAt']) < $gracePeriod) {
-            continue;
-        }
+        if (($now - (int)$v['createdAt']) < $gracePeriod) continue;
 
-        // Marcador simplificado sin caracteres especiales
         $marker = "SP_JOB_ID_" . $v['id'];
+        // Buscamos el ID en los argumentos del proceso (gracias al -user_agent)
         $pid = shell_exec("pgrep -f " . escapeshellarg($marker));
         
-        $sourcePath = resolve_video_path($v['videoUrl']);
-        $tempPath = $sourcePath . ".transcoding.mp4";
-
         if (empty(trim($pid))) {
-            // El proceso no está en la lista del sistema. 
-            // Doble comprobación: ¿El archivo existe y se creó recientemente?
+            $sourcePath = resolve_video_path($v['videoUrl']);
+            $tempPath = $sourcePath . ".transcoding.mp4";
+
+            // Si el archivo temporal existe y no ha crecido en 1 minuto, está muerto.
             if (file_exists($tempPath)) {
                 $fileTime = filemtime($tempPath);
-                // Si el archivo se modificó hace menos de 30 segundos, asumimos que el proceso sigue vivo 
-                // pero pgrep falló por alguna razón de permisos o delay de kernel.
-                if (($now - $fileTime) < 30) {
-                    continue; 
-                }
+                if (($now - $fileTime) < 60) continue; 
 
-                // Si el archivo es grande y no crece, el proceso terminó.
-                if (filesize($tempPath) > 1024 * 1024) {
+                if (filesize($tempPath) > 10 * 1024 * 1024) {
                     $backupPath = $sourcePath . ".old";
                     if (@rename($sourcePath, $backupPath)) {
                         if (@rename($tempPath, $sourcePath)) {
                             @unlink($backupPath);
                             $pdo->prepare("UPDATE videos SET transcode_status = 'DONE' WHERE id = ?")->execute([$v['id']]);
-                            file_debug_log("RESCATE DONE", "Video {$v['title']} recuperado.");
+                            file_debug_log("RESCATE DONE", "Video {$v['title']} finalizado tras inactividad de proceso.");
                             continue;
                         }
                     }
                 }
             }
             
-            // Si llegamos aquí, realmente es un proceso fantasma.
             $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$v['id']]);
-            file_debug_log("LIMPIEZA REALIZADA", "Video {$v['title']} vuelto a cola.");
+            file_debug_log("LIMPIEZA REALIZADA", "Video {$v['title']} vuelto a cola por desaparición de proceso.");
         }
     }
 }
 
 function admin_transcode_batch($pdo) {
     if (session_id()) session_write_close();
-    
-    // Sincronizar antes de lanzar nada nuevo
     admin_cleanup_stale_transcodes($pdo);
 
     $stmtS = $pdo->query("SELECT batchSize, transcodePreset FROM system_settings WHERE id = 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $limit = isset($settings['batchSize']) ? (int)$settings['batchSize'] : 1;
 
-    // Contar procesos activos reales
-    $osCount = 0;
     $osPids = shell_exec("pgrep -f \"SP_JOB_ID_\"");
-    if (!empty(trim($osPids))) {
-        $osCount = count(explode("\n", trim($osPids)));
-    }
+    $osCount = !empty(trim($osPids)) ? count(explode("\n", trim($osPids))) : 0;
 
     if ($osCount >= $limit) {
         respond(true, ['processed' => 0, 'message' => 'Servidor al Límite (OS)', 'active_jobs' => $osCount, 'limit' => $limit]);
@@ -141,13 +125,11 @@ function admin_transcode_batch($pdo) {
     $stmt = $pdo->query("SELECT id, videoUrl, title FROM videos WHERE transcode_status = 'WAITING' LIMIT 1");
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$video) {
-        respond(true, ['processed' => 0, 'completed' => true]);
-    }
+    if (!$video) respond(true, ['processed' => 0, 'completed' => true]);
 
     $sourcePath = resolve_video_path($video['videoUrl']);
     if (!$sourcePath || !file_exists($sourcePath)) {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no existe' WHERE id = ?")->execute([$video['id']]);
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo físico no encontrado' WHERE id = ?")->execute([$video['id']]);
         respond(false, null, "Archivo perdido.");
     }
 
@@ -155,28 +137,55 @@ function admin_transcode_batch($pdo) {
     $tempPath = $sourcePath . ".transcoding.mp4";
     if (file_exists($tempPath)) @unlink($tempPath);
 
-    // Etiqueta alfanumérica simple para evitar fallos de pgrep
     $marker = "SP_JOB_ID_" . $video['id'];
     
-    // nice -n 15 baja la prioridad del proceso para que el servidor web no se sienta lento
-    // Incluimos el marker en el nombre del archivo temporal para doble seguridad
-    $tempPathWithId = $sourcePath . "." . $marker . ".tmp";
+    // USAMOS -user_agent PARA INYECTAR EL ID EN EL PROCESO
+    $cmd = "nice -n 15 ffmpeg -y -threads 1 -user_agent " . escapeshellarg($marker) . " -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath);
     
-    $cmd = "nice -n 15 ffmpeg -y -threads 1 -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath) . " 2>&1";
-    
-    // nohup y & desligan el proceso totalmente de PHP
-    // Añadimos el marker como un comentario de shell
-    $fullCmd = "nohup $cmd # " . $marker . " > /dev/null 2>&1 &";
+    $fullCmd = "nohup $cmd > /dev/null 2>&1 &";
     
     file_debug_log("LANZAMIENTO FFmpeg", ["video" => $video['title'], "job" => $marker]);
-    
     shell_exec($fullCmd);
 
-    // Marcamos como PROCESSING e insertamos el timestamp actual para el tiempo de gracia
-    $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', createdAt = ? WHERE id = ?")
-        ->execute([time(), $video['id']]);
+    $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', createdAt = ? WHERE id = ?")->execute([time(), $video['id']]);
 
     respond(true, ['processed' => 1, 'message' => 'Lanzado', 'videoId' => $video['id']]);
+}
+
+function admin_transcode_scan_filters($pdo, $input) {
+    $days = intval($input['days'] ?? 0);
+    $onlyNonMp4 = isset($input['onlyNonMp4']) && $input['onlyNonMp4'];
+    $onlyIncompatible = isset($input['onlyIncompatible']) && $input['onlyIncompatible'];
+    $mode = $input['mode'] ?? 'PREVIEW'; // PREVIEW o EXECUTE
+
+    $where = ["transcode_status = 'NONE'"];
+    $params = [];
+
+    if ($days > 0) {
+        $threshold = time() - ($days * 86400);
+        $where[] = "createdAt < ?";
+        $params[] = $threshold;
+    }
+
+    if ($onlyNonMp4) {
+        $where[] = "(videoUrl NOT LIKE '%.mp4' AND videoUrl NOT LIKE '%action=stream%')";
+    }
+
+    if ($onlyIncompatible) {
+        $where[] = "needs_transcode = 1";
+    }
+
+    $sqlWhere = implode(' AND ', $where);
+    
+    if ($mode === 'PREVIEW') {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE $sqlWhere");
+        $stmt->execute($params);
+        respond(true, ['count' => (int)$stmt->fetchColumn()]);
+    } else {
+        $stmt = $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE $sqlWhere");
+        $stmt->execute($params);
+        respond(true, ['affected' => $stmt->rowCount()]);
+    }
 }
 
 function admin_get_local_stats($pdo) {
@@ -184,12 +193,9 @@ function admin_get_local_stats($pdo) {
     $totalSpace = @disk_total_space(".") ?: 0;
     $freeSpace = @disk_free_space(".") ?: 0;
     $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn();
-    
     $osCount = 0;
     $osPids = shell_exec("pgrep -f \"SP_JOB_ID_\"");
-    if (!empty(trim($osPids))) {
-        $osCount = count(explode("\n", trim($osPids)));
-    }
+    if (!empty(trim($osPids))) $osCount = count(explode("\n", trim($osPids)));
 
     respond(true, [
         'disk_total' => round($totalSpace / (1024*1024*1024), 2),
@@ -298,11 +304,6 @@ function admin_stop_transcoder($pdo) {
     $pdo->exec("UPDATE system_settings SET is_transcoder_active = 0 WHERE id = 1");
     shell_exec("pkill -f \"SP_JOB_ID_\"");
     respond(true);
-}
-
-function admin_transcode_scan_filters($pdo, $input) {
-    $count = $pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'NONE'")->fetchColumn();
-    respond(true, ['count' => (int)$count]);
 }
 
 function admin_repair_db($pdo) {
