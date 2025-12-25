@@ -72,7 +72,6 @@ function admin_repair_db($pdo) {
 }
 
 function admin_cleanup_stale_transcodes($pdo) {
-    // Si un video lleva más de 4 horas en PROCESSING, lo devolvemos a espera
     $staleTime = time() - 14400;
     $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'PROCESSING' AND createdAt < ?")
         ->execute([$staleTime]);
@@ -82,14 +81,12 @@ function admin_transcode_batch($pdo) {
     set_time_limit(0); 
     admin_cleanup_stale_transcodes($pdo);
 
-    // 1. Verificar si ffmpeg está disponible
     exec("which ffmpeg", $ffmpegPath, $ffmpegCode);
     if ($ffmpegCode !== 0) {
         file_debug_log("ERROR CRÍTICO", "ffmpeg no encontrado.");
         respond(false, null, "FFmpeg no instalado.");
     }
 
-    // 2. Buscar video en espera (WAITING)
     $stmt = $pdo->query("SELECT id, videoUrl, title FROM videos WHERE transcode_status = 'WAITING' LIMIT 1");
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -97,18 +94,15 @@ function admin_transcode_batch($pdo) {
         respond(true, ['processed' => 0, 'completed' => true]);
     }
 
-    // 3. Resolver ruta física
     $sourcePath = resolve_video_path($video['videoUrl']);
     if (!$sourcePath || !file_exists($sourcePath)) {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no encontrado fisicamente' WHERE id = ?")->execute([$video['id']]);
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no encontrado físicamente' WHERE id = ?")->execute([$video['id']]);
         respond(false, null, "Archivo no encontrado: " . $video['videoUrl']);
     }
 
-    // 4. Marcar inicio real
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', createdAt = ? WHERE id = ?")
         ->execute([time(), $video['id']]);
 
-    // Usar extensión .mp4.tmp para que FFmpeg sepa que el contenedor es MP4
     $tempPath = $sourcePath . ".transcoded.mp4.tmp";
     if (file_exists($tempPath)) @unlink($tempPath);
 
@@ -118,13 +112,13 @@ function admin_transcode_batch($pdo) {
     if ($dbPreset) $preset = $dbPreset;
 
     /**
-     * COMANDO MEJORADO:
-     * -f mp4: Fuerza el formato de salida a MP4 independientemente de la extensión.
-     * -movflags +faststart: Optimiza para reproducción web (PWA).
-     * -threads 0: Usa todo el CPU disponible.
-     * -pix_fmt yuv420p: Asegura compatibilidad con navegadores antiguos.
+     * COMANDO RESILIENTE MEJORADO:
+     * -map 0:v:0: Toma solo el primer flujo de video (evita problemas con multiples pistas).
+     * -map 0:a:0?: Toma el primer flujo de audio si existe (opcional con ?).
+     * -ignore_unknown: Salta flujos de datos que FFmpeg no reconoce.
+     * -f mp4: Obliga al contenedor MP4.
      */
-    $cmd = "ffmpeg -y -threads 0 -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -ac 2 -movflags +faststart -f mp4 " . escapeshellarg($tempPath) . " 2>&1";
+    $cmd = "ffmpeg -y -threads 0 -i " . escapeshellarg($sourcePath) . " -map 0:v:0 -map 0:a:0? -c:v libx264 -preset $preset -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -ac 2 -movflags +faststart -ignore_unknown -f mp4 " . escapeshellarg($tempPath) . " 2>&1";
     
     file_debug_log("EJECUTANDO FFMPEG", ["video" => $video['title'], "cmd" => $cmd]);
     
@@ -134,8 +128,6 @@ function admin_transcode_batch($pdo) {
 
     if ($resultCode === 0 && file_exists($tempPath) && filesize($tempPath) > 0) {
         $backupPath = $sourcePath . ".old";
-        // Si el archivo original no es .mp4, querremos que el nuevo archivo sí lo sea en la base de datos
-        // Pero para no romper rutas del NAS, mantenemos el nombre original pero con contenido MP4
         if (@rename($sourcePath, $backupPath)) {
             if (@rename($tempPath, $sourcePath)) {
                 @unlink($backupPath);
@@ -148,10 +140,8 @@ function admin_transcode_batch($pdo) {
         }
     }
 
-    // Manejo de Error real
     if (file_exists($tempPath)) @unlink($tempPath);
     
-    // Capturar el error real de la salida de FFmpeg para el admin
     $lastLine = count($output) > 0 ? end($output) : "Unknown Error";
     $errorMsg = "FFmpeg Code $resultCode: $lastLine";
     
@@ -171,9 +161,7 @@ function admin_get_local_stats($pdo) {
     $videosDir = 'uploads/videos/';
     $totalSpace = @disk_total_space(".") ?: 0;
     $freeSpace = @disk_free_space(".") ?: 0;
-    
     $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn();
-    
     $orphanCount = 0;
     if (is_dir($videosDir)) {
         $files = scandir($videosDir);
@@ -185,7 +173,6 @@ function admin_get_local_stats($pdo) {
             if ($stmt->fetchColumn() == 0) $orphanCount++;
         }
     }
-
     respond(true, [
         'disk_total' => round($totalSpace / (1024*1024*1024), 2),
         'disk_free' => round($freeSpace / (1024*1024*1024), 2),
@@ -200,22 +187,17 @@ function admin_cleanup_system_files($pdo) {
     $thumbsDir = 'uploads/thumbnails/';
     $deletedVideos = 0;
     $deletedThumbs = 0;
-
     $ignore = ['.', '..', '@eaDir', '#recycle', '.DS_Store'];
-
     if (is_dir($videosDir)) {
         $files = scandir($videosDir);
         foreach ($files as $f) {
             if (in_array($f, $ignore)) continue;
-            
             if (strpos($f, '.tmp') !== false || strpos($f, '_transcoding') !== false) {
                 if (@unlink($videosDir . $f)) $deletedVideos++;
                 continue;
             }
-
             $fullPath = $videosDir . $f;
             if (is_dir($fullPath)) continue;
-
             $relPath = 'api/' . $fullPath;
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
             $stmt->execute([$relPath]);
@@ -224,14 +206,12 @@ function admin_cleanup_system_files($pdo) {
             }
         }
     }
-
     if (is_dir($thumbsDir)) {
         $files = scandir($thumbsDir);
         foreach ($files as $f) {
             if (in_array($f, $ignore) || $f === 'default.jpg') continue;
             $fullPath = $thumbsDir . $f;
             if (is_dir($fullPath)) continue;
-
             $relPath = 'api/' . $fullPath;
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE thumbnailUrl = ?");
             $stmt->execute([$relPath]);
@@ -240,7 +220,6 @@ function admin_cleanup_system_files($pdo) {
             }
         }
     }
-
     respond(true, ['videos' => $deletedVideos, 'thumbnails' => $deletedThumbs]);
 }
 
@@ -248,9 +227,7 @@ function admin_add_balance($pdo, $input) {
     $adminId = $input['adminId'];
     $targetId = $input['targetId'];
     $amount = floatval($input['amount']);
-
     if ($amount <= 0) respond(false, null, 'Monto inválido');
-
     $pdo->beginTransaction();
     try {
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
@@ -343,7 +320,7 @@ function admin_stop_transcoder($pdo) {
 }
 
 function admin_transcode_scan_filters($pdo, $input) {
-    $count = $pdo->query("SELECT COUNT(*) FROM videos WHERE needs_transcode = 1")->fetchColumn();
+    $count = $pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'NONE'")->fetchColumn();
     respond(true, ['count' => (int)$count]);
 }
 

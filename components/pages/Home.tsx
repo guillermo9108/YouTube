@@ -138,13 +138,12 @@ export default function Home() {
       addToUsed(trending);
 
       // 4. Pool de Descubrimiento Inteligente (EL RESTO ORDENADO POR RELEVANCIA)
-      // Aquí aplicamos el mismo "método de lista inteligente" al pool infinito
       const discoveryPool = getUnused(availableVideos).sort((a, b) => {
           const scoreA = topCategories.indexOf(a.category) !== -1 ? (100 - topCategories.indexOf(a.category)) : 0;
           const scoreB = topCategories.indexOf(b.category) !== -1 ? (100 - topCategories.indexOf(b.category)) : 0;
           
           if (scoreA !== scoreB) return scoreB - scoreA;
-          return b.createdAt - a.createdAt; // Desempate por fecha
+          return b.createdAt - a.createdAt; 
       });
 
       const heroCandidate = videos.filter(v => v.price > 0).sort((a,b) => b.createdAt - a.createdAt)[0] || videos[0];
@@ -209,7 +208,7 @@ export default function Home() {
       
       if (visibleCount < pool.length) {
           setIsMoreLoading(true);
-          // Simular pequeño retraso para suavidad visual
+          // Simulación de buffer para carga suave
           setTimeout(() => {
               setVisibleCount(prev => prev + 12);
               setIsMoreLoading(false);
@@ -217,14 +216,15 @@ export default function Home() {
       }
   }, [isFilteredMode, filteredList.length, feed?.discovery, visibleCount, isMoreLoading]);
 
+  // SENSOR DE PROXIMIDAD ULTRA-PROACTIVO (2500PX)
   useEffect(() => {
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
               loadMore();
           }
       }, { 
-          threshold: 0.1, 
-          rootMargin: '1200px' // DETECCIÓN PROACTIVA: Carga mucho antes de llegar al final
+          threshold: 0, 
+          rootMargin: '2500px' // Se activa muchísimo antes de llegar al final
       });
 
       if (loadMoreRef.current) {
@@ -232,7 +232,7 @@ export default function Home() {
       }
       
       return () => observer.disconnect();
-  }, [loadMore, visibleCount]); // Actualizar observer cuando cambie el conteo
+  }, [loadMore, visibleCount]);
 
   const displayList = isFilteredMode ? filteredList : (feed?.discovery || []);
 
@@ -307,12 +307,11 @@ export default function Home() {
                       ))}
                   </div>
 
-                  {/* Refuerzo visual del scroll infinito */}
                   <div ref={loadMoreRef} className="h-40 flex flex-col justify-center items-center">
                       {visibleCount < displayList.length ? (
                           <div className="flex flex-col items-center gap-3">
                               <RefreshCw className="animate-spin text-indigo-500" size={24}/>
-                              <span className="text-[10px] uppercase font-black text-slate-600 tracking-widest">Sincronizando más contenido relevante</span>
+                              <span className="text-[10px] uppercase font-black text-slate-600 tracking-widest">Sincronizando más contenido inteligente</span>
                           </div>
                       ) : displayList.length > 0 && (
                           <div className="text-[10px] uppercase font-black text-slate-700 tracking-[0.3em] border-t border-slate-900 pt-8 w-full text-center">Has explorado toda la biblioteca</div>
