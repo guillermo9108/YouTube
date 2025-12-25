@@ -1,23 +1,17 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { Video } from "../types";
 
 /**
  * Servicio de Inteligencia Artificial utilizando Google Gemini.
- * Se encarga de la generación automática de metadatos para optimizar la subida de contenidos.
  */
 
 const getAIClient = () => {
-    // La API KEY se obtiene exclusivamente de las variables de entorno configuradas.
     const apiKey = process.env.API_KEY;
     if (!apiKey) return null;
     return new GoogleGenAI({ apiKey });
 };
 
 export const aiService = {
-    /**
-     * Sugiere metadatos estructurados para un video basándose únicamente en su nombre de archivo.
-     * @param filename Nombre original del archivo de video.
-     * @returns Objeto JSON con título, descripción, categoría y etiquetas, o null en caso de error.
-     */
     async suggestMetadata(filename: string) {
         const ai = getAIClient();
         if (!ai) return null;
@@ -32,14 +26,46 @@ export const aiService = {
                 }
             });
 
-            // Se accede a .text directamente según las guías del SDK.
             const jsonText = response.text;
             if (!jsonText) return null;
-
             return JSON.parse(jsonText);
         } catch (e) {
             console.error("Gemini AI Service Error:", e);
             return null;
+        }
+    },
+
+    /**
+     * Chat interactivo para recomendar contenido basado en el catálogo actual.
+     */
+    async chatWithConcierge(userMessage: string, history: { role: 'user' | 'model', parts: { text: string }[] }[], availableVideos: Video[]) {
+        const ai = getAIClient();
+        if (!ai) return "Configuración de IA no disponible.";
+
+        const context = availableVideos.map(v => `- ${v.title} (${v.category}, Precio: ${v.price} Saldo, ID: ${v.id})`).join('\n');
+
+        try {
+            const chat = ai.chats.create({
+                model: 'gemini-3-flash-preview',
+                config: {
+                    systemInstruction: `Eres el Conserje de StreamPay, un asistente elegante y experto en cine.
+                    Tu catálogo actual es:\n${context}\n
+                    Reglas:
+                    1. Recomienda videos específicos de la lista.
+                    2. Sé breve y entusiasta.
+                    3. Si el usuario pregunta por precios, guíalo.
+                    4. No inventes videos que no estén en la lista.
+                    5. Responde siempre en español.`,
+                }
+            });
+
+            // Enviar historial previo si existe
+            // (Simplificado para este ejemplo enviando el mensaje actual)
+            const response = await chat.sendMessage({ message: userMessage });
+            return response.text || "Lo siento, no pude procesar tu solicitud.";
+        } catch (e) {
+            console.error("Concierge Error:", e);
+            return "Tuve un pequeño problema técnico. ¿Podemos intentarlo de nuevo?";
         }
     }
 };

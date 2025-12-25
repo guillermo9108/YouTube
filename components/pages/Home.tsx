@@ -3,8 +3,9 @@ import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, UserRole } from '../../types';
-import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, ChevronRight, ArrowDown, Database, LayoutGrid } from 'lucide-react';
-import { Link, useLocation } from '../Router';
+import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, ChevronRight, ArrowDown, Database, LayoutGrid, Play, Info } from 'lucide-react';
+import { Link, useLocation, useNavigate } from '../Router';
+import AIConcierge from '../AIConcierge';
 
 const SectionHeader = ({ title, icon: Icon, link }: { title: string, icon: any, link?: string }) => (
     <div className="flex items-center justify-between mb-3 px-4 md:px-0">
@@ -25,6 +26,67 @@ const HorizontalScroll = ({ children }: { children?: React.ReactNode }) => (
         {children}
     </div>
 );
+
+const HeroSection = ({ video }: { video: Video | null }) => {
+    const navigate = useNavigate();
+    if (!video) return null;
+
+    return (
+        <div className="relative h-[60vh] md:h-[70vh] -mx-4 md:mx-0 mb-8 overflow-hidden rounded-b-[40px] md:rounded-3xl group">
+            {/* Background Image */}
+            <img 
+                src={video.thumbnailUrl} 
+                className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" 
+                alt={video.title} 
+            />
+            
+            {/* Overlays */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+            <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent"></div>
+            
+            {/* Content */}
+            <div className="absolute bottom-0 left-0 p-8 md:p-12 w-full md:w-2/3 space-y-4 animate-in slide-in-from-bottom-8 duration-700">
+                <div className="flex items-center gap-2">
+                    <span className="bg-indigo-600 text-white text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest flex items-center gap-1">
+                        <Sparkles size={10}/> Destacado
+                    </span>
+                    <span className="bg-amber-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest">
+                        Premium
+                    </span>
+                </div>
+                
+                <h1 className="text-4xl md:text-6xl font-black text-white leading-[0.9] tracking-tighter uppercase italic">
+                    {video.title}
+                </h1>
+                
+                <p className="text-slate-300 text-sm md:text-lg line-clamp-2 max-w-xl font-medium">
+                    {video.description || "Sumérgete en esta experiencia premium exclusiva de StreamPay. Calidad máxima y contenido inigualable."}
+                </p>
+                
+                <div className="flex items-center gap-4 pt-4">
+                    <button 
+                        onClick={() => navigate(`/watch/${video.id}`)}
+                        className="bg-white text-black font-black px-8 py-4 rounded-2xl flex items-center gap-2 hover:bg-slate-200 active:scale-95 transition-all shadow-2xl shadow-white/10"
+                    >
+                        <Play size={20} fill="currentColor"/> Ver Ahora
+                    </button>
+                    <button 
+                        onClick={() => navigate(`/watch/${video.id}`)}
+                        className="bg-white/10 backdrop-blur-md border border-white/20 text-white font-black px-8 py-4 rounded-2xl flex items-center gap-2 hover:bg-white/20 active:scale-95 transition-all"
+                    >
+                        <Info size={20}/> Detalles
+                    </button>
+                </div>
+            </div>
+
+            {/* Price Floating Tag */}
+            <div className="absolute top-8 right-8 bg-black/40 backdrop-blur-xl border border-white/20 p-4 rounded-3xl flex flex-col items-center shadow-2xl">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Inversión</span>
+                <span className="text-3xl font-black text-white">{video.price} $</span>
+            </div>
+        </div>
+    );
+};
 
 export default function Home() {
   const { user } = useAuth();
@@ -82,7 +144,11 @@ export default function Home() {
       const trending = getUnused(availableVideos).sort((a,b) => b.views - a.views).slice(0, 10);
       addToUsed(trending);
       const discovery = getUnused(availableVideos).sort(() => 0.5 - Math.random());
-      return { tasteNew, trending, subs, discovery };
+      
+      // Hero: Best available candidate (Latest + Price > 0)
+      const heroCandidate = videos.filter(v => v.price > 0).sort((a,b) => b.createdAt - a.createdAt)[0] || videos[0];
+
+      return { tasteNew, trending, subs, discovery, hero: heroCandidate };
   };
 
   useEffect(() => {
@@ -202,6 +268,8 @@ export default function Home() {
           </div>
       ) : (
           <div className="space-y-10 animate-in fade-in">
+              {!isFilteredMode && <HeroSection video={feed?.hero} />}
+
               {!isFilteredMode && (
                   <>
                     {feed?.subs?.length > 0 && (
@@ -245,6 +313,9 @@ export default function Home() {
                       )}
                   </div>
               </section>
+
+              {/* Concierge AI */}
+              {!isFilteredMode && <AIConcierge videos={allVideos} />}
           </div>
       )}
     </div>

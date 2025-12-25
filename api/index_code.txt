@@ -1,7 +1,7 @@
 <?php
 /**
- * StreamPay - Core Controller V8.0
- * Resiliencia total y unificación de entradas.
+ * StreamPay - Core Controller V8.1
+ * Sistema de Logs Inteligente y Resiliente.
  */
 
 ini_set('display_errors', 0);
@@ -10,8 +10,29 @@ error_reporting(E_ALL);
 
 if (ob_get_level() == 0) ob_start();
 
-// Registro de logs
-function file_debug_log($message, $data = null) {
+// Variable global para cachear la configuración de logs
+$GLOBAL_LOG_ENABLED = null;
+
+// Registro de logs inteligente
+function file_debug_log($message, $data = null, $force = false) {
+    global $pdo, $GLOBAL_LOG_ENABLED;
+
+    // Solo consultamos la DB una vez por petición
+    if ($GLOBAL_LOG_ENABLED === null) {
+        try {
+            if (isset($pdo)) {
+                $stmt = $pdo->query("SELECT enableDebugLog FROM system_settings LIMIT 1");
+                $GLOBAL_LOG_ENABLED = (bool)($stmt->fetchColumn() ?? true);
+            } else {
+                $GLOBAL_LOG_ENABLED = true; // Loguear bootstrap errors por defecto
+            }
+        } catch (Exception $e) {
+            $GLOBAL_LOG_ENABLED = true;
+        }
+    }
+
+    if (!$GLOBAL_LOG_ENABLED && !$force) return;
+
     $logFile = __DIR__ . '/debug_log.txt';
     $timestamp = date('Y-m-d H:i:s');
     $output = "[$timestamp] $message";
@@ -21,15 +42,16 @@ function file_debug_log($message, $data = null) {
 
 // Capturador de Warnings
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    // Solo logueamos errores o advertencias reales
     $msg = "PHP [$errno]: $errstr en $errfile:$errline";
-    file_debug_log("WARNING/NOTICE", $msg);
+    file_debug_log("INCIDENTE", $msg, true); // Forzamos log en incidentes de PHP
     return true; 
 });
 
 register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
-        file_debug_log("FATAL ERROR", $error['message']);
+        file_debug_log("FATAL ERROR", $error['message'], true);
         while (ob_get_level() > 0) ob_end_clean();
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['success' => false, 'error' => 'CRASH: ' . $error['message']]);
@@ -38,8 +60,17 @@ register_shutdown_function(function() {
 });
 
 function respond($success, $data = null, $error = null) {
+    $action = $_GET['action'] ?? 'none';
+    
+    // FILTRADO INTELIGENTE DE LOGS DE RESPUESTA:
+    // Solo registramos si hay error o si es una acción crítica de administración
+    $critical_actions = ['initialize_system', 'update_system_settings', 'admin_repair_db', 'admin_cleanup_system_files', 'verify_db_connection'];
+    
+    if (!$success || in_array($action, $critical_actions)) {
+        file_debug_log("RESPOND ACTION: " . $action, ["success" => $success, "error" => $error]);
+    }
+
     $res = ['success' => $success, 'data' => $data, 'error' => $error];
-    file_debug_log("RESPOND ACTION: " . ($_GET['action'] ?? 'none'), ["success" => $success]);
     while (ob_get_level() > 0) ob_end_clean();
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
@@ -52,7 +83,7 @@ header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(); }
 
-// UNIFICACIÓN DE ENTRADAS (Previene Warnings de 'Undefined Index')
+// UNIFICACIÓN DE ENTRADAS
 $json_input = json_decode(file_get_contents('php://input'), true) ?? [];
 $input = array_merge($_GET, $_POST, $json_input);
 

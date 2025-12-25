@@ -86,34 +86,39 @@ const NotificationBell = ({
                                 </div>
                             ) : (
                                 <div className="divide-y divide-white/5 pb-8">
-                                    {notifs.map(n => (
-                                        <div key={n.id} onClick={() => handleClick(n)} className={`group p-4 flex gap-4 hover:bg-white/5 cursor-pointer transition-all active:scale-[0.98] ${!n.isRead ? 'bg-indigo-500/5' : ''}`}>
-                                            <div className="relative shrink-0 mt-1">
-                                                <div className={`w-12 h-12 rounded-xl bg-slate-800 overflow-hidden border border-white/10 ${n.type === 'SALE' ? 'ring-2 ring-emerald-500/30' : ''}`}>
-                                                    {n.avatarUrl ? (
-                                                        <img src={n.avatarUrl} className="w-full h-full object-cover" loading="lazy" />
-                                                    ) : (
-                                                        <div className="w-full h-full flex items-center justify-center text-slate-500">
-                                                            {n.type === 'SALE' ? <SaleIcon size={20} className="text-emerald-400"/> : <Bell size={20}/>}
-                                                        </div>
+                                    {notifs.map(n => {
+                                        const metadata = (n as any).metadata || {};
+                                        const thumb = metadata.thumb || n.avatarUrl;
+
+                                        return (
+                                            <div key={n.id} onClick={() => handleClick(n)} className={`group p-4 flex gap-4 hover:bg-white/5 cursor-pointer transition-all active:scale-[0.98] ${!n.isRead ? 'bg-indigo-500/5' : ''}`}>
+                                                <div className="relative shrink-0 mt-1">
+                                                    <div className={`w-14 h-14 rounded-xl bg-slate-800 overflow-hidden border border-white/10 ${n.type === 'SALE' ? 'ring-2 ring-emerald-500/30' : ''}`}>
+                                                        {thumb ? (
+                                                            <img src={thumb} className="w-full h-full object-cover" loading="lazy" />
+                                                        ) : (
+                                                            <div className="w-full h-full flex items-center justify-center text-slate-500">
+                                                                {n.type === 'SALE' ? <SaleIcon size={20} className="text-emerald-400"/> : <Bell size={20}/>}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    {!n.isRead && <div className="absolute -top-1 -right-1 w-3 h-3 bg-indigo-500 rounded-full border-2 border-slate-900 animate-pulse shadow-lg shadow-indigo-500/50"></div>}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between items-start gap-2">
+                                                        <span className={`text-[10px] font-black uppercase tracking-widest ${n.type === 'SALE' ? 'text-emerald-400' : 'text-indigo-400'}`}>
+                                                            {n.type === 'SALE' ? 'Venta Exitosa' : (n.type === 'UPLOAD' ? 'Nuevo Video' : 'Sistema')}
+                                                        </span>
+                                                        <span className="text-[9px] text-slate-600 font-bold whitespace-nowrap">{new Date(n.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                                    </div>
+                                                    <p className={`text-[13px] leading-snug mt-1 ${!n.isRead ? 'text-white font-bold' : 'text-slate-400'}`}>{n.text}</p>
+                                                    {n.type === 'SALE' && (
+                                                        <div className="mt-2 text-[10px] font-black bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded border border-emerald-500/20 w-fit">Recargo de Saldo +</div>
                                                     )}
                                                 </div>
-                                                {!n.isRead && <div className="absolute -top-1 -right-1 w-3 h-3 bg-indigo-500 rounded-full border-2 border-slate-900 animate-pulse shadow-lg shadow-indigo-500/50"></div>}
                                             </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex justify-between items-start gap-2">
-                                                    <span className={`text-[10px] font-black uppercase tracking-widest ${n.type === 'SALE' ? 'text-emerald-400' : 'text-indigo-400'}`}>
-                                                        {n.type === 'SALE' ? 'Venta Exitosa' : (n.type === 'UPLOAD' ? 'Nuevo Video' : 'Sistema')}
-                                                    </span>
-                                                    <span className="text-[9px] text-slate-600 font-bold whitespace-nowrap">{new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                                </div>
-                                                <p className={`text-[13px] leading-snug mt-1 ${!n.isRead ? 'text-white font-bold' : 'text-slate-400'}`}>{n.text}</p>
-                                                {n.type === 'SALE' && (
-                                                    <div className="mt-2 text-[10px] font-black bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded border border-emerald-500/20 w-fit">Recargo de Saldo +</div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>

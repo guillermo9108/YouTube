@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, VideoCategory, VipPlan } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles, Globe, Cpu } from 'lucide-react';
+import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles, Globe, Cpu, FileText } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
@@ -162,6 +162,17 @@ export default function AdminConfig() {
                 isOpen={openSection === 'SYSTEM'} 
                 onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}
             >
+                <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800 mb-4">
+                    <div>
+                        <h4 className="font-bold text-white text-sm flex items-center gap-2"><FileText size={16} className="text-indigo-400"/> Registro de Logs</h4>
+                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Habilita/Deshabilita el guardado de errores y eventos en debug_log.txt</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" checked={settings.enableDebugLog ?? true} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, enableDebugLog: e.target.checked} : null)} className="sr-only peer"/>
+                        <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                </div>
+
                 <div className="grid grid-cols-2 gap-6">
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Inicio Descarga</label>

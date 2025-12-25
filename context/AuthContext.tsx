@@ -87,9 +87,10 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         // HEARTBEAT (Netflix-Style Check)
         // Cada 30 segundos verificamos si este dispositivo sigue siendo el activo.
         heartbeatRef.current = window.setInterval(async () => {
-            if (user) {
-                const isValid = await db.heartbeat(user.id);
-                // Si isValid es false, el interceptor de db.ts ya habrá disparado 'sp_session_expired'
+            // CRITICAL GUARD: Only execute heartbeat if user exists and window is active
+            if (user && user.id && !document.hidden) {
+                await db.heartbeat(user.id);
+                // Si falla (401), el interceptor de db.ts disparará 'sp_session_expired'
             }
         }, 30000);
     } else {
