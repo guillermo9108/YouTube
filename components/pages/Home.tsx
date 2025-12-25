@@ -3,7 +3,7 @@ import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, UserRole } from '../../types';
-import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, ChevronRight, ArrowDown, Database, LayoutGrid, Play, Info } from 'lucide-react';
+import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, ChevronRight, ArrowDown, Database, LayoutGrid, Play, Info, Plus } from 'lucide-react';
 import { Link, useLocation, useNavigate } from '../Router';
 import AIConcierge from '../AIConcierge';
 
@@ -216,23 +216,19 @@ export default function Home() {
       }
   }, [isFilteredMode, filteredList.length, feed?.discovery, visibleCount, isMoreLoading]);
 
-  // SENSOR DE PROXIMIDAD ULTRA-PROACTIVO (2500PX)
   useEffect(() => {
       const observer = new IntersectionObserver((entries) => {
-          if (entries[0].isIntersecting) {
+          if (entries[0].isIntersecting && !isMoreLoading) {
               loadMore();
           }
       }, { 
           threshold: 0, 
-          rootMargin: '2500px' // Se activa muchísimo antes de llegar al final
+          rootMargin: '1000px' 
       });
 
-      if (loadMoreRef.current) {
-          observer.observe(loadMoreRef.current);
-      }
-      
+      if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
-  }, [loadMore, visibleCount]);
+  }, [loadMore, isMoreLoading]);
 
   const displayList = isFilteredMode ? filteredList : (feed?.discovery || []);
 
@@ -307,11 +303,23 @@ export default function Home() {
                       ))}
                   </div>
 
-                  <div ref={loadMoreRef} className="h-40 flex flex-col justify-center items-center">
+                  {/* SENTINEL & FALLBACK LOAD MORE */}
+                  <div ref={loadMoreRef} className="py-20 flex flex-col justify-center items-center">
                       {visibleCount < displayList.length ? (
-                          <div className="flex flex-col items-center gap-3">
-                              <RefreshCw className="animate-spin text-indigo-500" size={24}/>
-                              <span className="text-[10px] uppercase font-black text-slate-600 tracking-widest">Sincronizando más contenido inteligente</span>
+                          <div className="flex flex-col items-center gap-6 w-full">
+                              {isMoreLoading ? (
+                                  <div className="flex flex-col items-center gap-3">
+                                      <RefreshCw className="animate-spin text-indigo-500" size={32}/>
+                                      <span className="text-[10px] uppercase font-black text-slate-600 tracking-widest animate-pulse">Sincronizando biblioteca...</span>
+                                  </div>
+                              ) : (
+                                  <button 
+                                    onClick={loadMore}
+                                    className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-white font-black px-10 py-4 rounded-2xl flex items-center gap-2 active:scale-95 transition-all shadow-xl shadow-black/50"
+                                  >
+                                      <Plus size={18}/> Cargar más videos
+                                  </button>
+                              )}
                           </div>
                       ) : displayList.length > 0 && (
                           <div className="text-[10px] uppercase font-black text-slate-700 tracking-[0.3em] border-t border-slate-900 pt-8 w-full text-center">Has explorado toda la biblioteca</div>

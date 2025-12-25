@@ -34,15 +34,58 @@ function video_get_one($pdo, $id) {
 }
 
 function video_get_related($pdo, $id) {
-    $stmt = $pdo->prepare("SELECT creatorId, category FROM videos WHERE id = ?");
+    // 1. Obtener datos del video actual
+    $stmt = $pdo->prepare("SELECT videoUrl, category, title, creatorId FROM videos WHERE id = ?");
     $stmt->execute([$id]);
-    $base = $stmt->fetch();
-    if (!$base) respond(true, []);
-    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.creatorId = ? OR v.category = ?) AND v.category NOT IN ('PENDING', 'PROCESSING') LIMIT 12");
-    $stmt->execute([$id, $base['creatorId'], $base['category']]);
-    $vids = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    video_process_rows($vids);
-    respond(true, $vids);
+    $current = $stmt->fetch();
+    if (!$current) respond(true, []);
+
+    // Extraer jerarquía de carpetas
+    $path = str_replace('\\', '/', $current['videoUrl']);
+    $parts = explode('/', $path);
+    $parentDir = (count($parts) > 1) ? $parts[count($parts)-2] : null;
+    $grandParentDir = (count($parts) > 2) ? $parts[count($parts)-3] : null;
+
+    // 2. Obtener pool de candidatos (excluyendo el actual)
+    $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+                         FROM videos v 
+                         LEFT JOIN users u ON v.creatorId = u.id 
+                         WHERE v.id != '$id' AND v.category NOT IN ('PENDING', 'PROCESSING')
+                         LIMIT 100");
+    $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // 3. Algoritmo de Scoring por Jerarquía
+    foreach ($candidates as &$c) {
+        $score = 0;
+        $cPath = str_replace('\\', '/', $c['videoUrl']);
+        $cParts = explode('/', $cPath);
+        $cParent = (count($cParts) > 1) ? $cParts[count($cParts)-2] : null;
+        $cGrand = (count($cParts) > 2) ? $cParts[count($cParts)-3] : null;
+
+        if ($parentDir && $cParent === $parentDir) $score += 1000; // Misma carpeta (Temporada)
+        if ($grandParentDir && $cGrand === $grandParentDir) $score += 500; // Mismo Show
+        if ($c['category'] === $current['category']) $score += 100; // Misma Categoría
+        if ($c['creatorId'] === $current['creatorId']) $score += 50; // Mismo Creador
+        
+        // Coincidencia parcial de título (series como "Naruto 01", "Naruto 02")
+        $cleanCurrentTitle = preg_replace('/[0-9]/', '', $current['title']);
+        $cleanCandidateTitle = preg_replace('/[0-9]/', '', $c['title']);
+        if (stripos($cleanCandidateTitle, substr($cleanCurrentTitle, 0, 10)) !== false) $score += 200;
+
+        $c['relevancy_score'] = $score;
+    }
+
+    // 4. Ordenar por Score (Desc) y luego por Título Natural (Asc)
+    usort($candidates, function($a, $b) {
+        if ($a['relevancy_score'] !== $b['relevancy_score']) {
+            return $b['relevancy_score'] - $a['relevancy_score'];
+        }
+        return strnatcasecmp($a['title'], $b['title']);
+    });
+
+    $result = array_slice($candidates, 0, 15);
+    video_process_rows($result);
+    respond(true, $result);
 }
 
 function video_get_by_creator($pdo, $userId) {
@@ -106,7 +149,6 @@ function video_scan_local($pdo, $input) {
                 foreach ($ignoreFolders as $ignore) if (strpos($pathName, $ignore) !== false) continue 2;
                 if (!$file->isFile()) continue;
                 
-                // VALIDACIÓN CRÍTICA: Ignorar temporales e incompletos
                 $fname = $file->getFilename();
                 if (strpos($fname, '_transcoding') !== false || strpos($fname, '.tmp') !== false) continue;
                 if ($file->getSize() === 0) continue;
@@ -216,4 +258,3 @@ function video_delete($pdo, $input) {
     }
     respond(true);
 }
-?>
