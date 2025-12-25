@@ -6,18 +6,16 @@ import { useToast } from '../../../context/ToastContext';
 export default function AdminTranscoder() {
     const toast = useToast();
     const [isRunning, setIsRunning] = useState(false);
-    const [isBusyServer, setIsBusyServer] = useState(false);
-    const [batchSize, setBatchSize] = useState(() => parseInt(localStorage.getItem('sp_tr_batch') || '1'));
-    const [filters, setFilters] = useState(() => {
-        const saved = localStorage.getItem('sp_tr_filters');
-        return saved ? JSON.parse(saved) : { days: 0, onlyNonMp4: true, onlyIncompatible: true };
-    });
     const [stats, setStats] = useState({ waiting: 0, processing: 0, failed: 0, done: 0 });
     const [log, setLog] = useState<string[]>([]);
     const [scanResult, setScanResult] = useState<number | null>(null);
     const [isScanning, setIsScanning] = useState(false);
     const loopActive = useRef(false);
     const stopRequested = useRef(false);
+    const [filters, setFilters] = useState(() => {
+        const saved = localStorage.getItem('sp_tr_filters');
+        return saved ? JSON.parse(saved) : { days: 0, onlyNonMp4: true, onlyIncompatible: true };
+    });
 
     const loadStats = async (showSyncMessage = false) => {
         try {
@@ -26,8 +24,8 @@ export default function AdminTranscoder() {
             const processingCount = all.filter((v: any) => v.transcode_status === 'PROCESSING').length;
             const failed = all.filter((v: any) => v.transcode_status === 'FAILED').length;
             const done = all.filter((v: any) => v.transcode_status === 'DONE').length;
+            
             setStats({ waiting, processing: processingCount, failed, done });
-            setIsBusyServer(processingCount > 0);
             
             const settings = await db.getSystemSettings();
             if (settings.is_transcoder_active) {
@@ -43,9 +41,10 @@ export default function AdminTranscoder() {
 
     useEffect(() => { 
         loadStats(true); 
-        const interval = setInterval(() => loadStats(false), 15000);
+        // Aumentamos frecuencia de sondeo mientras esté activo para ver el progreso real
+        const interval = setInterval(() => loadStats(false), 5000);
         return () => clearInterval(interval);
-    }, []);
+    }, [isRunning]);
 
     useEffect(() => {
         if (isRunning && !loopActive.current) runBatchLoop();
@@ -87,7 +86,7 @@ export default function AdminTranscoder() {
             await db.updateSystemSettings({ is_transcoder_active: true });
             stopRequested.current = false;
             setIsRunning(true);
-            addToLog("Encendiendo motor FFmpeg...");
+            addToLog("Encendiendo motor asíncrono...");
         } catch (e: any) { toast.error(e.message); }
     };
 
@@ -114,40 +113,32 @@ export default function AdminTranscoder() {
             }
             
             try {
+                // admin_transcode_batch ahora responde instantáneamente tras lanzar en background
                 const res = await db.request<any>(`action=admin_transcode_batch`);
                 
-                if (res.message === 'Servidor Ocupado') {
-                    // Si el servidor está al límite, esperamos un poco más antes de reintentar
+                if (res.message === 'Servidor al Límite (OS)') {
+                    // Esperar a que alguno termine
                     setTimeout(loop, 10000); 
                     return;
                 }
                 
                 if (res.processed > 0) {
-                    addToLog(`Éxito: Video optimizado.`);
+                    addToLog(`Tarea enviada: ${res.videoId}`);
                     loadStats();
                 }
 
                 if (res.completed) {
                     setIsRunning(false);
                     loopActive.current = false;
-                    addToLog("Librería optimizada al 100%.");
+                    addToLog("Librería al día.");
                     await db.updateSystemSettings({ is_transcoder_active: false });
                     return;
                 }
 
-                // Continuar bucle si sigue activo
-                const settings = await db.getSystemSettings();
-                if (!settings.is_transcoder_active) {
-                    setIsRunning(false);
-                    loopActive.current = false;
-                    addToLog("Motor apagado por el sistema.");
-                    return;
-                }
-
-                setTimeout(loop, 4000);
+                // Pausa corta entre lanzamientos para no saturar el bus de comandos
+                setTimeout(loop, 6000);
             } catch (e: any) {
                 addToLog(`Error: ${e.message}`);
-                // Reintentar tras error con delay prudencial
                 setTimeout(loop, 15000);
             }
         };
