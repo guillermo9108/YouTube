@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../services/db';
 import { Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, Filter, History, AlertCircle, Activity, Box, Radio } from 'lucide-react';
@@ -29,13 +28,14 @@ export default function AdminTranscoder() {
             const done = all.filter((v: any) => v.transcode_status === 'DONE').length;
             setStats({ waiting, processing: processingCount, failed, done });
             setIsBusyServer(processingCount > 0);
+            
             const settings = await db.getSystemSettings();
             if (settings.is_transcoder_active) {
                 if (!isRunning) {
                     setIsRunning(true);
                     stopRequested.current = false;
                 }
-            } else if (isRunning && !loopActive.current) {
+            } else if (isRunning) {
                 setIsRunning(false);
             }
         } catch (e) {}
@@ -105,32 +105,49 @@ export default function AdminTranscoder() {
     const runBatchLoop = async () => {
         if (loopActive.current) return;
         loopActive.current = true;
+        
         const loop = async () => {
             if (stopRequested.current) {
                 loopActive.current = false;
                 setIsRunning(false);
                 return;
             }
+            
             try {
                 const res = await db.request<any>(`action=admin_transcode_batch`);
-                if (res.processed > 0) {
-                    addToLog(`Success: Conversión finalizada.`);
-                    loadStats();
-                }
+                
                 if (res.message === 'Servidor Ocupado') {
+                    // Si el servidor está al límite, esperamos un poco más antes de reintentar
                     setTimeout(loop, 10000); 
                     return;
                 }
-                const settings = await db.getSystemSettings();
-                if (!settings.is_transcoder_active || res.completed) {
+                
+                if (res.processed > 0) {
+                    addToLog(`Éxito: Video optimizado.`);
+                    loadStats();
+                }
+
+                if (res.completed) {
                     setIsRunning(false);
                     loopActive.current = false;
-                    addToLog(res.completed ? "Librería optimizada." : "Motor apagado.");
+                    addToLog("Librería optimizada al 100%.");
+                    await db.updateSystemSettings({ is_transcoder_active: false });
                     return;
                 }
+
+                // Continuar bucle si sigue activo
+                const settings = await db.getSystemSettings();
+                if (!settings.is_transcoder_active) {
+                    setIsRunning(false);
+                    loopActive.current = false;
+                    addToLog("Motor apagado por el sistema.");
+                    return;
+                }
+
                 setTimeout(loop, 4000);
             } catch (e: any) {
                 addToLog(`Error: ${e.message}`);
+                // Reintentar tras error con delay prudencial
                 setTimeout(loop, 15000);
             }
         };
