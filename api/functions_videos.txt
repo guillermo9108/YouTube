@@ -3,15 +3,12 @@
 function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
-        // Detectar si el video está en el servidor (local o subido)
         $isLocal = (isset($v['isLocal']) && ($v['isLocal'] == 1 || $v['isLocal'] === "1" || $v['isLocal'] === true));
         $isUploaded = (strpos($v['videoUrl'], 'uploads/videos/') !== false);
-        
         if ($isLocal || $isUploaded) {
             $v['videoUrl'] = "api/index.php?action=stream&id=" . $v['id'];
             $v['isLocal'] = true;
         }
-        
         if (isset($v['thumbnailUrl'])) $v['thumbnailUrl'] = fix_url($v['thumbnailUrl']);
         if (!isset($v['transcode_status'])) $v['transcode_status'] = 'NONE';
     }
@@ -36,15 +33,11 @@ function video_get_one($pdo, $id) {
     respond(false, null, 'Video no encontrado');
 }
 
-/**
- * Obtener videos relacionados (Mismo creador o misma categoría)
- */
 function video_get_related($pdo, $id) {
     $stmt = $pdo->prepare("SELECT creatorId, category FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $base = $stmt->fetch();
     if (!$base) respond(true, []);
-
     $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.creatorId = ? OR v.category = ?) AND v.category NOT IN ('PENDING', 'PROCESSING') LIMIT 12");
     $stmt->execute([$id, $base['creatorId'], $base['category']]);
     $vids = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -52,9 +45,6 @@ function video_get_related($pdo, $id) {
     respond(true, $vids);
 }
 
-/**
- * Obtener videos de un creador específico
- */
 function video_get_by_creator($pdo, $userId) {
     $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.createdAt DESC");
     $stmt->execute([$userId]);
@@ -71,36 +61,25 @@ function video_upload($pdo, $post, $files) {
     $cat = $post['category'] ?? 'GENERAL';
     $dur = intval($post['duration'] ?? 0);
     $uid = $post['userId'] ?? '';
-
     if (!$uid) respond(false, null, 'ID de usuario faltante');
-
     $videoUrl = null;
     $thumbUrl = 'api/uploads/thumbnails/default.jpg';
-
     if (isset($files['video']) && $files['video']['error'] === UPLOAD_ERR_OK) {
         $vDir = 'uploads/videos/';
         if (!is_dir($vDir)) mkdir($vDir, 0777, true);
         $ext = pathinfo($files['video']['name'], PATHINFO_EXTENSION);
         $vPath = "{$vDir}{$id}.{$ext}";
-        if (move_uploaded_file($files['video']['tmp_name'], $vPath)) {
-            $videoUrl = "api/" . $vPath;
-        }
+        if (move_uploaded_file($files['video']['tmp_name'], $vPath)) { $videoUrl = "api/" . $vPath; }
     }
-
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         $tDir = 'uploads/thumbnails/';
         if (!is_dir($tDir)) mkdir($tDir, 0777, true);
         $tPath = "{$tDir}{$id}.jpg";
-        if (move_uploaded_file($files['thumbnail']['tmp_name'], $tPath)) {
-            $thumbUrl = "api/" . $tPath;
-        }
+        if (move_uploaded_file($files['thumbnail']['tmp_name'], $tPath)) { $thumbUrl = "api/" . $tPath; }
     }
-
     if (!$videoUrl) respond(false, null, 'Fallo al mover video');
-
     $sql = "INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)";
     $pdo->prepare($sql)->execute([$id, $title, $desc, $price, $thumbUrl, $videoUrl, $uid, time(), $cat, $dur]);
-    
     respond(true, ['id' => $id]);
 }
 
@@ -108,8 +87,7 @@ function video_scan_local($pdo, $input) {
     while (ob_get_level() > 0) ob_end_clean();
     ob_start();
     try {
-        set_time_limit(1200); 
-        ini_set('memory_limit', '1024M');
+        set_time_limit(1200); ini_set('memory_limit', '1024M');
         $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
         if (!$rawPath || !is_dir($rawPath)) throw new Exception("Ruta inaccesible");
         $rootPath = realpath($rawPath);
@@ -119,13 +97,6 @@ function video_scan_local($pdo, $input) {
         $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store'];
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Local', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
         
-        /**
-         * COMPATIBILIDAD SYNOLOGY NAS:
-         * Usamos enteros literales para las banderas de los iteradores.
-         * 4608 = SKIP_DOTS (4096) | FOLLOW_SYMLINKS (512)
-         * 1 = SELF_FIRST
-         * 16 = CATCH_GET_CHILD
-         */
         $dirIterator = new RecursiveDirectoryIterator($rootPath, 4608);
         $iterator = new RecursiveIteratorIterator($dirIterator, 1, 16);
         
@@ -134,6 +105,11 @@ function video_scan_local($pdo, $input) {
                 $pathName = $file->getPathname();
                 foreach ($ignoreFolders as $ignore) if (strpos($pathName, $ignore) !== false) continue 2;
                 if (!$file->isFile()) continue;
+                
+                // IGNORAR ARCHIVOS TEMPORALES DE CONVERSIÓN O INCOMPLETOS
+                $fname = $file->getFilename();
+                if (strpos($fname, '_transcoding') !== false || strpos($fname, '.tmp') !== false) continue;
+
                 $ext = strtolower($file->getExtension());
                 if (!in_array($ext, $allowedExts)) continue;
                 $totalScanned++;
@@ -181,8 +157,7 @@ function video_update_metadata($pdo, $post, $files) {
         if (!is_dir($tDir)) mkdir($tDir, 0777, true);
         $thumbPath = "{$tDir}{$id}.jpg";
         if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) {
-            $sql .= ", thumbnailUrl = ?";
-            $params[] = "api/" . $thumbPath; 
+            $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; 
         }
     }
     $sql .= " WHERE id = ?"; $params[] = $id;

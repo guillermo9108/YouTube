@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V8.1
+ * StreamPay - Core Controller V8.2
  * Sistema de Logs Inteligente y Resiliente.
  */
 
@@ -22,7 +22,8 @@ function file_debug_log($message, $data = null, $force = false) {
         try {
             if (isset($pdo)) {
                 $stmt = $pdo->query("SELECT enableDebugLog FROM system_settings LIMIT 1");
-                $GLOBAL_LOG_ENABLED = (bool)($stmt->fetchColumn() ?? true);
+                $val = $stmt->fetchColumn();
+                $GLOBAL_LOG_ENABLED = ($val !== false) ? (bool)$val : true;
             } else {
                 $GLOBAL_LOG_ENABLED = true; // Loguear bootstrap errors por defecto
             }
@@ -32,6 +33,10 @@ function file_debug_log($message, $data = null, $force = false) {
     }
 
     if (!$GLOBAL_LOG_ENABLED && !$force) return;
+
+    // Evitar loguear peticiones de lectura de logs para no llenar el disco de basura recursiva
+    $action = $_GET['action'] ?? '';
+    if ($action === 'admin_get_logs' && !$force) return;
 
     $logFile = __DIR__ . '/debug_log.txt';
     $timestamp = date('Y-m-d H:i:s');
@@ -63,8 +68,8 @@ function respond($success, $data = null, $error = null) {
     $action = $_GET['action'] ?? 'none';
     
     // FILTRADO INTELIGENTE DE LOGS DE RESPUESTA:
-    // Solo registramos si hay error o si es una acción crítica de administración
-    $critical_actions = ['initialize_system', 'update_system_settings', 'admin_repair_db', 'admin_cleanup_system_files', 'verify_db_connection'];
+    // Solo registramos si hay error (4xx/5xx/App Error) o si es una acción crítica de administración
+    $critical_actions = ['initialize_system', 'update_system_settings', 'admin_repair_db', 'admin_cleanup_system_files', 'verify_db_connection', 'admin_clear_logs'];
     
     if (!$success || in_array($action, $critical_actions)) {
         file_debug_log("RESPOND ACTION: " . $action, ["success" => $success, "error" => $error]);
@@ -170,6 +175,8 @@ try {
         case 'get_real_stats': admin_get_real_stats($pdo); break;
         case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;
         case 'admin_delete_listing': market_delete_listing($pdo, $input); break;
+        case 'admin_get_logs': admin_get_logs(); break;
+        case 'admin_clear_logs': admin_clear_logs(); break;
 
         // SOCIAL & NOTIFS
         case 'get_comments': interact_get_comments($pdo, $input['videoId']); break;

@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../../../services/db';
 import { VideoCategory, SmartCleanerResult } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { 
     Wrench, Trash2, Database, Brush, Activity, Server, 
     HardDrive, CheckCircle, Percent, Clock, Eye, ThumbsDown, 
-    Settings2, Info, AlertTriangle, Loader2, Play, Check, X, ShieldAlert, Zap
+    Settings2, Info, AlertTriangle, Loader2, Play, Check, X, ShieldAlert, Zap, FileText, RefreshCw
 } from 'lucide-react';
 
 const SystemHealthCard = ({ icon: Icon, label, status, color }: any) => (
@@ -26,6 +26,9 @@ export default function AdminMaintenance() {
     const toast = useToast();
     const [cleaning, setCleaning] = useState(false);
     const [cleanerPreview, setCleanerPreview] = useState<SmartCleanerResult | null>(null);
+    const [logs, setLogs] = useState<string[]>([]);
+    const [loadingLogs, setLoadingLogs] = useState(false);
+    const logIntervalRef = useRef<number | null>(null);
     
     // Configuración Janitor V6
     const [config, setConfig] = useState({
@@ -39,12 +42,38 @@ export default function AdminMaintenance() {
     // Estado de progreso real
     const [execution, setExecution] = useState<{ progress: number, current: string, total: number } | null>(null);
 
+    const fetchLogs = async (silent = false) => {
+        if (!silent) setLoadingLogs(true);
+        try {
+            const data = await db.request<string[]>('action=admin_get_logs');
+            setLogs(data || []);
+        } catch (e) {} finally {
+            if (!silent) setLoadingLogs(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchLogs();
+        logIntervalRef.current = window.setInterval(() => fetchLogs(true), 10000);
+        return () => { if (logIntervalRef.current) clearInterval(logIntervalRef.current); };
+    }, []);
+
+    const handleClearLogs = async () => {
+        if (!confirm("¿Deseas vaciar el archivo de logs?")) return;
+        try {
+            await db.request('action=admin_clear_logs');
+            setLogs([]);
+            toast.success("Logs vaciados");
+        } catch (e: any) { toast.error(e.message); }
+    };
+
     const handleCleanupOrphans = async () => {
         if (!confirm("Esta acción eliminará FÍSICAMENTE los archivos (videos, fotos, avatares) que no estén registrados en la base de datos. ¿Continuar?")) return;
         setCleaning(true);
         try {
             const res = await db.adminCleanupSystemFiles();
             toast.success(`Eliminados: ${res.videos} videos, ${res.thumbnails} miniaturas.`);
+            fetchLogs();
         } catch (e: any) { toast.error("Error: " + e.message); }
         finally { setCleaning(false); }
     };
@@ -54,6 +83,7 @@ export default function AdminMaintenance() {
         try {
             await db.adminRepairDb();
             toast.success("Base de datos reparada y sincronizada.");
+            fetchLogs();
         } catch (e: any) { toast.error("Error: " + e.message); }
         finally { setCleaning(false); }
     };
@@ -80,7 +110,6 @@ export default function AdminMaintenance() {
         const total = ids.length;
         setExecution({ progress: 0, current: 'Iniciando limpieza...', total });
 
-        // Dividimos en lotes de 10 para mostrar progreso real en el UI
         const chunkSize = 10;
         let deletedTotal = 0;
 
@@ -103,6 +132,7 @@ export default function AdminMaintenance() {
         setExecution(null);
         setCleanerPreview(null);
         setCleaning(false);
+        fetchLogs();
     };
 
     return (
@@ -163,24 +193,6 @@ export default function AdminMaintenance() {
                                 </div>
                             </div>
 
-                            <div className="bg-indigo-900/10 p-3 rounded-xl border border-indigo-500/20">
-                                <label className="text-[10px] font-bold text-indigo-300 uppercase block mb-3">Lógica de combinación:</label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <button 
-                                        onClick={() => setConfig({...config, operator: 'AND'})}
-                                        className={`py-2 text-[10px] font-bold rounded-lg border transition-all ${config.operator === 'AND' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-500'}`}
-                                    >
-                                        Y (Exigente)
-                                    </button>
-                                    <button 
-                                        onClick={() => setConfig({...config, operator: 'OR'})}
-                                        className={`py-2 text-[10px] font-bold rounded-lg border transition-all ${config.operator === 'OR' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-500'}`}
-                                    >
-                                        O (Relajado)
-                                    </button>
-                                </div>
-                            </div>
-
                             <button 
                                 onClick={handlePreviewCleaner} 
                                 disabled={cleaning}
@@ -191,34 +203,42 @@ export default function AdminMaintenance() {
                             </button>
                         </div>
                     </div>
+
+                    {/* Botones de acción rápida */}
+                    <div className="grid grid-cols-1 gap-3">
+                        <button onClick={handleCleanupOrphans} disabled={cleaning} className="flex items-center gap-3 p-4 bg-slate-900 border border-slate-800 hover:border-red-500/50 rounded-xl transition-all group">
+                             <Trash2 size={18} className="text-red-500 group-hover:scale-110 transition-transform" />
+                             <div className="text-left">
+                                 <span className="block text-xs font-bold text-white uppercase tracking-wider">Borrar Huérfanos</span>
+                                 <span className="block text-[9px] text-slate-500 uppercase">Ficheros sin DB</span>
+                             </div>
+                        </button>
+                        <button onClick={handleRepairDb} disabled={cleaning} className="flex items-center gap-3 p-4 bg-slate-900 border border-slate-800 hover:border-indigo-500/50 rounded-xl transition-all group">
+                             <Database size={18} className="text-indigo-500 group-hover:scale-110 transition-transform" />
+                             <div className="text-left">
+                                 <span className="block text-xs font-bold text-white uppercase tracking-wider">Sincronizar MariaDB</span>
+                                 <span className="block text-[9px] text-slate-500 uppercase">Reparar Tablas</span>
+                             </div>
+                        </button>
+                    </div>
                 </div>
 
-                {/* Panel de Resultados / Auditoría */}
-                <div className="lg:col-span-2 space-y-4">
+                {/* Panel de Resultados / Auditoría / Logs */}
+                <div className="lg:col-span-2 space-y-6">
                     {execution ? (
                         <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-8 text-center animate-in zoom-in-95">
                             <Loader2 size={48} className="animate-spin text-indigo-500 mx-auto mb-6" />
                             <h3 className="text-xl font-black text-white mb-2 uppercase tracking-tighter">Limpieza en Progreso</h3>
                             <p className="text-slate-400 text-sm mb-6">{execution.current}</p>
-                            
                             <div className="max-w-md mx-auto">
-                                <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase mb-2">
-                                    <span>Progreso General</span>
-                                    <span>{execution.progress}%</span>
-                                </div>
                                 <div className="h-4 bg-slate-800 rounded-full overflow-hidden border border-slate-700 p-0.5">
-                                    <div 
-                                        className="h-full bg-gradient-to-r from-indigo-600 to-purple-600 rounded-full transition-all duration-500 shadow-[0_0_15px_rgba(79,70,229,0.5)]"
-                                        style={{ width: `${execution.progress}%` }}
-                                    ></div>
+                                    <div className="h-full bg-gradient-to-r from-indigo-600 to-purple-600 rounded-full transition-all duration-500" style={{ width: `${execution.progress}%` }}></div>
                                 </div>
-                                <p className="text-[10px] text-slate-600 mt-4 uppercase font-bold tracking-widest">
-                                    No cierres esta pestaña hasta finalizar
-                                </p>
+                                <p className="text-[10px] text-slate-600 mt-4 uppercase font-bold tracking-widest">No cierres esta pestaña</p>
                             </div>
                         </div>
                     ) : cleanerPreview ? (
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[700px] animate-in slide-in-from-right-4">
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[600px] animate-in slide-in-from-right-4">
                             <div className="p-5 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
                                 <div>
                                     <h4 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2"><CheckCircle size={16} className="text-amber-500"/> Plan de Ejecución</h4>
@@ -231,38 +251,21 @@ export default function AdminMaintenance() {
                                     </button>
                                 </div>
                             </div>
-
-                            <div className="flex-1 overflow-y-auto overscroll-contain bg-slate-900/50">
+                            <div className="flex-1 overflow-y-auto bg-slate-900/50">
                                 <table className="w-full text-left border-collapse">
                                     <thead className="bg-slate-950/80 sticky top-0 z-10">
                                         <tr className="text-[9px] uppercase font-black text-slate-500">
-                                            <th className="p-4 border-b border-slate-800">Video / Categoría</th>
-                                            <th className="p-4 border-b border-slate-800">Métricas (V / D)</th>
-                                            <th className="p-4 border-b border-slate-800">Razón de Purga</th>
-                                            <th className="p-4 border-b border-slate-800 text-right">Peso</th>
+                                            <th className="p-4">Video</th>
+                                            <th className="p-4">Vistas</th>
+                                            <th className="p-4">Razón</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/50">
                                         {cleanerPreview.preview.map((v: any) => (
                                             <tr key={v.id} className="hover:bg-slate-800/30 transition-colors">
-                                                <td className="p-4">
-                                                    <div className="text-xs font-bold text-white truncate max-w-[180px]">{v.title}</div>
-                                                    <div className="text-[9px] text-slate-500 font-mono">{v.category}</div>
-                                                </td>
-                                                <td className="p-4">
-                                                    <div className="flex items-center gap-3">
-                                                        <span className="text-[10px] text-slate-400 flex items-center gap-1"><Eye size={10}/> {v.views}</span>
-                                                        <span className="text-[10px] text-red-400 flex items-center gap-1"><ThumbsDown size={10}/> {v.dislikes}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="p-4">
-                                                    <span className="bg-slate-950 border border-slate-800 text-[9px] font-black text-amber-500 px-2 py-1 rounded uppercase tracking-tighter">
-                                                        {v.reason}
-                                                    </span>
-                                                </td>
-                                                <td className="p-4 text-right">
-                                                    <span className="font-mono text-xs text-slate-400">{v.size_fmt}</span>
-                                                </td>
+                                                <td className="p-4 text-xs font-bold text-white truncate max-w-[150px]">{v.title}</td>
+                                                <td className="p-4 text-[10px] text-slate-400">{v.views}</td>
+                                                <td className="p-4"><span className="text-[9px] font-black text-amber-500 uppercase">{v.reason}</span></td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -270,35 +273,38 @@ export default function AdminMaintenance() {
                             </div>
                         </div>
                     ) : (
-                        <div className="space-y-6">
-                            <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 border-dashed text-center">
-                                <Brush size={48} className="text-slate-700 mx-auto mb-4" />
-                                <h3 className="text-lg font-bold text-slate-300">Smart Cleaner Inactivo</h3>
-                                <p className="text-sm text-slate-500 max-w-sm mx-auto mt-2">
-                                    Configura los filtros a la izquierda y pulsa "Simular Purga" para ver qué videos recomienda el Janitor eliminar del servidor.
-                                </p>
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[600px]">
+                            <div className="p-4 bg-slate-950 border-b border-slate-800 flex justify-between items-center">
+                                <div className="flex items-center gap-2">
+                                    <FileText size={18} className="text-indigo-400" />
+                                    <h4 className="text-sm font-black text-white uppercase tracking-widest">Incidentes del Sistema</h4>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => fetchLogs()} className={`p-2 hover:bg-slate-800 rounded-full text-slate-500 ${loadingLogs ? 'animate-spin' : ''}`} title="Refrescar"><RefreshCw size={16}/></button>
+                                    <button onClick={handleClearLogs} className="p-2 hover:bg-red-900/30 rounded-full text-slate-500 hover:text-red-400" title="Vaciar Logs"><Trash2 size={16}/></button>
+                                </div>
                             </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <button onClick={handleCleanupOrphans} disabled={cleaning} className="w-full p-5 bg-slate-900 border border-slate-800 hover:border-red-500/30 rounded-2xl text-left group transition-all">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"><Trash2 size={24}/></div>
-                                        <div>
-                                            <span className="font-black text-slate-200 block text-xs uppercase tracking-widest">Borrar Huérfanos</span>
-                                            <span className="text-[10px] text-slate-500 font-bold uppercase">Limpiar archivos sin DB</span>
-                                        </div>
+                            <div className="flex-1 bg-black/40 overflow-y-auto p-4 font-mono text-[10px] space-y-1.5 custom-scrollbar">
+                                {logs.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-slate-700 opacity-50 italic">
+                                        <CheckCircle size={32} className="mb-2" />
+                                        No hay incidentes registrados.
                                     </div>
-                                </button>
-
-                                <button onClick={handleRepairDb} disabled={cleaning} className="w-full p-5 bg-slate-900 border border-slate-800 hover:border-indigo-500/30 rounded-2xl text-left group transition-all">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 bg-indigo-900/20 text-indigo-500 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform"><Database size={24}/></div>
-                                        <div>
-                                            <span className="font-black text-slate-200 block text-xs uppercase tracking-widest">Reparar MariaDB</span>
-                                            <span className="text-[10px] text-slate-500 font-bold uppercase">Sincronizar Esquema</span>
-                                        </div>
-                                    </div>
-                                </button>
+                                ) : (
+                                    logs.map((log, i) => {
+                                        const isError = log.includes('ERROR') || log.includes('INCIDENTE');
+                                        const isAction = log.includes('RESPOND ACTION');
+                                        return (
+                                            <div key={i} className={`p-2 rounded border border-transparent ${isError ? 'bg-red-900/10 border-red-500/10 text-red-400' : (isAction ? 'text-slate-500' : 'text-slate-400')}`}>
+                                                <span className="opacity-30 mr-2">[{i+1}]</span>
+                                                {log}
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                            <div className="p-2 bg-slate-950/80 border-t border-slate-800 text-[9px] text-slate-600 text-center uppercase font-bold tracking-widest">
+                                Mostrando últimos 100 eventos críticos
                             </div>
                         </div>
                     )}

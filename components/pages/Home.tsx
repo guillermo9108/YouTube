@@ -33,18 +33,13 @@ const HeroSection = ({ video }: { video: Video | null }) => {
 
     return (
         <div className="relative h-[60vh] md:h-[70vh] -mx-4 md:mx-0 mb-8 overflow-hidden rounded-b-[40px] md:rounded-3xl group">
-            {/* Background Image */}
             <img 
                 src={video.thumbnailUrl} 
                 className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" 
                 alt={video.title} 
             />
-            
-            {/* Overlays */}
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
             <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent"></div>
-            
-            {/* Content */}
             <div className="absolute bottom-0 left-0 p-8 md:p-12 w-full md:w-2/3 space-y-4 animate-in slide-in-from-bottom-8 duration-700">
                 <div className="flex items-center gap-2">
                     <span className="bg-indigo-600 text-white text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest flex items-center gap-1">
@@ -54,32 +49,21 @@ const HeroSection = ({ video }: { video: Video | null }) => {
                         Premium
                     </span>
                 </div>
-                
                 <h1 className="text-4xl md:text-6xl font-black text-white leading-[0.9] tracking-tighter uppercase italic">
                     {video.title}
                 </h1>
-                
                 <p className="text-slate-300 text-sm md:text-lg line-clamp-2 max-w-xl font-medium">
                     {video.description || "Sumérgete en esta experiencia premium exclusiva de StreamPay. Calidad máxima y contenido inigualable."}
                 </p>
-                
                 <div className="flex items-center gap-4 pt-4">
-                    <button 
-                        onClick={() => navigate(`/watch/${video.id}`)}
-                        className="bg-white text-black font-black px-8 py-4 rounded-2xl flex items-center gap-2 hover:bg-slate-200 active:scale-95 transition-all shadow-2xl shadow-white/10"
-                    >
+                    <button onClick={() => navigate(`/watch/${video.id}`)} className="bg-white text-black font-black px-8 py-4 rounded-2xl flex items-center gap-2 hover:bg-slate-200 active:scale-95 transition-all shadow-2xl shadow-white/10">
                         <Play size={20} fill="currentColor"/> Ver Ahora
                     </button>
-                    <button 
-                        onClick={() => navigate(`/watch/${video.id}`)}
-                        className="bg-white/10 backdrop-blur-md border border-white/20 text-white font-black px-8 py-4 rounded-2xl flex items-center gap-2 hover:bg-white/20 active:scale-95 transition-all"
-                    >
+                    <button onClick={() => navigate(`/watch/${video.id}`)} className="bg-white/10 backdrop-blur-md border border-white/20 text-white font-black px-8 py-4 rounded-2xl flex items-center gap-2 hover:bg-white/20 active:scale-95 transition-all">
                         <Info size={20}/> Detalles
                     </button>
                 </div>
             </div>
-
-            {/* Price Floating Tag */}
             <div className="absolute top-8 right-8 bg-black/40 backdrop-blur-xl border border-white/20 p-4 rounded-3xl flex flex-col items-center shadow-2xl">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Inversión</span>
                 <span className="text-3xl font-black text-white">{video.price} $</span>
@@ -94,17 +78,13 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('ALL');
-  
   const [allVideos, setAllVideos] = useState<Video[]>([]);
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
   const [feed, setFeed] = useState<any>(null);
   const [categories, setCategories] = useState<string[]>(['ALL']);
-  
-  // Infinite Scroll State
   const [visibleCount, setVisibleCount] = useState(12);
   const [isMoreLoading, setIsMoreLoading] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
-
   const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
   const generateSmartFeed = async (videos: Video[], userId: string | undefined) => {
@@ -112,16 +92,11 @@ export default function Home() {
       const usedIds = new Set<string>();
       const addToUsed = (vids: Video[]) => vids.forEach(v => usedIds.add(v.id));
       const getUnused = (pool: Video[]) => pool.filter(v => !usedIds.has(v.id));
-
       let topCategories: string[] = [];
       let subCreatorIds: string[] = [];
-
       if (userId) {
           try {
-              const [activity, subs] = await Promise.all([
-                  db.getUserActivity(userId),
-                  db.getSubscriptions(userId)
-              ]);
+              const [activity, subs] = await Promise.all([db.getUserActivity(userId), db.getSubscriptions(userId)]);
               subCreatorIds = subs || [];
               const categoryScores: Record<string, number> = {};
               const interactIds = [...(activity.liked || []), ...(activity.watched || [])];
@@ -135,7 +110,6 @@ export default function Home() {
               topCategories = Object.entries(categoryScores).sort(([,a], [,b]) => b - a).map(([cat]) => cat);
           } catch(e) {}
       }
-
       const subs = getUnused(availableVideos.filter(v => subCreatorIds.includes(v.creatorId))).sort((a,b) => b.createdAt - a.createdAt).slice(0, 10);
       addToUsed(subs);
       const oneWeekAgo = Date.now()/1000 - (7 * 86400);
@@ -143,11 +117,8 @@ export default function Home() {
       addToUsed(tasteNew);
       const trending = getUnused(availableVideos).sort((a,b) => b.views - a.views).slice(0, 10);
       addToUsed(trending);
-      const discovery = getUnused(availableVideos).sort(() => 0.5 - Math.random());
-      
-      // Hero: Best available candidate (Latest + Price > 0)
+      const discovery = getUnused(availableVideos);
       const heroCandidate = videos.filter(v => v.price > 0).sort((a,b) => b.createdAt - a.createdAt)[0] || videos[0];
-
       return { tasteNew, trending, subs, discovery, hero: heroCandidate };
   };
 
@@ -158,15 +129,12 @@ export default function Home() {
             const all = await db.getAllVideos();
             const validVideos = all.filter(v => v.category !== 'PENDING' && v.category !== 'PROCESSING');
             setAllVideos(validVideos);
-
             if (user) {
                 const act = await db.getUserActivity(user.id);
                 setWatchedIds(act.watched || []);
             }
-
             const smartData = await generateSmartFeed(validVideos, user?.id);
             setFeed(smartData);
-
             const settings = await db.getSystemSettings();
             const catStats: Record<string, { count: number, views: number }> = {};
             validVideos.forEach(v => {
@@ -175,14 +143,11 @@ export default function Home() {
                 catStats[c].count++;
                 catStats[c].views += Number(v.views || 0);
             });
-
             let allConfiguredCats = ['GENERAL', ...(settings.customCategories || [])];
             allConfiguredCats = Array.from(new Set(allConfiguredCats));
-
             const sortedCats = allConfiguredCats
                 .filter(cat => catStats[cat] && catStats[cat].count > 0)
                 .sort((a, b) => (catStats[b]?.views || 0) - (catStats[a]?.views || 0));
-
             setCategories(['ALL', ...sortedCats]);
         } catch (e) {} finally { setLoading(false); }
     };
@@ -192,46 +157,37 @@ export default function Home() {
   const isFilteredMode = searchQuery.trim() !== '' || activeCategory !== 'ALL';
   
   const filteredList = useMemo(() => {
-      if (!isFilteredMode) return [];
       return allVideos.filter(v => {
           const matchCat = activeCategory === 'ALL' || v.category === activeCategory;
           const matchSearch = v.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                               v.creatorName.toLowerCase().includes(searchQuery.toLowerCase());
           return matchCat && matchSearch;
       }).sort((a,b) => b.createdAt - a.createdAt);
-  }, [allVideos, activeCategory, searchQuery, isFilteredMode]);
+  }, [allVideos, activeCategory, searchQuery]);
 
-  // RESET PAGINATION ON FILTER CHANGE
-  useEffect(() => {
-      setVisibleCount(12);
-  }, [searchQuery, activeCategory]);
+  useEffect(() => { setVisibleCount(12); }, [searchQuery, activeCategory]);
 
-  // INFINITE SCROLL LOGIC
   const loadMore = useCallback(() => {
       if (isMoreLoading) return;
-      const totalAvailable = isFilteredMode ? filteredList.length : (feed?.discovery?.length || 0);
+      const totalAvailable = isFilteredMode ? filteredList.length : allVideos.length;
       if (visibleCount < totalAvailable) {
           setIsMoreLoading(true);
-          // Fake delay for smoother feel
           setTimeout(() => {
               setVisibleCount(prev => prev + 12);
               setIsMoreLoading(false);
           }, 300);
       }
-  }, [isFilteredMode, filteredList.length, feed?.discovery?.length, visibleCount, isMoreLoading]);
+  }, [isFilteredMode, filteredList.length, allVideos.length, visibleCount, isMoreLoading]);
 
   useEffect(() => {
       const observer = new IntersectionObserver((entries) => {
-          if (entries[0].isIntersecting) {
-              loadMore();
-          }
+          if (entries[0].isIntersecting) { loadMore(); }
       }, { threshold: 0.1, rootMargin: '1000px' });
-      
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
   }, [loadMore]);
 
-  const displayList = isFilteredMode ? filteredList : (feed?.discovery || []);
+  const displayList = isFilteredMode ? filteredList : allVideos;
 
   return (
     <div className="pb-20">
@@ -269,7 +225,6 @@ export default function Home() {
       ) : (
           <div className="space-y-10 animate-in fade-in">
               {!isFilteredMode && <HeroSection video={feed?.hero} />}
-
               {!isFilteredMode && (
                   <>
                     {feed?.subs?.length > 0 && (
@@ -292,7 +247,6 @@ export default function Home() {
                     )}
                   </>
               )}
-
               <section className={!isFilteredMode ? "pt-4 border-t border-slate-800" : ""}>
                   <SectionHeader title={isFilteredMode ? "Resultados encontrados" : "Descubrimiento"} icon={isFilteredMode ? Filter : Shuffle} />
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-8 gap-x-4">
@@ -300,8 +254,6 @@ export default function Home() {
                           <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)} />
                       ))}
                   </div>
-                  
-                  {/* SCROLL SENTINEL */}
                   <div ref={loadMoreRef} className="h-40 flex flex-col justify-center items-center">
                       {visibleCount < displayList.length ? (
                           <div className="flex flex-col items-center gap-3">
@@ -313,8 +265,6 @@ export default function Home() {
                       )}
                   </div>
               </section>
-
-              {/* Concierge AI */}
               {!isFilteredMode && <AIConcierge videos={allVideos} />}
           </div>
       )}
