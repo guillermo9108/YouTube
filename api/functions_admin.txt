@@ -71,35 +71,88 @@ function admin_repair_db($pdo) {
     respond(true, ['message' => 'Base de datos sincronizada']);
 }
 
-/**
- * Reset de tareas estancadas (Zombies).
- * Si un video está en PROCESSING pero no hay actividad real, se devuelve a WAITING.
- */
 function admin_cleanup_stale_transcodes($pdo) {
-    // Definimos 2 horas como tiempo máximo razonable para una conversión en un NAS/Server lento
-    $timeout = time() - 7200; 
+    // Si un video lleva más de 2 horas en PROCESSING, asumimos que el proceso murió por reinicio del server
+    $staleTime = time() - 7200;
     $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'PROCESSING' AND createdAt < ?")
-        ->execute([$timeout]);
+        ->execute([$staleTime]);
 }
 
 function admin_transcode_batch($pdo) {
-    // 1. Limpiar zombies antes de buscar nuevas tareas
+    set_time_limit(0); 
     admin_cleanup_stale_transcodes($pdo);
 
-    $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE transcode_status = 'WAITING' LIMIT 1");
+    // 1. Verificar si ffmpeg está disponible
+    exec("which ffmpeg", $ffmpegPath, $ffmpegCode);
+    if ($ffmpegCode !== 0) {
+        file_debug_log("ERROR CRÍTICO", "ffmpeg no encontrado en el sistema. Verifica la instalación en el servidor.");
+        respond(false, null, "FFmpeg no instalado o no accesible.");
+    }
+
+    // 2. Buscar video en espera
+    $stmt = $pdo->query("SELECT id, videoUrl, title FROM videos WHERE transcode_status = 'WAITING' LIMIT 1");
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$video) {
         respond(true, ['processed' => 0, 'completed' => true]);
     }
 
-    // Marcar como procesando
+    // 3. Resolver ruta física
+    $sourcePath = resolve_video_path($video['videoUrl']);
+    if (!$sourcePath || !file_exists($sourcePath)) {
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no encontrado' WHERE id = ?")->execute([$video['id']]);
+        respond(false, null, "Archivo no encontrado: " . $video['videoUrl']);
+    }
+
+    // 4. Marcar inicio real
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', createdAt = ? WHERE id = ?")
         ->execute([time(), $video['id']]);
 
-    // Aquí iría la lógica de FFmpeg real (ejecución exec()). 
-    // Por ahora devolvemos que se ha iniciado.
-    respond(true, ['processed' => 1, 'completed' => false, 'videoId' => $video['id']]);
+    $tempPath = $sourcePath . ".transcoding.tmp";
+    if (file_exists($tempPath)) @unlink($tempPath);
+
+    $preset = 'superfast';
+    $stmtS = $pdo->query("SELECT transcodePreset FROM system_settings WHERE id = 1");
+    $dbPreset = $stmtS->fetchColumn();
+    if ($dbPreset) $preset = $dbPreset;
+
+    // Comando FFmpeg balanceado para PWA (H.264 + AAC + FastStart)
+    $cmd = "ffmpeg -y -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart " . escapeshellarg($tempPath) . " 2>&1";
+    
+    file_debug_log("EJECUTANDO FFMPEG", ["video" => $video['title'], "cmd" => $cmd]);
+    
+    $output = [];
+    $resultCode = -1;
+    exec($cmd, $output, $resultCode);
+
+    if ($resultCode === 0 && file_exists($tempPath) && filesize($tempPath) > 0) {
+        // Éxito: Intercambiar archivos
+        $backupPath = $sourcePath . ".old";
+        if (@rename($sourcePath, $backupPath)) {
+            if (@rename($tempPath, $sourcePath)) {
+                @unlink($backupPath);
+                $pdo->prepare("UPDATE videos SET transcode_status = 'DONE' WHERE id = ?")->execute([$video['id']]);
+                file_debug_log("CONVERSIÓN EXITOSA", $video['title']);
+                respond(true, ['processed' => 1, 'completed' => false, 'videoId' => $video['id']]);
+            } else {
+                @rename($backupPath, $sourcePath); // Revertir
+            }
+        }
+    }
+
+    // Manejo de Error
+    if (file_exists($tempPath)) @unlink($tempPath);
+    $errorMsg = "Error en FFmpeg (Code $resultCode)";
+    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = ? WHERE id = ?")
+        ->execute([$errorMsg, $video['id']]);
+        
+    file_debug_log("CONVERSIÓN FALLIDA", [
+        "video" => $video['title'], 
+        "result" => $resultCode,
+        "output" => array_slice($output, -10) // Últimas 10 líneas del log de FFmpeg
+    ]);
+    
+    respond(false, null, "Error en la conversión del video. Revisa el log de incidentes.");
 }
 
 function admin_get_local_stats($pdo) {
@@ -142,10 +195,10 @@ function admin_cleanup_system_files($pdo) {
         $files = scandir($videosDir);
         foreach ($files as $f) {
             if (in_array($f, $ignore)) continue;
-            // IGNORAR ARCHIVOS TEMPORALES DE CONVERSIÓN
-            if (strpos($f, '_transcoding') !== false || strpos($f, '.tmp') !== false) {
-                @unlink($videosDir . $f);
-                $deletedVideos++;
+            
+            // ELIMINACIÓN DE TEMPORALES HUÉRFANOS
+            if (strpos($f, '.tmp') !== false || strpos($f, '_transcoding') !== false) {
+                if (@unlink($videosDir . $f)) $deletedVideos++;
                 continue;
             }
 
@@ -192,7 +245,7 @@ function admin_add_balance($pdo, $input) {
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
         $tid = uniqid('tx_adm_');
         $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'DEPOSIT')")
-            ->execute([$tid, $targetId, $amount, time()]);
+            ->execute([tid, $targetId, $amount, time()]);
         $pdo->commit();
         respond(true);
     } catch (Exception $e) {

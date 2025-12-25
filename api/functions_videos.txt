@@ -106,9 +106,10 @@ function video_scan_local($pdo, $input) {
                 foreach ($ignoreFolders as $ignore) if (strpos($pathName, $ignore) !== false) continue 2;
                 if (!$file->isFile()) continue;
                 
-                // IGNORAR ARCHIVOS TEMPORALES DE CONVERSIÓN O INCOMPLETOS
+                // VALIDACIÓN CRÍTICA: Ignorar temporales e incompletos
                 $fname = $file->getFilename();
                 if (strpos($fname, '_transcoding') !== false || strpos($fname, '.tmp') !== false) continue;
+                if ($file->getSize() === 0) continue;
 
                 $ext = strtolower($file->getExtension());
                 if (!in_array($ext, $allowedExts)) continue;
@@ -125,7 +126,7 @@ function video_scan_local($pdo, $input) {
             } catch (Exception $inner) { continue; }
         }
         while (ob_get_level() > 0) ob_end_clean();
-        respond(true, ['totalFound' => $totalScanned, 'newToImport' => $addedCount, 'message' => "Registrados $addedCount nuevos."]);
+        respond(true, ['totalFound' => $totalScanned, 'newToImport' => $addedCount, 'message' => "Registrados $addedCount nuevos archivos válidos."]);
     } catch (Exception $e) {
         while (ob_get_level() > 0) ob_end_clean();
         respond(false, null, "Error escaneo: " . $e->getMessage());

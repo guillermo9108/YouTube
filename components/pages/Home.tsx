@@ -127,7 +127,7 @@ export default function Home() {
         setLoading(true);
         try {
             const all = await db.getAllVideos();
-            const validVideos = all.filter(v => v.category !== 'PENDING' && v.category !== 'PROCESSING');
+            const validVideos = all.filter(v => v.category !== 'PENDING' && v.category !== 'PROCESSING' && v.category !== 'FAILED_METADATA');
             setAllVideos(validVideos);
             if (user) {
                 const act = await db.getUserActivity(user.id);
@@ -169,25 +169,26 @@ export default function Home() {
 
   const loadMore = useCallback(() => {
       if (isMoreLoading) return;
-      const totalAvailable = isFilteredMode ? filteredList.length : allVideos.length;
-      if (visibleCount < totalAvailable) {
+      // Usamos el listado de descubrimiento si no hay filtros activos
+      const pool = isFilteredMode ? filteredList : (feed?.discovery || []);
+      if (visibleCount < pool.length) {
           setIsMoreLoading(true);
           setTimeout(() => {
               setVisibleCount(prev => prev + 12);
               setIsMoreLoading(false);
           }, 300);
       }
-  }, [isFilteredMode, filteredList.length, allVideos.length, visibleCount, isMoreLoading]);
+  }, [isFilteredMode, filteredList.length, feed?.discovery, visibleCount, isMoreLoading]);
 
   useEffect(() => {
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) { loadMore(); }
-      }, { threshold: 0.1, rootMargin: '1000px' });
+      }, { threshold: 0.1, rootMargin: '1200px' });
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
   }, [loadMore]);
 
-  const displayList = isFilteredMode ? filteredList : allVideos;
+  const displayList = isFilteredMode ? filteredList : (feed?.discovery || []);
 
   return (
     <div className="pb-20">
