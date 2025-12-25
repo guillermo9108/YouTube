@@ -25,15 +25,21 @@ class DBService {
         const headers: any = options?.headers || {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
 
+        // CACHE BUSTING: Añadir timestamp a peticiones GET para evitar cache del navegador
+        let finalQuery = query;
+        if (!options || !options.method || options.method === 'GET') {
+            const separator = query.includes('?') ? '&' : (query ? '&' : '');
+            finalQuery = `${query}${separator}_t=${Date.now()}`;
+        }
+
         let text = "";
         try {
-            const response = await fetch(`${this.baseUrl}?${query}`, {
+            const response = await fetch(`${this.baseUrl}?${finalQuery}`, {
                 ...options,
                 headers: { ...headers }
             });
 
-            // INTERCEPTOR DE SESIÓN ÚNICA:
-            // Si el servidor responde 401, significa que el token ya no es válido
+            // INTERCEPTOR DE SESIÓN ÚNICA
             if (response.status === 401) {
                 window.dispatchEvent(new CustomEvent('sp_session_expired'));
                 const errorData = await response.json().catch(() => ({}));
@@ -98,7 +104,6 @@ class DBService {
         }
     }
 
-    // ... (resto de métodos permanecen igual)
     public async checkInstallation(): Promise<{status: string}> {
         try { return await this.request<{status: string}>(`action=check_installation`); }
         catch (e: any) { return { status: 'not_installed' }; }
@@ -217,7 +222,7 @@ class DBService {
         const token = localStorage.getItem('sp_session_token');
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${this.baseUrl}?action=upload_video`);
+            xhr.open('POST', `${this.baseUrl}?action=upload_video&_t=${Date.now()}`);
             if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
             xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total); };
             xhr.onload = () => {

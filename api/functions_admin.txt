@@ -7,12 +7,15 @@ function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $settings = $stmt->fetch();
     if ($settings) {
-        // Decodificar JSONs
+        // Decodificar JSONs con validación de tipo objeto
         $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}', true);
+        if (empty($settings['categoryPrices'])) $settings['categoryPrices'] = (object)[];
+
         $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]', true);
         $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? 'null', true);
         $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true);
         $settings['paqueteMapper'] = json_decode($settings['paqueteMapper'] ?? '{}', true);
+        if (empty($settings['paqueteMapper'])) $settings['paqueteMapper'] = (object)[];
         
         // FORZAR BOOLEANOS (MariaDB devuelve 0/1 como strings o ints)
         $settings['enableDebugLog'] = (bool)($settings['enableDebugLog'] ?? true);
@@ -70,12 +73,10 @@ function admin_update_settings($pdo, $input) {
             $val = $s[$key];
             
             // Tratamiento de tipos para SQL
-            if (is_array($val)) {
+            if (is_array($val) || is_object($val)) {
                 $val = json_encode($val, JSON_UNESCAPED_UNICODE);
             } else if (is_bool($val)) {
                 $val = $val ? 1 : 0;
-            } else if ($val === null) {
-                // Mantener nulo si el campo lo permite
             }
             
             $fields[] = "$col = ?";

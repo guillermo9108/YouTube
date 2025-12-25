@@ -68,16 +68,20 @@ function respond($success, $data = null, $error = null) {
     $action = $_GET['action'] ?? 'none';
     
     // FILTRADO INTELIGENTE DE LOGS DE RESPUESTA:
-    // Solo registramos si hay error (4xx/5xx/App Error) o si es una acción crítica de administración
-    $critical_actions = ['initialize_system', 'update_system_settings', 'admin_repair_db', 'admin_cleanup_system_files', 'verify_db_connection', 'admin_clear_logs'];
-    
-    if (!$success || in_array($action, $critical_actions)) {
+    if (!$success || in_array($action, ['initialize_system', 'update_system_settings', 'admin_repair_db', 'admin_cleanup_system_files', 'verify_db_connection', 'admin_clear_logs'])) {
         file_debug_log("RESPOND ACTION: " . $action, ["success" => $success, "error" => $error]);
     }
 
     $res = ['success' => $success, 'data' => $data, 'error' => $error];
+    
     while (ob_get_level() > 0) ob_end_clean();
+    
+    // CABECERAS ANTI-CACHE CRÍTICAS
     header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Cache-Control: post-check=0, pre-check=0', false);
+    header('Pragma: no-cache');
+    
     echo json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     exit();
 }
