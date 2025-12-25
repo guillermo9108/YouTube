@@ -203,12 +203,14 @@ function syncTable($pdo, $tableName, $def) {
             $sql .= ") CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
             $pdo->exec($sql);
         } else {
+            // Sincronización robusta de columnas
             $stmt = $pdo->query("SHOW COLUMNS FROM $tableName");
-            $rawCols = $stmt->fetchAll(PDO::FETCH_COLUMN);
-            $existingCols = array_map('strtolower', $rawCols);
+            $existingColumnsData = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $existingCols = array_map('strtolower', array_column($existingColumnsData, 'Field'));
             
             foreach ($def['cols'] as $colName => $colDef) {
                 if (!in_array(strtolower($colName), $existingCols)) {
+                    // Limpiar definiciones de Primary Key para ALTER
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
                 }
