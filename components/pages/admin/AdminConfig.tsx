@@ -25,25 +25,51 @@ export default function AdminConfig() {
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [openSection, setOpenSection] = useState<string>('SYSTEM');
     const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
     const [newCatName, setNewCatName] = useState('');
 
-    useEffect(() => {
-        db.getSystemSettings().then((s: any) => {
+    const loadSettings = async () => {
+        setLoading(true);
+        try {
+            const s: any = await db.getSystemSettings();
             if (Array.isArray(s.categoryPrices) || !s.categoryPrices) {
                 s.categoryPrices = {};
             }
             setSettings(s);
+        } catch(e) {
+            toast.error("Error al cargar configuración");
+        } finally {
             setLoading(false);
-        }).catch(() => setLoading(false));
+        }
+    };
+
+    useEffect(() => {
+        loadSettings();
     }, []);
 
     const handleSaveConfig = async () => {
         if (!settings) return;
+        setSaving(true);
         try {
-            await db.updateSystemSettings(settings);
-            toast.success("Configuración guardada");
+            // Aseguramos que los valores numéricos sean números
+            const cleanSettings = {
+                ...settings,
+                videoCommission: Number(settings.videoCommission),
+                marketCommission: Number(settings.marketCommission),
+                batchSize: Number(settings.batchSize),
+                maxDuration: Number(settings.maxDuration),
+                maxResolution: Number(settings.maxResolution),
+                currencyConversion: Number(settings.currencyConversion)
+            };
+            
+            await db.updateSystemSettings(cleanSettings);
+            toast.success("Configuración guardada exitosamente");
+            // Recargar para confirmar persistencia
+            await loadSettings();
         } catch(e: any) {
-            toast.error("Error al guardar");
+            toast.error("Error al guardar: " + e.message);
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -151,8 +177,9 @@ export default function AdminConfig() {
         <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in pb-20">
             <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-bold text-white">Configuración del Sistema</h2>
-                <button onClick={handleSaveConfig} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg flex items-center gap-2 shadow-lg shadow-indigo-900/20 active:scale-95 transition-all">
-                    <Save size={18}/> Guardar Todo
+                <button onClick={handleSaveConfig} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold py-2 px-6 rounded-lg flex items-center gap-2 shadow-lg shadow-indigo-900/20 active:scale-95 transition-all">
+                    {saving ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>}
+                    {saving ? 'Guardando...' : 'Guardar Todo'}
                 </button>
             </div>
 
@@ -165,7 +192,7 @@ export default function AdminConfig() {
                 <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800 mb-4">
                     <div>
                         <h4 className="font-bold text-white text-sm flex items-center gap-2"><FileText size={16} className="text-indigo-400"/> Registro de Logs</h4>
-                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Habilita/Deshabilita el guardado de errores y eventos en debug_log.txt</p>
+                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Habilita el guardado de errores y eventos en debug_log.txt</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" checked={settings.enableDebugLog ?? true} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, enableDebugLog: e.target.checked} : null)} className="sr-only peer"/>
@@ -199,7 +226,7 @@ export default function AdminConfig() {
                     <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
                         <div>
                             <h4 className="font-bold text-white text-sm">Procesamiento Automático</h4>
-                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Detecta y convierte videos no compatibles (WebReady)</p>
+                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Convierte automáticamente videos incompatibles</p>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" checked={settings.autoTranscode || false} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, autoTranscode: e.target.checked} : null)} className="sr-only peer"/>
@@ -210,18 +237,18 @@ export default function AdminConfig() {
                     {settings.autoTranscode && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top-2">
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Cpu size={12}/> Preset de Velocidad</label>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Cpu size={12}/> Preset FFmpeg</label>
                                 <select value={settings.transcodePreset || 'superfast'} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, transcodePreset: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
-                                    <option value="ultrafast">Ultrafast (CPU Bajo / Archivo Grande)</option>
-                                    <option value="superfast">Superfast (Recomendado)</option>
+                                    <option value="ultrafast">Ultrafast (CPU bajo)</option>
+                                    <option value="superfast">Superfast (Equilibrado)</option>
                                     <option value="veryfast">Veryfast</option>
                                     <option value="fast">Fast</option>
-                                    <option value="medium">Medium (Calidad Óptima / Lento)</option>
+                                    <option value="medium">Medium (Lento)</option>
                                 </select>
                             </div>
                             <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-lg p-3 text-[10px] text-indigo-300 leading-relaxed">
                                 <Sparkles size={14} className="mb-1"/>
-                                <strong>Smart FastStart:</strong> FFmpeg moverá automáticamente los metadatos al inicio del archivo (FastStart) para habilitar reproducción instantánea en la PWA.
+                                <strong>FastStart:</strong> El motor moverá los metadatos al inicio para habilitar reproducción instantánea en la PWA.
                             </div>
                         </div>
                     )}
@@ -235,28 +262,22 @@ export default function AdminConfig() {
                 onToggle={() => setOpenSection(openSection === 'API' ? '' : 'API')}
             >
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Gemini 1.5 Flash API Key <InfoTooltip text="Obténla GRATIS en ai.google.dev (Modelo estable)" /></label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Gemini API Key</label>
                     <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, geminiKey: e.target.value} : null)} className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 placeholder-slate-700" placeholder="AIza..."/>
                 </div>
 
                 <div className="bg-slate-950 border border-indigo-900/30 p-4 rounded-lg my-2">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2"><Globe size={12}/> HTTP Proxy <InfoTooltip text="Necesario si estás en un país restringido por Google (Error 403)" example="http://192.168.1.50:8080" /></label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2"><Globe size={12}/> HTTP Proxy</label>
                     <input type="text" value={settings.proxyUrl || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, proxyUrl: e.target.value} : null)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="http://user:pass@host:port"/>
-                    <p className="text-[10px] text-slate-500 mt-1">Usado para conectar con Gemini API.</p>
                 </div>
 
                 <div className="h-px bg-slate-800 my-2"></div>
 
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pexels API Key <InfoTooltip text="Para búsqueda de stock videos" /></label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pexels API Key</label>
                     <input type="password" value={settings.pexelsKey || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, pexelsKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
                 </div>
                 
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pixabay API Key <InfoTooltip text="Alternativa stock gratuita" /></label>
-                    <input type="password" value={settings.pixabayKey || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, pixabayKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                </div>
-
                 <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">YouTube (yt-dlp)</label>
                     <div className="flex items-center gap-2 p-3 bg-slate-950 rounded-lg border border-slate-700">
@@ -271,7 +292,6 @@ export default function AdminConfig() {
                 </div>
             </ConfigSection>
 
-            {/* VIP PLANS EDITOR */}
             <ConfigSection 
                 title="Planes VIP & Recargas" 
                 icon={Crown} 
@@ -309,15 +329,10 @@ export default function AdminConfig() {
                                     </div>
                                 ) : (
                                     <div className="col-span-2">
-                                        <label className="text-[10px] uppercase font-bold text-slate-500">% Bono Extra</label>
+                                        <label className="text-[10px] uppercase font-bold text-slate-500">Bono %</label>
                                         <input type="number" value={plan.bonusPercent} onChange={e => updateVipPlan(plan.id, 'bonusPercent', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-sm text-white"/>
                                     </div>
                                 )}
-                            </div>
-                            
-                            <div>
-                                <label className="text-[10px] uppercase font-bold text-slate-500">Descripción</label>
-                                <input type="text" value={plan.description} onChange={e => updateVipPlan(plan.id, 'description', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-xs text-slate-300"/>
                             </div>
                         </div>
                     ))}
@@ -328,65 +343,12 @@ export default function AdminConfig() {
                 </div>
             </ConfigSection>
 
-            {/* PAYMENT INSTRUCTIONS & GATEWAYS */}
-            <ConfigSection 
-                title="Pagos & Gateways" 
-                icon={CreditCard} 
-                isOpen={openSection === 'PAYMENT'} 
-                onToggle={() => setOpenSection(openSection === 'PAYMENT' ? '' : 'PAYMENT')}
-            >
-                <div className="space-y-6">
-                    {/* Tropipay Config */}
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2 text-indigo-300">Integración Tropipay</h4>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Client ID</label>
-                                <input type="text" value={settings.tropipayClientId || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, tropipayClientId: e.target.value} : null)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Client Secret</label>
-                                <input type="password" value={settings.tropipayClientSecret || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, tropipayClientSecret: e.target.value} : null)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none"/>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tasa Cambio (CUP &rarr; 1 EUR)</label>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm text-slate-400">1 EUR = </span>
-                                    <input type="number" min="1" value={settings.currencyConversion || 1} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, currencyConversion: parseFloat(e.target.value)} : null)} className="w-24 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none text-center font-bold"/>
-                                    <span className="text-sm text-slate-400">Saldo/CUP</span>
-                                </div>
-                                <p className="text-[10px] text-slate-500 mt-1">Si tus planes valen 1000 y la tasa es 300, el usuario pagará 3.33 EUR en Tropipay.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800">
-                            Escribe aquí las instrucciones MANUALES para usuarios que no usen la pasarela automática (ej: Transferencia QR).
-                        </p>
-                        <textarea 
-                            rows={4} 
-                            value={settings.paymentInstructions || ''} 
-                            onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, paymentInstructions: e.target.value} : null)} 
-                            className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-sm text-white focus:border-indigo-500 outline-none leading-relaxed font-mono"
-                            placeholder="Ejemplo:
-1. Envía el pago a Tropipay: user@example.com
-2. Usa QvaPay: https://qvapay.com/pay/me"
-                        />
-                    </div>
-                </div>
-            </ConfigSection>
-
             <ConfigSection 
                 title="Precios Automáticos por Categoría" 
                 icon={Tag} 
                 isOpen={openSection === 'PRICES'} 
                 onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}
             >
-                <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-lg border border-slate-800 mb-4">
-                    Estos precios se aplicarán automáticamente a los videos durante el <strong>Paso 3: Organización Inteligente</strong> basándose en su categoría detectada.
-                </p>
-                
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     {allCategories.map(cat => {
                         const isCustom = !Object.values(VideoCategory).includes(cat as any);
@@ -402,7 +364,6 @@ export default function AdminConfig() {
                                         <button 
                                             onClick={() => handleRemoveCategory(cat)} 
                                             className="text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                                            title="Eliminar categoría"
                                         >
                                             <X size={12}/>
                                         </button>
@@ -429,13 +390,9 @@ export default function AdminConfig() {
                         value={newCatName}
                         onChange={(e) => setNewCatName(e.target.value)}
                         placeholder="Nueva Categoría (Ej: RETRO)"
-                        className="flex-1 bg-transparent text-sm text-white placeholder-slate-600 outline-none uppercase font-bold"
+                        className="flex-1 bg-transparent text-sm text-white outline-none uppercase font-bold"
                     />
-                    <button 
-                        onClick={handleAddCategory}
-                        disabled={!newCatName.trim()}
-                        className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white p-2 rounded-lg transition-colors"
-                    >
+                    <button onClick={handleAddCategory} disabled={!newCatName.trim()} className="bg-slate-800 hover:bg-slate-700 text-white p-2 rounded-lg">
                         <Plus size={16}/>
                     </button>
                 </div>
@@ -450,20 +407,11 @@ export default function AdminConfig() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Videos (%)</label>
-                        <div className="relative">
-                            <input type="number" value={settings.videoCommission ?? 20} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, videoCommission: parseInt(e.target.value) || 0} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
-                            <span className="absolute right-3 top-2.5 text-slate-500 font-bold">%</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 mt-1">Retenido por el sistema en cada venta de video.</p>
+                        <input type="number" value={settings.videoCommission ?? 20} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, videoCommission: parseInt(e.target.value) || 0} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none"/>
                     </div>
-
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Marketplace (%)</label>
-                        <div className="relative">
-                            <input type="number" value={settings.marketCommission ?? 25} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, marketCommission: parseInt(e.target.value) || 0} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 pr-8"/>
-                            <span className="absolute right-3 top-2.5 text-slate-500 font-bold">%</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 mt-1">Retenido en ventas de productos físicos.</p>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Tienda (%)</label>
+                        <input type="number" value={settings.marketCommission ?? 25} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, marketCommission: parseInt(e.target.value) || 0} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none"/>
                     </div>
                 </div>
             </ConfigSection>
