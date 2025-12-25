@@ -180,7 +180,9 @@ function getAppSchema() {
                 'text' => 'VARCHAR(255)',
                 'link' => 'VARCHAR(255)',
                 'isRead' => 'TINYINT(1) DEFAULT 0',
-                'timestamp' => 'BIGINT'
+                'timestamp' => 'BIGINT',
+                'avatarUrl' => 'VARCHAR(255) DEFAULT NULL',
+                'metadata' => 'JSON DEFAULT NULL'
             ]
         ]
     ];
