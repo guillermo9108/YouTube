@@ -232,9 +232,24 @@ function interact_get_notifications($pdo, $uid) {
     $stmt = $pdo->prepare("SELECT * FROM notifications WHERE userId = ? ORDER BY timestamp DESC LIMIT 30");
     $stmt->execute([$uid]);
     $list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
     foreach($list as &$n) {
-        $n['avatarUrl'] = fix_url($n['avatarUrl']);
-        if($n['metadata']) $n['metadata'] = json_decode($n['metadata'], true);
+        // VALIDACIÓN DEFENSIVA: Evita errores Undefined Index si la columna no existe o es nula
+        if (isset($n['avatarUrl'])) {
+            $n['avatarUrl'] = fix_url($n['avatarUrl']);
+        } else {
+            $n['avatarUrl'] = null;
+        }
+
+        if (isset($n['metadata']) && !empty($n['metadata'])) {
+            try {
+                $n['metadata'] = json_decode($n['metadata'], true);
+            } catch (Exception $e) {
+                $n['metadata'] = null;
+            }
+        } else {
+            $n['metadata'] = null;
+        }
     }
     respond(true, $list);
 }
