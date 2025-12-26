@@ -14,12 +14,12 @@ interface ShortItemProps {
 }
 
 const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: ShortItemProps) => {
-  const { user, refreshUser } = useAuth();
+  const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const lastTapRef = useRef<number>(0);
   
   const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
-  const [isMuted, setIsMuted] = useState(false); // AUDIO POR DEFECTO
-  const [purchasing, setPurchasing] = useState(false);
+  const [isMuted, setIsMuted] = useState(false); 
   const [isBuffering, setIsBuffering] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   
@@ -29,9 +29,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   const [newComment, setNewComment] = useState('');
   const [likeCount, setLikeCount] = useState(video.likes);
   const [isSubscribed, setIsSubscribed] = useState(false);
-
-  // Detector de Doble Toque
-  const lastTapRef = useRef<number>(0);
 
   useEffect(() => {
     if (user && shouldLoad) {
@@ -51,14 +48,12 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
     if (!el) return;
 
     if (isActive && isUnlocked) {
+        el.currentTime = 0;
         const playPromise = el.play();
         if (playPromise !== undefined) {
             playPromise
-            .then(() => {
-                setIsBuffering(false);
-            })
+            .then(() => setIsBuffering(false))
             .catch(() => {
-                // Si falla con audio, silenciamos y reintentamos (política de navegadores)
                 el.muted = true;
                 setIsMuted(true);
                 el.play().catch(() => {});
@@ -66,7 +61,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
         }
     } else {
         el.pause();
-        el.currentTime = 0; 
     }
   }, [isActive, isUnlocked]);
 
@@ -78,17 +72,21 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   };
 
   const handleScreenTouch = () => {
-      const now = Date.now();
-      const DOUBLE_TAP_DELAY = 300;
-      if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
-          // DOUBLE TAP!
-          if (!interaction?.liked) handleRate('like');
-          setShowHeart(true);
-          setTimeout(() => setShowHeart(false), 800);
-      } else {
-          toggleMute();
-      }
-      lastTapRef.current = now;
+    const now = Date.now();
+    const DOUBLE_TAP_DELAY = 300;
+    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+        // DOUBLE TAP DETECTED
+        if (!interaction?.liked) handleRate('like');
+        setShowHeart(true);
+        setTimeout(() => setShowHeart(false), 1000);
+    } else {
+        // SINGLE TAP -> TOGGLE MUTE
+        if (videoRef.current) {
+            videoRef.current.muted = !videoRef.current.muted;
+            setIsMuted(videoRef.current.muted);
+        }
+    }
+    lastTapRef.current = now;
   };
 
   const handleSubscribe = async () => {
@@ -111,13 +109,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
           navigator.clipboard.writeText(url);
           alert("Link copiado!");
       }
-  };
-
-  const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !videoRef.current.muted;
-      setIsMuted(videoRef.current.muted);
-    }
   };
 
   const postComment = async (e: React.FormEvent) => {
@@ -146,8 +137,8 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><Loader2 className="animate-spin text-white w-8 h-8" /></div>
             )}
             {showHeart && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in duration-300">
-                    <Heart size={100} className="text-red-500 fill-red-500 drop-shadow-2xl" />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in fade-in duration-300">
+                    <Heart size={120} className="text-red-500 fill-red-500 drop-shadow-2xl" />
                 </div>
             )}
           </>
@@ -157,7 +148,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
               <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
                  <div className="bg-black/40 backdrop-blur-xl p-8 rounded-2xl border border-white/10 text-center mx-4 max-w-sm w-full">
                     <div className="text-4xl font-black text-amber-400 mb-2">{video.price} $</div>
-                    <button onClick={() => handleRate('like')} className="w-full bg-white text-black font-bold py-3 rounded-full shadow-xl">Desbloquear</button>
+                    <button onClick={() => db.purchaseVideo(user!.id, video.id).then(()=>setIsUnlocked(true))} className="w-full bg-white text-black font-bold py-3 rounded-full shadow-xl">Desbloquear</button>
                  </div>
               </div>
            </div>
@@ -166,11 +157,9 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
       
       <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/90 pointer-events-none z-10" />
 
-      {isUnlocked && (
-        <button onClick={toggleMute} className="absolute top-16 right-4 z-30 bg-black/40 backdrop-blur-md p-2 rounded-full text-white">
-          {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-        </button>
-      )}
+      <button onClick={(e) => { e.stopPropagation(); if(videoRef.current) { videoRef.current.muted = !videoRef.current.muted; setIsMuted(videoRef.current.muted); } }} className="absolute top-16 right-4 z-30 bg-black/40 backdrop-blur-md p-2 rounded-full text-white">
+        {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+      </button>
 
       <div className="absolute right-2 bottom-20 z-30 flex flex-col items-center gap-5 pb-safe">
         <Link to={`/channel/${video.creatorId}`} className="relative group mb-2">
@@ -185,21 +174,21 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
         </Link>
 
         <div className="flex flex-col items-center gap-1">
-          <button onClick={() => handleRate('like')} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>
+          <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>
              <Heart size={26} fill={interaction?.liked ? "currentColor" : "white"} fillOpacity={interaction?.liked ? 1 : 0.2} />
           </button>
           <span className="text-xs font-bold text-white drop-shadow-md">{likeCount}</span>
         </div>
 
         <div className="flex flex-col items-center gap-1">
-          <button onClick={() => setShowComments(true)} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+          <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
              <MessageCircle size={26} fill="white" fillOpacity={0.2} />
           </button>
           <span className="text-xs font-bold text-white drop-shadow-md">{comments.length}</span>
         </div>
 
         <div className="flex flex-col items-center gap-1">
-          <button onClick={handleShare} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+          <button onClick={(e) => { e.stopPropagation(); handleShare(); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
              <Share2 size={26} fill="white" fillOpacity={0.2} />
           </button>
         </div>
@@ -215,21 +204,21 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
 
       {showComments && (
         <div className="fixed inset-0 z-[100] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-           <div className="w-full bg-slate-900 rounded-t-2xl h-[65%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom" onClick={(e) => e.stopPropagation()}>
+           <div className="w-full bg-slate-900 rounded-t-3xl h-[70%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center p-4 border-b border-slate-800">
-                 <h3 className="font-bold text-white">Comentarios ({comments.length})</h3>
-                 <button onClick={() => setShowComments(false)} className="text-slate-400 bg-slate-800 p-1.5 rounded-full"><X size={20} /></button>
+                 <h3 className="font-bold text-white uppercase text-xs tracking-widest">Comentarios ({comments.length})</h3>
+                 <button onClick={() => setShowComments(false)} className="text-slate-400 bg-slate-800 p-2 rounded-full"><X size={20} /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                 {comments.map(c => (
-                      <div key={c.id} className="flex gap-3">
+                 {comments.length === 0 ? <p className="text-center text-slate-500 py-10 italic">Sé el primero en comentar</p> : comments.map(c => (
+                      <div key={c.id} className="flex gap-3 animate-in fade-in">
                          <div className="w-8 h-8 rounded-full bg-slate-800 shrink-0 border border-slate-700 overflow-hidden">
                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c.username[0]}</div>}
                          </div>
                          <div>
                             <div className="flex items-baseline gap-2">
                                <span className="text-xs font-bold text-slate-400">{c.username}</span>
-                               <span className="text-[10px] text-slate-600">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
+                               <span className="text-[9px] text-slate-600 uppercase">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-slate-200 mt-0.5">{c.text}</p>
                          </div>
@@ -256,7 +245,7 @@ export default function Shorts() {
   
   useEffect(() => {
     db.getAllVideos().then((all: Video[]) => {
-        const shorts = all.filter(v => v.duration < 180).sort(() => Math.random() - 0.5);
+        const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
         setVideos(shorts);
     });
   }, []);
@@ -288,9 +277,14 @@ export default function Shorts() {
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative" style={{ scrollBehavior: 'smooth' }}>
       <div className="fixed top-4 left-4 z-50">
-          <Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white"><ArrowLeft size={24} /></Link>
+          <Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center"><ArrowLeft size={24} /></Link>
       </div>
-      {videos.map((video, idx) => (
+      {videos.length === 0 ? (
+          <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4">
+              <Loader2 className="animate-spin text-indigo-500" size={32}/>
+              <p className="font-bold uppercase text-xs tracking-widest">Buscando Shorts...</p>
+          </div>
+      ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">
              <ShortItem video={video} isActive={idx === activeIndex} shouldLoad={Math.abs(idx - activeIndex) <= 2} preload={idx === activeIndex ? "auto" : "metadata"} hasFullAccess={hasFullAccess} />
         </div>

@@ -35,7 +35,7 @@ function video_get_one($pdo, $id) {
 
 function video_get_related($pdo, $id) {
     // 1. Obtener datos del video actual
-    $stmt = $pdo->prepare("SELECT videoUrl, category, title, creatorId FROM videos WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT id, videoUrl, category, title, creatorId FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $current = $stmt->fetch();
     if (!$current) respond(true, []);
@@ -46,12 +46,12 @@ function video_get_related($pdo, $id) {
     $parentDir = (count($parts) > 1) ? $parts[count($parts)-2] : null;
     $grandParentDir = (count($parts) > 2) ? $parts[count($parts)-3] : null;
 
-    // 2. Obtener pool de candidatos (excluyendo el actual)
+    // 2. Obtener pool de candidatos
     $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
                          FROM videos v 
                          LEFT JOIN users u ON v.creatorId = u.id 
                          WHERE v.id != '$id' AND v.category NOT IN ('PENDING', 'PROCESSING')
-                         LIMIT 100");
+                         LIMIT 200");
     $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // 3. Algoritmo de Scoring por Jerarquía
@@ -62,20 +62,30 @@ function video_get_related($pdo, $id) {
         $cParent = (count($cParts) > 1) ? $cParts[count($cParts)-2] : null;
         $cGrand = (count($cParts) > 2) ? $cParts[count($cParts)-3] : null;
 
-        if ($parentDir && $cParent === $parentDir) $score += 1000; // Misma carpeta (Temporada)
-        if ($grandParentDir && $cGrand === $grandParentDir) $score += 500; // Mismo Show
-        if ($c['category'] === $current['category']) $score += 100; // Misma Categoría
-        if ($c['creatorId'] === $current['creatorId']) $score += 50; // Mismo Creador
+        // Prioridad 1: Misma carpeta padre (Temporada)
+        if ($parentDir && $cParent === $parentDir) {
+            $score += 10000;
+        } 
+        // Prioridad 2: Misma carpeta abuela (Serie)
+        else if ($grandParentDir && $cGrand === $grandParentDir) {
+            $score += 5000;
+        }
+        // Prioridad 3: Misma Categoría
+        if ($c['category'] === $current['category']) {
+            $score += 1000;
+        }
         
-        // Coincidencia parcial de título (series como "Naruto 01", "Naruto 02")
-        $cleanCurrentTitle = preg_replace('/[0-9]/', '', $current['title']);
-        $cleanCandidateTitle = preg_replace('/[0-9]/', '', $c['title']);
-        if (stripos($cleanCandidateTitle, substr($cleanCurrentTitle, 0, 10)) !== false) $score += 200;
+        // Prioridad 4: Título parcialmente parecido (Natural Sort ep matching)
+        $cleanCurrent = preg_replace('/[^a-zA-Z]/', '', $current['title']);
+        $cleanCandidate = preg_replace('/[^a-zA-Z]/', '', $c['title']);
+        if (stripos($cleanCandidate, substr($cleanCurrent, 0, 8)) !== false) {
+            $score += 500;
+        }
 
         $c['relevancy_score'] = $score;
     }
 
-    // 4. Ordenar por Score (Desc) y luego por Título Natural (Asc)
+    // 4. Ordenar por Score (Desc) y luego por Título Natural (Asc) para series
     usort($candidates, function($a, $b) {
         if ($a['relevancy_score'] !== $b['relevancy_score']) {
             return $b['relevancy_score'] - $a['relevancy_score'];
@@ -148,19 +158,15 @@ function video_scan_local($pdo, $input) {
                 $pathName = $file->getPathname();
                 foreach ($ignoreFolders as $ignore) if (strpos($pathName, $ignore) !== false) continue 2;
                 if (!$file->isFile()) continue;
-                
                 $fname = $file->getFilename();
                 if (strpos($fname, '_transcoding') !== false || strpos($fname, '.tmp') !== false) continue;
                 if ($file->getSize() === 0) continue;
-
                 $ext = strtolower($file->getExtension());
                 if (!in_array($ext, $allowedExts)) continue;
                 $totalScanned++;
                 $fullPath = str_replace('\\', '/', $pathName);
                 $fullPath = mb_convert_encoding($fullPath, 'UTF-8', 'auto');
-                $fullPath = preg_replace('/[\x00-\x1F\x7F]/u', '', $fullPath); 
                 $title = mb_convert_encoding(basename($fullPath), 'UTF-8', 'auto');
-                $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
                 $vidId = 'loc_' . md5($fullPath); 
                 $insert->execute([$vidId, $title, $fullPath, $adminId, time()]);
                 if ($insert->rowCount() > 0) $addedCount++;

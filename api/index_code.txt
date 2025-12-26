@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V8.5
+ * StreamPay - Core Controller V8.6
  */
 
 ini_set('display_errors', 0);
@@ -136,7 +136,7 @@ try {
         case 'smart_organize_library': video_smart_organize($pdo); break;
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         
-        // NUEVAS RUTAS TRANSCODER V2
+        // TRANSCODER V2
         case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
         case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
         case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
@@ -145,10 +145,14 @@ try {
         case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $input); break;
         case 'admin_remove_from_queue': admin_remove_from_queue($pdo, $input); break;
 
-        case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
-        case 'admin_repair_db': admin_repair_db($pdo); break;
+        // CLEANERS & LIBRARIAN
+        case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $input); break;
         case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
         case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
+        case 'admin_organize_paquete': admin_organize_paquete($pdo, $input); break;
+
+        case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
+        case 'admin_repair_db': admin_repair_db($pdo); break;
         case 'admin_add_balance': admin_add_balance($pdo, $input); break;
         case 'get_balance_requests': admin_get_balance_requests($pdo); break;
         case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;

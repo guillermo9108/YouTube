@@ -1,7 +1,9 @@
+
 {
-  "name": "StreamPay PWA OFICIAL 1.4",
-  "description": "A mobile-first Pay-Per-View video platform using an internal currency (Saldo).",
+  "name": "StreamPay PWA PPV",
+  "description": "Una plataforma móvil de video Pay-Per-View con moneda interna y Marketplace.",
   "requestFramePermissions": [
-    "camera"
+    "camera",
+    "microphone"
   ]
 }

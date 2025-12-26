@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, UserRole } from '../../types';
-import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, ChevronRight, ArrowDown, Database, LayoutGrid, Play, Info, Plus } from 'lucide-react';
+import { RefreshCw, Search, Filter, X, Flame, Clock, Sparkles, UserCheck, Shuffle, ChevronRight, ArrowDown, Database, LayoutGrid, Play, Info, Plus, Wallet, Zap } from 'lucide-react';
 import { Link, useLocation, useNavigate } from '../Router';
 import AIConcierge from '../AIConcierge';
 
@@ -24,6 +25,35 @@ const SectionHeader = ({ title, icon: Icon, link }: { title: string, icon: any, 
 const HorizontalScroll = ({ children }: { children?: React.ReactNode }) => (
     <div className="flex overflow-x-auto pb-6 -mx-4 px-4 md:mx-0 md:px-0 gap-4 snap-x snap-mandatory scrollbar-hide">
         {children}
+    </div>
+);
+
+const QuickStats = ({ user, refresh }: { user: any, refresh: any }) => (
+    <div className="grid grid-cols-2 gap-3 mb-8 animate-in fade-in slide-in-from-top-4 duration-500">
+        <div className="bg-gradient-to-br from-indigo-600 to-indigo-900 p-4 rounded-[24px] shadow-lg border border-white/10 relative overflow-hidden group">
+            <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-125 transition-transform duration-700">
+                <Wallet size={100} />
+            </div>
+            <div className="relative z-10">
+                <span className="text-[10px] font-black uppercase tracking-widest text-indigo-200">Saldo Disponible</span>
+                <div className="text-2xl font-black text-white mt-1">{Number(user?.balance || 0).toFixed(2)} $</div>
+                <button onClick={refresh} className="mt-3 text-[9px] font-black bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-full backdrop-blur-md transition-all flex items-center gap-1">
+                    <RefreshCw size={10} /> RECARGAR
+                </button>
+            </div>
+        </div>
+        <Link to="/vip" className="bg-slate-900 p-4 rounded-[24px] border border-slate-800 shadow-lg relative overflow-hidden group">
+            <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-125 transition-transform duration-700 text-amber-500">
+                <Zap size={100} fill="currentColor"/>
+            </div>
+            <div className="relative z-10">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Acceso Premium</span>
+                <div className="text-sm font-black text-amber-400 mt-1 uppercase leading-tight">Activar<br/>Pase VIP</div>
+                <div className="mt-3 text-[9px] font-black text-slate-400 flex items-center gap-1">
+                    Explorar planes <ChevronRight size={10}/>
+                </div>
+            </div>
+        </Link>
     </div>
 );
 
@@ -73,7 +103,7 @@ const HeroSection = ({ video }: { video: Video | null }) => {
 };
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -100,54 +130,44 @@ export default function Home() {
           try {
               const [activity, subs] = await Promise.all([db.getUserActivity(userId), db.getSubscriptions(userId)]);
               subCreatorIds = subs || [];
-              
               const categoryScores: Record<string, number> = {};
-              const interactIds = [...(activity.liked || []), ...(activity.watched || [])];
-              
+              const interactIds = [...(activity.watched || [])];
               interactIds.forEach(id => {
                   const vid = videos.find(v => v.id === id);
                   if (vid) {
-                      const score = (activity.liked?.includes(id) ? 3 : 1);
-                      categoryScores[vid.category] = (categoryScores[vid.category] || 0) + score;
+                      categoryScores[vid.category] = (categoryScores[vid.category] || 0) + 1;
                   }
               });
-              
               topCategories = Object.entries(categoryScores)
                 .sort(([,a], [,b]) => b - a)
                 .map(([cat]) => cat);
           } catch(e) {}
       }
 
-      // 1. Suscripciones
       const subs = getUnused(availableVideos.filter(v => subCreatorIds.includes(v.creatorId)))
         .sort((a,b) => b.createdAt - a.createdAt)
         .slice(0, 10);
       addToUsed(subs);
 
-      // 2. Gustos Recientes
       const oneWeekAgo = Date.now()/1000 - (7 * 86400);
       const tasteNew = getUnused(availableVideos.filter(v => v.createdAt > oneWeekAgo && topCategories.includes(v.category)))
         .sort((a,b) => b.createdAt - a.createdAt)
         .slice(0, 10);
       addToUsed(tasteNew);
 
-      // 3. Tendencias
       const trending = getUnused(availableVideos)
         .sort((a,b) => b.views - a.views)
         .slice(0, 10);
       addToUsed(trending);
 
-      // 4. Pool de Descubrimiento Inteligente (EL RESTO ORDENADO POR RELEVANCIA)
       const discoveryPool = getUnused(availableVideos).sort((a, b) => {
           const scoreA = topCategories.indexOf(a.category) !== -1 ? (100 - topCategories.indexOf(a.category)) : 0;
           const scoreB = topCategories.indexOf(b.category) !== -1 ? (100 - topCategories.indexOf(b.category)) : 0;
-          
           if (scoreA !== scoreB) return scoreB - scoreA;
           return b.createdAt - a.createdAt; 
       });
 
       const heroCandidate = videos.filter(v => v.price > 0).sort((a,b) => b.createdAt - a.createdAt)[0] || videos[0];
-
       return { tasteNew, trending, subs, discovery: discoveryPool, hero: heroCandidate };
   };
 
@@ -158,15 +178,12 @@ export default function Home() {
             const all = await db.getAllVideos();
             const validVideos = all.filter(v => v.category !== 'PENDING' && v.category !== 'PROCESSING' && v.category !== 'FAILED_METADATA');
             setAllVideos(validVideos);
-            
             if (user) {
                 const act = await db.getUserActivity(user.id);
                 setWatchedIds(act.watched || []);
             }
-            
             const smartData = await generateSmartFeed(validVideos, user?.id);
             setFeed(smartData);
-
             const settings = await db.getSystemSettings();
             const catStats: Record<string, { count: number, views: number }> = {};
             validVideos.forEach(v => {
@@ -175,19 +192,16 @@ export default function Home() {
                 catStats[c].count++;
                 catStats[c].views += Number(v.views || 0);
             });
-
             let allConfiguredCats = ['GENERAL', ...(settings.customCategories || [])];
             allConfiguredCats = Array.from(new Set(allConfiguredCats));
-            
             const sortedCats = allConfiguredCats
                 .filter(cat => catStats[cat] && catStats[cat].count > 0)
                 .sort((a, b) => (catStats[b]?.views || 0) - (catStats[a]?.views || 0));
-
             setCategories(['ALL', ...sortedCats]);
         } catch (e) {} finally { setLoading(false); }
     };
     loadData();
-  }, [user, location.pathname]);
+  }, [user?.id, location.pathname]);
 
   const isFilteredMode = searchQuery.trim() !== '' || activeCategory !== 'ALL';
   
@@ -205,10 +219,8 @@ export default function Home() {
   const loadMore = useCallback(() => {
       if (isMoreLoading) return;
       const pool = isFilteredMode ? filteredList : (feed?.discovery || []);
-      
       if (visibleCount < pool.length) {
           setIsMoreLoading(true);
-          // Simulación de buffer para carga suave
           setTimeout(() => {
               setVisibleCount(prev => prev + 12);
               setIsMoreLoading(false);
@@ -221,11 +233,7 @@ export default function Home() {
           if (entries[0].isIntersecting && !isMoreLoading) {
               loadMore();
           }
-      }, { 
-          threshold: 0, 
-          rootMargin: '1000px' 
-      });
-
+      }, { threshold: 0.1, rootMargin: '400px' });
       if (loadMoreRef.current) observer.observe(loadMoreRef.current);
       return () => observer.disconnect();
   }, [loadMore, isMoreLoading]);
@@ -251,24 +259,10 @@ export default function Home() {
 
       {loading ? (
           <div className="flex justify-center py-20"><RefreshCw className="animate-spin text-indigo-500" size={32} /></div>
-      ) : allVideos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-32 px-6 text-center animate-in fade-in duration-700">
-              <div className="w-24 h-24 bg-slate-900 rounded-3xl flex items-center justify-center mb-6 border border-slate-800 shadow-2xl relative">
-                  <LayoutGrid size={48} className="text-slate-700" />
-                  <div className="absolute -bottom-2 -right-2 bg-indigo-600 p-2 rounded-full border-4 border-black"><RefreshCw size={16} className="text-white animate-spin" /></div>
-              </div>
-              <h2 className="text-2xl font-black text-white mb-2 uppercase tracking-tight">Librería Vacía</h2>
-              <p className="text-slate-500 text-sm max-w-sm leading-relaxed">No hay videos publicados aún.</p>
-              {isAdmin && (
-                  <Link to="/admin" className="mt-8 bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-8 py-3 rounded-xl shadow-lg shadow-indigo-900/40 flex items-center gap-2 active:scale-95 transition-all">
-                      <Database size={18}/> Ir a Gestión de Librería
-                  </Link>
-              )}
-          </div>
       ) : (
           <div className="space-y-10 animate-in fade-in">
+              {!isFilteredMode && <QuickStats user={user} refresh={refreshUser} />}
               {!isFilteredMode && <HeroSection video={feed?.hero} />}
-              
               {!isFilteredMode && (
                   <>
                     {feed?.subs?.length > 0 && (
@@ -277,56 +271,45 @@ export default function Home() {
                             <HorizontalScroll>{feed.subs.map((v: Video) => <div key={v.id} className="w-64 md:w-72 flex-shrink-0 snap-start"><VideoCard video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)}/></div>)}</HorizontalScroll>
                         </section>
                     )}
-
                     {feed?.tasteNew?.length > 0 && (
                         <section>
                             <SectionHeader title="Nuevos para ti" icon={Sparkles} />
                             <HorizontalScroll>{feed.tasteNew.map((v: Video) => <div key={v.id} className="w-72 md:w-80 flex-shrink-0 snap-start"><VideoCard video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)}/></div>)}</HorizontalScroll>
                         </section>
                     )}
-
-                    {feed?.trending?.length > 0 && (
-                        <section>
-                            <SectionHeader title="Tendencias" icon={Flame} />
-                            <HorizontalScroll>{feed.trending.map((v: Video, idx: number) => <div key={v.id} className="w-72 md:w-80 flex-shrink-0 snap-start relative"><div className="absolute -left-2 -top-4 text-[100px] font-black text-slate-800/30 z-0 pointer-events-none select-none font-serif">{idx + 1}</div><div className="relative z-10 pl-4"><VideoCard video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)}/></div></div>)}</HorizontalScroll>
-                        </section>
-                    )}
                   </>
               )}
-
-              <section className={!isFilteredMode ? "pt-4 border-t border-slate-800" : ""}>
+              
+              <section className={!isFilteredMode ? "pt-4" : ""}>
                   <SectionHeader title={isFilteredMode ? "Resultados encontrados" : "Descubrimiento Inteligente"} icon={isFilteredMode ? Filter : Shuffle} />
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-8 gap-x-4">
-                      {displayList.slice(0, visibleCount).map((v: Video) => (
-                          <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)} />
-                      ))}
-                  </div>
-
-                  {/* SENTINEL & FALLBACK LOAD MORE */}
+                  {displayList.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+                          <LayoutGrid size={48} className="text-slate-800 mb-4" />
+                          <p className="text-slate-500 text-sm">No se encontraron videos.</p>
+                      </div>
+                  ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-8 gap-x-4">
+                          {displayList.slice(0, visibleCount).map((v: Video) => (
+                              <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)} />
+                          ))}
+                      </div>
+                  )}
                   <div ref={loadMoreRef} className="py-20 flex flex-col justify-center items-center">
                       {visibleCount < displayList.length ? (
                           <div className="flex flex-col items-center gap-6 w-full">
                               {isMoreLoading ? (
-                                  <div className="flex flex-col items-center gap-3">
-                                      <RefreshCw className="animate-spin text-indigo-500" size={32}/>
-                                      <span className="text-[10px] uppercase font-black text-slate-600 tracking-widest animate-pulse">Sincronizando biblioteca...</span>
-                                  </div>
+                                  <RefreshCw className="animate-spin text-indigo-500" size={32}/>
                               ) : (
-                                  <button 
-                                    onClick={loadMore}
-                                    className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-white font-black px-10 py-4 rounded-2xl flex items-center gap-2 active:scale-95 transition-all shadow-xl shadow-black/50"
-                                  >
-                                      <Plus size={18}/> Cargar más videos
+                                  <button onClick={loadMore} className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-white font-black px-10 py-4 rounded-2xl flex items-center gap-2 active:scale-95 transition-all">
+                                      <Plus size={18}/> Cargar más contenido
                                   </button>
                               )}
                           </div>
                       ) : displayList.length > 0 && (
-                          <div className="text-[10px] uppercase font-black text-slate-700 tracking-[0.3em] border-t border-slate-900 pt-8 w-full text-center">Has explorado toda la biblioteca</div>
+                          <div className="text-[10px] uppercase font-black text-slate-700 tracking-[0.3em] border-t border-slate-900 pt-8 w-full text-center">Fin de la lista</div>
                       )}
                   </div>
               </section>
-
               {!isFilteredMode && <AIConcierge videos={allVideos} />}
           </div>
       )}
