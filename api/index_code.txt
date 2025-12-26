@@ -1,7 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V8.2
- * Sistema de Logs Inteligente y Resiliente.
+ * StreamPay - Core Controller V8.5
  */
 
 ini_set('display_errors', 0);
@@ -10,34 +9,22 @@ error_reporting(E_ALL);
 
 if (ob_get_level() == 0) ob_start();
 
-// Variable global para cachear la configuración de logs
 $GLOBAL_LOG_ENABLED = null;
 
-// Registro de logs inteligente
 function file_debug_log($message, $data = null, $force = false) {
     global $pdo, $GLOBAL_LOG_ENABLED;
-
-    // Solo consultamos la DB una vez por petición
     if ($GLOBAL_LOG_ENABLED === null) {
         try {
             if (isset($pdo)) {
                 $stmt = $pdo->query("SELECT enableDebugLog FROM system_settings LIMIT 1");
                 $val = $stmt->fetchColumn();
                 $GLOBAL_LOG_ENABLED = ($val !== false) ? (bool)$val : true;
-            } else {
-                $GLOBAL_LOG_ENABLED = true; // Loguear bootstrap errors por defecto
-            }
-        } catch (Exception $e) {
-            $GLOBAL_LOG_ENABLED = true;
-        }
+            } else { $GLOBAL_LOG_ENABLED = true; }
+        } catch (Exception $e) { $GLOBAL_LOG_ENABLED = true; }
     }
-
     if (!$GLOBAL_LOG_ENABLED && !$force) return;
-
-    // Evitar loguear peticiones de lectura de logs para no llenar el disco de basura recursiva
     $action = $_GET['action'] ?? '';
     if ($action === 'admin_get_logs' && !$force) return;
-
     $logFile = __DIR__ . '/debug_log.txt';
     $timestamp = date('Y-m-d H:i:s');
     $output = "[$timestamp] $message";
@@ -45,11 +32,9 @@ function file_debug_log($message, $data = null, $force = false) {
     file_put_contents($logFile, $output . "\n", FILE_APPEND);
 }
 
-// Capturador de Warnings
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
-    // Solo logueamos errores o advertencias reales
     $msg = "PHP [$errno]: $errstr en $errfile:$errline";
-    file_debug_log("INCIDENTE", $msg, true); // Forzamos log en incidentes de PHP
+    file_debug_log("INCIDENTE", $msg, true);
     return true; 
 });
 
@@ -66,22 +51,14 @@ register_shutdown_function(function() {
 
 function respond($success, $data = null, $error = null) {
     $action = $_GET['action'] ?? 'none';
-    
-    // FILTRADO INTELIGENTE DE LOGS DE RESPUESTA:
     if (!$success || in_array($action, ['initialize_system', 'update_system_settings', 'admin_repair_db', 'admin_cleanup_system_files', 'verify_db_connection', 'admin_clear_logs'])) {
         file_debug_log("RESPOND ACTION: " . $action, ["success" => $success, "error" => $error]);
     }
-
     $res = ['success' => $success, 'data' => $data, 'error' => $error];
-    
     while (ob_get_level() > 0) ob_end_clean();
-    
-    // CABECERAS ANTI-CACHE CRÍTICAS
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-    header('Cache-Control: post-check=0, pre-check=0', false);
     header('Pragma: no-cache');
-    
     echo json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     exit();
 }
@@ -92,15 +69,11 @@ header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(); }
 
-// UNIFICACIÓN DE ENTRADAS
 $json_input = json_decode(file_get_contents('php://input'), true) ?? [];
 $input = array_merge($_GET, $_POST, $json_input);
 
-// Carga de módulos
 $required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
-foreach ($required_files as $file) { 
-    if (file_exists($file)) { @require_once $file; }
-}
+foreach ($required_files as $file) { if (file_exists($file)) { @require_once $file; } }
 
 $action = $input['action'] ?? null;
 $configFile = 'db_config.json';
@@ -162,13 +135,18 @@ try {
         case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
         case 'smart_organize_library': video_smart_organize($pdo); break;
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
+        
+        // NUEVAS RUTAS TRANSCODER V2
         case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
         case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
         case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
+        case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;
+        case 'admin_save_transcode_profile': admin_save_transcode_profile($pdo, $input); break;
+        case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $input); break;
+        case 'admin_remove_from_queue': admin_remove_from_queue($pdo, $input); break;
+
         case 'admin_cleanup_system_files': admin_cleanup_system_files($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
-        case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $input); break;
-        case 'admin_organize_paquete': admin_organize_paquete($pdo, $input); break;
         case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
         case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
         case 'admin_add_balance': admin_add_balance($pdo, $input); break;

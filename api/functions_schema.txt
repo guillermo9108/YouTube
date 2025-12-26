@@ -43,6 +43,13 @@ function getAppSchema() {
                 'reason' => 'TEXT DEFAULT NULL'
             ]
         ],
+        'transcode_profiles' => [
+            'cols' => [
+                'extension' => 'VARCHAR(10) PRIMARY KEY',
+                'command_args' => 'TEXT NOT NULL',
+                'description' => 'VARCHAR(255)'
+            ]
+        ],
         'marketplace_items' => [
             'cols' => [
                 'id' => 'VARCHAR(50) PRIMARY KEY',
