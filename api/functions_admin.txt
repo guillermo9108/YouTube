@@ -3,7 +3,7 @@
 
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS
- * Versión 9.2 - Optimización para NAS y Archivos TS
+ * Versión 9.3 - Ultra-Compatibilidad FFmpeg 2.x
  */
 
 // --- AJUSTES DEL SISTEMA ---
@@ -132,29 +132,33 @@ function admin_transcode_batch($pdo) {
 
     $ffmpegBin = $settings['ffmpegPath'] ?: 'ffmpeg';
     
-    // MEJORA: Usar carpeta 'uploads/transcoding/' para evitar problemas de permisos en discos USB
     $tempDir = __DIR__ . '/uploads/transcoding/';
     if (!is_dir($tempDir)) mkdir($tempDir, 0777, true);
     $tempPath = $tempDir . $video['id'] . ".mp4";
     
     $marker = "SP_JOB_ID_" . $video['id'];
-    $preset = $settings['transcodePreset'] ?: 'superfast';
+    // Forzamos ultrafast para procesadores antiguos de NAS
+    $preset = 'ultrafast'; 
     
     $logPath = __DIR__ . '/uploads/transcode_last_log.txt';
     if (file_exists($logPath)) @unlink($logPath);
 
-    // COMANDOS MEJORADOS PARA TS Y FFMPEG ANTIGUO:
-    // 1. -fflags +genpts: Regenera timestamps para archivos TS dañados
-    // 2. -strict -2: Necesario en versiones antiguas para el encoder AAC
-    // 3. -map 0: Asegura que mapeamos los flujos correctamente
-    $cmd = "nice -n 15 $ffmpegBin -y -fflags +genpts -i " . escapeshellarg($sourcePath) . " -map 0 -c:v libx264 -preset $preset -crf 23 -c:a aac -strict -2 -b:a 128k -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
+    /** 
+     * COMANDO ULTRA COMPATIBLE (FFmpeg 2.7.1 + NAS)
+     * 1. -fflags +genpts: Corrige errores de sincronización en archivos TS.
+     * 2. -avoid_negative_ts make_zero: Previene que el archivo empiece en tiempo negativo.
+     * 3. -vsync 1: Sincronización de cuadros constante (vital para streaming PWA).
+     * 4. -c:a copy: Tu fuente ya es AAC, copiar es 100% seguro y ahorra mucha CPU.
+     * 5. -crf 28: Calidad aceptable pero mucho más rápido de procesar.
+     */
+    $cmd = "nice -n 15 $ffmpegBin -y -fflags +genpts -avoid_negative_ts make_zero -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 28 -vsync 1 -c:a copy -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
     
     $fullCmd = "nohup $cmd > " . escapeshellarg($logPath) . " 2>&1 &";
     
     shell_exec($fullCmd);
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$video['id']]);
     
-    file_debug_log("Iniciada conversión (GenPTS) para: " . $video['title'], ["job" => $marker, "bin" => $ffmpegBin]);
+    file_debug_log("Lanzada conversión compatible (CRF28+CopyAudio) para: " . $video['title'], ["job" => $marker, "bin" => $ffmpegBin]);
     respond(true, ['videoId' => $video['id'], 'title' => $video['title']]);
 }
 
@@ -165,16 +169,12 @@ function admin_cleanup_stale_transcodes($pdo) {
         $marker = "SP_JOB_ID_" . $v['id'];
         $pid = shell_exec("pgrep -f " . escapeshellarg($marker));
         if (empty(trim($pid))) {
-            // Si el proceso ya no existe, verificar si terminó con éxito o error
             $tempPath = __DIR__ . '/uploads/transcoding/' . $v['id'] . ".mp4";
             if (file_exists($tempPath)) {
-                // Si el archivo temporal es muy pequeño o no ha cambiado, es un fallo
-                if (filesize($tempPath) < 1000 || (time() - filemtime($tempPath) > 120)) {
+                if (time() - filemtime($tempPath) > 180) { // 3 minutos de inactividad
                     @unlink($tempPath);
-                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg se detuvo o produjo archivo inválido' WHERE id = ?")->execute([$v['id']]);
+                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Proceso interrumpido (Inactividad)' WHERE id = ?")->execute([$v['id']]);
                 } else {
-                    // Si parece estar bien, el CRON finalizador (no incluido aquí) debería moverlo.
-                    // Por ahora, si no hay PID lo devolvemos a WAITING para reintento
                     $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$v['id']]);
                 }
             } else {
@@ -313,7 +313,7 @@ function admin_cleanup_system_files($pdo) {
     $count = 0;
     foreach ($files as $file) {
         $id = str_replace(['uploads/thumbnails/', '.jpg'], '', $file);
-        if (!to_in_array($id, $validIds) && $id !== 'default') { @unlink($file); $count++; }
+        if (!in_array($id, $validIds) && $id !== 'default') { @unlink($file); $count++; }
     }
     respond(true, ['videos' => $count]);
 }
