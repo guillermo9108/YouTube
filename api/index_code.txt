@@ -1,7 +1,7 @@
 
 <?php
 /**
- * StreamPay - Core Controller V8.7
+ * StreamPay - Core Controller V8.8
  */
 
 ini_set('display_errors', 0);
@@ -143,6 +143,7 @@ try {
         case 'admin_reset_transcoder_states': admin_reset_transcoder_states($pdo); break;
         case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
         case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;
+        case 'admin_get_transcode_log': admin_get_transcode_log(); break;
         case 'admin_save_transcode_profile': admin_save_transcode_profile($pdo, $input); break;
         case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $input); break;
         case 'admin_remove_from_queue': admin_remove_from_queue($pdo, $input); break;

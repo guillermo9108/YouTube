@@ -3,7 +3,7 @@
 
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS
- * Versión 9.0 - Diagnóstico FFmpeg & Logs Técnicos
+ * Versión 9.1 - Diagnóstico Robusto
  */
 
 // --- AJUSTES DEL SISTEMA ---
@@ -31,6 +31,12 @@ function admin_get_settings($pdo) {
 function admin_update_settings($pdo, $input) {
     $s = $input['settings'] ?? [];
     if (empty($s)) respond(true);
+    
+    // Aseguramos que la tabla tenga las columnas necesarias antes de intentar actualizar
+    require_once 'functions_schema.php';
+    $schema = getAppSchema();
+    syncTable($pdo, 'system_settings', $schema['system_settings']);
+
     $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
     $fields = []; $params = [];
     $allowed = ['downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 'ytDlpPath', 'ffmpegPath', 'enableYoutube', 'autoTranscode', 'is_transcoder_active', 'transcodePreset', 'categoryPrices', 'customCategories', 'localLibraryPath', 'ftpSettings', 'videoCommission', 'marketCommission', 'vipPlans', 'paymentInstructions', 'paqueteMapper', 'tropipayClientId', 'tropipayClientSecret', 'currencyConversion', 'proxyUrl', 'enableDebugLog'];
@@ -91,21 +97,31 @@ function admin_stop_transcoder($pdo) {
 
 function admin_get_transcode_log() {
     $logFile = __DIR__ . '/uploads/transcode_last_log.txt';
-    if (!file_exists($logFile)) respond(true, "No hay logs recientes.");
+    if (!file_exists($logFile)) respond(true, "No hay logs recientes. El motor podría no haber iniciado.");
     $content = file_get_contents($logFile);
     respond(true, $content);
 }
 
 function admin_transcode_batch($pdo) {
     if (session_id()) session_write_close();
-    admin_cleanup_stale_transcodes($pdo);
     
-    $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
+    // Auto-reparar tabla de ajustes si falla el select por columna inexistente
+    try {
+        $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
+    } catch (PDOException $e) {
+        require_once 'functions_schema.php';
+        $schema = getAppSchema();
+        syncTable($pdo, 'system_settings', $schema['system_settings']);
+        $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
+    }
+
     if (!$settings['is_transcoder_active']) respond(true, ['message' => 'Motor inactivo']);
+
+    admin_cleanup_stale_transcodes($pdo);
 
     $osPids = shell_exec("pgrep -f \"SP_JOB_ID_\"");
     $osCount = !empty(trim($osPids)) ? count(explode("\n", trim($osPids))) : 0;
-    if ($osCount >= (int)$settings['batchSize']) respond(true, ['active' => $osCount, 'msg' => 'Límite alcanzado']);
+    if ($osCount >= (int)($settings['batchSize'] ?? 1)) respond(true, ['active' => $osCount, 'msg' => 'Límite alcanzado']);
 
     $video = $pdo->query("SELECT id, videoUrl, title FROM videos WHERE transcode_status = 'WAITING' LIMIT 1")->fetch();
     if (!$video) respond(true, ['completed' => true]);
@@ -113,7 +129,7 @@ function admin_transcode_batch($pdo) {
     $sourcePath = resolve_video_path($video['videoUrl']);
     if (!$sourcePath || !file_exists($sourcePath)) {
         $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo de origen no existe' WHERE id = ?")->execute([$video['id']]);
-        respond(false, null, "Archivo perdido: " . $video['title']);
+        respond(false, null, "Archivo físico no encontrado para: " . $video['title']);
     }
 
     $ffmpegBin = $settings['ffmpegPath'] ?: 'ffmpeg';
@@ -121,13 +137,13 @@ function admin_transcode_batch($pdo) {
     $marker = "SP_JOB_ID_" . $video['id'];
     $preset = $settings['transcodePreset'] ?: 'superfast';
     
-    // Log de inicio técnico
     $logPath = __DIR__ . '/uploads/transcode_last_log.txt';
     if (!is_dir(dirname($logPath))) mkdir(dirname($logPath), 0777, true);
     
+    // Borrar log anterior para ver solo el actual
+    if (file_exists($logPath)) @unlink($logPath);
+
     $cmd = "nice -n 15 $ffmpegBin -y -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
-    
-    // Ejecución con nohup y captura completa de errores
     $fullCmd = "nohup $cmd > " . escapeshellarg($logPath) . " 2>&1 &";
     
     shell_exec($fullCmd);
@@ -149,12 +165,10 @@ function admin_cleanup_stale_transcodes($pdo) {
             if (file_exists($tempPath)) {
                 if (time() - filemtime($tempPath) > 300) {
                     @unlink($tempPath);
-                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Error crítico: FFmpeg terminó inesperadamente' WHERE id = ?")->execute([$v['id']]);
-                    file_debug_log("Huérfano detectado y marcado como fallido: " . $v['id']);
+                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg murió inesperadamente' WHERE id = ?")->execute([$v['id']]);
                 }
             } else {
                 $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$v['id']]);
-                file_debug_log("Huérfano sin rastro devuelto a WAITING: " . $v['id']);
             }
         }
     }
