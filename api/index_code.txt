@@ -147,6 +147,7 @@ try {
         case 'admin_save_transcode_profile': admin_save_transcode_profile($pdo, $input); break;
         case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $input); break;
         case 'admin_remove_from_queue': admin_remove_from_queue($pdo, $input); break;
+        case 'admin_skip_transcode': admin_skip_transcode($pdo, $input); break;
         case 'admin_clear_transcode_queue': admin_clear_transcode_queue($pdo); break;
         case 'admin_retry_failed_transcodes': admin_retry_failed_transcodes($pdo); break;
 

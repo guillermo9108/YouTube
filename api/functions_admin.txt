@@ -3,7 +3,7 @@
 
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS
- * Versión 9.4 - Diagnóstico y Compatibilidad MPEG-TS
+ * Versión 9.6 - Super Transcoder & Real-time Progress
  */
 
 // --- AJUSTES DEL SISTEMA ---
@@ -54,14 +54,12 @@ function admin_update_settings($pdo, $input) {
     respond(true);
 }
 
-// --- MOTOR DE CONVERSIÓN (TRANSCODER) ---
+// --- MOTOR DE CONVERSIÓN (TRANSCODER V3) ---
 
 function admin_get_local_stats($pdo) {
     $free = @disk_free_space("/") / (1024 * 1024 * 1024);
     $total = @disk_total_space("/") / (1024 * 1024 * 1024);
     
-    $dbProcessingCount = $pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'PROCESSING'")->fetchColumn();
-
     $activeProcesses = [];
     $osPidsStr = shell_exec("pgrep -f \"SP_JOB_ID_\"");
     if (!empty(trim($osPidsStr))) {
@@ -72,11 +70,27 @@ function admin_get_local_stats($pdo) {
             preg_match('/SP_JOB_ID_([a-zA-Z0-9_]+)/', $cmdLine, $matches);
             $vidId = $matches[1] ?? null;
             if ($vidId) {
-                $title = $pdo->query("SELECT title FROM videos WHERE id = '$vidId'")->fetchColumn() ?: "Video ID: $vidId";
-                $activeProcesses[] = ['id' => "PID $pid", 'title' => $title, 'vidId' => $vidId];
+                $stmt = $pdo->prepare("SELECT title, duration, transcode_progress FROM videos WHERE id = ?");
+                $stmt->execute([$vidId]);
+                $v = $stmt->fetch();
+                
+                // Parser de progreso en tiempo real
+                $progress = admin_parse_ffmpeg_progress($vidId, $v['duration'] ?? 0);
+                if ($progress > ($v['transcode_progress'] ?? 0)) {
+                    $pdo->prepare("UPDATE videos SET transcode_progress = ? WHERE id = ?")->execute([$progress, $vidId]);
+                }
+
+                $activeProcesses[] = [
+                    'id' => "PID $pid", 
+                    'title' => $v['title'] ?? "Video ID: $vidId", 
+                    'vidId' => $vidId,
+                    'progress' => $progress
+                ];
             }
         }
     }
+
+    $dbProcessingCount = $pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'PROCESSING'")->fetchColumn();
 
     respond(true, [
         'disk_free' => round($free, 2),
@@ -87,32 +101,30 @@ function admin_get_local_stats($pdo) {
     ]);
 }
 
-function admin_stop_transcoder($pdo) {
-    $pdo->exec("UPDATE system_settings SET is_transcoder_active = 0 WHERE id = 1");
-    shell_exec("pkill -f \"SP_JOB_ID_\"");
-    $pdo->exec("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'PROCESSING'");
-    respond(true);
-}
-
-function admin_get_transcode_log() {
-    $logFile = __DIR__ . '/uploads/transcode_last_log.txt';
-    if (!file_exists($logFile)) respond(true, "No hay logs recientes. El motor podría no haber iniciado.");
-    $content = file_get_contents($logFile);
-    respond(true, $content);
+/**
+ * Lee el archivo de log individual de un proceso para calcular el %
+ */
+function admin_parse_ffmpeg_progress($videoId, $totalDuration) {
+    if ($totalDuration <= 0) return 0;
+    $logFile = __DIR__ . "/uploads/transcoding/{$videoId}.log";
+    if (!file_exists($logFile)) return 0;
+    
+    $content = shell_exec("tail -n 5 " . escapeshellarg($logFile));
+    if (preg_match('/time=([0-9:.]+)/', $content, $matches)) {
+        $timeStr = $matches[1];
+        $parts = explode(':', $timeStr);
+        if (count($parts) == 3) {
+            $seconds = ($parts[0] * 3600) + ($parts[1] * 60) + (float)$parts[2];
+            return min(99, round(($seconds / $totalDuration) * 100));
+        }
+    }
+    return 0;
 }
 
 function admin_transcode_batch($pdo) {
     if (session_id()) session_write_close();
     
-    // REPARACIÓN PREVENTIVA: Si falla la columna, sincronizar esquema inmediatamente
-    try {
-        $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
-    } catch (Exception $e) {
-        require_once 'functions_schema.php';
-        syncTable($pdo, 'system_settings', getAppSchema()['system_settings']);
-        $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
-    }
-
+    $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
     if (!$settings['is_transcoder_active']) respond(true, ['message' => 'Motor inactivo']);
 
     admin_cleanup_stale_transcodes($pdo);
@@ -130,51 +142,56 @@ function admin_transcode_batch($pdo) {
         respond(false, null, "Archivo físico no encontrado para: " . $video['title']);
     }
 
+    $ext = strtolower(pathinfo($sourcePath, PATHINFO_EXTENSION));
+    $profile = $pdo->prepare("SELECT command_args FROM transcode_profiles WHERE extension = ?");
+    $profile->execute([$ext]);
+    $args = $profile->fetchColumn();
+
+    // Si no hay perfil, usar el comando resiliente por defecto
+    if (!$args) {
+        $args = "-c:v libx264 -preset {$settings['transcodePreset']} -crf 26 -vsync 1 -avoid_negative_ts make_zero -c:a copy";
+    }
+
     $ffmpegBin = $settings['ffmpegPath'] ?: 'ffmpeg';
-    
     $tempDir = __DIR__ . '/uploads/transcoding/';
     if (!is_dir($tempDir)) mkdir($tempDir, 0777, true);
     $tempPath = $tempDir . $video['id'] . ".mp4";
+    $logPath = $tempDir . $video['id'] . ".log";
     
     $marker = "SP_JOB_ID_" . $video['id'];
-    $preset = 'ultrafast'; 
     
-    $logPath = __DIR__ . '/uploads/transcode_last_log.txt';
-    if (file_exists($logPath)) @unlink($logPath);
-
-    /** 
-     * COMANDO RESILIENTE PARA FFMPEG 2.x Y ARCHIVOS TS
-     * 1. -fflags +genpts +igndts: Ignora errores de timestamps y los regenera.
-     * 2. -avoid_negative_ts make_zero: Asegura que el video no empiece con tiempo negativo.
-     * 3. -analyzeduration / -probesize: Ayuda a identificar streams en archivos TS complejos.
-     * 4. -c:a copy: No re-encodifica el audio (ahorra mucha CPU y evita desincronización).
-     */
-    $cmd = "nice -n 15 $ffmpegBin -y -fflags +genpts+igndts -analyzeduration 100M -probesize 100M -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 26 -vsync 1 -avoid_negative_ts make_zero -c:a copy -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
+    $cmd = "nice -n 15 $ffmpegBin -y -fflags +genpts+igndts -analyzeduration 100M -probesize 100M -i " . escapeshellarg($sourcePath) . " $args -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
     
     $fullCmd = "nohup $cmd > " . escapeshellarg($logPath) . " 2>&1 &";
     
     shell_exec($fullCmd);
-    $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$video['id']]);
+    $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', transcode_progress = 0 WHERE id = ?")->execute([$video['id']]);
     
-    file_debug_log("Lanzada conversión compatible TS para: " . $video['title'], ["job" => $marker, "bin" => $ffmpegBin]);
     respond(true, ['videoId' => $video['id'], 'title' => $video['title']]);
 }
 
 function admin_cleanup_stale_transcodes($pdo) {
-    $stmt = $pdo->query("SELECT id, videoUrl FROM videos WHERE transcode_status = 'PROCESSING'");
+    $stmt = $pdo->query("SELECT id, videoUrl, title FROM videos WHERE transcode_status = 'PROCESSING'");
     $processing = $stmt->fetchAll();
     foreach ($processing as $v) {
         $marker = "SP_JOB_ID_" . $v['id'];
         $pid = shell_exec("pgrep -f " . escapeshellarg($marker));
         if (empty(trim($pid))) {
             $tempPath = __DIR__ . '/uploads/transcoding/' . $v['id'] . ".mp4";
+            $logPath = __DIR__ . '/uploads/transcoding/' . $v['id'] . ".log";
+            
             if (file_exists($tempPath)) {
-                // Si el archivo no ha crecido en 2 minutos, asumimos que FFmpeg murió
-                if (time() - filemtime($tempPath) > 120) { 
+                // Verificar si el log indica éxito
+                $logContent = file_exists($logPath) ? file_get_contents($logPath) : '';
+                if (strpos($logContent, 'video:') !== false || strpos($logContent, 'muxing overhead') !== false) {
+                    // ÉXITO: El proceso terminó pero la DB no se enteró
+                    $pdo->prepare("UPDATE videos SET transcode_status = 'DONE', transcode_progress = 100 WHERE id = ?")->execute([$v['id']]);
+                    continue;
+                }
+
+                if (time() - filemtime($tempPath) > 180) { 
                     @unlink($tempPath);
-                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg se detuvo (Inactividad)' WHERE id = ?")->execute([$v['id']]);
-                } else {
-                    // Si el archivo sigue "fresco", lo dejamos en PROCESSING para que el finalizador lo detecte
+                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg se detuvo sin finalizar' WHERE id = ?")->execute([$v['id']]);
                 }
             } else {
                 $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$v['id']]);
@@ -183,10 +200,47 @@ function admin_cleanup_stale_transcodes($pdo) {
     }
 }
 
-function admin_reset_transcoder_states($pdo) {
-    $pdo->exec("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'PROCESSING'");
-    shell_exec("pkill -f \"SP_JOB_ID_\"");
-    respond(true, ['msg' => 'Todos los procesos han sido reseteados']);
+function admin_transcode_scan_filters($pdo, $input) {
+    $where = ["transcode_status = 'NONE'"];
+    if ($input['onlyNonMp4'] ?? false) {
+        $where[] = "(videoUrl NOT LIKE '%.mp4' AND videoUrl NOT LIKE '%.MP4')";
+    }
+    if ($input['onlyIncompatible'] ?? false) {
+        $where[] = "needs_transcode = 1";
+    }
+    
+    $sql = "SELECT id FROM videos WHERE " . implode(' AND ', $where);
+    
+    if ($input['mode'] === 'PREVIEW') {
+        $count = $pdo->query("SELECT COUNT(*) FROM videos WHERE " . implode(' AND ', $where))->fetchColumn();
+        respond(true, ['count' => (int)$count]);
+    } else {
+        $pdo->exec("UPDATE videos SET transcode_status = 'WAITING' WHERE " . implode(' AND ', $where));
+        respond(true, ['affected' => 1]);
+    }
+}
+
+function admin_skip_transcode($pdo, $input) {
+    $id = $input['videoId'] ?? '';
+    if (!$id) respond(false, null, 'ID faltante');
+    $pdo->prepare("UPDATE videos SET transcode_status = 'DONE', reason = 'Manual skip (Conflictivo)', transcode_progress = 100 WHERE id = ?")->execute([$id]);
+    respond(true, ['msg' => 'Video marcado como procesado manualmente']);
+}
+
+// Transcoder Profiles
+function admin_get_transcode_profiles($pdo) {
+    respond(true, $pdo->query("SELECT * FROM transcode_profiles ORDER BY extension ASC")->fetchAll());
+}
+
+function admin_save_transcode_profile($pdo, $input) {
+    $stmt = $pdo->prepare("REPLACE INTO transcode_profiles (extension, command_args, description) VALUES (?, ?, ?)");
+    $stmt->execute([strtolower($input['extension']), $input['command_args'], $input['description'] ?? '']);
+    respond(true);
+}
+
+function admin_delete_transcode_profile($pdo, $input) {
+    $pdo->prepare("DELETE FROM transcode_profiles WHERE extension = ?")->execute([$input['extension']]);
+    respond(true);
 }
 
 // --- LIMPIEZA Y LIBRERÍA ---
@@ -220,77 +274,6 @@ function admin_file_cleanup_preview($pdo, $input) {
             break;
     }
     respond(true, $results);
-}
-
-function admin_smart_cleaner_preview($pdo, $input) {
-    $category = $input['category'] ?? 'ALL';
-    $minDays = intval($input['minDays'] ?? 30);
-    $maxGb = intval($input['maxGbLimit'] ?? 10);
-    $where = ["createdAt < " . (time() - ($minDays * 86400))];
-    if ($category !== 'ALL') $where[] = "category = '$category'";
-    $sql = "SELECT * FROM videos WHERE " . implode(' AND ', $where) . " ORDER BY views ASC LIMIT 200";
-    $stmt = $pdo->query($sql);
-    $preview = []; $totalSize = 0;
-    foreach ($stmt->fetchAll() as $v) {
-        $path = resolve_video_path($v['videoUrl']);
-        if ($path && file_exists($path)) {
-            $size = filesize($path); $totalSize += $size;
-            $v['size_fmt'] = round($size / (1024 * 1024), 2) . " MB";
-            $v['reason'] = 'Antigüedad / Bajo uso';
-            $preview[] = $v;
-        }
-        if (($totalSize / (1024*1024*1024)) > $maxGb) break;
-    }
-    respond(true, ['preview' => $preview, 'stats' => ['spaceReclaimed' => round($totalSize / (1024*1024*1024), 2) . " GB"]]);
-}
-
-function admin_smart_cleaner_execute($pdo, $input) {
-    $ids = $input['videoIds'] ?? [];
-    $subAction = $input['subAction'] ?? 'DELETE';
-    $count = 0;
-    foreach ($ids as $id) {
-        $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
-        $stmt->execute([$id]);
-        $v = $stmt->fetch();
-        if (!$v) continue;
-        if ($subAction === 'DELETE') {
-            $path = resolve_video_path($v['videoUrl']);
-            if ($path && file_exists($path)) @unlink($path);
-            $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
-        }
-        $count++;
-    }
-    respond(true, ['deleted' => $count]);
-}
-
-function admin_organize_paquete($pdo, $input) {
-    $simulate = $input['simulate'] ?? true;
-    $localPath = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1")->fetchColumn();
-    if (!$localPath || !is_dir($localPath)) respond(false, null, "Ruta de biblioteca no válida");
-    $plan = []; $junk = ['@eaDir', '#recycle', '.DS_Store', 'Thumbs.db', '.thumbnails'];
-    $dir = new RecursiveDirectoryIterator($localPath);
-    $it = new RecursiveIteratorIterator($dir);
-    $cleaned = 0;
-    foreach ($it as $file) {
-        $path = $file->getPathname();
-        foreach ($junk as $j) {
-            if (strpos($path, $j) !== false) {
-                $plan[] = ['file' => basename($path), 'reason' => 'Archivo basura de sistema'];
-                if (!$simulate) { if ($file->isDir()) @rmdir($path); else @unlink($path); $cleaned++; }
-                break;
-            }
-        }
-    }
-    respond(true, ['plan' => $plan, 'cleaned' => $cleaned]);
-}
-
-// --- LOGS Y OTROS ---
-
-function admin_get_logs() {
-    $logFile = __DIR__ . '/debug_log.txt';
-    if (!file_exists($logFile)) respond(true, []);
-    $lines = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    respond(true, array_reverse(array_slice($lines, -100)));
 }
 
 function admin_clear_logs() {
@@ -386,22 +369,6 @@ function admin_delete_request($pdo, $input) {
     respond(true);
 }
 
-// Transcoder Profiles
-function admin_get_transcode_profiles($pdo) {
-    respond(true, $pdo->query("SELECT * FROM transcode_profiles ORDER BY extension ASC")->fetchAll());
-}
-
-function admin_save_transcode_profile($pdo, $input) {
-    $stmt = $pdo->prepare("REPLACE INTO transcode_profiles (extension, command_args, description) VALUES (?, ?, ?)");
-    $stmt->execute([strtolower($input['extension']), $input['command_args'], $input['description'] ?? '']);
-    respond(true);
-}
-
-function admin_delete_transcode_profile($pdo, $input) {
-    $pdo->prepare("DELETE FROM transcode_profiles WHERE extension = ?")->execute([$input['extension']]);
-    respond(true);
-}
-
 function admin_remove_from_queue($pdo, $input) {
     $pdo->prepare("UPDATE videos SET transcode_status = 'NONE' WHERE id = ?")->execute([$input['videoId']]);
     respond(true);
@@ -417,16 +384,8 @@ function admin_retry_failed_transcodes($pdo) {
     respond(true);
 }
 
-function admin_transcode_scan_filters($pdo, $input) {
-    $where = ["transcode_status = 'NONE'"];
-    if ($input['onlyNonMp4'] ?? false) $where[] = "videoUrl NOT LIKE '%.mp4'";
-    if ($input['onlyIncompatible'] ?? false) $where[] = "needs_transcode = 1";
-    $sql = "SELECT id FROM videos WHERE " . implode(' AND ', $where);
-    if ($input['mode'] === 'PREVIEW') {
-        $count = $pdo->query("SELECT COUNT(*) FROM ($sql) as t")->fetchColumn();
-        respond(true, ['count' => (int)$count]);
-    } else {
-        $pdo->exec("UPDATE videos SET transcode_status = 'WAITING' WHERE id IN ($sql)");
-        respond(true, ['affected' => 1]);
-    }
+function admin_reset_transcoder_states($pdo) {
+    $pdo->exec("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'PROCESSING'");
+    shell_exec("pkill -f \"SP_JOB_ID_\"");
+    respond(true, ['msg' => 'Todos los procesos han sido reseteados']);
 }

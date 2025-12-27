@@ -41,6 +41,7 @@ function getAppSchema() {
                 'processing_attempts' => 'INT DEFAULT 0',
                 'needs_transcode' => 'TINYINT(1) DEFAULT 0',
                 'transcode_status' => "ENUM('NONE', 'WAITING', 'PROCESSING', 'DONE', 'FAILED') DEFAULT 'NONE'",
+                'transcode_progress' => 'INT DEFAULT 0',
                 'reason' => 'TEXT DEFAULT NULL'
             ]
         ],
@@ -147,7 +148,7 @@ function getAppSchema() {
                 'downloadStartTime' => "VARCHAR(10) DEFAULT '01:00'",
                 'downloadEndTime' => "VARCHAR(10) DEFAULT '06:00'",
                 'isQueuePaused' => 'TINYINT(1) DEFAULT 0',
-                'batchSize' => 'INT DEFAULT 5',
+                'batchSize' => 'INT DEFAULT 2',
                 'maxDuration' => 'INT DEFAULT 600',
                 'maxResolution' => 'INT DEFAULT 1080',
                 'pexelsKey' => 'VARCHAR(255)',
@@ -158,7 +159,7 @@ function getAppSchema() {
                 'enableYoutube' => 'TINYINT(1) DEFAULT 0',
                 'autoTranscode' => 'TINYINT(1) DEFAULT 0',
                 'is_transcoder_active' => 'TINYINT(1) DEFAULT 0',
-                'transcodePreset' => "VARCHAR(20) DEFAULT 'superfast'",
+                'transcodePreset' => "VARCHAR(20) DEFAULT 'ultrafast'",
                 'categoryPrices' => 'JSON DEFAULT NULL',
                 'customCategories' => 'JSON DEFAULT NULL',
                 'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
@@ -213,14 +214,12 @@ function syncTable($pdo, $tableName, $def) {
             $sql .= ") CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
             $pdo->exec($sql);
         } else {
-            // Sincronización robusta de columnas
             $stmt = $pdo->query("SHOW COLUMNS FROM $tableName");
             $existingColumnsData = $stmt->fetchAll(PDO::FETCH_ASSOC);
             $existingCols = array_map('strtolower', array_column($existingColumnsData, 'Field'));
             
             foreach ($def['cols'] as $colName => $colDef) {
                 if (!in_array(strtolower($colName), $existingCols)) {
-                    // Limpiar definiciones de Primary Key para ALTER
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
                 }
