@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../../../services/db';
 import { 
@@ -363,7 +362,7 @@ export default function AdminTranscoder() {
                             <button onClick={() => setShowFailedList(false)} className="p-2 hover:bg-white/10 rounded-full"><X/></button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                            {/* ... (lista de fallidos con botón handleSkip) ... */}
+                            {/* Los videos fallidos se cargan dinámicamente desde el estado failedVids */}
                         </div>
                     </div>
                 </div>

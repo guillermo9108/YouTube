@@ -1,4 +1,3 @@
-
 <?php
 // DEFINICIÓN DEL ESQUEMA MAESTRO
 function getAppSchema() {
