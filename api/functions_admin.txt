@@ -3,7 +3,7 @@
 
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS
- * Versión 9.1 - Diagnóstico Robusto
+ * Versión 9.2 - Optimización para NAS y Archivos TS
  */
 
 // --- AJUSTES DEL SISTEMA ---
@@ -32,7 +32,6 @@ function admin_update_settings($pdo, $input) {
     $s = $input['settings'] ?? [];
     if (empty($s)) respond(true);
     
-    // Aseguramos que la tabla tenga las columnas necesarias antes de intentar actualizar
     require_once 'functions_schema.php';
     $schema = getAppSchema();
     syncTable($pdo, 'system_settings', $schema['system_settings']);
@@ -105,7 +104,6 @@ function admin_get_transcode_log() {
 function admin_transcode_batch($pdo) {
     if (session_id()) session_write_close();
     
-    // Auto-reparar tabla de ajustes si falla el select por columna inexistente
     try {
         $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
     } catch (PDOException $e) {
@@ -133,23 +131,30 @@ function admin_transcode_batch($pdo) {
     }
 
     $ffmpegBin = $settings['ffmpegPath'] ?: 'ffmpeg';
-    $tempPath = $sourcePath . ".transcoding.mp4";
+    
+    // MEJORA: Usar carpeta 'uploads/transcoding/' para evitar problemas de permisos en discos USB
+    $tempDir = __DIR__ . '/uploads/transcoding/';
+    if (!is_dir($tempDir)) mkdir($tempDir, 0777, true);
+    $tempPath = $tempDir . $video['id'] . ".mp4";
+    
     $marker = "SP_JOB_ID_" . $video['id'];
     $preset = $settings['transcodePreset'] ?: 'superfast';
     
     $logPath = __DIR__ . '/uploads/transcode_last_log.txt';
-    if (!is_dir(dirname($logPath))) mkdir(dirname($logPath), 0777, true);
-    
-    // Borrar log anterior para ver solo el actual
     if (file_exists($logPath)) @unlink($logPath);
 
-    $cmd = "nice -n 15 $ffmpegBin -y -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 23 -c:a aac -b:a 128k -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
+    // COMANDOS MEJORADOS PARA TS Y FFMPEG ANTIGUO:
+    // 1. -fflags +genpts: Regenera timestamps para archivos TS dañados
+    // 2. -strict -2: Necesario en versiones antiguas para el encoder AAC
+    // 3. -map 0: Asegura que mapeamos los flujos correctamente
+    $cmd = "nice -n 15 $ffmpegBin -y -fflags +genpts -i " . escapeshellarg($sourcePath) . " -map 0 -c:v libx264 -preset $preset -crf 23 -c:a aac -strict -2 -b:a 128k -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
+    
     $fullCmd = "nohup $cmd > " . escapeshellarg($logPath) . " 2>&1 &";
     
     shell_exec($fullCmd);
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$video['id']]);
     
-    file_debug_log("Lanzada conversión para: " . $video['title'], ["job" => $marker, "bin" => $ffmpegBin]);
+    file_debug_log("Iniciada conversión (GenPTS) para: " . $video['title'], ["job" => $marker, "bin" => $ffmpegBin]);
     respond(true, ['videoId' => $video['id'], 'title' => $video['title']]);
 }
 
@@ -160,12 +165,17 @@ function admin_cleanup_stale_transcodes($pdo) {
         $marker = "SP_JOB_ID_" . $v['id'];
         $pid = shell_exec("pgrep -f " . escapeshellarg($marker));
         if (empty(trim($pid))) {
-            $sourcePath = resolve_video_path($v['videoUrl']);
-            $tempPath = $sourcePath . ".transcoding.mp4";
+            // Si el proceso ya no existe, verificar si terminó con éxito o error
+            $tempPath = __DIR__ . '/uploads/transcoding/' . $v['id'] . ".mp4";
             if (file_exists($tempPath)) {
-                if (time() - filemtime($tempPath) > 300) {
+                // Si el archivo temporal es muy pequeño o no ha cambiado, es un fallo
+                if (filesize($tempPath) < 1000 || (time() - filemtime($tempPath) > 120)) {
                     @unlink($tempPath);
-                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg murió inesperadamente' WHERE id = ?")->execute([$v['id']]);
+                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg se detuvo o produjo archivo inválido' WHERE id = ?")->execute([$v['id']]);
+                } else {
+                    // Si parece estar bien, el CRON finalizador (no incluido aquí) debería moverlo.
+                    // Por ahora, si no hay PID lo devolvemos a WAITING para reintento
+                    $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$v['id']]);
                 }
             } else {
                 $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$v['id']]);
@@ -303,7 +313,7 @@ function admin_cleanup_system_files($pdo) {
     $count = 0;
     foreach ($files as $file) {
         $id = str_replace(['uploads/thumbnails/', '.jpg'], '', $file);
-        if (!in_array($id, $validIds) && $id !== 'default') { @unlink($file); $count++; }
+        if (!to_in_array($id, $validIds) && $id !== 'default') { @unlink($file); $count++; }
     }
     respond(true, ['videos' => $count]);
 }

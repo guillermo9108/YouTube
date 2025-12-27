@@ -4,7 +4,7 @@ import { db } from '../../../services/db';
 import { 
     Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, 
     Filter, History, AlertCircle, Activity, Box, Radio, Trash2, Settings2, 
-    Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert, FileText, ScrollText
+    Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert, FileText, ScrollText, Copy
 } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 
@@ -79,6 +79,12 @@ export default function AdminTranscoder() {
             setTechnicalLog(res);
         } catch (e) { toast.error("No se pudo obtener el log técnico."); }
         finally { setIsLoadingTechLog(false); }
+    };
+
+    const copyTechLogToClipboard = () => {
+        if (!technicalLog) return;
+        navigator.clipboard.writeText(technicalLog);
+        toast.success("Log copiado al portapapeles");
     };
 
     const handleAction = async (action: string) => {
@@ -246,7 +252,7 @@ export default function AdminTranscoder() {
                          </div>
                          <div className="font-mono text-[10px] flex-1 overflow-y-auto space-y-1 custom-scrollbar text-slate-500">
                             {log.map((line, i) => (
-                                <div key={i} className={`flex gap-3 ${line.includes('ERROR') || line.includes('FALLIDO') ? 'text-red-400' : (line.includes('Lanzada') ? 'text-indigo-400' : 'text-slate-500')}`}>
+                                <div key={i} className={`flex gap-3 ${line.includes('ERROR') || line.includes('FALLIDO') ? 'text-red-400' : (line.includes('Iniciada') ? 'text-indigo-400' : 'text-slate-500')}`}>
                                     <span className="opacity-20 shrink-0">[{i}]</span>
                                     <span>{line}</span>
                                 </div>
@@ -265,7 +271,10 @@ export default function AdminTranscoder() {
                                 <ScrollText size={20} className="text-indigo-400"/>
                                 <h4 className="font-black text-white text-sm uppercase tracking-widest">Log de Salida de FFmpeg (Último Intento)</h4>
                             </div>
-                            <button onClick={() => setTechnicalLog(null)} className="p-2 hover:bg-slate-800 rounded-full text-white"><X/></button>
+                            <div className="flex gap-2">
+                                <button onClick={copyTechLogToClipboard} className="p-2 hover:bg-slate-800 rounded-full text-indigo-400" title="Copiar Log"><Copy size={18}/></button>
+                                <button onClick={() => setTechnicalLog(null)} className="p-2 hover:bg-slate-800 rounded-full text-white"><X size={20}/></button>
+                            </div>
                         </div>
                         <div className="flex-1 overflow-auto p-6 bg-black/50 font-mono text-xs leading-relaxed text-indigo-200 custom-scrollbar">
                             <pre className="whitespace-pre-wrap">{technicalLog}</pre>
