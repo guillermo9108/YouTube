@@ -140,6 +140,7 @@ try {
         // TRANSCODER V2
         case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
         case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
+        case 'admin_reset_transcoder_states': admin_reset_transcoder_states($pdo); break;
         case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
         case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;
         case 'admin_save_transcode_profile': admin_save_transcode_profile($pdo, $input); break;

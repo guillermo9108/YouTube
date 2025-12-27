@@ -4,7 +4,7 @@ import { db } from '../../../services/db';
 import { 
     Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, 
     Filter, History, AlertCircle, Activity, Box, Radio, Trash2, Settings2, 
-    Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw
+    Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert
 } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 
@@ -12,7 +12,8 @@ export default function AdminTranscoder() {
     const toast = useToast();
     const [isRunning, setIsRunning] = useState(false);
     const [stats, setStats] = useState({ waiting: 0, processing: 0, failed: 0, done: 0 });
-    const [activeProcesses, setActiveProcesses] = useState<{id: string, title: string}[]>([]);
+    const [activeProcesses, setActiveProcesses] = useState<{id: string, title: string, vidId: string}[]>([]);
+    const [localStats, setLocalStats] = useState<any>(null);
     const [queue, setQueue] = useState<any[]>([]);
     const [failedVids, setFailedVids] = useState<any[]>([]);
     const [profiles, setProfiles] = useState<any[]>([]);
@@ -46,8 +47,9 @@ export default function AdminTranscoder() {
                 done: all.filter((v: any) => v.transcode_status === 'DONE').length
             });
             
-            const localStats: any = await db.request('action=admin_get_local_stats');
-            setActiveProcesses(localStats.active_processes || []);
+            const lStats: any = await db.request('action=admin_get_local_stats');
+            setLocalStats(lStats);
+            setActiveProcesses(lStats.active_processes || []);
 
             const profileData: any = await db.request('action=admin_get_transcode_profiles');
             setProfiles(profileData || []);
@@ -55,7 +57,6 @@ export default function AdminTranscoder() {
             const settings = await db.getSystemSettings();
             setIsRunning(!!settings.is_transcoder_active);
             
-            // Cargar logs reales
             const realLogs: any = await db.request('action=admin_get_logs');
             if (Array.isArray(realLogs)) setLog(realLogs);
             
@@ -68,36 +69,19 @@ export default function AdminTranscoder() {
         return () => clearInterval(interval);
     }, []);
 
-    const handlePreScan = async () => {
-        setIsScanning(true);
-        localStorage.setItem('sp_tr_filters', JSON.stringify(filters));
-        try {
-            const res = await db.request<{count: number}>(`action=admin_transcode_scan_filters`, {
-                method: 'POST',
-                body: JSON.stringify({ ...filters, mode: 'PREVIEW' })
-            });
-            setScanResult(res.count);
-            toast.info(`Análisis completo: ${res.count} videos para convertir.`);
-        } catch (e: any) { toast.error(e.message); }
-        finally { setIsScanning(false); }
-    };
-
-    const handleAddFilteredToQueue = async () => {
-        try {
-            await db.request(`action=admin_transcode_scan_filters`, {
-                method: 'POST',
-                body: JSON.stringify({ ...filters, mode: 'EXECUTE' })
-            });
-            toast.success(`Videos añadidos a la cola.`);
-            setScanResult(null);
-            loadData();
-        } catch (e: any) { toast.error(e.message); }
-    };
-
     const handleAction = async (action: string) => {
         try {
             await db.request(`action=${action}`, { method: 'POST' });
             toast.success("Operación completada");
+            loadData();
+        } catch (e: any) { toast.error(e.message); }
+    };
+
+    const handleEmergencyReset = async () => {
+        if (!confirm("Esto forzará a todos los videos en estado 'Procesando' a volver a 'En espera' y detendrá FFmpeg. ¿Continuar?")) return;
+        try {
+            await db.request('action=admin_reset_transcoder_states', { method: 'POST' });
+            toast.success("Reseteo completado. La cola se ha sincronizado.");
             loadData();
         } catch (e: any) { toast.error(e.message); }
     };
@@ -108,28 +92,6 @@ export default function AdminTranscoder() {
             setIsRunning(true);
             toast.info("Motor iniciado. Procesando cola...");
             await db.request('action=admin_transcode_batch');
-        } catch (e: any) { toast.error(e.message); }
-    };
-
-    const stopMotor = async () => {
-        try {
-            await db.request(`action=admin_stop_transcoder`);
-            setIsRunning(false);
-            toast.warning("Motor detenido manualmente.");
-            loadData();
-        } catch (e: any) { toast.error(e.message); }
-    };
-
-    const saveProfile = async () => {
-        if(!editingProfile.extension || !editingProfile.command_args) return;
-        try {
-            await db.request(`action=admin_save_transcode_profile`, {
-                method: 'POST',
-                body: JSON.stringify(editingProfile)
-            });
-            toast.success("Perfil guardado");
-            setShowProfileEditor(false);
-            loadData();
         } catch (e: any) { toast.error(e.message); }
     };
 
@@ -145,12 +107,17 @@ export default function AdminTranscoder() {
                     </div>
                     <div className="text-2xl font-black text-white">{stats.waiting}</div>
                 </div>
-                <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg border-emerald-500/30">
+                <div className={`bg-slate-900 border p-4 rounded-2xl shadow-lg transition-colors ${localStats?.orphans_detected > 0 ? 'border-red-500/50' : 'border-emerald-500/30'}`}>
                     <div className="flex justify-between items-center mb-2">
-                        <Activity size={18} className="text-emerald-400"/>
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Procesando</span>
+                        <Activity size={18} className={localStats?.orphans_detected > 0 ? 'text-red-400' : 'text-emerald-400'}/>
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">En DB</span>
                     </div>
-                    <div className="text-2xl font-black text-emerald-400">{stats.processing}</div>
+                    <div className={`text-2xl font-black ${localStats?.orphans_detected > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                        {stats.processing}
+                        {localStats?.orphans_detected > 0 && (
+                            <span className="text-xs ml-2 opacity-60">({localStats.orphans_detected} huérfanos)</span>
+                        )}
+                    </div>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg border-red-500/30 cursor-pointer" onClick={() => setShowFailedList(true)}>
                     <div className="flex justify-between items-center mb-2">
@@ -170,7 +137,7 @@ export default function AdminTranscoder() {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
-                {/* Lateral: Motor Control & Filters */}
+                {/* Lateral: Motor Control & Emergency */}
                 <div className="lg:col-span-4 space-y-6">
                     
                     {/* Motor Control */}
@@ -181,11 +148,11 @@ export default function AdminTranscoder() {
                             <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-all duration-500 ${isRunning ? 'bg-indigo-600 shadow-xl animate-pulse' : 'bg-slate-800'}`}>
                                 <Cpu size={32} className={isRunning ? 'text-white' : 'text-slate-500'} />
                             </div>
-                            <h3 className="text-lg font-black text-white uppercase tracking-tighter">Transcoder v2.0</h3>
-                            <p className="text-[10px] text-slate-500 mt-1 mb-6">Optimización de archivos para el NAS</p>
+                            <h3 className="text-lg font-black text-white uppercase tracking-tighter">Transcoder v2.1</h3>
+                            <p className="text-[10px] text-slate-500 mt-1 mb-6">Estado del motor: {isRunning ? 'Activo' : 'Detenido'}</p>
                             
                             <button 
-                                onClick={isRunning ? stopMotor : startMotor} 
+                                onClick={isRunning ? () => handleAction('admin_stop_transcoder') : startMotor} 
                                 className={`w-full py-4 rounded-2xl font-black text-xs flex items-center justify-center gap-3 shadow-xl transition-all active:scale-95 ${isRunning ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
                             >
                                 {isRunning ? <><Pause size={18}/> PARAR MOTOR</> : <><Play size={18} fill="currentColor"/> INICIAR MOTOR</>}
@@ -193,51 +160,59 @@ export default function AdminTranscoder() {
                         </div>
                     </div>
 
-                    {/* Quick Scan */}
+                    {/* Emergency Tool */}
+                    {localStats?.orphans_detected > 0 && (
+                        <div className="bg-red-900/10 border border-red-500/20 rounded-2xl p-4 animate-in zoom-in">
+                            <div className="flex items-center gap-3 text-red-400 mb-3">
+                                <ShieldAlert size={20}/>
+                                <span className="text-xs font-black uppercase">Problema Detectado</span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed mb-4">
+                                Hay {localStats.orphans_detected} videos que la DB cree que se están convirtiendo pero no hay ningún proceso real. Esto bloquea la cola.
+                            </p>
+                            <button 
+                                onClick={handleEmergencyReset}
+                                className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg"
+                            >
+                                Limpiar Huérfanos Ahora
+                            </button>
+                        </div>
+                    )}
+
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
                         <h3 className="font-bold text-white mb-4 text-xs flex items-center gap-2">
                             <Filter size={14} className="text-indigo-400"/> Generar Tareas
                         </h3>
-                        <div className="space-y-4">
-                            <div className="space-y-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
-                                <label className="flex items-center justify-between group cursor-pointer">
-                                    <span className="text-[10px] font-bold text-slate-500 uppercase">Videos no-MP4</span>
-                                    <input type="checkbox" checked={filters.onlyNonMp4} onChange={e => setFilters({...filters, onlyNonMp4: e.target.checked})} className="accent-indigo-600 w-4 h-4"/>
-                                </label>
-                            </div>
-                            <button onClick={handlePreScan} disabled={isScanning} className="w-full bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold py-2.5 rounded-xl text-[10px] flex items-center justify-center gap-2 transition-all">
-                                {isScanning ? <RefreshCw className="animate-spin" size={14}/> : <History size={14}/>} Analizar Biblioteca
-                            </button>
-                            {scanResult !== null && scanResult > 0 && (
-                                <button onClick={handleAddFilteredToQueue} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl text-[10px] uppercase shadow-lg animate-in zoom-in">
-                                    Encolar {scanResult} videos
-                                </button>
-                            )}
-                        </div>
+                        <button onClick={() => handleAction('admin_retry_failed_transcodes')} className="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold py-2.5 rounded-xl text-[10px] flex items-center justify-center gap-2 transition-all mb-3">
+                            <RotateCcw size={14}/> Reintentar Fallidos
+                        </button>
                     </div>
                 </div>
 
-                {/* Central: Active Processes & Logs */}
+                {/* Central: Active OS Processes */}
                 <div className="lg:col-span-8 space-y-6">
                     
-                    {/* Procesos en ejecución real */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
                         <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                            <Activity size={16} className="text-emerald-400"/> Monitor de Procesos (OS)
+                            <Activity size={16} className="text-emerald-400"/> Procesos Reales en el Servidor (OS)
                         </h4>
                         
                         <div className="space-y-3">
                             {activeProcesses.length === 0 ? (
-                                <div className="text-center py-6 border-2 border-dashed border-slate-800 rounded-2xl">
-                                    <p className="text-xs text-slate-600">No hay tareas de FFmpeg activas en el servidor.</p>
+                                <div className="text-center py-10 border-2 border-dashed border-slate-800 rounded-2xl">
+                                    <Zap size={32} className="mx-auto mb-2 text-slate-800 opacity-20"/>
+                                    <p className="text-xs text-slate-600">No hay ejecuciones activas de FFmpeg.</p>
                                 </div>
                             ) : activeProcesses.map(p => (
-                                <div key={p.id} className="bg-slate-950 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between">
+                                <div key={p.id} className="bg-slate-950 border border-indigo-500/20 p-4 rounded-xl flex items-center justify-between group">
                                     <div className="flex items-center gap-3 min-w-0">
                                         <RefreshCw size={14} className="text-emerald-500 animate-spin"/>
-                                        <span className="text-xs font-bold text-white truncate">{p.title}</span>
+                                        <div className="min-w-0">
+                                            <span className="text-xs font-bold text-white truncate block">{p.title}</span>
+                                            <span className="text-[9px] text-slate-500 font-mono">STATUS: RENDERING</span>
+                                        </div>
                                     </div>
-                                    <span className="text-[9px] font-mono text-slate-500 bg-slate-900 px-2 py-1 rounded">{p.id.toUpperCase()}</span>
+                                    <span className="text-[9px] font-mono text-indigo-400 bg-indigo-500/5 px-2 py-1 rounded border border-indigo-500/10">{p.id}</span>
                                 </div>
                             ))}
                         </div>
@@ -248,13 +223,13 @@ export default function AdminTranscoder() {
                          <div className="flex justify-between items-center mb-3">
                              <div className="flex items-center gap-2 text-slate-500">
                                  <Terminal size={14}/>
-                                 <span className="text-[10px] font-black uppercase tracking-widest">Logs del Sistema</span>
+                                 <span className="text-[10px] font-black uppercase tracking-widest">Logs de Sincronización</span>
                              </div>
                              <button onClick={() => handleAction('admin_clear_logs')} className="text-[9px] text-slate-600 hover:text-slate-400 font-bold uppercase">Limpiar</button>
                          </div>
                          <div className="font-mono text-[10px] flex-1 overflow-y-auto space-y-1 custom-scrollbar">
                             {log.map((line, i) => (
-                                <div key={i} className={`flex gap-3 ${line.includes('ERROR') || line.includes('FATAL') ? 'text-red-400' : 'text-slate-500'}`}>
+                                <div key={i} className={`flex gap-3 ${line.includes('ERROR') || line.includes('FALLIDO') ? 'text-red-400' : (line.includes('Lanzada') ? 'text-indigo-400' : 'text-slate-500')}`}>
                                     <span className="opacity-20 shrink-0">[{i}]</span>
                                     <span>{line}</span>
                                 </div>
@@ -269,20 +244,20 @@ export default function AdminTranscoder() {
                 <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
                     <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
                         <div className="p-5 border-b border-white/5 flex justify-between items-center">
-                            <h4 className="font-black text-white uppercase text-sm">Videos con Error</h4>
+                            <h4 className="font-black text-white uppercase text-sm">Videos con Error de Codec</h4>
                             <button onClick={() => setShowFailedList(false)} className="p-2 hover:bg-white/10 rounded-full"><X/></button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                             {failedVids.map(v => (
                                 <div key={v.id} className="bg-slate-950 border border-slate-800 p-4 rounded-xl">
                                     <h5 className="font-bold text-white text-xs mb-1">{v.title}</h5>
-                                    <div className="text-[9px] text-red-400 font-mono">Error: {v.reason || 'Desconocido'}</div>
-                                    <div className="mt-2 flex justify-end gap-2">
-                                        <button onClick={() => handleAction('admin_retry_failed_transcodes')} className="text-[9px] font-bold text-indigo-400 hover:underline">REINTENTAR</button>
-                                        <button onClick={() => db.request(`action=admin_remove_from_queue&videoId=${v.id}`, {method:'POST'}).then(loadData)} className="text-[9px] font-bold text-slate-500 hover:text-white">BORRAR COLA</button>
+                                    <div className="text-[9px] text-red-400 font-mono italic">Motivo: {v.reason || 'FFmpeg finalizó con error'}</div>
+                                    <div className="mt-3 flex justify-end gap-2">
+                                        <button onClick={() => db.request(`action=admin_remove_from_queue&videoId=${v.id}`, {method:'POST'}).then(loadData)} className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-400 rounded-lg">QUITAR DE COLA</button>
                                     </div>
                                 </div>
                             ))}
+                            {failedVids.length === 0 && <p className="text-center py-10 text-slate-500 italic">No hay fallos registrados.</p>}
                         </div>
                     </div>
                 </div>
