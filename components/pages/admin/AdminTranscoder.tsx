@@ -4,7 +4,7 @@ import { db } from '../../../services/db';
 import { 
     Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, 
     Filter, History, AlertCircle, Activity, Box, Radio, Trash2, Settings2, 
-    Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert
+    Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert, FileText, ScrollText
 } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 
@@ -23,6 +23,9 @@ export default function AdminTranscoder() {
     const [showProfileEditor, setShowProfileEditor] = useState(false);
     const [showFailedList, setShowFailedList] = useState(false);
     
+    const [technicalLog, setTechnicalLog] = useState<string | null>(null);
+    const [isLoadingTechLog, setIsLoadingTechLog] = useState(false);
+
     const [editingProfile, setEditingProfile] = useState({ extension: '', command_args: '-c:v libx264 -preset superfast -crf 23 -c:a aac', description: '' });
 
     const [filters, setFilters] = useState(() => {
@@ -68,6 +71,15 @@ export default function AdminTranscoder() {
         const interval = setInterval(loadData, 5000);
         return () => clearInterval(interval);
     }, []);
+
+    const fetchTechnicalLog = async () => {
+        setIsLoadingTechLog(true);
+        try {
+            const res = await db.request<string>('action=admin_get_transcode_log');
+            setTechnicalLog(res);
+        } catch (e) { toast.error("No se pudo obtener el log técnico."); }
+        finally { setIsLoadingTechLog(false); }
+    };
 
     const handleAction = async (action: string) => {
         try {
@@ -151,12 +163,17 @@ export default function AdminTranscoder() {
                             <h3 className="text-lg font-black text-white uppercase tracking-tighter">Transcoder v2.1</h3>
                             <p className="text-[10px] text-slate-500 mt-1 mb-6">Estado del motor: {isRunning ? 'Activo' : 'Detenido'}</p>
                             
-                            <button 
-                                onClick={isRunning ? () => handleAction('admin_stop_transcoder') : startMotor} 
-                                className={`w-full py-4 rounded-2xl font-black text-xs flex items-center justify-center gap-3 shadow-xl transition-all active:scale-95 ${isRunning ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
-                            >
-                                {isRunning ? <><Pause size={18}/> PARAR MOTOR</> : <><Play size={18} fill="currentColor"/> INICIAR MOTOR</>}
-                            </button>
+                            <div className="flex flex-col gap-2 w-full">
+                                <button 
+                                    onClick={isRunning ? () => handleAction('admin_stop_transcoder') : startMotor} 
+                                    className={`w-full py-4 rounded-2xl font-black text-xs flex items-center justify-center gap-3 shadow-xl transition-all active:scale-95 ${isRunning ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
+                                >
+                                    {isRunning ? <><Pause size={18}/> PARAR MOTOR</> : <><Play size={18} fill="currentColor"/> INICIAR MOTOR</>}
+                                </button>
+                                <button onClick={fetchTechnicalLog} className="w-full py-3 rounded-2xl text-[10px] font-black uppercase text-slate-400 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 flex items-center justify-center gap-2">
+                                    <ScrollText size={14}/> Ver Log Técnico
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -227,7 +244,7 @@ export default function AdminTranscoder() {
                              </div>
                              <button onClick={() => handleAction('admin_clear_logs')} className="text-[9px] text-slate-600 hover:text-slate-400 font-bold uppercase">Limpiar</button>
                          </div>
-                         <div className="font-mono text-[10px] flex-1 overflow-y-auto space-y-1 custom-scrollbar">
+                         <div className="font-mono text-[10px] flex-1 overflow-y-auto space-y-1 custom-scrollbar text-slate-500">
                             {log.map((line, i) => (
                                 <div key={i} className={`flex gap-3 ${line.includes('ERROR') || line.includes('FALLIDO') ? 'text-red-400' : (line.includes('Lanzada') ? 'text-indigo-400' : 'text-slate-500')}`}>
                                     <span className="opacity-20 shrink-0">[{i}]</span>
@@ -238,6 +255,30 @@ export default function AdminTranscoder() {
                     </div>
                 </div>
             </div>
+
+            {/* Modal: Tech Log Viewer */}
+            {technicalLog && (
+                <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[80vh]">
+                        <div className="p-4 bg-slate-950 border-b border-slate-700 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <ScrollText size={20} className="text-indigo-400"/>
+                                <h4 className="font-black text-white text-sm uppercase tracking-widest">Log de Salida de FFmpeg (Último Intento)</h4>
+                            </div>
+                            <button onClick={() => setTechnicalLog(null)} className="p-2 hover:bg-slate-800 rounded-full text-white"><X/></button>
+                        </div>
+                        <div className="flex-1 overflow-auto p-6 bg-black/50 font-mono text-xs leading-relaxed text-indigo-200 custom-scrollbar">
+                            <pre className="whitespace-pre-wrap">{technicalLog}</pre>
+                        </div>
+                        <div className="p-4 bg-slate-950 border-t border-slate-700 flex justify-between items-center">
+                            <span className="text-[10px] text-slate-500 font-bold uppercase">Usa este log para diagnosticar errores de codecs o rutas</span>
+                            <button onClick={fetchTechnicalLog} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2">
+                                <RefreshCw size={14} className={isLoadingTechLog ? 'animate-spin' : ''}/> Actualizar Log
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Modal: Fallidos */}
             {showFailedList && (

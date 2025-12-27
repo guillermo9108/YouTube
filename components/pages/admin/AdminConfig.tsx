@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, VideoCategory, VipPlan } from '../../../types';
@@ -210,9 +211,15 @@ export default function AdminConfig() {
                         <input type="time" value={settings.downloadEndTime} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, downloadEndTime: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
                     </div>
                 </div>
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Ruta yt-dlp <InfoTooltip text="Ruta absoluta al binario en servidor" example="/usr/local/bin/yt-dlp" /></label>
-                    <input type="text" value={settings.ytDlpPath || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, ytDlpPath: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs outline-none focus:border-indigo-500"/>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Ruta yt-dlp <InfoTooltip text="Ruta absoluta al binario en servidor" example="/usr/local/bin/yt-dlp" /></label>
+                        <input type="text" value={settings.ytDlpPath || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, ytDlpPath: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs outline-none focus:border-indigo-500" placeholder="yt-dlp"/>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Ruta FFmpeg <InfoTooltip text="Indispensable para conversiones en NAS" example="/usr/bin/ffmpeg" /></label>
+                        <input type="text" value={settings.ffmpegPath || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, ffmpegPath: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs outline-none focus:border-indigo-500" placeholder="ffmpeg"/>
+                    </div>
                 </div>
             </ConfigSection>
 
