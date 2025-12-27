@@ -3,7 +3,7 @@
 
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS
- * Versión 9.3 - Ultra-Compatibilidad FFmpeg 2.x
+ * Versión 9.4 - Diagnóstico y Compatibilidad MPEG-TS
  */
 
 // --- AJUSTES DEL SISTEMA ---
@@ -104,12 +104,12 @@ function admin_get_transcode_log() {
 function admin_transcode_batch($pdo) {
     if (session_id()) session_write_close();
     
+    // REPARACIÓN PREVENTIVA: Si falla la columna, sincronizar esquema inmediatamente
     try {
         $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
-    } catch (PDOException $e) {
+    } catch (Exception $e) {
         require_once 'functions_schema.php';
-        $schema = getAppSchema();
-        syncTable($pdo, 'system_settings', $schema['system_settings']);
+        syncTable($pdo, 'system_settings', getAppSchema()['system_settings']);
         $settings = $pdo->query("SELECT batchSize, is_transcoder_active, transcodePreset, ffmpegPath FROM system_settings WHERE id = 1")->fetch();
     }
 
@@ -137,28 +137,26 @@ function admin_transcode_batch($pdo) {
     $tempPath = $tempDir . $video['id'] . ".mp4";
     
     $marker = "SP_JOB_ID_" . $video['id'];
-    // Forzamos ultrafast para procesadores antiguos de NAS
     $preset = 'ultrafast'; 
     
     $logPath = __DIR__ . '/uploads/transcode_last_log.txt';
     if (file_exists($logPath)) @unlink($logPath);
 
     /** 
-     * COMANDO ULTRA COMPATIBLE (FFmpeg 2.7.1 + NAS)
-     * 1. -fflags +genpts: Corrige errores de sincronización en archivos TS.
-     * 2. -avoid_negative_ts make_zero: Previene que el archivo empiece en tiempo negativo.
-     * 3. -vsync 1: Sincronización de cuadros constante (vital para streaming PWA).
-     * 4. -c:a copy: Tu fuente ya es AAC, copiar es 100% seguro y ahorra mucha CPU.
-     * 5. -crf 28: Calidad aceptable pero mucho más rápido de procesar.
+     * COMANDO RESILIENTE PARA FFMPEG 2.x Y ARCHIVOS TS
+     * 1. -fflags +genpts +igndts: Ignora errores de timestamps y los regenera.
+     * 2. -avoid_negative_ts make_zero: Asegura que el video no empiece con tiempo negativo.
+     * 3. -analyzeduration / -probesize: Ayuda a identificar streams en archivos TS complejos.
+     * 4. -c:a copy: No re-encodifica el audio (ahorra mucha CPU y evita desincronización).
      */
-    $cmd = "nice -n 15 $ffmpegBin -y -fflags +genpts -avoid_negative_ts make_zero -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 28 -vsync 1 -c:a copy -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
+    $cmd = "nice -n 15 $ffmpegBin -y -fflags +genpts+igndts -analyzeduration 100M -probesize 100M -i " . escapeshellarg($sourcePath) . " -c:v libx264 -preset $preset -crf 26 -vsync 1 -avoid_negative_ts make_zero -c:a copy -movflags +faststart -user_agent " . escapeshellarg($marker) . " " . escapeshellarg($tempPath);
     
     $fullCmd = "nohup $cmd > " . escapeshellarg($logPath) . " 2>&1 &";
     
     shell_exec($fullCmd);
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$video['id']]);
     
-    file_debug_log("Lanzada conversión compatible (CRF28+CopyAudio) para: " . $video['title'], ["job" => $marker, "bin" => $ffmpegBin]);
+    file_debug_log("Lanzada conversión compatible TS para: " . $video['title'], ["job" => $marker, "bin" => $ffmpegBin]);
     respond(true, ['videoId' => $video['id'], 'title' => $video['title']]);
 }
 
@@ -171,11 +169,12 @@ function admin_cleanup_stale_transcodes($pdo) {
         if (empty(trim($pid))) {
             $tempPath = __DIR__ . '/uploads/transcoding/' . $v['id'] . ".mp4";
             if (file_exists($tempPath)) {
-                if (time() - filemtime($tempPath) > 180) { // 3 minutos de inactividad
+                // Si el archivo no ha crecido en 2 minutos, asumimos que FFmpeg murió
+                if (time() - filemtime($tempPath) > 120) { 
                     @unlink($tempPath);
-                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Proceso interrumpido (Inactividad)' WHERE id = ?")->execute([$v['id']]);
+                    $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg se detuvo (Inactividad)' WHERE id = ?")->execute([$v['id']]);
                 } else {
-                    $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$v['id']]);
+                    // Si el archivo sigue "fresco", lo dejamos en PROCESSING para que el finalizador lo detecte
                 }
             } else {
                 $pdo->prepare("UPDATE videos SET transcode_status = 'WAITING' WHERE id = ?")->execute([$v['id']]);

@@ -1,7 +1,7 @@
 
 <?php
 /**
- * StreamPay - Core Controller V8.8
+ * StreamPay - Core Controller V9.5
  */
 
 ini_set('display_errors', 0);
