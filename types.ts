@@ -148,6 +148,7 @@ export interface MarketplaceItem {
 }
 
 export interface CartItem extends MarketplaceItem {
+  // quantity added manually for Cart UI
   quantity: number;
 }
 
@@ -226,7 +227,8 @@ export interface SystemSettings {
   pexelsKey: string;
   pixabayKey: string;
   geminiKey: string;
-  ytDlpPath: string;    
+  ytDlpPath: string;
+  ffmpegPath: string;
   enableYoutube: boolean; 
   categoryPrices: Record<string, number>; 
   customCategories: string[]; 
