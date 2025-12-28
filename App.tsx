@@ -121,21 +121,22 @@ export default function App() {
                                 </SetupGuard>
                             } />
                             
-                            <Route element={<Layout />}>
-                                <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                            {/* SetupGuard wraps the entire Layout to prevent child API calls before DB is ready */}
+                            <Route element={<SetupGuard><ProtectedRoute><Layout /></ProtectedRoute></SetupGuard>}>
+                                <Route path="/" element={<Home />} />
+                                <Route path="/shorts" element={<Shorts />} />
+                                <Route path="/watch/:id" element={<Watch />} />
+                                <Route path="/channel/:userId" element={<Channel />} />
+                                <Route path="/upload" element={<Upload />} />
+                                <Route path="/profile" element={<Profile />} />
+                                <Route path="/requests" element={<Requests />} />
+                                <Route path="/marketplace" element={<Marketplace />} />
+                                <Route path="/sell" element={<MarketplaceCreate />} />
+                                <Route path="/cart" element={<Cart />} />
+                                <Route path="/vip" element={<VipStore />} />
+                                <Route path="/marketplace/edit/:id" element={<MarketplaceEdit />} />
+                                <Route path="/marketplace/:id" element={<MarketplaceItem />} />
+                                <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
                             </Route>
 
                             <Route path="*" element={<Navigate to="/" />} />

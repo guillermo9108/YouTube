@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V9.6
+ * StreamPay - Core Controller V10.0
  */
 
 ini_set('display_errors', 0);
@@ -72,13 +72,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit(); }
 $json_input = json_decode(file_get_contents('php://input'), true) ?? [];
 $input = array_merge($_GET, $_POST, $json_input);
 
-$required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php'];
+$required_files = ['functions_schema.php', 'functions_utils.php', 'functions_auth.php', 'functions_videos.php', 'functions_interactions.php', 'functions_market.php', 'functions_admin.php', 'functions_payment.php', 'functions_setup.php'];
 foreach ($required_files as $file) { if (file_exists($file)) { @require_once $file; } }
 
 $action = $input['action'] ?? null;
 $configFile = 'db_config.json';
 
+// --- ACCIONES PRE-INSTALACIÓN (Bypass check) ---
 if ($action === 'check_installation') respond(true, ['status' => file_exists($configFile) ? 'installed' : 'not_installed']);
+if ($action === 'verify_db_connection') { setup_verify_db($input); exit; }
+if ($action === 'initialize_system') { setup_initialize($input); exit; }
+
 if (!file_exists($configFile)) respond(false, null, 'No instalado');
 
 $db_config = json_decode(file_get_contents($configFile), true);

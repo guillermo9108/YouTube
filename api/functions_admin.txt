@@ -25,6 +25,17 @@ function admin_get_settings($pdo) {
     respond(false, null, 'Settings not found');
 }
 
+function admin_request_balance($pdo, $input) {
+    $uid = $input['userId'];
+    $amt = floatval($input['amount']);
+    if ($amt <= 0) respond(false, null, 'Monto inválido');
+    
+    $id = uniqid('br_');
+    $stmt = $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, ?, 'PENDING', ?)");
+    $stmt->execute([$id, $uid, $amt, time()]);
+    respond(true, ['id' => $id]);
+}
+
 function admin_update_settings($pdo, $input) {
     $s = $input['settings'] ?? [];
     if (empty($s)) respond(true);
@@ -209,10 +220,4 @@ function admin_delete_transcode_profile($pdo, $input) { respond(true); }
 function admin_file_cleanup_preview($pdo, $input) { respond(true, []); }
 function admin_smart_cleaner_preview($pdo, $input) { respond(true, ['preview' => [], 'stats' => ['spaceReclaimed' => '0 B']]); }
 function admin_organize_paquete($pdo, $input) { respond(true, ['cleaned' => 0, 'plan' => []]); }
-function admin_request_balance($pdo, $input) {
-    $id = uniqid('br_');
-    $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, ?, 'PENDING', ?)")
-        ->execute([$id, $input['userId'], $input['amount'], time()]);
-    respond(true, ['id' => $id]);
-}
 ?>

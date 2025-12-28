@@ -1,0 +1,73 @@
+<?php
+
+function setup_verify_db($input) {
+    $host = $input['host'] ?? '127.0.0.1';
+    $port = $input['port'] ?? '3306';
+    $user = $input['username'] ?? 'root';
+    $pass = $input['password'] ?? '';
+    
+    try {
+        $pdo = new PDO("mysql:host=$host;port=$port;charset=utf8mb4", $user, $pass);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        respond(true, ['message' => 'Conexión exitosa al servidor MariaDB']);
+    } catch (PDOException $e) {
+        respond(false, null, 'Fallo de conexión: ' . $e->getMessage());
+    }
+}
+
+function setup_initialize($input) {
+    $dbConfig = $input['dbConfig'];
+    $adminUser = $input['admin'];
+
+    try {
+        $host = $dbConfig['host'] ?? '127.0.0.1';
+        $pdo = new PDO("mysql:host=$host;port={$dbConfig['port']};charset=utf8mb4", $dbConfig['username'], $dbConfig['password']);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+        // Crear base de datos
+        $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbConfig['database']}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $pdo->exec("USE `{$dbConfig['database']}`");
+
+        // Sincronizar Esquema
+        require_once 'functions_schema.php';
+        $schema = getAppSchema();
+        foreach ($schema as $tableName => $def) {
+            syncTable($pdo, $tableName, $def);
+        }
+        
+        $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
+
+        // Crear Admin
+        $adminId = 'u_' . uniqid();
+        $hash = password_hash($adminUser['password'], PASSWORD_DEFAULT);
+        
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE username = ?");
+        $stmt->execute([$adminUser['username']]);
+        if ($stmt->fetchColumn() == 0) {
+            $stmt = $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, autoPurchaseLimit, watchLater) VALUES (?, ?, ?, 'ADMIN', 999999.00, 100.00, '[]')");
+            $stmt->execute([$adminId, $adminUser['username'], $hash]);
+        } else {
+            $pdo->prepare("UPDATE users SET role = 'ADMIN' WHERE username = ?")->execute([$adminUser['username']]);
+        }
+
+        // Guardar configuración
+        $configData = [
+            'host' => $host,
+            'port' => $dbConfig['port'],
+            'user' => $dbConfig['username'],
+            'password' => $dbConfig['password'],
+            'name' => $dbConfig['database']
+        ];
+        file_put_contents('db_config.json', json_encode($configData));
+
+        // Directorios
+        $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market'];
+        foreach($dirs as $d) { if (!is_dir($d)) mkdir($d, 0777, true); }
+
+        respond(true, ['message' => 'Sistema inicializado correctamente']);
+
+    } catch (PDOException $e) {
+        respond(false, null, 'Error de instalación: ' . $e->getMessage());
+    }
+}
+?>
