@@ -1,27 +1,98 @@
 <?php
 function interact_has_purchased($pdo, $userId, $videoId) {
-    // 1. Check if user is ADMIN. Admins have global access.
-    $stmt = $pdo->prepare("SELECT role, vipExpiry FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    // 1. Obtener datos del video y del usuario en una sola consulta
+    $stmt = $pdo->prepare("
+        SELECT v.creatorId, u.role as creatorRole, 
+               (SELECT role FROM users WHERE id = ?) as userRole,
+               (SELECT vipExpiry FROM users WHERE id = ?) as vipExpiry
+        FROM videos v 
+        LEFT JOIN users u ON v.creatorId = u.id 
+        WHERE v.id = ?
+    ");
+    $stmt->execute([$userId, $userId, $videoId]);
+    $data = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    if ($user) {
-        // ADMIN check
-        if ($user['role'] === 'ADMIN') {
-            respond(true, ['hasPurchased' => true]);
-            return;
+    if ($data) {
+        // ADMIN tiene acceso global siempre
+        if ($data['userRole'] === 'ADMIN') {
+            respond(true, ['hasPurchased' => true]); return;
         }
-        // VIP Access check
-        if ($user['vipExpiry'] && intval($user['vipExpiry']) > time()) {
-            respond(true, ['hasPurchased' => true]);
-            return;
+
+        // Si es el creador del video
+        if ($data['creatorId'] === $userId) {
+            respond(true, ['hasPurchased' => true]); return;
+        }
+
+        // VIP Access check: SOLO si el creador es un ADMIN
+        if ($data['vipExpiry'] && intval($data['vipExpiry']) > time()) {
+            if ($data['creatorRole'] === 'ADMIN') {
+                respond(true, ['hasPurchased' => true]);
+                return;
+            }
         }
     }
 
-    // 2. Check if owned or purchased
+    // 2. Check if already purchased via transactions
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
     $stmt->execute([$userId, $videoId]);
     respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);
+}
+
+function interact_transfer_balance($pdo, $input) {
+    $senderId = $input['userId'];
+    $targetUsername = trim($input['targetUsername']);
+    $amount = floatval($input['amount']);
+    
+    if ($amount <= 0) respond(false, null, 'Monto inválido');
+
+    $pdo->beginTransaction();
+    try {
+        // 1. Validar receptor
+        $stmt = $pdo->prepare("SELECT id, username FROM users WHERE username = ?");
+        $stmt->execute([$targetUsername]);
+        $target = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$target) throw new Exception("Usuario receptor no encontrado");
+        if ($target['id'] === $senderId) throw new Exception("No puedes enviarte saldo a ti mismo");
+
+        // 2. Obtener Fee de configuración
+        $feePct = $pdo->query("SELECT transferFee FROM system_settings LIMIT 1")->fetchColumn() ?: 5;
+        $feeAmount = $amount * ($feePct / 100);
+        $totalToDeduct = $amount; // El usuario envía X y el otro recibe X - Fee, o el usuario paga X + Fee? 
+        // Lógica estándar: El receptor recibe el monto neto.
+        $netAmount = $amount - $feeAmount;
+
+        // 3. Validar saldo emisor
+        $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
+        $stmt->execute([$senderId]);
+        $balance = $stmt->fetchColumn();
+        if ($balance < $amount) throw new Exception("Saldo insuficiente");
+
+        // 4. Ejecutar transferencias
+        $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$amount, $senderId]);
+        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$netAmount, $target['id']]);
+        
+        // El Fee va a la cuenta del primer Admin encontrado (Caja Chica)
+        $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
+        if ($adminId) {
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$feeAmount, $adminId]);
+        }
+
+        // 5. Registrar transacciones
+        $tid = uniqid('tr_');
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, targetId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'TRANSFER')")
+            ->execute([$tid, $senderId, $target['id'], $amount, $feeAmount, time()]);
+
+        // 6. Notificar al receptor
+        $nid = uniqid('n_');
+        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'TRANSFER', ?, '/profile', 0, ?)")
+            ->execute([$nid, $target['id'], "Has recibido {$netAmount} Saldo de @{$input['senderUsername']}", time()]);
+
+        $pdo->commit();
+        respond(true, ['netAmount' => $netAmount, 'fee' => $feeAmount]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        respond(false, null, $e->getMessage());
+    }
 }
 
 function request_vip($pdo, $input) {
@@ -30,6 +101,43 @@ function request_vip($pdo, $input) {
     $plan = $input['plan'];
     $paymentRef = $input['paymentRef'] ?? '';
     
+    // Si la referencia es "INTERNAL_BALANCE", intentamos compra directa
+    if ($paymentRef === 'INTERNAL_BALANCE') {
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
+            $stmt->execute([userId]);
+            $balance = $stmt->fetchColumn();
+            
+            if ($balance < $plan['price']) throw new Exception("Saldo insuficiente para compra interna");
+            
+            $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$plan['price'], $userId]);
+            
+            // Lógica de activación
+            $days = intval($plan['durationDays'] ?? 30);
+            $seconds = $days * 86400;
+            $now = time();
+            $stmtEx = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
+            $stmtEx->execute([$userId]);
+            $currentEx = intval($stmtEx->fetchColumn());
+            $newExpiry = (max($currentEx, $now)) + $seconds;
+            
+            $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
+            
+            // Log transaccion
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'VIP')")
+                ->execute([uniqid('tx_v_'), $userId, $plan['price'], $now]);
+                
+            $pdo->commit();
+            respond(true, ['status' => 'ACTIVE', 'newExpiry' => $newExpiry]);
+            return;
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            respond(false, null, $e->getMessage());
+            return;
+        }
+    }
+
     $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, paymentRef) VALUES (?, ?, ?, 'PENDING', ?, ?)")
         ->execute([$id, $userId, json_encode($plan), time(), $paymentRef]);
         
@@ -77,7 +185,6 @@ function interact_purchase($pdo, $input) {
         $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, ?, 'PURCHASE')")
             ->execute([tid, $buyerId, $video['creatorId'], $videoId, $price, $adminFee, time()]);
             
-        // Notificación con miniatura
         $nid = uniqid('n_');
         $notifText = "Vendiste '{$video['title']}' por {$creatorShare} Saldo.";
         $meta = json_encode(['thumb' => $video['thumbnailUrl']]);
@@ -225,7 +332,7 @@ function interact_check_subscription($pdo, $uid, $cid) {
 function interact_get_subscriptions($pdo, $uid) {
     $stmt = $pdo->prepare("SELECT creatorId FROM subscriptions WHERE subscriberId = ?");
     $stmt->execute([$uid]);
-    respond(true, $stmt->fetchAll(PDO::FETCH_COLUMN));
+    respond(true, $stmt->fetchAll(PDO::COLUMN));
 }
 
 function interact_get_notifications($pdo, $uid) {
@@ -234,7 +341,6 @@ function interact_get_notifications($pdo, $uid) {
     $list = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     foreach($list as &$n) {
-        // VALIDACIÓN DEFENSIVA: Evita errores Undefined Index si la columna no existe o es nula
         if (isset($n['avatarUrl'])) {
             $n['avatarUrl'] = fix_url($n['avatarUrl']);
         } else {
@@ -260,8 +366,8 @@ function interact_mark_notification_read($pdo, $input) {
 }
 
 function interact_get_transactions($pdo, $userId) {
-    $stmt = $pdo->prepare("SELECT * FROM transactions WHERE buyerId = ? OR creatorId = ? ORDER BY timestamp DESC");
-    $stmt->execute([$userId, $userId]);
+    $stmt = $pdo->prepare("SELECT t.*, u.username as targetName FROM transactions t LEFT JOIN users u ON t.targetId = u.id WHERE t.buyerId = ? OR t.creatorId = ? OR t.targetId = ? ORDER BY t.timestamp DESC");
+    $stmt->execute([$userId, $userId, $userId]);
     respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 ?>

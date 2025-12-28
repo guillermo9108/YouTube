@@ -1,7 +1,6 @@
-
 <?php
 /**
- * StreamPay - Core Controller V9.5
+ * StreamPay - Core Controller V9.6
  */
 
 ini_set('display_errors', 0);
@@ -178,6 +177,7 @@ try {
         case 'get_subscriptions': interact_get_subscriptions($pdo, $input['userId']); break;
         case 'get_notifications': interact_get_notifications($pdo, $input['userId']); break;
         case 'mark_notification_read': interact_mark_notification_read($pdo, $input); break;
+        case 'transfer_balance': interact_transfer_balance($pdo, $input); break;
 
         // PETICIONES
         case 'search_external': admin_search_external($pdo, $input); break;

@@ -87,11 +87,13 @@ export interface SaleRecord {
 
 export interface Transaction {
   id: string;
-  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP' | 'VIP_REVENUE';
+  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP' | 'VIP_REVENUE' | 'TRANSFER_SENT' | 'TRANSFER_RECV';
   amount: number | string;
   buyerId?: string;
   buyerName?: string;
   creatorId?: string;
+  targetId?: string;
+  targetName?: string;
   videoTitle?: string;
   itemTitle?: string;
   timestamp: number;
@@ -101,7 +103,7 @@ export interface Transaction {
 export interface Notification {
   id: string;
   text: string;
-  type: 'SALE' | 'UPLOAD' | 'SYSTEM';
+  type: 'SALE' | 'UPLOAD' | 'SYSTEM' | 'TRANSFER';
   timestamp: number;
   isRead: boolean;
   link: string;
@@ -148,7 +150,6 @@ export interface MarketplaceItem {
 }
 
 export interface CartItem extends MarketplaceItem {
-  // quantity added manually for Cart UI
   quantity: number;
 }
 
@@ -211,10 +212,11 @@ export interface OrganizeResult {
 }
 
 export interface SmartCleanerResult {
-  preview: Video[];
   stats: {
     spaceReclaimed: string;
+    videosFound: number;
   };
+  preview: any[];
 }
 
 export interface SystemSettings {
@@ -236,6 +238,7 @@ export interface SystemSettings {
   ftpSettings?: FtpSettings;
   videoCommission: number;
   marketCommission: number;
+  transferFee: number;
   vipPlans?: VipPlan[];
   paymentInstructions?: string;
   tropipayClientId?: string;
