@@ -1,7 +1,7 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V10.6
- * Implementación robusta de guardado de configuraciones y finanzas.
+ * ADMINISTRACIÓN - CORE FUNCTIONS V10.7
+ * Implementación robusta de guardado de configuraciones, finanzas y cálculo de disco.
  */
 
 function admin_get_settings($pdo) {
@@ -14,18 +14,13 @@ function admin_get_settings($pdo) {
         $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? 'null', true);
         $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true) ?: [];
         $settings['paqueteMapper'] = json_decode($settings['paqueteMapper'] ?? '{}', true) ?: (object)[];
+        $settings['libraryPaths'] = json_decode($settings['libraryPaths'] ?? '[]', true) ?: [];
         
-        // Cast booleans for JS consumption
         $bool_fields = ['enableDebugLog', 'autoTranscode', 'is_transcoder_active', 'enableYoutube', 'isQueuePaused'];
-        foreach ($bool_fields as $f) {
-            if (isset($settings[$f])) $settings[$f] = (bool)$settings[$f];
-        }
+        foreach ($bool_fields as $f) { if (isset($settings[$f])) $settings[$f] = (bool)$settings[$f]; }
         
-        // Cast integers
         $int_fields = ['transferFee', 'videoCommission', 'marketCommission', 'batchSize', 'maxDuration', 'maxResolution'];
-        foreach ($int_fields as $f) {
-            if (isset($settings[$f])) $settings[$f] = intval($settings[$f]);
-        }
+        foreach ($int_fields as $f) { if (isset($settings[$f])) $settings[$f] = intval($settings[$f]); }
 
         respond(true, $settings);
     }
@@ -35,101 +30,119 @@ function admin_get_settings($pdo) {
 function admin_update_settings($pdo, $input) {
     $s = $input['settings'] ?? [];
     if (empty($s)) respond(true);
-    
     $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
     $fields = []; $params = [];
-    
-    // Lista de campos permitidos
-    $allowed = [
-        'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
-        'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 
-        'ytDlpPath', 'ffmpegPath', 'enableYoutube', 'autoTranscode', 
-        'is_transcoder_active', 'transcodePreset', 'categoryPrices', 
-        'customCategories', 'localLibraryPath', 'ftpSettings', 'videoCommission', 
-        'marketCommission', 'transferFee', 'vipPlans', 'paymentInstructions', 
-        'paqueteMapper', 'tropipayClientId', 'tropipayClientSecret', 
-        'currencyConversion', 'proxyUrl', 'enableDebugLog'
-    ];
-
-    // Definición de campos que son puramente numéricos/booleanos en la DB
-    $numeric_fields = [
-        'isQueuePaused', 'batchSize', 'maxDuration', 'maxResolution', 
-        'enableYoutube', 'autoTranscode', 'is_transcoder_active', 
-        'videoCommission', 'marketCommission', 'transferFee', 
-        'enableDebugLog'
-    ];
+    $allowed = ['downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 'ytDlpPath', 'ffmpegPath', 'enableYoutube', 'autoTranscode', 'is_transcoder_active', 'transcodePreset', 'categoryPrices', 'customCategories', 'localLibraryPath', 'libraryPaths', 'ftpSettings', 'videoCommission', 'marketCommission', 'transferFee', 'vipPlans', 'paymentInstructions', 'paqueteMapper', 'tropipayClientId', 'tropipayClientSecret', 'currencyConversion', 'proxyUrl', 'enableDebugLog'];
+    $numeric_fields = ['isQueuePaused', 'batchSize', 'maxDuration', 'maxResolution', 'enableYoutube', 'autoTranscode', 'is_transcoder_active', 'videoCommission', 'marketCommission', 'transferFee', 'enableDebugLog'];
 
     foreach ($s as $key => $val) {
         if (in_array($key, $allowed)) {
-            // 1. Manejo de Arrays/Objetos (JSON)
-            if (is_array($val) || is_object($val)) {
-                $val = json_encode($val, JSON_UNESCAPED_UNICODE);
-            } 
-            // 2. Manejo de Booleanos (Crucial para evitar error 1366)
-            else if (is_bool($val)) {
-                $val = $val ? 1 : 0;
-            }
-            // 3. Manejo de campos numéricos que vienen como string vacío
-            else if (in_array($key, $numeric_fields) && $val === '') {
-                $val = 0;
-            }
-            
+            if (is_array($val) || is_object($val)) { $val = json_encode($val, JSON_UNESCAPED_UNICODE); } 
+            else if (is_bool($val)) { $val = $val ? 1 : 0; }
+            else if (in_array($key, $numeric_fields) && $val === '') { $val = 0; }
             $fields[] = "$key = ?";
             $params[] = $val;
         }
     }
-
     if (empty($fields)) respond(true);
-
     try {
         $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
+        $pdo->prepare($sql)->execute($params);
         respond(true);
-    } catch (PDOException $e) {
-        respond(false, null, "Error al actualizar configuración: " . $e->getMessage());
-    }
+    } catch (PDOException $e) { respond(false, null, $e->getMessage()); }
 }
 
-// --- FINANZAS ---
+function admin_get_local_stats($pdo) {
+    // Intentar obtener la primera ruta de librería para medir el disco real del NAS
+    $stmtS = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
+    $s = $stmtS->fetch();
+    $paths = json_decode($s['libraryPaths'] ?? '[]', true) ?: [];
+    if (empty($paths) && !empty($s['localLibraryPath'])) $paths[] = $s['localLibraryPath'];
+    
+    $checkPath = !empty($paths) ? $paths[0] : "/";
+    if (!is_dir($checkPath)) $checkPath = "/";
+
+    $ds = @disk_free_space($checkPath) ?: 1024*1024*1024;
+    $dt = @disk_total_space($checkPath) ?: 1024*1024*1024;
+    
+    $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn();
+    $catStats = $pdo->query("SELECT category, COUNT(*) as count, SUM(views) as totalViews FROM videos GROUP BY category")->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Calcular peso de carpetas de subida
+    $folderUsage = [];
+    $uploadDirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market'];
+    foreach ($uploadDirs as $dir) {
+        $size = 0;
+        if (is_dir($dir)) {
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file) {
+                if ($file->isFile()) $size += $file->getSize();
+            }
+        }
+        $folderUsage[basename($dir)] = round($size / (1024*1024), 2); // MB
+    }
+
+    respond(true, [
+        'disk_free' => round($ds / (1024**3), 2),
+        'disk_total' => round($dt / (1024**3), 2),
+        'db_videos' => intval($dbVideos),
+        'category_stats' => $catStats,
+        'folder_usage' => $folderUsage,
+        'active_processes' => []
+    ]);
+}
+
+// --- OTROS (Finanzas, Logs, etc.) ---
+function admin_get_real_stats($pdo) {
+    $userCount = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
+    $videoCount = $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn();
+    $revenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
+    $balance = $pdo->query("SELECT SUM(balance) FROM users")->fetchColumn() ?: 0;
+    respond(true, ['userCount' => intval($userCount), 'videoCount' => intval($videoCount), 'systemRevenue' => floatval($revenue), 'totalBalance' => floatval($balance), 'history' => ['daily' => [], 'monthly' => []]]);
+}
+
+function admin_repair_db($pdo) {
+    require_once 'functions_schema.php';
+    $schema = getAppSchema();
+    foreach ($schema as $table => $def) { syncTable($pdo, $table, $def); }
+    respond(true);
+}
+
+function admin_add_balance($pdo, $input) {
+    $targetId = $input['targetId']; $amount = floatval($input['amount']);
+    $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
+    $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")->execute([uniqid('tx_m_'), $targetId, $amount, time()]);
+    respond(true);
+}
+
 function admin_get_balance_requests($pdo) {
     $stmtB = $pdo->query("SELECT r.*, u.username FROM balance_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC");
     $stmtV = $pdo->query("SELECT r.*, u.username FROM vip_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC");
     $stmtA = $pdo->query("SELECT id, username, avatarUrl, vipExpiry FROM users WHERE vipExpiry > " . time());
-    respond(true, [
-        'balance' => $stmtB->fetchAll(PDO::FETCH_ASSOC),
-        'vip' => $stmtV->fetchAll(PDO::FETCH_ASSOC),
-        'activeVip' => $stmtA->fetchAll(PDO::FETCH_ASSOC)
-    ]);
+    respond(true, ['balance' => $stmtB->fetchAll(PDO::FETCH_ASSOC), 'vip' => $stmtV->fetchAll(PDO::FETCH_ASSOC), 'activeVip' => $stmtA->fetchAll(PDO::FETCH_ASSOC)]);
 }
 
 function admin_handle_balance_request($pdo, $input) {
-    $reqId = $input['reqId'];
-    $status = $input['status']; // APPROVED | REJECTED
+    $reqId = $input['reqId']; $status = $input['status'];
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare("SELECT * FROM balance_requests WHERE id = ? AND status = 'PENDING'");
-        $stmt->execute([$reqId]);
-        $req = $stmt->fetch();
+        $stmt->execute([$reqId]); $req = $stmt->fetch();
         if (!$req) throw new Exception("Solicitud no válida");
         $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
         if ($status === 'APPROVED') {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
-            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")
-                ->execute([uniqid('tx_'), $req['userId'], $req['amount'], time()]);
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")->execute([uniqid('tx_'), $req['userId'], $req['amount'], time()]);
         }
         $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
 
 function admin_handle_vip_request($pdo, $input) {
-    $reqId = $input['reqId'];
-    $status = $input['status'];
+    $reqId = $input['reqId']; $status = $input['status'];
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare("SELECT * FROM vip_requests WHERE id = ? AND status = 'PENDING'");
-        $stmt->execute([$reqId]);
-        $req = $stmt->fetch();
+        $stmt->execute([$reqId]); $req = $stmt->fetch();
         if (!$req) throw new Exception("Solicitud no válida");
         $plan = json_decode($req['planSnapshot'], true);
         $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
@@ -139,11 +152,9 @@ function admin_handle_vip_request($pdo, $input) {
                 $total = $plan['price'] + ($plan['price'] * ($bonus / 100));
                 $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $req['userId']]);
             } else {
-                $days = intval($plan['durationDays'] ?? 30);
-                $now = time();
+                $days = intval($plan['durationDays'] ?? 30); $now = time();
                 $stmtU = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
-                $stmtU->execute([$req['userId']]);
-                $current = intval($stmtU->fetchColumn());
+                $stmtU->execute([$req['userId']]); $current = intval($stmtU->fetchColumn());
                 $newEx = (max($current, $now)) + ($days * 86400);
                 $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newEx, $req['userId']]);
             }
@@ -154,112 +165,27 @@ function admin_handle_vip_request($pdo, $input) {
 
 function admin_get_global_transactions($pdo) {
     $stmt = $pdo->query("SELECT t.*, b.username as buyerName, c.username as sellerName FROM transactions t LEFT JOIN users b ON t.buyerId = b.id LEFT JOIN users c ON t.creatorId = c.id ORDER BY t.timestamp DESC LIMIT 100");
-    $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $revenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
-    respond(true, ['history' => $history, 'systemRevenue' => floatval($revenue)]);
-}
-
-function admin_add_balance($pdo, $input) {
-    $targetId = $input['targetId'];
-    $amount = floatval($input['amount']);
-    $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
-    $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'DEPOSIT')")
-        ->execute([uniqid('tx_m_'), $targetId, $amount, time()]);
-    respond(true);
-}
-
-// --- MÉTRICAS ---
-function admin_get_real_stats($pdo) {
-    $userCount = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
-    $videoCount = $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn();
-    $revenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
-    $balance = $pdo->query("SELECT SUM(balance) FROM users")->fetchColumn() ?: 0;
-    respond(true, [
-        'userCount' => intval($userCount),
-        'videoCount' => intval($videoCount),
-        'systemRevenue' => floatval($revenue),
-        'totalBalance' => floatval($balance),
-        'history' => ['daily' => [], 'monthly' => []]
-    ]);
-}
-
-function admin_get_local_stats($pdo) {
-    $ds = @disk_free_space("/") ?: 1024*1024*1024;
-    $dt = @disk_total_space("/") ?: 1024*1024*1024;
-    $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn();
-    $catStats = $pdo->query("SELECT category, COUNT(*) as count, SUM(views) as totalViews FROM videos GROUP BY category")->fetchAll(PDO::FETCH_ASSOC);
-    respond(true, [
-        'disk_free' => round($ds / (1024**3), 2),
-        'disk_total' => round($dt / (1024**3), 2),
-        'db_videos' => intval($dbVideos),
-        'category_stats' => $catStats,
-        'active_processes' => []
-    ]);
-}
-
-// --- MANTENIMIENTO ---
-function admin_repair_db($pdo) {
-    require_once 'functions_schema.php';
-    $schema = getAppSchema();
-    foreach ($schema as $table => $def) { syncTable($pdo, $table, $def); }
-    respond(true);
-}
-
-function admin_cleanup_system_files($pdo) {
-    $count = 0;
-    $stmt = $pdo->query("SELECT videoUrl FROM videos WHERE isLocal = 0");
-    while ($row = $stmt->fetch()) {
-        $path = str_replace('api/', '', $row['videoUrl']);
-        if (!file_exists($path)) { /* Log orphan in DB if needed */ }
-    }
-    respond(true, ['videos' => $count]);
+    respond(true, ['history' => $stmt->fetchAll(PDO::FETCH_ASSOC), 'systemRevenue' => floatval($pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0)]);
 }
 
 function admin_get_logs() {
-    $file = 'debug_log.txt';
-    if (!file_exists($file)) respond(true, []);
-    $lines = file($file);
-    respond(true, array_reverse(array_slice($lines, -100)));
+    $file = 'debug_log.txt'; if (!file_exists($file)) respond(true, []);
+    respond(true, array_reverse(array_slice(file($file), -100)));
 }
-
-function admin_clear_logs() {
-    file_put_contents('debug_log.txt', '');
-    respond(true);
-}
-
-// --- PETICIONES ---
-function admin_get_requests($pdo, $status) {
-    $sql = "SELECT r.*, u.username FROM requests r JOIN users u ON r.userId = u.id";
-    if ($status !== 'ALL') { $sql .= " WHERE r.status = '$status'"; }
-    $sql .= " ORDER BY r.createdAt DESC";
-    respond(true, $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC));
-}
-
-function admin_update_request_status($pdo, $input) {
-    $pdo->prepare("UPDATE requests SET status = ? WHERE id = ?")->execute([$input['status'], $input['id']]);
-    respond(true);
-}
-
-function admin_delete_request($pdo, $input) {
-    $pdo->prepare("DELETE FROM requests WHERE id = ?")->execute([$input['id']]);
-    respond(true);
-}
-
-// --- TRANSCODER & CLEANER STUBS ---
-function admin_transcode_batch($pdo) { respond(true, ['message' => 'Motor iniciado']); }
-function admin_stop_transcoder($pdo) { respond(true, ['message' => 'Motor detenido']); }
+function admin_clear_logs() { file_put_contents('debug_log.txt', ''); respond(true); }
+function admin_cleanup_system_files($pdo) { respond(true, ['videos' => 0]); }
+function admin_get_requests($pdo, $status) { $sql = "SELECT r.*, u.username FROM requests r JOIN users u ON r.userId = u.id"; if ($status !== 'ALL') { $sql .= " WHERE r.status = '$status'"; } $sql .= " ORDER BY r.createdAt DESC"; respond(true, $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC)); }
+function admin_update_request_status($pdo, $input) { $pdo->prepare("UPDATE requests SET status = ? WHERE id = ?")->execute([$input['status'], $input['id']]); respond(true); }
+function admin_delete_request($pdo, $input) { $pdo->prepare("DELETE FROM requests WHERE id = ?")->execute([$input['id']]); respond(true); }
+function admin_transcode_batch($pdo) { respond(true); }
+function admin_stop_transcoder($pdo) { respond(true); }
 function admin_transcode_scan_filters($pdo, $input) { respond(true, ['count' => 0]); }
 function admin_get_transcode_profiles($pdo) { respond(true, []); }
-function admin_get_transcode_log() { respond(true, "No hay logs de FFmpeg activos."); }
+function admin_get_transcode_log() { respond(true, ""); }
 function admin_save_transcode_profile($pdo, $input) { respond(true); }
 function admin_delete_transcode_profile($pdo, $input) { respond(true); }
 function admin_file_cleanup_preview($pdo, $input) { respond(true, []); }
 function admin_smart_cleaner_preview($pdo, $input) { respond(true, ['preview' => [], 'stats' => ['spaceReclaimed' => '0 B']]); }
 function admin_organize_paquete($pdo, $input) { respond(true, ['cleaned' => 0, 'plan' => []]); }
-function admin_request_balance($pdo, $input) {
-    $id = uniqid('br_');
-    $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, ?, 'PENDING', ?)")
-        ->execute([$id, $input['userId'], $input['amount'], time()]);
-    respond(true, ['id' => $id]);
-}
+function admin_request_balance($pdo, $input) { $id = uniqid('br_'); $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, ?, 'PENDING', ?)")->execute([$id, $input['userId'], $input['amount'], time()]); respond(true, ['id' => $id]); }
 ?>

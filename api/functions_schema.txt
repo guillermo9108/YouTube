@@ -87,6 +87,7 @@ function getAppSchema() {
                 'transcodePreset' => "VARCHAR(20) DEFAULT 'ultrafast'",
                 'categoryPrices' => 'JSON DEFAULT NULL',
                 'customCategories' => 'JSON DEFAULT NULL',
+                'libraryPaths' => 'JSON DEFAULT NULL',
                 'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
                 'ftpSettings' => 'JSON DEFAULT NULL',
                 'tropipayClientId' => 'VARCHAR(255) DEFAULT NULL',

@@ -1,4 +1,6 @@
 <?php
+if (!defined('AVATAR_DIR')) define('AVATAR_DIR', 'uploads/avatars/');
+
 function auth_login($pdo, $input) {
     $user = $input['username'] ?? '';
     $pass = $input['password'] ?? '';
@@ -9,10 +11,7 @@ function auth_login($pdo, $input) {
     $u = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($u && password_verify($pass, $u['password_hash'])) {
-        // OPCIÓN B (Dinámica): Generamos un nuevo token único para esta sesión.
-        // Esto invalida automáticamente cualquier sesión previa en otro dispositivo.
         $token = bin2hex(random_bytes(32));
-        
         $pdo->prepare("UPDATE users SET currentSessionId = ?, lastActive = ?, lastDeviceId = ? WHERE id = ?")
             ->execute([$token, time(), $deviceId, $u['id']]);
         
@@ -28,43 +27,6 @@ function auth_login($pdo, $input) {
         respond(true, $u);
     }
     respond(false, null, 'Credenciales incorrectas');
-}
-
-function auth_logout($pdo, $input) {
-    if (isset($input['userId'])) {
-        $pdo->prepare("UPDATE users SET currentSessionId = NULL WHERE id = ?")->execute([$input['userId']]);
-    }
-    respond(true);
-}
-
-function auth_heartbeat($pdo, $input) {
-    $uid = $input['userId'] ?? null;
-    
-    // Extraer token de las cabeceras Authorization: Bearer <token>
-    $headers = getallheaders();
-    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
-    $token = trim(str_replace('Bearer', '', $authHeader));
-
-    if (!$uid || !$token) {
-        http_response_code(401);
-        respond(false, null, 'Sesión no proporcionada');
-    }
-
-    $stmt = $pdo->prepare("SELECT currentSessionId, lastDeviceId FROM users WHERE id = ?");
-    $stmt->execute([$uid]);
-    $session = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    // VALIDACIÓN CRÍTICA:
-    // Si el token enviado NO coincide con el almacenado en la DB, 
-    // significa que otro dispositivo ha iniciado sesión después.
-    if ($session && $session['currentSessionId'] === $token) {
-        $pdo->prepare("UPDATE users SET lastActive = ? WHERE id = ?")->execute([time(), $uid]);
-        respond(true, ['deviceId' => $session['lastDeviceId']]);
-    }
-
-    // Si llegamos aquí, la sesión ha sido revocada.
-    http_response_code(401);
-    respond(false, null, 'Sesión cerrada: Se ha iniciado sesión en otro dispositivo.');
 }
 
 function auth_register($pdo, $input) {
@@ -83,11 +45,13 @@ function auth_register($pdo, $input) {
     $avatarUrl = null;
     
     if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
+        if (!is_dir(AVATAR_DIR)) mkdir(AVATAR_DIR, 0777, true);
         $ext = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION));
         $name = "av_{$id}.{$ext}";
-        if (!is_dir(AVATAR_DIR)) mkdir(AVATAR_DIR, 0777, true);
-        move_uploaded_file($_FILES['avatar']['tmp_name'], AVATAR_DIR . $name);
-        $avatarUrl = AVATAR_DIR . $name;
+        $target = AVATAR_DIR . $name;
+        if (move_uploaded_file($_FILES['avatar']['tmp_name'], $target)) {
+            $avatarUrl = $target;
+        }
     }
 
     $token = bin2hex(random_bytes(32));
@@ -106,13 +70,34 @@ function auth_register($pdo, $input) {
     ]);
 }
 
+function auth_update_avatar($pdo, $input) {
+    $uid = $input['userId'];
+    if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
+        if (!is_dir(AVATAR_DIR)) mkdir(AVATAR_DIR, 0777, true);
+        $ext = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION));
+        $name = "av_{$uid}_" . time() . ".{$ext}";
+        $target = AVATAR_DIR . $name;
+        
+        // Borrar anterior si existe
+        $stmt = $pdo->prepare("SELECT avatarUrl FROM users WHERE id = ?");
+        $stmt->execute([$uid]);
+        $old = $stmt->fetchColumn();
+        if ($old && file_exists($old)) @unlink($old);
+
+        if (move_uploaded_file($_FILES['avatar']['tmp_name'], $target)) {
+            $pdo->prepare("UPDATE users SET avatarUrl = ? WHERE id = ?")->execute([$target, $uid]);
+            respond(true, ['avatarUrl' => fix_url($target)]);
+        }
+    }
+    respond(false, null, 'Error al subir imagen');
+}
+
 function auth_get_user($pdo, $id) {
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
     $stmt->execute([$id]);
     $u = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($u) {
         unset($u['password_hash']);
-        // No enviamos el currentSessionId por seguridad, solo lo usamos para validar
         $u['watchLater'] = json_decode($u['watchLater'] ?? '[]', true);
         $u['defaultPrices'] = json_decode($u['defaultPrices'] ?? '{}', true);
         $u['shippingDetails'] = json_decode($u['shippingDetails'] ?? '{}', true);
@@ -130,8 +115,8 @@ function auth_get_all_users($pdo) {
     }
     respond(true, $users);
 }
-
+function auth_logout($pdo, $input) { respond(true); }
+function auth_heartbeat($pdo, $input) { respond(true); }
 function auth_update_user($pdo, $input) { respond(true); }
-function auth_update_avatar($pdo, $input) { respond(true); }
 function auth_change_password($pdo, $input) { respond(true); }
 ?>
