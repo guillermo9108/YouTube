@@ -57,8 +57,6 @@ function interact_transfer_balance($pdo, $input) {
         // 2. Obtener Fee de configuración
         $feePct = $pdo->query("SELECT transferFee FROM system_settings LIMIT 1")->fetchColumn() ?: 5;
         $feeAmount = $amount * ($feePct / 100);
-        $totalToDeduct = $amount; // El usuario envía X y el otro recibe X - Fee, o el usuario paga X + Fee? 
-        // Lógica estándar: El receptor recibe el monto neto.
         $netAmount = $amount - $feeAmount;
 
         // 3. Validar saldo emisor
@@ -77,10 +75,15 @@ function interact_transfer_balance($pdo, $input) {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$feeAmount, $adminId]);
         }
 
-        // 5. Registrar transacciones
+        // 5. Registrar transacción
         $tid = uniqid('tr_');
-        $pdo->prepare("INSERT INTO transactions (id, buyerId, targetId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'TRANSFER')")
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, targetId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'TRANSFER_SENT')")
             ->execute([$tid, $senderId, $target['id'], $amount, $feeAmount, time()]);
+
+        // Registrar entrada para el receptor
+        $tid2 = uniqid('tr_');
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, targetId, amount, timestamp, type) VALUES (?, ?, ?, ?, ?, 'TRANSFER_RECV')")
+            ->execute([$tid2, $target['id'], $senderId, $netAmount, time()]);
 
         // 6. Notificar al receptor
         $nid = uniqid('n_');
@@ -96,24 +99,21 @@ function interact_transfer_balance($pdo, $input) {
 }
 
 function request_vip($pdo, $input) {
-    $id = uniqid('vip_req_');
     $userId = $input['userId'];
     $plan = $input['plan'];
     $paymentRef = $input['paymentRef'] ?? '';
     
-    // Si la referencia es "INTERNAL_BALANCE", intentamos compra directa
     if ($paymentRef === 'INTERNAL_BALANCE') {
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
-            $stmt->execute([userId]);
+            $stmt->execute([$userId]);
             $balance = $stmt->fetchColumn();
             
             if ($balance < $plan['price']) throw new Exception("Saldo insuficiente para compra interna");
             
             $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$plan['price'], $userId]);
             
-            // Lógica de activación
             $days = intval($plan['durationDays'] ?? 30);
             $seconds = $days * 86400;
             $now = time();
@@ -124,7 +124,6 @@ function request_vip($pdo, $input) {
             
             $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
             
-            // Log transaccion
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type) VALUES (?, ?, ?, ?, 'VIP')")
                 ->execute([uniqid('tx_v_'), $userId, $plan['price'], $now]);
                 
@@ -138,10 +137,29 @@ function request_vip($pdo, $input) {
         }
     }
 
+    $id = uniqid('vip_req_');
     $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, paymentRef) VALUES (?, ?, ?, 'PENDING', ?, ?)")
         ->execute([$id, $userId, json_encode($plan), time(), $paymentRef]);
         
     respond(true, ['id' => $id]);
+}
+
+function interact_get_transactions($pdo, $userId) {
+    $stmt = $pdo->prepare("
+        SELECT t.*, u.username as targetName 
+        FROM transactions t 
+        LEFT JOIN users u ON t.targetId = u.id 
+        WHERE t.buyerId = ? OR t.creatorId = ? OR t.targetId = ? 
+        ORDER BY t.timestamp DESC
+    ");
+    $stmt->execute([$userId, $userId, $userId]);
+    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function interact_get_subscriptions($pdo, $uid) {
+    $stmt = $pdo->prepare("SELECT creatorId FROM subscriptions WHERE subscriberId = ?");
+    $stmt->execute([$uid]);
+    respond(true, $stmt->fetchAll(PDO::FETCH_COLUMN));
 }
 
 function interact_purchase($pdo, $input) {
@@ -329,12 +347,6 @@ function interact_check_subscription($pdo, $uid, $cid) {
     respond(true, ['isSubscribed' => $stmt->fetchColumn() > 0]);
 }
 
-function interact_get_subscriptions($pdo, $uid) {
-    $stmt = $pdo->prepare("SELECT creatorId FROM subscriptions WHERE subscriberId = ?");
-    $stmt->execute([$uid]);
-    respond(true, $stmt->fetchAll(PDO::COLUMN));
-}
-
 function interact_get_notifications($pdo, $uid) {
     $stmt = $pdo->prepare("SELECT * FROM notifications WHERE userId = ? ORDER BY timestamp DESC LIMIT 30");
     $stmt->execute([$uid]);
@@ -363,11 +375,5 @@ function interact_get_notifications($pdo, $uid) {
 function interact_mark_notification_read($pdo, $input) {
     $pdo->prepare("UPDATE notifications SET isRead = 1 WHERE id = ?")->execute([$input['id']]);
     respond(true);
-}
-
-function interact_get_transactions($pdo, $userId) {
-    $stmt = $pdo->prepare("SELECT t.*, u.username as targetName FROM transactions t LEFT JOIN users u ON t.targetId = u.id WHERE t.buyerId = ? OR t.creatorId = ? OR t.targetId = ? ORDER BY t.timestamp DESC");
-    $stmt->execute([$userId, $userId, $userId]);
-    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 ?>
