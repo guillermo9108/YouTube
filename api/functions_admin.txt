@@ -1,7 +1,7 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V10.5
- * Implementación completa de métricas, finanzas y mantenimiento.
+ * ADMINISTRACIÓN - CORE FUNCTIONS V10.6
+ * Implementación robusta de guardado de configuraciones y finanzas.
  */
 
 function admin_get_settings($pdo) {
@@ -14,45 +14,81 @@ function admin_get_settings($pdo) {
         $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? 'null', true);
         $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true) ?: [];
         $settings['paqueteMapper'] = json_decode($settings['paqueteMapper'] ?? '{}', true) ?: (object)[];
-        $settings['enableDebugLog'] = (bool)($settings['enableDebugLog'] ?? true);
-        $settings['autoTranscode'] = (bool)($settings['autoTranscode'] ?? false);
-        $settings['is_transcoder_active'] = (bool)($settings['is_transcoder_active'] ?? false);
-        $settings['enableYoutube'] = (bool)($settings['enableYoutube'] ?? false);
-        $settings['isQueuePaused'] = (bool)($settings['isQueuePaused'] ?? false);
-        $settings['transferFee'] = intval($settings['transferFee'] ?? 5);
+        
+        // Cast booleans for JS consumption
+        $bool_fields = ['enableDebugLog', 'autoTranscode', 'is_transcoder_active', 'enableYoutube', 'isQueuePaused'];
+        foreach ($bool_fields as $f) {
+            if (isset($settings[$f])) $settings[$f] = (bool)$settings[$f];
+        }
+        
+        // Cast integers
+        $int_fields = ['transferFee', 'videoCommission', 'marketCommission', 'batchSize', 'maxDuration', 'maxResolution'];
+        foreach ($int_fields as $f) {
+            if (isset($settings[$f])) $settings[$f] = intval($settings[$f]);
+        }
+
         respond(true, $settings);
     }
     respond(false, null, 'Settings not found');
 }
 
-function admin_request_balance($pdo, $input) {
-    $uid = $input['userId'];
-    $amt = floatval($input['amount']);
-    if ($amt <= 0) respond(false, null, 'Monto inválido');
-    
-    $id = uniqid('br_');
-    $stmt = $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, ?, 'PENDING', ?)");
-    $stmt->execute([$id, $uid, $amt, time()]);
-    respond(true, ['id' => $id]);
-}
-
 function admin_update_settings($pdo, $input) {
     $s = $input['settings'] ?? [];
     if (empty($s)) respond(true);
+    
     $pdo->exec("INSERT IGNORE INTO system_settings (id) VALUES (1)");
     $fields = []; $params = [];
-    $allowed = ['downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 'ytDlpPath', 'ffmpegPath', 'enableYoutube', 'autoTranscode', 'is_transcoder_active', 'transcodePreset', 'categoryPrices', 'customCategories', 'localLibraryPath', 'ftpSettings', 'videoCommission', 'marketCommission', 'transferFee', 'vipPlans', 'paymentInstructions', 'paqueteMapper', 'tropipayClientId', 'tropipayClientSecret', 'currencyConversion', 'proxyUrl', 'enableDebugLog'];
+    
+    // Lista de campos permitidos
+    $allowed = [
+        'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
+        'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 
+        'ytDlpPath', 'ffmpegPath', 'enableYoutube', 'autoTranscode', 
+        'is_transcoder_active', 'transcodePreset', 'categoryPrices', 
+        'customCategories', 'localLibraryPath', 'ftpSettings', 'videoCommission', 
+        'marketCommission', 'transferFee', 'vipPlans', 'paymentInstructions', 
+        'paqueteMapper', 'tropipayClientId', 'tropipayClientSecret', 
+        'currencyConversion', 'proxyUrl', 'enableDebugLog'
+    ];
+
+    // Definición de campos que son puramente numéricos/booleanos en la DB
+    $numeric_fields = [
+        'isQueuePaused', 'batchSize', 'maxDuration', 'maxResolution', 
+        'enableYoutube', 'autoTranscode', 'is_transcoder_active', 
+        'videoCommission', 'marketCommission', 'transferFee', 
+        'enableDebugLog'
+    ];
+
     foreach ($s as $key => $val) {
         if (in_array($key, $allowed)) {
-            $val = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
+            // 1. Manejo de Arrays/Objetos (JSON)
+            if (is_array($val) || is_object($val)) {
+                $val = json_encode($val, JSON_UNESCAPED_UNICODE);
+            } 
+            // 2. Manejo de Booleanos (Crucial para evitar error 1366)
+            else if (is_bool($val)) {
+                $val = $val ? 1 : 0;
+            }
+            // 3. Manejo de campos numéricos que vienen como string vacío
+            else if (in_array($key, $numeric_fields) && $val === '') {
+                $val = 0;
+            }
+            
             $fields[] = "$key = ?";
             $params[] = $val;
         }
     }
+
     if (empty($fields)) respond(true);
-    $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
-    $pdo->prepare($sql)->execute($params);
-    respond(true);
+
+    try {
+        $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        respond(true);
+    } catch (PDOException $e) {
+        respond(false, null, "Error al actualizar configuración: " . $e->getMessage());
+    }
 }
 
 // --- FINANZAS ---
@@ -209,7 +245,7 @@ function admin_delete_request($pdo, $input) {
     respond(true);
 }
 
-// --- TRANSCODER & CLEANER STUBS (To be expanded in dedicated module if needed) ---
+// --- TRANSCODER & CLEANER STUBS ---
 function admin_transcode_batch($pdo) { respond(true, ['message' => 'Motor iniciado']); }
 function admin_stop_transcoder($pdo) { respond(true, ['message' => 'Motor detenido']); }
 function admin_transcode_scan_filters($pdo, $input) { respond(true, ['count' => 0]); }
@@ -220,4 +256,10 @@ function admin_delete_transcode_profile($pdo, $input) { respond(true); }
 function admin_file_cleanup_preview($pdo, $input) { respond(true, []); }
 function admin_smart_cleaner_preview($pdo, $input) { respond(true, ['preview' => [], 'stats' => ['spaceReclaimed' => '0 B']]); }
 function admin_organize_paquete($pdo, $input) { respond(true, ['cleaned' => 0, 'plan' => []]); }
+function admin_request_balance($pdo, $input) {
+    $id = uniqid('br_');
+    $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, ?, 'PENDING', ?)")
+        ->execute([$id, $input['userId'], $input['amount'], time()]);
+    respond(true, ['id' => $id]);
+}
 ?>
