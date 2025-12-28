@@ -2,7 +2,7 @@
 
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS
- * Versión 9.8 - Estabilidad Total & Janitor Engine
+ * Versión 9.9 - Storage Insights & Janitor Pro
  */
 
 // --- AJUSTES DEL SISTEMA ---
@@ -53,12 +53,33 @@ function admin_update_settings($pdo, $input) {
     respond(true);
 }
 
-// --- MOTOR DE CONVERSIÓN (TRANSCODER V3) ---
+// --- MOTOR DE ALMACENAMIENTO Y ESTADÍSTICAS ---
+
+function get_dir_size($path) {
+    $size = 0;
+    if (!is_dir($path)) return 0;
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path)) as $file) {
+        if ($file->isFile()) $size += $file->getSize();
+    }
+    return $size;
+}
 
 function admin_get_local_stats($pdo) {
     $free = @disk_free_space("/") / (1024 * 1024 * 1024);
     $total = @disk_total_space("/") / (1024 * 1024 * 1024);
     
+    // Tamaño de carpetas críticas
+    $uploadsDir = __DIR__ . '/uploads';
+    $folderUsage = [
+        'videos' => round(get_dir_size($uploadsDir . '/videos') / (1024 * 1024), 2),
+        'thumbnails' => round(get_dir_size($uploadsDir . '/thumbnails') / (1024 * 1024), 2),
+        'transcoding' => round(get_dir_size($uploadsDir . '/transcoding') / (1024 * 1024), 2),
+        'avatars' => round(get_dir_size($uploadsDir . '/avatars') / (1024 * 1024), 2)
+    ];
+
+    // Eficiencia por categoría
+    $catStats = $pdo->query("SELECT category, COUNT(*) as count, SUM(views) as totalViews FROM videos GROUP BY category")->fetchAll();
+
     $activeProcesses = [];
     $osPidsStr = shell_exec("pgrep -f \"SP_JOB_ID_\"");
     if (!empty(trim($osPidsStr))) {
@@ -82,7 +103,6 @@ function admin_get_local_stats($pdo) {
     }
 
     $dbProcessingCount = $pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'PROCESSING'")->fetchColumn();
-    $brokenLinks = 0;
     $dbVideosCount = $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn();
 
     respond(true, [
@@ -91,7 +111,8 @@ function admin_get_local_stats($pdo) {
         'active_processes' => $activeProcesses,
         'db_videos' => (int)$dbVideosCount,
         'db_processing_count' => (int)$dbProcessingCount,
-        'broken_links' => 0 // Se calcula en el analizador de ROI
+        'folder_usage' => $folderUsage,
+        'category_stats' => $catStats
     ]);
 }
 
@@ -103,7 +124,7 @@ function admin_stop_transcoder($pdo) {
 }
 
 function admin_get_transcode_log() {
-    $logFile = __DIR__ . '/debug_log.txt'; // O el archivo específico si se implementa
+    $logFile = __DIR__ . '/debug_log.txt';
     if (!file_exists($logFile)) respond(true, "No hay logs disponibles.");
     respond(true, shell_exec("tail -n 100 " . escapeshellarg($logFile)));
 }
@@ -180,7 +201,7 @@ function admin_cleanup_stale_transcodes($pdo) {
     }
 }
 
-// --- LIMPIEZA Y JANITOR ENGINE (CORRECCIÓN DE ERRORES) ---
+// --- LIMPIEZA Y JANITOR ENGINE ---
 
 function admin_file_cleanup_preview($pdo, $input) {
     $type = $input['type'] ?? 'LOW_ROI';
@@ -196,23 +217,24 @@ function admin_file_cleanup_preview($pdo, $input) {
             }
             break;
         case 'LOW_ROI':
-            $stmt = $pdo->query("SELECT * FROM videos WHERE views < 10 ORDER BY views ASC LIMIT 100");
+            $stmt = $pdo->query("SELECT * FROM videos WHERE views < 10 ORDER BY views ASC LIMIT 200");
             foreach ($stmt->fetchAll() as $v) {
                 $path = resolve_video_path($v['videoUrl']);
                 if ($path && file_exists($path)) {
                     $size = filesize($path);
-                    if ($size > (500 * 1024 * 1024)) { // Mas de 500MB y pocas vistas
-                        $v['size_fmt'] = round($size / (1024 * 1024 * 1024), 2) . " GB";
-                        $v['reason'] = 'Gran tamaño / Bajas vistas';
+                    if ($size > (50 * 1024 * 1024)) { // Mas de 50MB
+                        $v['size_fmt'] = round($size / (1024 * 1024), 2) . " MB";
+                        $efficiency = round($v['views'] / ($size / (1024 * 1024 * 1024)), 2);
+                        $v['reason'] = "Eficiencia: $efficiency v/GB";
                         $results[] = $v;
                     }
                 }
             }
             break;
         case 'LOW_PERFORMANCE':
-            $stmt = $pdo->query("SELECT * FROM videos WHERE createdAt < " . (time() - (90 * 86400)) . " AND views < 5 LIMIT 100");
+            $stmt = $pdo->query("SELECT * FROM videos WHERE createdAt < " . (time() - (60 * 86400)) . " AND views < 2 LIMIT 100");
             foreach ($stmt->fetchAll() as $v) {
-                $v['reason'] = 'Inactivo +90 días';
+                $v['reason'] = 'Olvidado (60+ días)';
                 $results[] = $v;
             }
             break;
@@ -277,7 +299,7 @@ function admin_organize_paquete($pdo, $input) {
     
     $plan = [];
     $cleaned = 0;
-    $samples = ['sample', 'trailer', 'extra', 'promo'];
+    $samples = ['sample', 'trailer', 'extra', 'promo', 'bonus'];
     
     $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root));
     foreach ($it as $file) {
@@ -285,8 +307,8 @@ function admin_organize_paquete($pdo, $input) {
             $name = strtolower($file->getFilename());
             $isSample = false;
             foreach ($samples as $s) if (strpos($name, $s) !== false) $isSample = true;
-            if ($isSample || $file->getSize() < (5 * 1024 * 1024)) { // Archivos < 5MB o con tags de sample
-                $plan[] = ['file' => $file->getPathname(), 'reason' => 'Sample / Archivo pequeño'];
+            if ($isSample || $file->getSize() < (3 * 1024 * 1024)) { // < 3MB
+                $plan[] = ['file' => $file->getPathname(), 'reason' => 'Sample / Junk File'];
                 if (!$simulate) {
                     @unlink($file->getPathname());
                     $cleaned++;
@@ -297,7 +319,7 @@ function admin_organize_paquete($pdo, $input) {
     respond(true, ['plan' => $plan, 'cleaned' => $cleaned]);
 }
 
-// --- LOGS Y MANTENIMIENTO ---
+// --- MANTENIMIENTO ---
 
 function admin_get_logs() {
     $logFile = __DIR__ . '/debug_log.txt';
