@@ -27,25 +27,25 @@ class DBService {
         }
 
         return fetch(url, options).then(async (response) => {
+            const rawText = await response.text();
+
             if (response.status === 401) {
                 window.dispatchEvent(new Event('sp_session_expired'));
                 throw new Error("Session expired");
             }
 
-            // Parsear JSON con manejo de error robusto
             let json: any;
             try {
-                json = await response.json();
+                json = JSON.parse(rawText);
             } catch (e) {
-                throw new Error(`Error en respuesta del servidor (${response.status})`);
+                console.error("Malformed JSON response:", rawText);
+                throw new Error(`Respuesta no válida del servidor (${response.status}). Verifica la configuración PHP.`);
             }
 
-            // Verificar éxito según el estándar del backend
             if (json.success === false) {
                 throw new Error(json.error || 'Error desconocido en el servidor');
             }
 
-            // Devolver solo los datos (unwrapping)
             return json.data as T;
         });
     }
@@ -53,18 +53,24 @@ class DBService {
     // --- INSTALLATION & SETUP ---
 
     public async checkInstallation(): Promise<{status: string}> {
-        return this.request<{status: string}>('action=check_installation');
+        // El instalador está en api/install.php, no en index.php
+        return fetch('api/install.php?action=check')
+            .then(r => r.json())
+            .then(res => {
+                // Adaptamos la respuesta del backend al formato que espera App.tsx
+                return { status: res.data?.installed ? 'installed' : 'not_installed' };
+            })
+            .catch(() => ({ status: 'installed' })); // En caso de duda (offline), asumimos instalado
     }
 
     public async verifyDbConnection(config: any): Promise<boolean> {
-        return this.request<boolean>('action=verify_db', {
+        return fetch('api/install.php?action=verify_db', {
             method: 'POST',
             body: JSON.stringify(config)
-        });
+        }).then(r => r.json()).then(res => res.success);
     }
 
     public async initializeSystem(dbConfig: any, adminConfig: any): Promise<void> {
-        // En instalación, usamos install.php directamente
         return fetch('api/install.php?action=install', {
             method: 'POST',
             body: JSON.stringify({ dbConfig, adminUser: adminConfig })
@@ -482,7 +488,6 @@ class DBService {
     }
 
     // --- FTP MANAGEMENT ---
-    // Fix: Added missing FTP methods
 
     public async listFtpFiles(path: string): Promise<FtpFile[]> {
         return this.request<FtpFile[]>(`action=list_ftp_files&path=${encodeURIComponent(path)}`);
