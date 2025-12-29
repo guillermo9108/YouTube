@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
@@ -6,26 +7,57 @@ import { FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, Chec
 
 interface ScannerPlayerProps {
     video: Video;
-    onComplete: (dur: number, thumb: File | null, success: boolean) => void;
+    onComplete: (dur: number, thumb: File | null, success: boolean, clientIncompatible?: boolean) => void;
 }
 
 const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState('Iniciando...');
     const processedRef = useRef(false);
+    const timeoutRef = useRef<number | null>(null);
 
     useEffect(() => {
         const vid = videoRef.current;
         if (!vid) return;
         vid.src = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
         vid.muted = true;
-        vid.play().catch(() => setStatus('Codec no soportado'));
+        
+        // Timeout de seguridad: si en 8 segundos no hemos procesado, forzamos cierre
+        timeoutRef.current = window.setTimeout(() => {
+            if (!processedRef.current) {
+                const dur = (vid.duration && isFinite(vid.duration)) ? vid.duration : 0;
+                // Si llegamos aquí, es que el navegador no pudo renderizar frames o tardó demasiado
+                onComplete(dur, null, dur > 0, true);
+                processedRef.current = true;
+            }
+        }, 8000);
+
+        vid.play().catch(() => {
+            setStatus('Error de códec');
+            // No bloqueamos, permitimos que el timeout maneje el reporte
+        });
+
+        return () => {
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        };
     }, [video]);
+
+    const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+        const vid = e.currentTarget;
+        // Si el navegador detecta que es "solo audio" (o codec video no soportado)
+        if (vid.videoWidth === 0 && vid.duration > 0) {
+            processedRef.current = true;
+            setStatus('Modo Audio (Incompatible)');
+            onComplete(vid.duration, null, true, true);
+        }
+    };
 
     const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
         if (processedRef.current) return;
-        if (vid.currentTime > 1.5 && vid.videoWidth > 0) {
+
+        // Si tenemos dimensiones, capturamos frame normal
+        if (vid.currentTime > 1.2 && vid.videoWidth > 0) {
             processedRef.current = true;
             setStatus('Capturando...');
             const canvas = document.createElement('canvas');
@@ -36,16 +68,31 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
                 ctx.drawImage(vid, 0, 0);
                 canvas.toBlob(blob => {
                     const file = blob ? new File([blob], "thumb.jpg", { type: "image/jpeg" }) : null;
-                    onComplete(vid.duration, file, true);
+                    onComplete(vid.duration, file, true, false);
                 }, 'image/jpeg', 0.8);
-            } else onComplete(vid.duration, null, true);
+            } else onComplete(vid.duration, null, true, false);
         }
     };
 
     return (
-        <div className="bg-black rounded-lg overflow-hidden aspect-video relative border border-slate-800">
-            <video ref={videoRef} className="w-full h-full object-contain" onTimeUpdate={handleTimeUpdate} onError={() => onComplete(0, null, false)} />
-            <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-[10px] text-white font-mono uppercase">{status}</div>
+        <div className="bg-black rounded-lg overflow-hidden aspect-video relative border border-slate-800 shadow-2xl">
+            <video 
+                ref={videoRef} 
+                className="w-full h-full object-contain" 
+                onLoadedMetadata={handleLoadedMetadata}
+                onTimeUpdate={handleTimeUpdate} 
+                onError={() => {
+                    if (!processedRef.current) {
+                        onComplete(0, null, false, true);
+                        processedRef.current = true;
+                    }
+                }} 
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none"></div>
+            <div className="absolute bottom-2 left-2 flex items-center gap-2">
+                <span className="bg-indigo-600 px-2 py-0.5 rounded text-[9px] text-white font-black uppercase animate-pulse">Analizando</span>
+                <span className="text-[10px] text-slate-300 font-mono truncate max-w-[200px]">{status}</span>
+            </div>
         </div>
     );
 };
@@ -88,11 +135,8 @@ export default function AdminLibrary() {
         try {
             await db.updateSystemSettings({ localLibraryPath: localPath });
             const res = await db.scanLocalLibrary(localPath);
-            
-            // Mostrar mensaje detallado del backend
             if (res.message) addToLog(res.message);
             addToLog(`Escaneo completado. Encontrados: ${res.totalFound}. Nuevos: ${res.newToImport}`);
-            
             toast.success("Paso 1 Finalizado");
             loadStats();
         } catch (e: any) { addToLog(`ERROR: ${e.message}`); }
@@ -113,17 +157,27 @@ export default function AdminLibrary() {
         } catch (e: any) { addToLog(`Error: ${e.message}`); }
     };
 
-    const handleVideoProcessed = async (duration: number, thumbnail: File | null, success: boolean) => {
+    const handleVideoProcessed = async (duration: number, thumbnail: File | null, success: boolean, clientIncompatible: boolean = false) => {
         const item = scanQueue[currentScanIndex];
         try {
-            await db.updateVideoMetadata(item.id, duration, thumbnail, success);
-            addToLog(`${success ? '[OK]' : '[FAIL]'} ${item.title}`);
+            // Enviamos el flag clientIncompatible al backend
+            const fd = new FormData();
+            fd.append('id', item.id);
+            fd.append('duration', String(duration));
+            fd.append('success', success ? '1' : '0');
+            fd.append('clientIncompatible', clientIncompatible ? '1' : '0');
+            if (thumbnail) fd.append('thumbnail', thumbnail);
+
+            await db.request(`action=update_video_metadata`, { method: 'POST', body: fd });
+            
+            let logMsg = success ? `[OK] ${item.title}` : `[FAIL] ${item.title}`;
+            if (clientIncompatible) logMsg += " (Incompatible: Transcodificación requerida)";
+            addToLog(logMsg);
         } catch (e) { console.error(e); }
         
         if (currentScanIndex + 1 >= scanQueue.length) {
             setActiveScan(false);
-            toast.success("Paso 2 Finalizado");
-            addToLog("Lote procesado. Listos para Paso 3.");
+            toast.success("Lote procesado");
             loadStats();
         } else {
             setCurrentScanIndex(prev => prev + 1);
@@ -147,69 +201,80 @@ export default function AdminLibrary() {
 
     return (
         <div className="space-y-6 pb-20 max-w-4xl mx-auto">
-            <h2 className="text-2xl font-bold flex items-center gap-2"><Database className="text-indigo-400"/> Gestión de Librería</h2>
+            <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
+                <Database className="text-indigo-400"/> Gestión de Librería
+            </h2>
             
-            {/* Stats Bar */}
             <div className="grid grid-cols-3 gap-3">
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center">
-                    <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">Pendientes (P1)</div>
-                    <div className="text-xl font-bold text-amber-500 flex items-center justify-center gap-1"><Clock size={16}/> {stats.pending}</div>
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P1: Pendientes</div>
+                    <div className="text-xl font-black text-amber-500 flex items-center justify-center gap-1"><Clock size={16}/> {stats.pending}</div>
                 </div>
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center">
-                    <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">En Cola (P2)</div>
-                    <div className="text-xl font-bold text-blue-500 flex items-center justify-center gap-1"><RefreshCw size={16}/> {stats.processing}</div>
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P2: En Cola</div>
+                    <div className="text-xl font-black text-blue-500 flex items-center justify-center gap-1"><RefreshCw size={16}/> {stats.processing}</div>
                 </div>
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center">
-                    <div className="text-slate-500 text-[10px] font-bold uppercase mb-1">Públicos (Final)</div>
-                    <div className="text-xl font-bold text-emerald-500 flex items-center justify-center gap-1"><CheckCircle2 size={16}/> {stats.public}</div>
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P3: Públicos</div>
+                    <div className="text-xl font-black text-emerald-500 flex items-center justify-center gap-1"><CheckCircle2 size={16}/> {stats.public}</div>
                 </div>
             </div>
             
-            {/* STEP 1 */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <h3 className="font-bold mb-3 flex items-center gap-2 text-blue-400"><span className="bg-blue-400/20 w-6 h-6 rounded flex items-center justify-center text-xs">1</span> Escaneo de Disco</h3>
-                <p className="text-[10px] text-slate-500 mb-4 uppercase font-bold tracking-wider">Registra los archivos físicos en la base de datos.</p>
-                <div className="flex gap-2">
-                    <input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="flex-1 bg-black border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono" placeholder="/ruta/videos" />
-                    <button onClick={handleStep1} disabled={isIndexing} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
-                        {isIndexing ? <RefreshCw className="animate-spin" size={16}/> : <FolderSearch size={16}/>} Escanear
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+                <div className="border-l-4 border-blue-500 pl-4">
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">1. Registro Físico</h3>
+                    <p className="text-xs text-slate-500 mb-4">Escanea el NAS/Disco en busca de archivos nuevos.</p>
+                    <div className="flex gap-2">
+                        <input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-indigo-300 outline-none focus:border-indigo-500" placeholder="/volume1/videos/..." />
+                        <button onClick={handleStep1} disabled={isIndexing} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 px-6 rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all flex items-center gap-2">
+                            {isIndexing ? <RefreshCw className="animate-spin" size={14}/> : <FolderSearch size={14}/>} Escanear
+                        </button>
+                    </div>
+                </div>
+
+                <div className="border-l-4 border-emerald-500 pl-4">
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">2. Extracción de Metadatos</h3>
+                    <p className="text-xs text-slate-500 mb-4">Captura imágenes y duración usando la potencia del navegador.</p>
+                    <button onClick={handleStep2} disabled={activeScan || stats.pending === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-emerald-900/20 transition-all flex items-center justify-center gap-2">
+                        <Film size={18}/> Iniciar Extracción ({stats.pending})
+                    </button>
+                </div>
+
+                <div className="border-l-4 border-purple-500 pl-4">
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">3. Publicación Inteligente</h3>
+                    <p className="text-xs text-slate-500 mb-4">Limpia nombres, asigna categorías y precios finales.</p>
+                    <button onClick={handleStep3} disabled={isOrganizing || stats.processing === 0} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-purple-900/20 transition-all flex items-center justify-center gap-2">
+                        {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} Publicar Ahora ({stats.processing})
                     </button>
                 </div>
             </div>
 
-            {/* STEP 2 */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <h3 className="font-bold mb-3 flex items-center gap-2 text-emerald-400"><span className="bg-emerald-400/20 w-6 h-6 rounded flex items-center justify-center text-xs">2</span> Extracción Visual (Browser)</h3>
-                <p className="text-[10px] text-slate-500 mb-4 uppercase font-bold tracking-wider">Captura miniaturas y duración. Requiere que esta pestaña esté activa.</p>
-                <button onClick={handleStep2} disabled={activeScan} className="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all">
-                    <Film size={18}/> Iniciar Extracción {stats.pending > 0 && `(${stats.pending})`}
-                </button>
-            </div>
-
-            {/* STEP 3 */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <h3 className="font-bold mb-3 flex items-center gap-2 text-purple-400"><span className="bg-purple-400/20 w-6 h-6 rounded flex items-center justify-center text-xs">3</span> Organización Inteligente</h3>
-                <p className="text-[10px] text-slate-500 mb-4 uppercase font-bold tracking-wider">Aplica limpieza de nombres, categorías y precios base.</p>
-                <button onClick={handleStep3} disabled={isOrganizing} className="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all">
-                    {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} Publicar Videos {stats.processing > 0 && `(${stats.processing})`}
-                </button>
-            </div>
-
-            {/* LOG */}
-            <div className="bg-black p-4 rounded-xl border border-slate-800 h-40 overflow-y-auto font-mono text-[10px] text-slate-400 shadow-inner">
-                {scanLog.map((l, i) => <div key={i} className="border-b border-white/5 py-1">{l}</div>)}
-                {scanLog.length === 0 && <div className="opacity-30">Consola de mantenimiento lista...</div>}
+            <div className="bg-black/60 p-4 rounded-2xl border border-slate-800 h-48 overflow-y-auto font-mono text-[10px] text-slate-500 shadow-inner custom-scrollbar">
+                {scanLog.map((l, i) => (
+                    <div key={i} className={`border-b border-white/5 py-1.5 ${l.includes('ERROR') ? 'text-red-400' : (l.includes('[OK]') ? 'text-emerald-400' : '')}`}>
+                        <span className="opacity-30 mr-2">[{new Date().toLocaleTimeString()}]</span>
+                        {l}
+                    </div>
+                ))}
+                {scanLog.length === 0 && <div className="opacity-20 italic">Consola de mantenimiento lista...</div>}
             </div>
 
             {activeScan && (
-                <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md">
-                    <div className="bg-slate-900 p-6 rounded-2xl border border-slate-700 w-full max-w-md text-center shadow-2xl">
-                        <h4 className="font-bold text-white mb-2 flex items-center justify-center gap-2"><Film size={18} className="text-emerald-400"/> Procesando {currentScanIndex + 1} de {scanQueue.length}</h4>
-                        <p className="text-[10px] text-slate-400 mb-4 truncate font-mono">{scanQueue[currentScanIndex].title}</p>
+                <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300">
+                    <div className="bg-slate-900 p-8 rounded-[32px] border border-slate-700 w-full max-w-md text-center shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-slate-800">
+                            <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${((currentScanIndex + 1) / scanQueue.length) * 100}%` }}></div>
+                        </div>
+                        <h4 className="font-black text-white mb-2 flex items-center justify-center gap-2 uppercase tracking-tighter text-lg">
+                            <Film size={20} className="text-emerald-400"/> Procesando {currentScanIndex + 1} / {scanQueue.length}
+                        </h4>
+                        <p className="text-[10px] text-slate-500 mb-6 truncate font-mono bg-black/30 p-2 rounded-lg">{scanQueue[currentScanIndex].title}</p>
+                        
                         <ScannerPlayer key={scanQueue[currentScanIndex].id} video={scanQueue[currentScanIndex]} onComplete={handleVideoProcessed} />
-                        <div className="mt-6 space-y-3">
-                            <p className="text-[10px] text-slate-500 italic">Si el video no carga tras 10 segundos, el sistema lo saltará automáticamente para evitar bloqueos.</p>
-                            <button onClick={() => setActiveScan(false)} className="text-red-400 text-xs font-bold uppercase tracking-widest hover:text-red-300">Detener Extracción</button>
+                        
+                        <div className="mt-8 flex flex-col gap-4">
+                            <p className="text-[10px] text-slate-500 italic px-4">Si el video es incompatible con el navegador, se delegará la generación de miniatura al servidor.</p>
+                            <button onClick={() => setActiveScan(false)} className="bg-red-950/20 hover:bg-red-900/40 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] py-3 rounded-xl border border-red-900/30 transition-all">Detener Mantenimiento</button>
                         </div>
                     </div>
                 </div>
