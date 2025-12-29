@@ -1,11 +1,10 @@
 <?php
 /**
- * StreamPay - Core Controller V10.5
- * Controlador principal para todas las peticiones de la PWA.
+ * StreamPay - Core Controller V11.0
  */
 
-ob_start(); // Prevenir cualquier salida accidental antes del JSON
-ini_set('display_errors', 0); // No mostrar errores como texto para no corromper el JSON
+ob_start(); 
+ini_set('display_errors', 0); 
 error_reporting(E_ALL);
 
 header('Access-Control-Allow-Origin: *');
@@ -18,7 +17,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// 1. Cargar configuración y módulos
+// Cargar Utils primero para tener write_log disponible inmediatamente
+require_once 'functions_utils.php';
+
+// --- MANEJADORES GLOBALES DE ERRORES ---
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    if (!(error_reporting() & $errno)) return false;
+    $level = 'ERROR';
+    switch ($errno) {
+        case E_USER_NOTICE: case E_NOTICE: $level = 'NOTICE'; break;
+        case E_USER_WARNING: case E_WARNING: $level = 'WARNING'; break;
+    }
+    write_log("$errstr in $errfile on line $errline", $level);
+    return false; // Seguir con la ejecución si es posible
+});
+
+set_exception_handler(function($e) {
+    write_log("Uncaught Exception: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine(), 'FATAL');
+    respond(false, null, "Error interno: " . $e->getMessage());
+});
+
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error && ($error['type'] === E_ERROR || $error['type'] === E_PARSE || $error['type'] === E_CORE_ERROR || $error['type'] === E_COMPILE_ERROR)) {
+        write_log("FATAL SHUTDOWN: " . $error['message'] . " in " . $error['file'] . " on line " . $error['line'], 'FATAL');
+        ob_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'error' => 'Critical PHP Error: ' . $error['message']]);
+    }
+});
+
+// 1. Cargar configuración
 $configFile = 'db_config.json';
 if (!file_exists($configFile)) {
     header('Content-Type: application/json');
@@ -28,9 +57,8 @@ if (!file_exists($configFile)) {
 
 $config = json_decode(file_get_contents($configFile), true);
 
-// 2. Definir función de respuesta estándar
 function respond($success, $data = null, $error = null) {
-    if (ob_get_level()) ob_clean(); // Limpiar cualquier advertencia o espacio accidental
+    if (ob_get_level()) ob_clean(); 
     header('Content-Type: application/json');
     echo json_encode([
         'success' => $success,
@@ -38,6 +66,13 @@ function respond($success, $data = null, $error = null) {
         'error' => $error
     ], JSON_UNESCAPED_UNICODE);
     exit();
+}
+
+// 2. Acción especial para loguear desde el cliente
+if (($_GET['action'] ?? '') === 'client_log') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    write_log("CLIENT: " . ($input['message'] ?? 'Empty'), $input['level'] ?? 'ERROR');
+    respond(true);
 }
 
 // 3. Conexión a Base de Datos
@@ -49,11 +84,11 @@ try {
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
 } catch (PDOException $e) {
-    respond(false, null, "Error de conexión BD: " . $e->getMessage());
+    write_log("DB Connection Failed: " . $e->getMessage(), 'FATAL');
+    respond(false, null, "Error de conexión BD");
 }
 
-// 4. Cargar librerías de funciones
-require_once 'functions_utils.php';
+// 4. Cargar librerías
 require_once 'functions_auth.php';
 require_once 'functions_videos.php';
 require_once 'functions_interactions.php';
@@ -63,8 +98,6 @@ require_once 'functions_admin.php';
 // 5. Procesar Acción
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-
-// Definición de directorios para uploads
 define('MARKET_DIR', 'uploads/market/');
 
 try {
@@ -127,13 +160,17 @@ try {
         case 'get_global_transactions': admin_get_global_transactions($pdo); break;
         case 'admin_repair_db': admin_repair_db($pdo); break;
         case 'admin_cleanup_files': admin_cleanup_files($pdo); break;
+        case 'admin_get_logs': 
+            $lines = file_exists('debug_log.txt') ? array_reverse(file('debug_log.txt')) : [];
+            respond(true, array_slice($lines, 0, 100)); 
+            break;
 
         default:
             respond(false, null, "Acción desconocida: $action");
             break;
     }
 } catch (Exception $e) {
-    if (function_exists('write_log')) write_log("ERROR CRÍTICO ($action): " . $e->getMessage(), 'ERROR');
+    write_log("ERROR CRÍTICO: " . $e->getMessage(), 'FATAL');
     respond(false, null, $e->getMessage());
 }
 ?>

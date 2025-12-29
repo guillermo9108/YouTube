@@ -14,12 +14,23 @@ class DBService {
     private homeDirty = false;
 
     /**
+     * Envía un log al servidor para registro persistente.
+     */
+    public async logRemote(message: string, level: 'ERROR' | 'INFO' | 'WARNING' = 'ERROR') {
+        try {
+            await fetch(`api/index.php?action=client_log`, {
+                method: 'POST',
+                body: JSON.stringify({ message, level })
+            });
+        } catch(e) {}
+    }
+
+    /**
      * Core request utility for communicating with the PHP backend.
      */
     public request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
         const url = endpoint.startsWith('http') ? endpoint : `api/index.php?${endpoint}`;
         
-        // Configurar headers de autenticación si hay token
         const token = localStorage.getItem('sp_session_token');
         if (token) {
             options.headers = {
@@ -47,17 +58,26 @@ class DBService {
             try {
                 json = JSON.parse(rawText);
             } catch (e) {
-                console.error("Malformed JSON response:", rawText);
-                // Si la respuesta no es JSON, mostramos un fragmento para debug
-                const snippet = rawText.substring(0, 200).replace(/<[^>]*>?/gm, '');
-                throw new Error(`Error del servidor: ${snippet}...`);
+                const snippet = rawText.substring(0, 500);
+                this.logRemote(`Malformed JSON from ${endpoint}: ${snippet}`, 'ERROR');
+                throw new Error(`Error del servidor (No-JSON). Revisa el log de mantenimiento.`);
             }
 
             if (json.success === false) {
-                throw new Error(json.error || 'Error desconocido en el servidor');
+                // Errores controlados por el backend también se loguean
+                if (endpoint !== 'action=heartbeat') {
+                    this.logRemote(`API Error (${endpoint}): ${json.error}`, 'WARNING');
+                }
+                throw new Error(json.error || 'Error desconocido');
             }
 
             return json.data as T;
+        }).catch(err => {
+            // Error de red (CORS, servidor caído, etc)
+            if (!(err instanceof Error && err.message.includes('Sesión'))) {
+                this.logRemote(`Network/Fetch Error: ${err.message} (${endpoint})`, 'ERROR');
+            }
+            throw err;
         });
     }
 
@@ -201,14 +221,14 @@ class DBService {
 
     public async purchaseVideo(userId: string, videoId: string): Promise<void> {
         return this.request<void>(`action=purchase_video`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ userId, videoId })
         });
     }
 
     public async rateVideo(userId: string, videoId: string, type: 'like' | 'dislike'): Promise<UserInteraction> {
         return this.request<UserInteraction>(`action=rate_video`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ userId, videoId, type })
         });
     }
@@ -219,7 +239,7 @@ class DBService {
 
     public async markWatched(userId: string, videoId: string): Promise<void> {
         return this.request<void>(`action=mark_watched`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ userId, videoId })
         });
     }
@@ -237,7 +257,7 @@ class DBService {
 
     public async deleteVideo(videoId: string, userId: string): Promise<void> {
         return this.request<void>(`action=delete_video`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ id: videoId, userId })
         });
     }
@@ -365,7 +385,6 @@ class DBService {
     }
 
     public async createListing(formData: FormData): Promise<void> {
-        // Asegurarse de que el action esté en la URL para el router de PHP
         return this.request<void>(`action=create_listing`, {
             method: 'POST',
             body: formData

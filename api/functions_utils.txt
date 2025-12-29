@@ -1,54 +1,50 @@
 <?php
 
 /**
- * Sistema de Logs Centralizado
+ * Sistema de Logs Centralizado Mejorado
  */
 function write_log($message, $level = 'INFO') {
     $logFile = __DIR__ . '/debug_log.txt';
-    $settingsFile = 'db_config.json';
     
-    // Solo loguear si la configuración existe (evitar logs durante instalación)
-    if (!file_exists($settingsFile)) return;
-
+    // Si es un error crítico, ignoramos verificaciones y tratamos de escribir
     $timestamp = date('Y-m-d H:i:s');
-    $formattedMessage = "[$timestamp] [$level] $message" . PHP_EOL;
     
-    // Intentar escribir al archivo. Ignorar fallos de permisos silenciosamente.
+    // Formatear mensaje con contexto si es un error
+    $trace = '';
+    if ($level === 'ERROR' || $level === 'FATAL') {
+        $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
+        if (isset($bt[1])) {
+            $file = basename($bt[1]['file'] ?? 'unknown');
+            $line = $bt[1]['line'] ?? '0';
+            $trace = " [File: $file, Line: $line]";
+        }
+    }
+
+    $formattedMessage = "[$timestamp] [$level]$trace $message" . PHP_EOL;
+    
+    // Escribir al archivo. Si falla, PHP reportará al error_log del sistema.
     @file_put_contents($logFile, $formattedMessage, FILE_APPEND);
 }
 
 /**
  * Traduce una URL o ruta relativa a una ruta absoluta del sistema de archivos.
- * Crucial para que FFmpeg pueda encontrar los archivos en el disco del NAS.
  */
 function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
+    if (file_exists($pathOrUrl)) return realpath($pathOrUrl);
 
-    // 1. Si es una ruta absoluta existente
-    if (file_exists($pathOrUrl)) {
-        return realpath($pathOrUrl);
-    }
-
-    // 2. Si la ruta empieza con 'api/', limpiar el prefijo
     $cleanPath = $pathOrUrl;
     if (strpos($cleanPath, 'api/') === 0) {
         $cleanPath = substr($cleanPath, 4);
     }
 
-    // 3. Buscar relativo al directorio actual
-    if (file_exists($cleanPath)) {
-        return realpath($cleanPath);
-    }
+    if (file_exists($cleanPath)) return realpath($cleanPath);
 
-    // 4. Intentar reconstruir si es una ruta de uploads
     if (strpos($cleanPath, 'uploads/') !== false) {
         $baseDir = dirname(__DIR__); 
         $fullPath = $baseDir . DIRECTORY_SEPARATOR . $cleanPath;
-        if (file_exists($fullPath)) {
-            return realpath($fullPath);
-        }
+        if (file_exists($fullPath)) return realpath($fullPath);
     }
-
     return false;
 }
 
@@ -59,19 +55,16 @@ function fix_url($url) {
     return $url;
 }
 
+// ... resto de funciones (get_youtube_video, etc) se mantienen igual ...
 function get_youtube_video($query, $config) {
     putenv("LC_ALL=C.UTF-8"); 
     $bin = $config['ytDlpPath'] ?: 'yt-dlp';
-    
     $safeQuery = escapeshellarg($query);
     $isUrl = filter_var($query, FILTER_VALIDATE_URL) && strpos($query, 'youtube.com') !== false;
     $searchArg = $isUrl ? $safeQuery : escapeshellarg("ytsearch12:$query");
-    
     $cmd = "\"$bin\" $searchArg --dump-json --no-warnings --no-check-certificate 2>&1";
     exec($cmd, $output, $res);
-
     if ($res !== 0) throw new Exception("yt-dlp error: " . implode(" ", $output));
-    
     $results = [];
     foreach ($output as $line) {
         $data = json_decode($line, true);
@@ -96,83 +89,37 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
     $pathParts = explode('/', dirname($fullPathNormalized));
-    
-    $junkPatterns = [
-        '/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i',
-        '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i',
-        '/\b(aac|ac3|eac3|dts|truehd|flac|mp3|atmos|dd5\.1|dd\+|5\.1|7\.1)\b/i',
-        '/\b(hdr|hdr10|dv|dolby|vision|10bit|8bit|sdr)\b/i',
-        '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i',
-        '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i',
-        '/\b(mkv|mp4|avi|mov|wmv|flv|ts)\b/i',
-        '/www\.[a-z0-9-]+\.[a-z]+/i'
-    ];
-
+    $junkPatterns = ['/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i', '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i', '/\b(aac|ac3|eac3|dts|truehd|flac|mp3|atmos|dd5\.1|dd\+|5\.1|7\.1)\b/i', '/\b(hdr|hdr10|dv|dolby|vision|10bit|8bit|sdr)\b/i', '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i', '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i', '/\b(mkv|mp4|avi|mov|wmv|flv|ts)\b/i', '/www\.[a-z0-9-]+\.[a-z]+/i'];
     $cleanText = function($txt) use ($junkPatterns) {
         $t = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $txt);
         foreach ($junkPatterns as $p) { $t = preg_replace($p, '', $t); }
         return trim(preg_replace('/\s+/', ' ', $t));
     };
-
     $cleanName = $cleanText($filename);
     if (strlen($cleanName) < 2) $cleanName = $filename;
-
     $detectedCategory = 'GENERAL';
     $ancestors = array_reverse($pathParts);
-
     foreach ($ancestors as $folder) {
         $folderUpper = strtoupper(trim($folder));
-        if (in_array($folderUpper, $customCategories)) {
-            $detectedCategory = $folderUpper;
-            break;
-        }
-        foreach ($customCategories as $cc) {
-            if (strpos($folderUpper, $cc) !== false) {
-                $detectedCategory = $cc;
-                break 2;
-            }
-        }
+        if (in_array($folderUpper, $customCategories)) { $detectedCategory = $folderUpper; break; }
+        foreach ($customCategories as $cc) { if (strpos($folderUpper, $cc) !== false) { $detectedCategory = $cc; break 2; } }
     }
-
-    return [
-        'title' => ucwords(strtolower($cleanName)),
-        'category' => $detectedCategory
-    ];
+    return ['title' => ucwords(strtolower($cleanName)), 'category' => $detectedCategory];
 }
 
-/**
- * Streamer robusto que soporta Range Requests y resolución de IDs.
- */
 function streamVideo($id, $pdo) {
     while (ob_get_level()) ob_end_clean();
-
-    // 1. Buscar el video por ID para obtener su URL real
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $videoUrl = $stmt->fetchColumn();
-
-    if (!$videoUrl) {
-        header("HTTP/1.0 404 Not Found");
-        echo "Video no encontrado en base de datos.";
-        exit;
-    }
-
-    // 2. Resolver la ruta absoluta en el servidor
+    if (!$videoUrl) { header("HTTP/1.0 404 Not Found"); exit; }
     $realPath = resolve_video_path($videoUrl);
-
-    if (!$realPath || !file_exists($realPath)) {
-        header("HTTP/1.0 404 Not Found");
-        echo "Archivo fisico no encontrado: " . $videoUrl;
-        exit;
-    }
-    
+    if (!$realPath || !file_exists($realPath)) { header("HTTP/1.0 404 Not Found"); exit; }
     $fileSize = sprintf("%u", filesize($realPath));
     $fp = fopen($realPath, 'rb');
-    
     header('Content-Type: video/mp4');
     header('Accept-Ranges: bytes');
     header('Cache-Control: public, max-age=3600');
-
     if (isset($_SERVER['HTTP_RANGE'])) {
         preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
         $offset = intval($matches[1]);
@@ -181,16 +128,8 @@ function streamVideo($id, $pdo) {
         header("Content-Range: bytes $offset-$end/$fileSize");
         header("Content-Length: " . ($end - $offset + 1));
         fseek($fp, $offset);
-    } else {
-        header("Content-Length: $fileSize");
-    }
-
-    // Buffer optimizado de 128KB por fragmento
-    while (!feof($fp)) {
-        echo fread($fp, 131072);
-        flush();
-        if (connection_aborted()) break;
-    }
+    } else { header("Content-Length: $fileSize"); }
+    while (!feof($fp)) { echo fread($fp, 131072); flush(); if (connection_aborted()) break; }
     fclose($fp);
     exit;
 }
