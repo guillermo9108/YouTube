@@ -38,9 +38,7 @@ export default function GridProcessor() {
             try {
                 await vid.play();
                 setStatus('CAPTURING');
-            } catch (e) {
-                // Fallback si el autoplay falla incluso silenciado
-            }
+            } catch (e) {}
         };
         startPlay();
 
@@ -65,7 +63,6 @@ export default function GridProcessor() {
         setStatus('DONE');
         
         try {
-            // Usamos una llamada directa para incluir el flag de incompatibilidad
             const fd = new FormData();
             fd.append('id', activeTask.id);
             fd.append('duration', String(duration));
@@ -73,7 +70,6 @@ export default function GridProcessor() {
             fd.append('clientIncompatible', isIncompatible ? '1' : '0');
             
             await db.request(`action=update_video_metadata`, { method: 'POST', body: fd });
-            // Notificamos al contexto para limpiar la tarea
             completeTask(duration, null);
         } catch(e) {
             skipTask();
@@ -84,13 +80,12 @@ export default function GridProcessor() {
         const vid = e.currentTarget;
         if (!activeTask || processedRef.current) return;
 
-        // Caso A: Browser detecta que es solo audio o codec incompatible (width 0)
+        // Si el navegador detecta width=0, es incompatible (se comporta como audio)
         if (vid.readyState >= 1 && vid.videoWidth === 0 && vid.duration > 0) {
             handleForceComplete(vid.duration, true);
             return;
         }
 
-        // Caso B: Captura normal
         if (vid.currentTime > 1.5 && vid.videoWidth > 0) {
             processedRef.current = true;
             try {
@@ -104,7 +99,6 @@ export default function GridProcessor() {
                         setStatus('DONE');
                         const file = blob ? new File([blob], "thumb.jpg", { type: "image/jpeg" }) : null;
                         
-                        // Llamada manual para soportar el flag clientIncompatible: false
                         const fd = new FormData();
                         fd.append('id', activeTask.id);
                         fd.append('duration', String(vid.duration));
@@ -137,7 +131,7 @@ export default function GridProcessor() {
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
                         <Sparkles size={10} className="text-indigo-400" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{status === 'DONE' ? 'FINALIZADO' : 'ANALIZANDO'}</span>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{status === 'DONE' ? 'LISTO' : 'ANALIZANDO'}</span>
                     </div>
                     <div className="text-[11px] font-bold text-white truncate" title={activeTask.title}>{activeTask.title}</div>
                     {status === 'CAPTURING' && <div className="w-full h-1 bg-slate-800 rounded-full mt-1.5 overflow-hidden"><div className="h-full bg-indigo-500 animate-pulse"></div></div>}

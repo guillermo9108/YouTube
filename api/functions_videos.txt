@@ -179,7 +179,7 @@ function video_update_metadata($pdo, $post, $files) {
     $sql = "UPDATE videos SET category = 'PROCESSING', duration = ?, processing_attempts = 0";
     $params = [$duration];
     
-    // Si el cliente no pudo extraer miniatura pero nos dio duración, intentamos con FFmpeg en servidor
+    // Si el cliente reporta incompatibilidad (o no mandó thumb pero tiene duración), intentamos extracción local
     if ($clientIncompatible && !isset($files['thumbnail'])) {
         $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
         $ffmpeg = $stmtS->fetchColumn() ?: 'ffmpeg';
@@ -192,14 +192,16 @@ function video_update_metadata($pdo, $post, $files) {
         if ($realPath && file_exists($realPath)) {
             $tDir = 'uploads/thumbnails/';
             if (!is_dir($tDir)) mkdir($tDir, 0777, true);
-            $thumbPath = "{$tDir}{$id}.jpg";
-            $cmd = "\"$ffmpeg\" -i \"$realPath\" -ss 00:00:02 -vframes 1 \"$thumbPath\" -y 2>&1";
+            $thumbName = "{$id}.jpg";
+            $thumbPath = $tDir . $thumbName;
+            // Intentar extraer miniatura en el segundo 2
+            $cmd = "\"$ffmpeg\" -ss 00:00:02 -i \"$realPath\" -vframes 1 -q:v 2 \"$thumbPath\" -y 2>&1";
             @exec($cmd);
             if (file_exists($thumbPath)) {
                 $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; 
             }
         }
-        // Marcamos para transcodificación obligatoria ya que el navegador no lo soporta nativamente
+        // Marcar para transcodificación automática obligatoria
         $sql .= ", needs_transcode = 1, transcode_status = 'WAITING'";
     }
 
@@ -258,10 +260,13 @@ function video_delete($pdo, $input) {
     $stmt->execute([$id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$video) respond(false, null, "No encontrado");
+    
     $stmtU = $pdo->prepare("SELECT role FROM users WHERE id = ?");
-    $stmtU->execute([uid]);
+    $stmtU->execute([$uid]); // ERROR FIX: Se añade $ a uid
     $role = $stmtU->fetchColumn();
+    
     if ($video['creatorId'] !== $uid && $role !== 'ADMIN') respond(false, null, "No autorizado");
+    
     $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
     if (strpos($video['videoUrl'] ?? '', 'uploads/videos/') !== false) {
         $vPath = str_replace('api/', '', $video['videoUrl']);
