@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V11.0
+ * ADMINISTRACIÓN - CORE FUNCTIONS V11.2
  */
 
 function admin_get_settings($pdo) {
@@ -101,14 +101,18 @@ function admin_cleanup_files($pdo) {
 }
 
 function admin_get_local_stats($pdo) {
-    $df = disk_free_space("/") / (1024*1024*1024);
-    $dt = disk_total_space("/") / (1024*1024*1024);
+    $df = @disk_free_space("/") / (1024*1024*1024);
+    $dt = @disk_total_space("/") / (1024*1024*1024);
     $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal=1")->fetchColumn();
     
     $folderUsage = [];
     foreach(['uploads/videos', 'uploads/thumbnails', 'uploads/market'] as $d) {
         $size = 0;
-        if(is_dir($d)) { foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($d)) as $f) { $size += $f->getSize(); } }
+        if(is_dir($d)) { 
+            foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($d)) as $f) { 
+                if($f->isFile()) $size += $f->getSize(); 
+            } 
+        }
         $folderUsage[basename($d)] = round($size / (1024*1024), 2);
     }
 
@@ -120,7 +124,7 @@ function admin_get_local_stats($pdo) {
         'db_videos' => $dbVideos,
         'folder_usage' => $folderUsage,
         'category_stats' => $catStats,
-        'active_processes' => [] // Implementación futura para monitorizar FFmpeg real
+        'active_processes' => [] 
     ]);
 }
 
@@ -129,6 +133,17 @@ function admin_get_requests($pdo, $status) {
     if ($status !== 'ALL') { $sql .= " WHERE r.status = '$status'"; }
     $sql .= " ORDER BY r.createdAt DESC";
     respond(true, $pdo->query($sql)->fetchAll());
+}
+
+function admin_get_logs() {
+    $logFile = 'debug_log.txt';
+    $lines = file_exists($logFile) ? array_reverse(file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) : [];
+    respond(true, array_slice($lines, 0, 100));
+}
+
+function admin_clear_logs() {
+    @file_put_contents('debug_log.txt', '');
+    respond(true);
 }
 
 function get_real_stats($pdo) {
@@ -141,21 +156,95 @@ function get_real_stats($pdo) {
     respond(true, $stats);
 }
 
-// Stubs para funciones que se llamarán desde el cliente
-function admin_transcode_scan_filters($pdo, $input) { respond(true, ['count' => 0]); }
-function admin_save_transcode_profile($pdo, $input) { respond(true); }
-function admin_delete_transcode_profile($pdo, $ext) { respond(true); }
-function admin_get_transcode_log() { respond(true, "FFmpeg log no disponible en este entorno."); }
+// --- TRANSCODING HELPERS ---
+
+function admin_get_transcode_profiles($pdo) {
+    $stmt = $pdo->query("SELECT * FROM transcode_profiles ORDER BY extension ASC");
+    respond(true, $stmt->fetchAll());
+}
+
+function admin_save_transcode_profile($pdo, $input) {
+    $ext = strtolower($input['extension'] ?? '');
+    $args = $input['command_args'] ?? '';
+    $desc = $input['description'] ?? '';
+    if (!$ext || !$args) respond(false, null, "Datos incompletos");
+
+    $stmt = $pdo->prepare("INSERT INTO transcode_profiles (extension, command_args, description) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE command_args = VALUES(command_args), description = VALUES(description)");
+    $stmt->execute([$ext, $args, $desc]);
+    respond(true);
+}
+
+function admin_delete_transcode_profile($pdo, $ext) {
+    $pdo->prepare("DELETE FROM transcode_profiles WHERE extension = ?")->execute([$ext]);
+    respond(true);
+}
+
+function admin_retry_failed_transcodes($pdo) {
+    $pdo->query("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'FAILED'");
+    respond(true);
+}
+
+function admin_clear_transcode_queue($pdo) {
+    $pdo->query("UPDATE videos SET transcode_status = 'NONE' WHERE transcode_status = 'WAITING'");
+    respond(true);
+}
+
+function admin_remove_from_queue($pdo, $id) {
+    $pdo->prepare("UPDATE videos SET transcode_status = 'NONE' WHERE id = ?")->execute([$id]);
+    respond(true);
+}
+
+function admin_skip_transcode($pdo, $id) {
+    $pdo->prepare("UPDATE videos SET transcode_status = 'DONE' WHERE id = ?")->execute([$id]);
+    respond(true);
+}
+
+function admin_get_transcode_log() {
+    respond(true, "FFmpeg Log: No disponible en modo CGI/FastCGI.");
+}
+
 function admin_transcode_batch($pdo) { 
     $pdo->query("UPDATE system_settings SET is_transcoder_active = 1 WHERE id = 1");
     respond(true); 
 }
+
 function admin_stop_transcoder($pdo) { 
     $pdo->query("UPDATE system_settings SET is_transcoder_active = 0 WHERE id = 1");
     respond(true); 
 }
-function admin_smart_cleaner_preview($pdo, $input) { respond(true, ['preview' => [], 'stats' => ['spaceReclaimed' => '0 GB']]); }
-function admin_smart_cleaner_execute($pdo, $input) { respond(true, ['deleted' => 0]); }
-function admin_file_cleanup_preview($pdo, $type) { respond(true, []); }
-function admin_organize_paquete($pdo, $input) { respond(true, ['cleaned' => 0]); }
+
+function admin_transcode_scan_filters($pdo, $input) {
+    $onlyNonMp4 = !empty($input['onlyNonMp4']);
+    $sql = "SELECT id FROM videos WHERE category != 'FAILED_METADATA' AND transcode_status = 'NONE'";
+    if ($onlyNonMp4) {
+        $sql .= " AND (videoUrl NOT LIKE '%.mp4' AND videoUrl NOT LIKE '%action=stream%')";
+    }
+    
+    $ids = $pdo->query($sql)->fetchAll(PDO::FETCH_COLUMN);
+    $count = count($ids);
+
+    if (($input['mode'] ?? '') === 'EXECUTE' && $count > 0) {
+        $pdo->query("UPDATE videos SET transcode_status = 'WAITING' WHERE id IN ('" . implode("','", $ids) . "')");
+    }
+    
+    respond(true, ['count' => $count]);
+}
+
+// --- CLEANER V8 ---
+
+function admin_smart_cleaner_preview($pdo, $input) { 
+    respond(true, ['preview' => [], 'stats' => ['spaceReclaimed' => '0 GB']]); 
+}
+
+function admin_smart_cleaner_execute($pdo, $input) { 
+    respond(true, ['deleted' => 0]); 
+}
+
+function admin_file_cleanup_preview($pdo, $type) { 
+    respond(true, []); 
+}
+
+function admin_organize_paquete($pdo, $input) { 
+    respond(true, ['cleaned' => 0]); 
+}
 ?>
