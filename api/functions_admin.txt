@@ -58,6 +58,81 @@ function admin_add_balance($pdo, $input) {
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
 
+function admin_handle_balance_request($pdo, $input) {
+    $reqId = $input['reqId'] ?? '';
+    $status = $input['status'] ?? ''; // APPROVED o REJECTED
+    
+    if (!$reqId || !in_array($status, ['APPROVED', 'REJECTED'])) respond(false, null, 'Datos inválidos');
+
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM balance_requests WHERE id = ? FOR UPDATE");
+        $stmt->execute([$reqId]);
+        $req = $stmt->fetch();
+
+        if (!$req) throw new Exception("Solicitud no encontrada");
+        if ($req['status'] !== 'PENDING') throw new Exception("Solicitud ya procesada");
+
+        if ($status === 'APPROVED') {
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp) VALUES (?, ?, ?, 'DEPOSIT', ?)")
+                ->execute([uniqid('dep_'), $req['userId'], $req['amount'], time()]);
+            
+            // Notificación
+            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
+                ->execute([uniqid('n_'), $req['userId'], "Tu recarga de {$req['amount']}$ ha sido aprobada.", time()]);
+        }
+
+        $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
+}
+
+function admin_handle_vip_request($pdo, $input) {
+    $reqId = $input['reqId'] ?? '';
+    $status = $input['status'] ?? '';
+
+    if (!$reqId || !in_array($status, ['APPROVED', 'REJECTED'])) respond(false, null, 'Datos inválidos');
+
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM vip_requests WHERE id = ? FOR UPDATE");
+        $stmt->execute([$reqId]);
+        $req = $stmt->fetch();
+
+        if (!$req) throw new Exception("Solicitud no encontrada");
+        if ($req['status'] !== 'PENDING') throw new Exception("Solicitud ya procesada");
+
+        if ($status === 'APPROVED') {
+            $plan = json_decode($req['planSnapshot'], true);
+            $userId = $req['userId'];
+            
+            if ($plan['type'] === 'BALANCE') {
+                $bonus = floatval($plan['bonusPercent'] ?? 0);
+                $total = $plan['price'] + ($plan['price'] * ($bonus / 100));
+                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $userId]);
+            } else {
+                $days = intval($plan['durationDays'] ?? 30);
+                $now = time();
+                $stmtU = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
+                $stmtU->execute([$userId]);
+                $current = intval($stmtU->fetchColumn());
+                $start = ($current > $now) ? $current : $now;
+                $newExpiry = $start + ($days * 86400);
+                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
+            }
+            
+            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
+                ->execute([uniqid('n_'), $userId, "Tu membresía/recarga ha sido activada.", time()]);
+        }
+
+        $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
+}
+
 function admin_get_finance_requests($pdo) {
     $balance = $pdo->query("SELECT r.*, u.username FROM balance_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC")->fetchAll();
     $vip = $pdo->query("SELECT r.*, u.username FROM vip_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC")->fetchAll();
