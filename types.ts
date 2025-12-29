@@ -53,8 +53,14 @@ export interface Video {
   views: number;
   likes: number;
   isLocal?: boolean | number | string;
-  transcode_status?: 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
+  transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
+  // Backend dynamic properties
+  size_fmt?: string;
+  transcode_progress?: number;
+  needs_transcode?: boolean | number;
+  processing_attempts?: number;
+  fileHash?: string;
 }
 
 export interface Transaction {
