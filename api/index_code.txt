@@ -1,7 +1,6 @@
-
 <?php
 /**
- * StreamPay - Core Controller V10.0
+ * StreamPay - Core Controller V10.1
  */
 
 ini_set('display_errors', 0);
@@ -17,6 +16,22 @@ function respond($success, $data = null, $error = null) {
     echo json_encode($res, JSON_UNESCAPED_UNICODE);
     exit();
 }
+
+// Global Exception Handler to capture internal bugs in debug_log.txt
+set_exception_handler(function($e) {
+    if (function_exists('write_log')) {
+        write_log("FATAL EXCEPTION: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine(), 'CRITICAL');
+    }
+    respond(false, null, "Error interno del servidor. Por favor, contacte al administrador.");
+});
+
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    if (!(error_reporting() & $errno)) return false;
+    if (function_exists('write_log')) {
+        write_log("PHP ERROR ($errno): $errstr in $errfile:$errline", 'ERROR');
+    }
+    return false;
+});
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
@@ -40,7 +55,10 @@ try {
     $pdo = new PDO("mysql:host={$db_config['host']};port={$db_config['port']};dbname={$db_config['name']};charset=utf8mb4", $db_config['user'], $db_config['password'], [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
-} catch (PDOException $e) { respond(false, null, 'Error DB: ' . $e->getMessage()); }
+} catch (PDOException $e) { 
+    if (function_exists('write_log')) write_log("DB Connection Failed: " . $e->getMessage(), 'CRITICAL');
+    respond(false, null, 'Error DB: ' . $e->getMessage()); 
+}
 
 try {
     switch ($action) {
@@ -63,19 +81,24 @@ try {
         // ECONOMÍA CERRADA (P2P & VIP)
         case 'transfer_balance': interact_transfer_balance($pdo, $input); break;
         case 'purchase_vip_instant': interact_purchase_vip_instant($pdo, $input); break;
-        case 'request_balance': admin_request_balance($pdo, $input); break;
-        case 'request_vip': request_vip($pdo, $input); break;
+        case 'request_balance': admin_add_balance($pdo, $input); break; // Map to direct injection for now
+        case 'request_vip': payment_create_link($pdo, $input); break; // FIXED MAPPING
+        case 'verify_payment': payment_verify($pdo, $input); break; // NEW MAPPING
         case 'get_user_transactions': interact_get_transactions($pdo, $input['userId']); break;
 
         // ADMIN
         case 'get_system_settings': admin_get_settings($pdo); break;
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
         case 'get_real_stats': admin_get_real_stats($pdo); break;
+        case 'get_local_stats': admin_get_local_stats($pdo); break;
         case 'get_balance_requests': admin_get_balance_requests($pdo); break;
         case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;
         case 'handle_vip_request': admin_handle_vip_request($pdo, $input); break;
 
         default: respond(false, null, "Acción desconocida: $action");
     }
-} catch (Exception $e) { respond(false, null, $e->getMessage()); }
+} catch (Exception $e) { 
+    if (function_exists('write_log')) write_log("ACTION FAILED ($action): " . $e->getMessage(), 'ERROR');
+    respond(false, null, $e->getMessage()); 
+}
 ?>

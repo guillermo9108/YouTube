@@ -1,6 +1,23 @@
 <?php
 
 /**
+ * Sistema de Logs Centralizado
+ */
+function write_log($message, $level = 'INFO') {
+    $logFile = __DIR__ . '/debug_log.txt';
+    $settingsFile = 'db_config.json';
+    
+    // Solo loguear si la configuración existe (evitar logs durante instalación)
+    if (!file_exists($settingsFile)) return;
+
+    $timestamp = date('Y-m-d H:i:s');
+    $formattedMessage = "[$timestamp] [$level] $message" . PHP_EOL;
+    
+    // Intentar escribir al archivo. Ignorar fallos de permisos silenciosamente.
+    @file_put_contents($logFile, $formattedMessage, FILE_APPEND);
+}
+
+/**
  * Traduce una URL o ruta relativa a una ruta absoluta del sistema de archivos.
  * Crucial para que FFmpeg pueda encontrar los archivos en el disco del NAS.
  */

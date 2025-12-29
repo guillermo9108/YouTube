@@ -1,17 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { 
     Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, 
     Filter, History, AlertCircle, Activity, Box, Radio, Trash2, Settings2, 
     Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert, 
-    FileText, ScrollText, Copy, FastForward, Save, PlusCircle
+    FileText, ScrollText, Copy, FastForward, Save, PlusCircle, Loader2
 } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
+import { Video } from '../../../types';
 
 export default function AdminTranscoder() {
     const toast = useToast();
     const [isRunning, setIsRunning] = useState(false);
     const [stats, setStats] = useState({ waiting: 0, processing: 0, failed: 0, done: 0 });
+    const [allVideos, setAllVideos] = useState<Video[]>([]);
     const [activeProcesses, setActiveProcesses] = useState<any[]>([]);
     const [localStats, setLocalStats] = useState<any>(null);
     const [profiles, setProfiles] = useState<any[]>([]);
@@ -38,6 +40,7 @@ export default function AdminTranscoder() {
     const loadData = async () => {
         try {
             const all = await db.getAllVideos();
+            setAllVideos(all);
             const waitingVids = all.filter((v: any) => v.transcode_status === 'WAITING');
             const failedOnes = all.filter((v: any) => v.transcode_status === 'FAILED');
             const processingOnes = all.filter((v: any) => v.transcode_status === 'PROCESSING');
@@ -70,6 +73,8 @@ export default function AdminTranscoder() {
         const interval = setInterval(loadData, 4000);
         return () => clearInterval(interval);
     }, []);
+
+    const failedVideos = useMemo(() => allVideos.filter(v => v.transcode_status === 'FAILED'), [allVideos]);
 
     const handleScanFilter = async (mode: 'PREVIEW' | 'EXECUTE') => {
         setIsScanning(true);
@@ -129,6 +134,11 @@ export default function AdminTranscoder() {
         finally { setIsLoadingTechLog(false); }
     };
 
+    const handleRetryAll = async () => {
+        if (!confirm("¿Reintentar todos los videos fallidos?")) return;
+        await handleAction('admin_retry_failed_transcodes');
+    };
+
     return (
         <div className="space-y-6 animate-in fade-in max-w-7xl mx-auto pb-24 px-2">
             
@@ -148,7 +158,7 @@ export default function AdminTranscoder() {
                     </div>
                     <div className="text-2xl font-black text-emerald-400">{activeProcesses.length}</div>
                 </div>
-                <div className="bg-slate-900 border border-red-500/30 p-4 rounded-2xl shadow-lg cursor-pointer" onClick={() => setShowFailedList(true)}>
+                <div className="bg-slate-900 border border-red-500/30 p-4 rounded-2xl shadow-lg cursor-pointer hover:bg-slate-800 transition-colors" onClick={() => setShowFailedList(true)}>
                     <div className="flex justify-between items-center mb-2">
                         <AlertTriangle size={18} className="text-red-400"/>
                         <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Fallidos</span>
@@ -346,7 +356,7 @@ export default function AdminTranscoder() {
                             <h4 className="font-black text-white text-sm uppercase">Logs de Salida FFmpeg</h4>
                             <button onClick={() => setTechnicalLog(null)} className="p-2 text-slate-400 hover:text-white"><X/></button>
                         </div>
-                        <div className="flex-1 overflow-auto p-6 font-mono text-[10px] leading-relaxed text-indigo-300">
+                        <div className="flex-1 overflow-auto p-6 font-mono text-[10px] leading-relaxed text-indigo-300 bg-black/50">
                             <pre className="whitespace-pre-wrap">{technicalLog}</pre>
                         </div>
                     </div>
@@ -356,13 +366,37 @@ export default function AdminTranscoder() {
             {/* Modal: Fallidos */}
             {showFailedList && (
                 <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
-                        <div className="p-5 border-b border-white/5 flex justify-between items-center">
-                            <h4 className="font-black text-white uppercase text-sm">Videos con Error de Codec</h4>
-                            <button onClick={() => setShowFailedList(false)} className="p-2 hover:bg-white/10 rounded-full"><X/></button>
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
+                        <div className="p-5 border-b border-white/5 flex justify-between items-center bg-slate-950">
+                            <div>
+                                <h4 className="font-black text-white uppercase text-sm">Archivos Fallidos ({failedVideos.length})</h4>
+                                <p className="text-[10px] text-slate-500 uppercase mt-0.5 tracking-widest">Incompatibilidad de codec o error de disco</p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={handleRetryAll} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-1.5"><RotateCcw size={12}/> Reintentar Todo</button>
+                                <button onClick={() => setShowFailedList(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-500 transition-colors"><X/></button>
+                            </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                            {/* Los videos fallidos se cargan dinámicamente desde el estado failedVids */}
+                        <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-900/50 custom-scrollbar">
+                            {failedVideos.length === 0 ? (
+                                <div className="text-center py-20 text-slate-600 italic">No hay videos con estado fallido.</div>
+                            ) : failedVideos.map(v => (
+                                <div key={v.id} className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-white/5 group hover:border-red-500/30 transition-colors">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-10 h-10 bg-black rounded-lg flex items-center justify-center border border-red-900/20 shrink-0">
+                                            <FileVideo size={20} className="text-red-500 opacity-40" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="text-xs font-bold text-white truncate">{v.title}</div>
+                                            <div className="text-[9px] text-red-400 font-mono italic">Error: {v.reason || 'Sin detalles técnicos'}</div>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick={() => db.request(`action=admin_remove_from_queue&videoId=${v.id}`, {method:'POST'}).then(loadData)} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white" title="Quitar de cola"><Trash2 size={14}/></button>
+                                        <button onClick={() => db.request(`action=admin_skip_transcode&videoId=${v.id}`, {method:'POST'}).then(loadData)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500" title="Marcar como LISTO (Saltar)"><FastForward size={14}/></button>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>

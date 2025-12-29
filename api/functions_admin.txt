@@ -2,7 +2,7 @@
 
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS
- * Versión 10.0 - Business Intelligence & Real Stats
+ * Versión 10.1 - Business Intelligence & Diagnostics
  */
 
 // --- AJUSTES DEL SISTEMA ---
@@ -65,7 +65,6 @@ function admin_get_real_stats($pdo) {
     $systemRevenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
     
     // 3. Histórico Diario (Últimos 30 días)
-    $dailyHistory = [];
     $thirtyDaysAgo = time() - (30 * 86400);
     $stmtDaily = $pdo->prepare("
         SELECT 
@@ -82,7 +81,6 @@ function admin_get_real_stats($pdo) {
     $dailyHistory = $stmtDaily->fetchAll();
 
     // 4. Histórico Mensual (Últimos 12 meses)
-    $monthlyHistory = [];
     $oneYearAgo = time() - (365 * 86400);
     $stmtMonthly = $pdo->prepare("
         SELECT 
@@ -98,15 +96,11 @@ function admin_get_real_stats($pdo) {
     $stmtMonthly->execute([$oneYearAgo]);
     $monthlyHistory = $stmtMonthly->fetchAll();
 
-    // 5. Ventas Directas del Admin
-    $adminSales = $pdo->query("SELECT COUNT(*) FROM transactions WHERE type='PURCHASE' AND creatorId IN (SELECT id FROM users WHERE role='ADMIN')")->fetchColumn();
-
     respond(true, [
         'userCount' => (int)$userCount,
         'videoCount' => (int)$videoCount,
         'totalBalance' => (float)$totalBalance,
         'systemRevenue' => (float)$systemRevenue,
-        'adminVideoSales' => (int)$adminSales,
         'history' => [
             'daily' => $dailyHistory,
             'monthly' => $monthlyHistory
@@ -114,12 +108,14 @@ function admin_get_real_stats($pdo) {
     ]);
 }
 
-// --- MOTOR DE CONVERSIÓN ---
+// --- MOTOR DE CONVERSIÓN & HEALTH ---
 
 function admin_get_local_stats($pdo) {
+    // 1. Espacio en Disco
     $free = @disk_free_space("/") / (1024 * 1024 * 1024);
     $total = @disk_total_space("/") / (1024 * 1024 * 1024);
     
+    // 2. Procesos FFmpeg Activos
     $activeProcesses = [];
     $osPidsStr = shell_exec("pgrep -f \"SP_JOB_ID_\"");
     if (!empty(trim($osPidsStr))) {
@@ -142,13 +138,29 @@ function admin_get_local_stats($pdo) {
         }
     }
 
-    $dbProcessingCount = $pdo->query("SELECT COUNT(*) FROM videos WHERE transcode_status = 'PROCESSING'")->fetchColumn();
+    // 3. Uso de Carpetas
+    $folderUsage = [];
+    $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market'];
+    foreach ($dirs as $dir) {
+        $size = 0;
+        if (is_dir($dir)) {
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file) {
+                if ($file->isFile()) $size += $file->getSize();
+            }
+        }
+        $folderUsage[$dir] = round($size / (1024 * 1024), 2); // MB
+    }
+
+    // 4. Estadísticas por Categoría
+    $categoryStats = $pdo->query("SELECT category, COUNT(*) as count, SUM(views) as totalViews FROM videos GROUP BY category ORDER BY count DESC")->fetchAll();
 
     respond(true, [
         'disk_free' => round($free, 2),
         'disk_total' => round($total, 2),
         'active_processes' => $activeProcesses,
-        'db_processing_count' => (int)$dbProcessingCount
+        'db_videos' => (int)$pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn(),
+        'folder_usage' => $folderUsage,
+        'category_stats' => $categoryStats
     ]);
 }
 
@@ -455,3 +467,4 @@ function admin_parse_ffmpeg_progress($videoId, $totalDuration) {
     }
     return 0;
 }
+?>
