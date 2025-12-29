@@ -1,7 +1,7 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V10.7
- * Implementación robusta de guardado de configuraciones, finanzas y cálculo de disco.
+ * ADMINISTRACIÓN - CORE FUNCTIONS V10.8
+ * Implementación robusta de guardado de configuraciones, finanzas y cálculo de disco real.
  */
 
 function admin_get_settings($pdo) {
@@ -53,18 +53,24 @@ function admin_update_settings($pdo, $input) {
 }
 
 function admin_get_local_stats($pdo) {
-    // Intentar obtener la primera ruta de librería para medir el disco real del NAS
+    // Intentar obtener la primera ruta de librería válida para medir el disco del servidor
     $stmtS = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
     $s = $stmtS->fetch();
     $paths = json_decode($s['libraryPaths'] ?? '[]', true) ?: [];
     if (empty($paths) && !empty($s['localLibraryPath'])) $paths[] = $s['localLibraryPath'];
     
-    $checkPath = !empty($paths) ? $paths[0] : "/";
-    if (!is_dir($checkPath)) $checkPath = "/";
+    $checkPath = "/";
+    foreach ($paths as $p) {
+        if (!empty($p) && is_dir($p)) { $checkPath = $p; break; }
+    }
 
-    $ds = @disk_free_space($checkPath) ?: 1024*1024*1024;
-    $dt = @disk_total_space($checkPath) ?: 1024*1024*1024;
+    $ds = @disk_free_space($checkPath);
+    $dt = @disk_total_space($checkPath);
     
+    // Fallback si falla el acceso a la ruta (ej: PHP restrictions)
+    if ($ds === false) $ds = @disk_free_space(".");
+    if ($dt === false) $dt = @disk_total_space(".");
+
     $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos")->fetchColumn();
     $catStats = $pdo->query("SELECT category, COUNT(*) as count, SUM(views) as totalViews FROM videos GROUP BY category")->fetchAll(PDO::FETCH_ASSOC);
     
@@ -74,8 +80,9 @@ function admin_get_local_stats($pdo) {
     foreach ($uploadDirs as $dir) {
         $size = 0;
         if (is_dir($dir)) {
-            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file) {
-                if ($file->isFile()) $size += $file->getSize();
+            $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS));
+            foreach ($files as $file) {
+                $size += $file->getSize();
             }
         }
         $folderUsage[basename($dir)] = round($size / (1024*1024), 2); // MB

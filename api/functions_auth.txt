@@ -78,7 +78,7 @@ function auth_update_avatar($pdo, $input) {
         $name = "av_{$uid}_" . time() . ".{$ext}";
         $target = AVATAR_DIR . $name;
         
-        // Borrar anterior si existe
+        // Borrar anterior si existe para ahorrar espacio
         $stmt = $pdo->prepare("SELECT avatarUrl FROM users WHERE id = ?");
         $stmt->execute([$uid]);
         $old = $stmt->fetchColumn();

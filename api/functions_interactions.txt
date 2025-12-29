@@ -34,7 +34,7 @@ function interact_has_purchased($pdo, $userId, $videoId) {
 }
 
 function interact_get_transactions($pdo, $userId) {
-    // Corregido: Join robusto para targetId
+    // Corregido: Join robusto para targetId y asegurar que las columnas existan
     $stmt = $pdo->prepare("
         SELECT t.*, 
                u1.username as targetName, 

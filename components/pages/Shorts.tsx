@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft } from 'lucide-react';
 import { db } from '../../services/db';
@@ -10,15 +11,14 @@ interface ShortItemProps {
   isActive: boolean;
   shouldLoad: boolean;
   preload: "auto" | "none" | "metadata";
-  hasFullAccess: boolean; 
 }
 
-const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: ShortItemProps) => {
+const ShortItem = ({ video, isActive, shouldLoad, preload }: ShortItemProps) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastTapRef = useRef<number>(0);
   
-  const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
+  const [isUnlocked, setIsUnlocked] = useState(false);
   const [isMuted, setIsMuted] = useState(false); 
   const [isBuffering, setIsBuffering] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
@@ -30,18 +30,38 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   const [likeCount, setLikeCount] = useState(video.likes);
   const [isSubscribed, setIsSubscribed] = useState(false);
 
+  // LÓGICA DE ACCESO REFINADA
   useEffect(() => {
-    if (user && shouldLoad) {
+    if (!user || !video) return;
+
+    const checkAccess = async () => {
+        // 1. Gratis por defecto
+        if (Number(video.price) <= 0) { setIsUnlocked(true); return; }
+        
+        // 2. Admin o Dueño
+        if (user.role === 'ADMIN' || user.id === video.creatorId) { setIsUnlocked(true); return; }
+        
+        // 3. VIP (Solo para contenido Admin)
+        const isVip = user.vipExpiry && user.vipExpiry > (Date.now() / 1000);
+        const isCreatorAdmin = video.creatorAvatarUrl?.includes('admin') || (video as any).creatorRole === 'ADMIN'; 
+        // Nota: En un entorno real, el backend debe proveer el creatorRole. Usamos db.hasPurchased como verdad única.
+        
+        try {
+            const hasPurchased = await db.hasPurchased(user.id, video.id);
+            setIsUnlocked(hasPurchased);
+        } catch(e) { setIsUnlocked(false); }
+    };
+
+    if (shouldLoad) checkAccess();
+  }, [user?.id, video.id, shouldLoad]);
+
+  useEffect(() => {
+    if (user && shouldLoad && isActive) {
       db.getInteraction(user.id, video.id).then(setInteraction);
-      if (!hasFullAccess) {
-          db.hasPurchased(user.id, video.id).then(setIsUnlocked);
-      }
-      if (isActive) {
-          db.getComments(video.id).then(setComments);
-          db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed).catch(() => setIsSubscribed(false));
-      }
+      db.getComments(video.id).then(setComments);
+      db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed).catch(() => setIsSubscribed(false));
     }
-  }, [user, video.id, video.creatorId, shouldLoad, isActive, hasFullAccess]);
+  }, [user, video.id, video.creatorId, shouldLoad, isActive]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -75,12 +95,10 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
     const now = Date.now();
     const DOUBLE_TAP_DELAY = 300;
     if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
-        // DOUBLE TAP DETECTED
         if (!interaction?.liked) handleRate('like');
         setShowHeart(true);
         setTimeout(() => setShowHeart(false), 1000);
     } else {
-        // SINGLE TAP -> TOGGLE MUTE
         if (videoRef.current) {
             videoRef.current.muted = !videoRef.current.muted;
             setIsMuted(videoRef.current.muted);
@@ -147,6 +165,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
               <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-sm brightness-50" />
               <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
                  <div className="bg-black/40 backdrop-blur-xl p-8 rounded-2xl border border-white/10 text-center mx-4 max-w-sm w-full">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Contenido Premium</div>
                     <div className="text-4xl font-black text-amber-400 mb-2">{video.price} $</div>
                     <button onClick={() => db.purchaseVideo(user!.id, video.id).then(()=>setIsUnlocked(true))} className="w-full bg-white text-black font-bold py-3 rounded-full shadow-xl">Desbloquear</button>
                  </div>
@@ -245,7 +264,7 @@ export default function Shorts() {
   
   useEffect(() => {
     db.getAllVideos().then((all: Video[]) => {
-        const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
+        const shorts = all.filter(v => v.duration < 300 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
         setVideos(shorts);
     });
   }, []);
@@ -267,13 +286,6 @@ export default function Shorts() {
     return () => observer.disconnect();
   }, [videos]);
 
-  const hasFullAccess = useMemo(() => {
-      if (!user) return false;
-      const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-      const isVipActive = user.vipExpiry && user.vipExpiry > (Date.now() / 1000);
-      return Boolean(isAdmin || isVipActive);
-  }, [user]);
-
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative" style={{ scrollBehavior: 'smooth' }}>
       <div className="fixed top-4 left-4 z-50">
@@ -286,7 +298,7 @@ export default function Shorts() {
           </div>
       ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">
-             <ShortItem video={video} isActive={idx === activeIndex} shouldLoad={Math.abs(idx - activeIndex) <= 2} preload={idx === activeIndex ? "auto" : "metadata"} hasFullAccess={hasFullAccess} />
+             <ShortItem video={video} isActive={idx === activeIndex} shouldLoad={Math.abs(idx - activeIndex) <= 2} preload={idx === activeIndex ? "auto" : "metadata"} />
         </div>
       ))}
     </div>

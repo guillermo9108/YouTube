@@ -234,6 +234,7 @@ export interface SystemSettings {
   enableYoutube: boolean; 
   categoryPrices: Record<string, number>; 
   customCategories: string[]; 
+  libraryPaths: string[]; // SOPORTE PARA MÚLTIPLES RUTAS
   localLibraryPath: string; 
   ftpSettings?: FtpSettings;
   videoCommission: number;
