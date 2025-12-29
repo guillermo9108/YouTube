@@ -8,15 +8,17 @@ export enum UserRole {
   USER = 'USER'
 }
 
+// Added VideoCategory enum for upload and library management
 export enum VideoCategory {
-  GENERAL = 'GENERAL',
-  MOVIES = 'MOVIES',
-  SERIES = 'SERIES',
-  SPORTS = 'SPORTS',
-  MUSIC = 'MUSIC',
-  OTHER = 'OTHER',
-  PENDING = 'PENDING',
-  PROCESSING = 'PROCESSING'
+    GENERAL = 'GENERAL',
+    MOVIES = 'MOVIES',
+    SERIES = 'SERIES',
+    SPORTS = 'SPORTS',
+    MUSIC = 'MUSIC',
+    OTHER = 'OTHER',
+    PENDING = 'PENDING',
+    PROCESSING = 'PROCESSING',
+    FAILED_METADATA = 'FAILED_METADATA'
 }
 
 export interface User {
@@ -53,36 +55,6 @@ export interface Video {
   isLocal?: boolean | number | string;
   transcode_status?: 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
-  size_fmt?: string;
-}
-
-export interface Comment {
-  id: string;
-  userId: string;
-  username: string;
-  userAvatarUrl?: string;
-  text: string;
-  timestamp: number;
-}
-
-export interface UserInteraction {
-  liked: boolean;
-  disliked: boolean;
-  isWatched: boolean;
-  newLikeCount?: number;
-}
-
-export interface SaleRecord {
-  id: string;
-  amount: number;
-  adminFee?: number;
-  itemImage?: string;
-  itemTitle?: string;
-  buyerAvatar?: string;
-  buyerName?: string;
-  timestamp: number;
-  fulfillmentStatus?: string;
-  shippingData?: any;
 }
 
 export interface Transaction {
@@ -92,83 +64,12 @@ export interface Transaction {
   buyerId?: string;
   buyerName?: string;
   creatorId?: string;
-  targetId?: string;
-  targetName?: string;
   videoTitle?: string;
   itemTitle?: string;
   timestamp: number;
   adminFee?: number | string;
-}
-
-export interface Notification {
-  id: string;
-  text: string;
-  type: 'SALE' | 'UPLOAD' | 'SYSTEM' | 'TRANSFER';
-  timestamp: number;
-  isRead: boolean;
-  link: string;
-  avatarUrl?: string;
-}
-
-export interface VideoResult {
-  id: string;
-  title: string;
-  thumbnail: string;
-  downloadUrl: string;
-  source: string;
-  author?: string;
-  duration?: number;
-}
-
-export interface ContentRequest {
-  id: string;
-  userId: string;
-  username?: string;
-  query: string;
-  status: 'PENDING' | 'COMPLETED' | 'FAILED' | string;
-  createdAt: number;
-}
-
-export interface MarketplaceItem {
-  id: string;
-  title: string;
-  description: string;
-  price: number;
-  originalPrice?: number;
-  discountPercent?: number;
-  stock?: number;
-  condition: 'NUEVO' | 'USADO' | 'REACONDICIONADO' | string;
-  category: string;
-  sellerId: string;
-  sellerName: string;
-  sellerAvatarUrl?: string;
-  images: string[];
-  status: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO' | string;
-  rating?: number;
-  reviewCount?: number;
-  createdAt: number;
-}
-
-export interface CartItem extends MarketplaceItem {
-  quantity: number;
-}
-
-export interface MarketplaceReview {
-  id: string;
-  userId: string;
-  username: string;
-  userAvatarUrl?: string;
-  rating: number;
-  comment: string;
-  timestamp: number;
-}
-
-export interface BalanceRequest {
-  id: string;
-  userId: string;
-  username: string;
-  amount: number;
-  createdAt: number;
+  recipientName?: string;
+  senderName?: string;
 }
 
 export interface VipPlan {
@@ -182,41 +83,129 @@ export interface VipPlan {
   highlight?: boolean;
 }
 
+// Added Comment interface for video discussions
+export interface Comment {
+    id: string;
+    userId: string;
+    username: string;
+    userAvatarUrl?: string;
+    text: string;
+    timestamp: number;
+}
+
+// Added UserInteraction for tracking likes and watch status
+export interface UserInteraction {
+    liked: boolean;
+    disliked: boolean;
+    isWatched: boolean;
+    newLikeCount?: number;
+}
+
+// Added Notification for system and user events
+export interface Notification {
+    id: string;
+    userId: string;
+    text: string;
+    type: 'SALE' | 'UPLOAD' | 'SYSTEM';
+    link: string;
+    isRead: boolean;
+    timestamp: number;
+    avatarUrl?: string;
+    metadata?: any;
+}
+
+// Added VideoResult for external search results
+export interface VideoResult {
+    id: string;
+    title: string;
+    thumbnail: string;
+    downloadUrl: string;
+    source: string;
+    author: string;
+    duration?: number;
+}
+
+// Added ContentRequest for user-submitted content ideas
+export interface ContentRequest {
+    id: string;
+    userId: string;
+    query: string;
+    status: 'PENDING' | 'COMPLETED' | 'FAILED';
+    createdAt: number;
+    username?: string;
+}
+
+// Added MarketplaceItem for the store
+export interface MarketplaceItem {
+    id: string;
+    title: string;
+    description: string;
+    price: number;
+    originalPrice?: number;
+    discountPercent?: number;
+    stock?: number;
+    category?: string;
+    condition?: string;
+    sellerId: string;
+    sellerName: string;
+    sellerAvatarUrl?: string;
+    images?: string[];
+    status?: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO';
+    rating?: number;
+    reviewCount?: number;
+    createdAt: number;
+}
+
+// Added CartItem for shopping cart management
+export interface CartItem extends MarketplaceItem {
+    quantity: number;
+}
+
+// Added MarketplaceReview for product feedback
+export interface MarketplaceReview {
+    id: string;
+    itemId: string;
+    userId: string;
+    username: string;
+    userAvatarUrl?: string;
+    rating: number;
+    comment: string;
+    timestamp: number;
+}
+
+// Added BalanceRequest for tracking pending deposits
+export interface BalanceRequest {
+    id: string;
+    userId: string;
+    username: string;
+    amount: number;
+    createdAt: number;
+}
+
+// Added VipRequest for tracking pending membership activations
 export interface VipRequest {
-  id: string;
-  userId: string;
-  username: string;
-  planSnapshot: any;
-  paymentRef: string;
-  createdAt: number;
+    id: string;
+    userId: string;
+    username: string;
+    planSnapshot: any;
+    paymentRef?: string;
+    createdAt: number;
 }
 
-export interface FtpSettings {
-  host: string;
-  port: number;
-  user: string;
-  pass: string;
-  rootPath: string;
-}
-
-export interface FtpFile {
-  name: string;
-  path: string;
-  type: 'file' | 'dir';
-  size?: string;
-}
-
-export interface OrganizeResult {
-  processed: number;
-  remaining: number;
-}
-
+// Added SmartCleanerResult for system maintenance tools
 export interface SmartCleanerResult {
-  stats: {
-    spaceReclaimed: string;
-    videosFound: number;
-  };
-  preview: any[];
+    preview: Video[];
+    stats: {
+        spaceReclaimed: string;
+    };
+}
+
+// Added FtpFile for remote file browsing
+export interface FtpFile {
+    name: string;
+    path: string;
+    type: 'file' | 'dir';
+    size?: string;
 }
 
 export interface SystemSettings {
@@ -234,21 +223,24 @@ export interface SystemSettings {
   enableYoutube: boolean; 
   categoryPrices: Record<string, number>; 
   customCategories: string[]; 
-  libraryPaths: string[]; // SOPORTE PARA MÚLTIPLES RUTAS
   localLibraryPath: string; 
-  ftpSettings?: FtpSettings;
   videoCommission: number;
   marketCommission: number;
-  transferFee: number;
+  transferFee?: number;
   vipPlans?: VipPlan[];
   paymentInstructions?: string;
-  tropipayClientId?: string;
-  tropipayClientSecret?: string;
   currencyConversion?: number;
-  proxyUrl?: string;
-  paqueteMapper?: Record<string, string>;
+  enableDebugLog?: boolean;
+  // Added missing settings for transcoding and FTP integration
   autoTranscode?: boolean;
   transcodePreset?: string;
+  proxyUrl?: string;
   is_transcoder_active?: boolean;
-  enableDebugLog?: boolean;
+  ftpSettings?: {
+      host: string;
+      port: number;
+      user: string;
+      pass: string;
+      rootPath: string;
+  };
 }
