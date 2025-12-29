@@ -1,3 +1,4 @@
+
 import React, { Suspense, useState, useEffect } from 'react';
 // Page Imports
 import Login from './components/pages/Login';
@@ -19,6 +20,8 @@ import VipStore from './components/pages/VipStore';
 
 // Components & Context
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
+// Fix: Import missing Layout component
+import Layout from './components/Layout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UploadProvider } from './context/UploadContext';
 import { CartProvider } from './context/CartContext';
@@ -27,9 +30,6 @@ import { ToastProvider } from './context/ToastContext';
 import { GridProvider } from './context/GridContext';
 import { db } from './services/db';
 import { Loader2, WifiOff } from 'lucide-react';
-
-// Lazy load Layout
-const Layout = React.lazy(() => import('./components/Layout'));
 
 const OfflineBanner = () => {
     const [online, setOnline] = useState(navigator.onLine);
@@ -78,15 +78,18 @@ const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
   const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
+    // Verificación robusta del estado de instalación
     db.checkInstallation()
       .then((res) => {
-         if (res.status === 'not_installed') {
+         // Con el db.ts arreglado, res es solo { status: 'installed'|'not_installed' }
+         if (res && res.status === 'not_installed') {
              setNeedsSetup(true);
          }
          setCheckDone(true);
       })
-      .catch(() => {
-         setNeedsSetup(true);
+      .catch((err) => {
+         // Si hay un error de conexión, no forzamos setup a menos que sea explícito
+         console.warn("Verificación de instalación ignorada por error de red", err);
          setCheckDone(true);
       });
   }, []);

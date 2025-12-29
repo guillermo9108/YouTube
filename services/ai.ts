@@ -8,10 +8,9 @@ import { Video } from "../types";
  */
 
 const getAIClient = () => {
-    // API KEY se obtiene exclusivamente de process.env.API_KEY
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) return null;
-    return new GoogleGenAI({ apiKey });
+    // Fix: Always use process.env.API_KEY string directly in named parameter
+    if (!process.env.API_KEY) return null;
+    return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const aiService = {

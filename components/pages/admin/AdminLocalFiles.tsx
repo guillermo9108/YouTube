@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
@@ -198,7 +199,7 @@ export default function AdminLocalFiles() {
                                     <option value="ORPHAN_DB">Vínculos Rotos (Error 404)</option>
                                 </select>
                                 <button onClick={() => handleSearchCleanup()} disabled={isSearching} className="flex-1 md:flex-none px-8 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2">
-                                    {/* Fix: Added RefreshCw import from lucide-react to resolve the missing name error */}
+                                    {/* Fix: RefreshCw is now correctly imported from lucide-react */}
                                     {isSearching ? <Loader2 className="animate-spin" size={16}/> : <RefreshCw size={16}/>} Analizar
                                 </button>
                             </div>
