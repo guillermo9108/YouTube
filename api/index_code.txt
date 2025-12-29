@@ -1,10 +1,71 @@
 <?php
 /**
- * StreamPay - Core Controller V10.4
- * Inclusión de búsqueda de usuarios
+ * StreamPay - Core Controller V10.5
+ * Controlador principal para todas las peticiones de la PWA.
  */
 
-// ... (Preambulo igual)
+ob_start(); // Prevenir cualquier salida accidental antes del JSON
+ini_set('display_errors', 0); // No mostrar errores como texto para no corromper el JSON
+error_reporting(E_ALL);
+
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    ob_clean();
+    http_response_code(200);
+    exit();
+}
+
+// 1. Cargar configuración y módulos
+$configFile = 'db_config.json';
+if (!file_exists($configFile)) {
+    header('Content-Type: application/json');
+    echo json_encode(['success' => false, 'error' => 'Sistema no instalado. Ve a /#/setup']);
+    exit;
+}
+
+$config = json_decode(file_get_contents($configFile), true);
+
+// 2. Definir función de respuesta estándar
+function respond($success, $data = null, $error = null) {
+    if (ob_get_level()) ob_clean(); // Limpiar cualquier advertencia o espacio accidental
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => $success,
+        'data' => $data,
+        'error' => $error
+    ], JSON_UNESCAPED_UNICODE);
+    exit();
+}
+
+// 3. Conexión a Base de Datos
+try {
+    $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['name']};charset=utf8mb4";
+    $pdo = new PDO($dsn, $config['user'], $config['password'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+} catch (PDOException $e) {
+    respond(false, null, "Error de conexión BD: " . $e->getMessage());
+}
+
+// 4. Cargar librerías de funciones
+require_once 'functions_utils.php';
+require_once 'functions_auth.php';
+require_once 'functions_videos.php';
+require_once 'functions_interactions.php';
+require_once 'functions_market.php';
+require_once 'functions_admin.php';
+
+// 5. Procesar Acción
+$action = $_GET['action'] ?? '';
+$input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+
+// Definición de directorios para uploads
+define('MARKET_DIR', 'uploads/market/');
 
 try {
     switch ($action) {
@@ -13,15 +74,66 @@ try {
         case 'register': auth_register($pdo, $input); break;
         case 'heartbeat': auth_heartbeat($pdo, $input); break;
         case 'logout': auth_logout($pdo, $input); break;
-        case 'get_user': auth_get_user($pdo, $input['userId']); break;
+        case 'get_user': auth_get_user($pdo, $_GET['userId'] ?? ''); break;
         case 'get_all_users': auth_get_all_users($pdo); break;
-        case 'search_users': auth_search_users($pdo, $input); break; // NUEVA ACCIÓN
+        case 'search_users': auth_search_users($pdo, $input); break;
         case 'update_user_profile': auth_update_user($pdo, $input); break;
 
-        // ... (Resto de casos igual)
+        // --- VIDEOS ---
+        case 'get_videos': video_get_all($pdo); break;
+        case 'get_video': video_get_one($pdo, $_GET['id'] ?? ''); break;
+        case 'get_videos_by_creator': video_get_by_creator($pdo, $_GET['userId'] ?? ''); break;
+        case 'get_related_videos': video_get_related($pdo, $_GET['videoId'] ?? ''); break;
+        case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
+        case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;
+        case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
+        case 'delete_video': video_delete($pdo, $input); break;
+        case 'stream': streamVideo($_GET['id'] ?? '', $pdo); break;
+
+        // --- INTERACCIONES & ECONOMÍA ---
+        case 'has_purchased': interact_has_purchased($pdo, $_GET['userId'] ?? '', $_GET['videoId'] ?? ''); break;
+        case 'purchase_video': interact_purchase($pdo, $input); break;
+        case 'purchase_vip_instant': interact_purchase_vip_instant($pdo, $input); break;
+        case 'transfer_balance': interact_transfer_balance($pdo, $input); break;
+        case 'rate_video': interact_rate($pdo, $input); break;
+        case 'get_interaction': interact_get($pdo, $_GET['userId'] ?? '', $_GET['videoId'] ?? ''); break;
+        case 'mark_watched': interact_mark_watched($pdo, $input); break;
+        case 'get_user_activity': interact_get_activity($pdo, $_GET['userId'] ?? ''); break;
+        case 'get_comments': interact_get_comments($pdo, $_GET['id'] ?? ''); break;
+        case 'add_comment': interact_add_comment($pdo, $input); break;
+        case 'get_notifications': interact_get_notifications($pdo, $_GET['userId'] ?? ''); break;
+        case 'mark_notification_read': interact_mark_notification_read($pdo, $input); break;
+        case 'get_user_transactions': interact_get_transactions($pdo, $_GET['userId'] ?? ''); break;
+        case 'toggle_subscribe': interact_toggle_subscribe($pdo, $input); break;
+        case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'] ?? '', $_GET['creatorId'] ?? ''); break;
+        case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId'] ?? ''); break;
+
+        // --- MARKETPLACE ---
+        case 'get_marketplace_items': market_get_items($pdo); break;
+        case 'get_marketplace_item': market_get_item($pdo, $_GET['id'] ?? ''); break;
+        case 'create_listing': market_create_listing($pdo, $_POST, $_FILES); break;
+        case 'edit_listing': market_edit_listing($pdo, $input); break;
+        case 'add_review': market_add_review($pdo, $input); break;
+        case 'get_reviews': market_get_reviews($pdo, $_GET['itemId'] ?? ''); break;
+        case 'checkout_cart': market_checkout($pdo, $input); break;
+
+        // --- ADMIN ---
+        case 'get_system_settings': admin_get_settings($pdo); break;
+        case 'update_system_settings': admin_update_settings($pdo, $input); break;
+        case 'admin_add_balance': admin_add_balance($pdo, $input); break;
+        case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;
+        case 'admin_delete_listing': market_delete_listing($pdo, $input); break;
+        case 'get_balance_requests': admin_get_finance_requests($pdo); break;
+        case 'get_global_transactions': admin_get_global_transactions($pdo); break;
+        case 'admin_repair_db': admin_repair_db($pdo); break;
+        case 'admin_cleanup_files': admin_cleanup_files($pdo); break;
+
+        default:
+            respond(false, null, "Acción desconocida: $action");
+            break;
     }
-} catch (Exception $e) { 
-    if (function_exists('write_log')) write_log("ACTION FAILED ($action): " . $e->getMessage(), 'ERROR');
-    respond(false, null, $e->getMessage()); 
+} catch (Exception $e) {
+    if (function_exists('write_log')) write_log("ERROR CRÍTICO ($action): " . $e->getMessage(), 'ERROR');
+    respond(false, null, $e->getMessage());
 }
 ?>
