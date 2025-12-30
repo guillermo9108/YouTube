@@ -201,7 +201,7 @@ function video_update_metadata($pdo, $post, $files) {
                 $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; 
             }
         }
-        // Marcar para transcodificación automática obligatoria
+        // Marcar para transcodificación automática obligatoria ya que el browser no lo reproduce
         $sql .= ", needs_transcode = 1, transcode_status = 'WAITING'";
     }
 
@@ -262,7 +262,7 @@ function video_delete($pdo, $input) {
     if (!$video) respond(false, null, "No encontrado");
     
     $stmtU = $pdo->prepare("SELECT role FROM users WHERE id = ?");
-    $stmtU->execute([$uid]); // ERROR FIX: Se añade $ a uid
+    $stmtU->execute([$uid]); // CORRECCIÓN: Se asegura el uso de $uid como variable
     $role = $stmtU->fetchColumn();
     
     if ($video['creatorId'] !== $uid && $role !== 'ADMIN') respond(false, null, "No autorizado");

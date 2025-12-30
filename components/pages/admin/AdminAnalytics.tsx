@@ -44,9 +44,14 @@ export default function AdminAnalytics() {
         try {
             const rs = await db.request<any>('action=get_real_stats');
             setRealStats(rs);
-            if (rs) setSim(prev => ({ ...prev, users: rs.userCount || 100 }));
-        } catch(e) { console.error(e); } 
-        finally { setLoading(false); }
+            if (rs && rs.userCount) {
+                setSim(prev => ({ ...prev, users: Number(rs.userCount) }));
+            }
+        } catch(e) { 
+            console.error("Analytics Load Error:", e); 
+        } finally { 
+            setLoading(false); 
+        }
     };
 
     useEffect(() => { loadData(); }, []);
@@ -57,26 +62,21 @@ export default function AdminAnalytics() {
         const data = [];
         let currentUsers = sim.users;
         let cumulativeNetProfit = 0;
-        const totalFixedCosts = sim.contentInflow + sim.opCosts; // $1,600
+        const totalFixedCosts = sim.contentInflow + sim.opCosts;
 
         for (let i = 1; i <= steps; i++) {
-            // 1. Dinámica de Población
             const netMonthlyGrowth = (sim.growth - sim.churn) / 100;
             currentUsers = Math.max(0, currentUsers * (1 + netMonthlyGrowth));
 
-            // 2. Ingresos por Membresías (Entrada Dinero Real)
             const payingUsers = currentUsers * (sim.conversion / 100);
             const rev7d = (payingUsers * (sim.mix7d / 100)) * PRICES.d7;
             const rev14d = (payingUsers * (sim.mix14d / 100)) * PRICES.d14;
             const rev31d = (payingUsers * (sim.mix31d / 100)) * PRICES.d31;
             const totalMembershipRev = rev7d + rev14d + rev31d;
 
-            // 3. Ingresos por Economía Circular (P2P Network Fee)
-            // Volume * Fee * % de saldo circulante
             const circulatingVolume = currentUsers * sim.p2pVolume;
             const p2pProfit = circulatingVolume * (sim.p2pCommission / 100) * (sim.reinvestmentRate / 100);
 
-            // 4. Beneficio Neto Mensual
             const grossRevenue = totalMembershipRev + p2pProfit;
             const netMonthlyProfit = grossRevenue - totalFixedCosts;
             cumulativeNetProfit += netMonthlyProfit;
@@ -90,21 +90,24 @@ export default function AdminAnalytics() {
             });
         }
 
-        // Break-even logic
         const arpuMem = ((sim.mix7d/100)*PRICES.d7 + (sim.mix14d/100)*PRICES.d14 + (sim.mix31d/100)*PRICES.d31) * (sim.conversion/100);
         const arpuP2P = sim.p2pVolume * (sim.p2pCommission/100) * (sim.reinvestmentRate/100);
-        const breakEvenUsers = Math.ceil(totalFixedCosts / (arpuMem + arpuP2P));
+        const breakEvenUsers = Math.ceil(totalFixedCosts / (arpuMem + arpuP2P || 1));
 
         return { data, totalProfit: cumulativeNetProfit, breakEvenUsers, totalFixedCosts };
     }, [sim]);
 
     const renderChart = (points: any[], dataKey: string, color: string) => {
-        if (!points || points.length < 2) return null;
+        if (!points || !Array.isArray(points) || points.length < 2) return (
+            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-700 uppercase font-black tracking-widest italic">
+                Datos insuficientes para graficar
+            </div>
+        );
         const values = points.map(p => Number(p[dataKey] || 0));
-        const max = Math.max(...values.map(Math.abs), 100) * 1.2;
+        const max = Math.max(...values.map(Math.abs), 10) * 1.2;
         const path = points.map((p, i) => {
             const x = (i / (points.length - 1)) * 100;
-            const y = 50 - ((p[dataKey] / max) * 50);
+            const y = 50 - ((Number(p[dataKey]) / max) * 50);
             return `${x},${y}`;
         }).join(' ');
 
@@ -130,6 +133,7 @@ export default function AdminAnalytics() {
                         Simulador Pro
                     </button>
                 </div>
+                <button onClick={loadData} className="p-2 text-slate-500 hover:text-white"><RefreshCw size={16}/></button>
             </div>
 
             {activeView === 'REAL' ? (
@@ -138,35 +142,41 @@ export default function AdminAnalytics() {
                         <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 shadow-xl">
                             <Users className="text-blue-500 mb-2" size={24}/>
                             <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Base Usuarios</div>
-                            <div className="text-3xl font-black text-white">{realStats?.userCount}</div>
+                            <div className="text-3xl font-black text-white">{Number(realStats?.userCount || 0)}</div>
                         </div>
                         <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 shadow-xl">
                             <Landmark className="text-emerald-500 mb-2" size={24}/>
                             <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Capital Red</div>
-                            <div className="text-3xl font-black text-emerald-400">{realStats?.systemRevenue.toFixed(0)} <span className="text-sm">$</span></div>
+                            <div className="text-3xl font-black text-emerald-400">{Number(realStats?.systemRevenue || 0).toFixed(0)} <span className="text-sm">$</span></div>
                         </div>
                         <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 shadow-xl">
                             <Activity className="text-purple-500 mb-2" size={24}/>
                             <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Saldo Interno</div>
-                            <div className="text-3xl font-black text-white">{realStats?.totalBalance.toFixed(0)} <span className="text-sm">$</span></div>
+                            <div className="text-3xl font-black text-white">{Number(realStats?.totalBalance || 0).toFixed(0)} <span className="text-sm">$</span></div>
                         </div>
                         <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 shadow-xl">
                             <ArrowRightLeft className="text-amber-500 mb-2" size={24}/>
                             <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">ARPU Sistema</div>
-                            <div className="text-3xl font-black text-amber-400">{(realStats?.systemRevenue / (realStats?.userCount || 1)).toFixed(2)} <span className="text-sm">$</span></div>
+                            <div className="text-3xl font-black text-amber-400">{(Number(realStats?.systemRevenue || 0) / (Number(realStats?.userCount) || 1)).toFixed(2)} <span className="text-sm">$</span></div>
                         </div>
                     </div>
 
                     <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 md:p-12 shadow-2xl overflow-hidden relative">
-                        <h3 className="text-xl font-black text-white uppercase italic tracking-tighter mb-8">Volumen de Recaudación Real</h3>
+                        <div className="flex justify-between items-center mb-8">
+                            <h3 className="text-xl font-black text-white uppercase italic tracking-tighter">Volumen de Recaudación Real</h3>
+                            <div className="flex gap-2 p-1 bg-slate-950 rounded-lg">
+                                <button onClick={() => setTimeframe('DAYS')} className={`px-3 py-1 rounded text-[9px] font-bold uppercase transition-all ${timeframe === 'DAYS' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>Días</button>
+                                <button onClick={() => setTimeframe('MONTHS')} className={`px-3 py-1 rounded text-[9px] font-bold uppercase transition-all ${timeframe === 'MONTHS' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>Meses</button>
+                            </div>
+                        </div>
                         <div className="h-64 w-full bg-slate-950/20 rounded-3xl p-6 border border-slate-800/50">
-                            {renderChart(timeframe === 'DAYS' ? realStats?.history?.daily : realStats?.history?.monthly, 'revenue', '#10b981')}
+                            {renderChart(timeframe === 'DAYS' ? (realStats?.history?.daily || []) : (realStats?.history?.monthly || []), 'revenue', '#10b981')}
                         </div>
                     </div>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {/* Control Panel */}
+                    {/* Control Panel (Simulador) */}
                     <div className="lg:col-span-4 space-y-4">
                         <div className="bg-slate-900 p-8 rounded-[40px] border border-slate-800 shadow-xl space-y-8">
                             <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
@@ -177,17 +187,16 @@ export default function AdminAnalytics() {
                             <div className="space-y-6">
                                 <div>
                                     <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gastos Operativos (Contenido + Luz)</label>
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gastos Operativos</label>
                                         <span className="text-sm font-black text-red-400">${sim.contentInflow + sim.opCosts}</span>
                                     </div>
                                     <input type="range" min="200" max="5000" step="100" value={sim.contentInflow + sim.opCosts} onChange={e => setSim({...sim, contentInflow: parseInt(e.target.value) - 200})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
-                                    <p className="text-[9px] text-slate-600 mt-1 uppercase font-bold italic">Base: $1400 contenido + $200 luz</p>
                                 </div>
 
                                 <div>
                                     <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Volumen Transaccional P2P</label>
-                                        <span className="text-sm font-black text-indigo-400">${sim.p2pVolume}/usu</span>
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Volumen P2P / Usuario</label>
+                                        <span className="text-sm font-black text-indigo-400">${sim.p2pVolume}</span>
                                     </div>
                                     <input type="range" min="0" max="100" step="5" value={sim.p2pVolume} onChange={e => setSim({...sim, p2pVolume: parseInt(e.target.value)})} className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                                 </div>
@@ -208,15 +217,6 @@ export default function AdminAnalytics() {
                                         </div>
                                     ))}
                                 </div>
-
-                                <div>
-                                    <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tasa de Reinversión de Saldo</label>
-                                        <span className="text-sm font-black text-emerald-400">{sim.reinvestmentRate}%</span>
-                                    </div>
-                                    <input type="range" min="10" max="100" value={sim.reinvestmentRate} onChange={e => setSim({...sim, reinvestmentRate: parseInt(e.target.value)})} className="w-full accent-emerald-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
-                                    <p className="text-[9px] text-slate-600 mt-1 uppercase font-bold italic">Saldo que vuelve a circular vs estancado</p>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -226,8 +226,8 @@ export default function AdminAnalytics() {
                         <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 md:p-12 shadow-2xl relative overflow-hidden flex flex-col justify-between h-full">
                             <div className="relative z-10 flex flex-col md:flex-row justify-between items-start gap-8 mb-12">
                                 <div>
-                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Proyección de Economía Cerrada</h3>
-                                    <p className="text-sm text-slate-500">Estimación de rentabilidad neta tras absorber gastos de $1,600.</p>
+                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Proyección de Economía</h3>
+                                    <p className="text-sm text-slate-500">Beneficio neto tras absorber gastos fijos de ${sim.contentInflow + sim.opCosts}.</p>
                                 </div>
                                 <div className={`text-right px-8 py-5 rounded-[24px] border backdrop-blur-md shadow-2xl ${projection.totalProfit >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
                                     <div className={`text-4xl font-black ${projection.totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -243,37 +243,23 @@ export default function AdminAnalytics() {
 
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-12 pt-8 border-t border-slate-800 text-center">
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Punto de Equilibrio</div>
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Break-Even</div>
                                     <div className="text-xl font-black text-white">{projection.breakEvenUsers} <span className="text-[10px] text-indigo-400">Usu</span></div>
-                                    <div className="text-[8px] text-slate-600 font-bold uppercase tracking-widest">Meta Supervivencia</div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
                                     <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Revenue M12</div>
-                                    <div className="text-xl font-black text-emerald-400">${Math.round(projection.data[11].revenue)}</div>
-                                    <div className="text-[8px] text-slate-600 font-bold uppercase tracking-widest">Ingresos Totales</div>
+                                    <div className="text-xl font-black text-emerald-400">${Math.round(projection.data[11]?.revenue || 0)}</div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Leakage Rate</div>
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Pérdida/Leakage</div>
                                     <div className="text-xl font-black text-red-400">{100 - sim.reinvestmentRate}%</div>
-                                    <div className="text-[8px] text-slate-600 font-bold uppercase tracking-widest">Saldo Estancado</div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
                                     <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Población M12</div>
-                                    <div className="text-xl font-black text-white">{projection.data[11].users.toLocaleString()}</div>
-                                    <div className="text-[8px] text-slate-600 font-bold uppercase tracking-widest">Red Proyectada</div>
+                                    <div className="text-xl font-black text-white">{projection.data[11]?.users.toLocaleString() || 0}</div>
                                 </div>
                             </div>
                         </div>
-
-                        {projection.breakEvenUsers > sim.users * 3 && (
-                            <div className="bg-red-500/10 border border-red-500/30 p-6 rounded-[32px] flex items-center gap-6 animate-pulse shadow-xl shadow-red-950/20">
-                                <ShieldAlert className="text-red-500 shrink-0" size={40}/>
-                                <div>
-                                    <h4 className="text-sm font-black text-red-500 uppercase tracking-widest">Meta de Supervivencia Alta</h4>
-                                    <p className="text-xs text-red-400/80 leading-relaxed">Con los costos operativos de $1,600, el sistema necesita triplicar la base de usuarios o incentivar más el volumen P2P para no agotar el capital de inyección semanal.</p>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
             )}

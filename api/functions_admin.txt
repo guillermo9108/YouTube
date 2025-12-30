@@ -60,7 +60,7 @@ function admin_add_balance($pdo, $input) {
 
 function admin_handle_balance_request($pdo, $input) {
     $reqId = $input['reqId'] ?? '';
-    $status = $input['status'] ?? ''; // APPROVED o REJECTED
+    $status = $input['status'] ?? ''; 
     
     if (!$reqId || !in_array($status, ['APPROVED', 'REJECTED'])) respond(false, null, 'Datos inválidos');
 
