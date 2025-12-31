@@ -81,16 +81,19 @@ function getAppSchema() {
         'transactions' => [
             'cols' => [
                 'id' => 'VARCHAR(50) PRIMARY KEY',
-                'buyerId' => 'VARCHAR(50)',
-                'creatorId' => 'VARCHAR(50)',
-                'videoId' => 'VARCHAR(50)',
+                'buyerId' => 'VARCHAR(50) DEFAULT NULL',
+                'creatorId' => 'VARCHAR(50) DEFAULT NULL',
+                'videoId' => 'VARCHAR(50) DEFAULT NULL',
                 'marketplaceItemId' => 'VARCHAR(50) DEFAULT NULL',
                 'amount' => 'DECIMAL(10, 2)',
                 'adminFee' => 'DECIMAL(10, 2) DEFAULT 0.00',
                 'timestamp' => 'BIGINT',
                 'type' => 'VARCHAR(20)',
                 'shippingData' => 'JSON DEFAULT NULL',
-                'fulfillmentStatus' => "VARCHAR(20) DEFAULT 'PENDING'"
+                'fulfillmentStatus' => "VARCHAR(20) DEFAULT 'PENDING'",
+                'videoTitle' => 'VARCHAR(255) DEFAULT NULL',
+                'recipientName' => 'VARCHAR(50) DEFAULT NULL',
+                'senderName' => 'VARCHAR(50) DEFAULT NULL'
             ]
         ],
         'balance_requests' => [
