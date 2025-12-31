@@ -1,33 +1,32 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
-import { SystemSettings, VideoCategory, VipPlan, CategoryConfig } from '../../../types';
+import { SystemSettings, VideoCategory, CategoryConfig } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-/* Fixed: Added missing HardDriveDownload import from lucide-react */
 import { 
-    Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, 
-    DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles, 
-    Globe, Cpu, FileText, FolderTree, Edit3, ChevronRight, Hash, Layers,
-    ArrowRightLeft, Landmark, FolderInput, LayoutTemplate, Clock, BarChart3,
-    HardDriveDownload
+    Settings, Save, Percent, ChevronDown, ChevronUp, Tag, 
+    DollarSign, Loader2, Trash2, Plus, X, Sparkles, 
+    Globe, Cpu, FileText, FolderTree, ChevronRight, Hash, 
+    Layers, Landmark, ArrowRightLeft, LayoutTemplate, HardDriveDownload
 } from 'lucide-react';
-import { InfoTooltip } from './components/InfoTooltip';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
-    <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden transition-all duration-300">
+    <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden transition-all duration-300 shadow-lg">
         <button 
             onClick={onToggle}
-            className="w-full px-4 md:px-6 py-4 flex justify-between items-center bg-slate-900 hover:bg-slate-800/50 transition-colors"
+            className="w-full px-5 py-4 flex justify-between items-center bg-slate-900 hover:bg-slate-800/50 transition-colors"
         >
-            <div className="flex items-center gap-3 font-bold text-white text-sm md:text-base">
-                <Icon size={20} className="text-indigo-400" /> {title}
+            <div className="flex items-center gap-3 font-black text-white text-sm uppercase tracking-tighter">
+                <Icon size={18} className="text-indigo-400" /> {title}
             </div>
             {isOpen ? <ChevronUp size={18} className="text-slate-500"/> : <ChevronDown size={18} className="text-slate-500"/>}
         </button>
-        {isOpen && <div className="px-4 md:px-6 pb-6 pt-2 border-t border-slate-800/50 space-y-4 animate-in slide-in-from-top-2 fade-in">{children}</div>}
+        {isOpen && <div className="px-5 pb-6 pt-2 border-t border-slate-800/50 space-y-4 animate-in slide-in-from-top-2 fade-in">{children}</div>}
     </div>
 );
 
+// Nodo de Categoría optimizado para móvil (Vertical)
+// Fix: Explicitly define props interface for CategoryNode to fix TS key prop error
 interface CategoryNodeProps {
     node: CategoryConfig;
     onUpdate: (id: string, updates: Partial<CategoryConfig>) => void;
@@ -50,8 +49,8 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
             name: 'Nueva Subcategoría',
             price: node.price,
             folderPatterns: [],
-            parentFolderPatterns: [],
             namePatterns: [],
+            autoGroupFolders: true,
             children: []
         };
         onUpdate(node.id, { children: [...(node.children || []), newChild] });
@@ -60,41 +59,41 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
 
     return (
         <div className="space-y-2">
-            <div className={`bg-slate-950 p-3 rounded-xl border border-slate-800 group hover:border-slate-600 transition-all ${level > 0 ? 'ml-4 md:ml-8' : ''}`}>
-                <div className="flex flex-col md:flex-row md:items-center gap-3">
-                    <div className="flex items-center gap-2 flex-1">
-                        <button onClick={() => setIsExpanded(!isExpanded)} className={`p-1 text-slate-500 hover:text-white transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
-                            <ChevronRight size={14}/>
+            <div className={`bg-slate-950 p-4 rounded-xl border border-slate-800 transition-all ${level > 0 ? 'ml-4 border-l-indigo-500/50' : 'border-slate-700'}`}>
+                {/* Header: Nombre y Precio */}
+                <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setIsExpanded(!isExpanded)} className={`p-1 text-slate-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                            <ChevronRight size={16}/>
                         </button>
                         <input 
                             type="text" 
                             value={node.name} 
                             onChange={e => onUpdate(node.id, { name: e.target.value })}
-                            className="bg-transparent border-b border-transparent focus:border-indigo-500 text-sm font-bold text-white outline-none px-1 flex-1"
-                            placeholder="Nombre..."
+                            className="bg-transparent border-b border-transparent focus:border-indigo-500 text-sm font-bold text-white outline-none flex-1"
                         />
                     </div>
 
-                    <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
-                            <DollarSign size={10} className="text-amber-500"/>
+                    <div className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg">
+                        <div className="flex items-center gap-2">
+                            <DollarSign size={14} className="text-amber-500"/>
                             <input 
                                 type="number" 
                                 value={node.price} 
                                 onChange={e => onUpdate(node.id, { price: parseFloat(e.target.value) || 0 })}
-                                className="bg-transparent text-xs font-black text-amber-400 outline-none w-14 text-center"
+                                className="bg-transparent text-sm font-black text-amber-400 outline-none w-16"
                             />
                         </div>
-
-                        <div className="flex items-center gap-1">
-                            <button onClick={() => setShowRules(!showRules)} className={`p-2 rounded-lg border transition-all ${showRules ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+                        
+                        <div className="flex gap-1">
+                            <button onClick={() => setShowRules(!showRules)} className={`p-2 rounded-lg border transition-all ${showRules ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
                                 <Layers size={14}/>
                             </button>
-                            <button onClick={addChild} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-emerald-400 rounded-lg transition-all">
+                            <button onClick={addChild} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-emerald-400 rounded-lg">
                                 <Plus size={14}/>
                             </button>
                             {level > 0 && (
-                                <button onClick={() => onDelete(node.id)} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-500 rounded-lg transition-all">
+                                <button onClick={() => onDelete(node.id)} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-500 rounded-lg">
                                     <Trash2 size={14}/>
                                 </button>
                             )}
@@ -102,89 +101,50 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                     </div>
                 </div>
 
+                {/* Reglas de Agrupación (Vertical en móvil) */}
                 {showRules && (
-                    <div className="mt-4 p-4 bg-slate-900/50 rounded-xl border border-indigo-500/20 space-y-4 animate-in slide-in-from-top-1">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-1"><FolderInput size={10}/> Carpeta Contenedora</label>
-                                <div className="flex flex-wrap gap-2 mb-2">
-                                    {(node.parentFolderPatterns || []).map((p, i) => (
-                                        <span key={i} className="bg-indigo-500/10 text-indigo-400 text-[10px] font-bold px-2 py-1 rounded-md border border-indigo-500/20 flex items-center gap-1">
-                                            {p} <button onClick={() => onUpdate(node.id, { parentFolderPatterns: (node.parentFolderPatterns || []).filter((_, idx) => idx !== i) })}><X size={10}/></button>
-                                        </span>
-                                    ))}
-                                </div>
-                                <input 
-                                    type="text" 
-                                    placeholder="Nombre exacto..." 
-                                    onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                            const val = e.currentTarget.value.trim();
-                                            if (val) {
-                                                onUpdate(node.id, { parentFolderPatterns: [...(node.parentFolderPatterns || []), val] });
-                                                e.currentTarget.value = '';
-                                            }
-                                        }
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
-                                />
+                    <div className="mt-4 p-4 bg-slate-900 rounded-xl border border-indigo-500/20 space-y-4 animate-in slide-in-from-top-1">
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1">
+                                <FolderTree size={12}/> Keywords en Carpeta
+                            </label>
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                {node.folderPatterns.map((p, i) => (
+                                    <span key={i} className="bg-indigo-500/10 text-indigo-400 text-[10px] font-bold px-2 py-0.5 rounded border border-indigo-500/20 flex items-center gap-1">
+                                        {p} <button onClick={() => onUpdate(node.id, { folderPatterns: node.folderPatterns.filter((_, idx) => idx !== i) })}><X size={10}/></button>
+                                    </span>
+                                ))}
                             </div>
-                            <div>
-                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1"><FolderTree size={10}/> Ruta (Keywords)</label>
-                                <div className="flex flex-wrap gap-2 mb-2">
-                                    {node.folderPatterns.map((p, i) => (
-                                        <span key={i} className="bg-slate-500/10 text-slate-400 text-[10px] font-bold px-2 py-1 rounded-md border border-indigo-500/20 flex items-center gap-1">
-                                            {p} <button onClick={() => onUpdate(node.id, { folderPatterns: node.folderPatterns.filter((_, idx) => idx !== i) })}><X size={10}/></button>
-                                        </span>
-                                    ))}
-                                </div>
-                                <input 
-                                    type="text" 
-                                    placeholder="Keywords ruta..." 
-                                    onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                            const val = e.currentTarget.value.trim();
-                                            if (val) {
-                                                onUpdate(node.id, { folderPatterns: [...node.folderPatterns, val] });
-                                                e.currentTarget.value = '';
-                                            }
-                                        }
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1"><Hash size={10}/> Archivo (Keywords)</label>
-                                <div className="flex flex-wrap gap-2 mb-2">
-                                    {node.namePatterns.map((p, i) => (
-                                        <span key={i} className="bg-purple-500/10 text-purple-400 text-[10px] font-bold px-2 py-1 rounded-md border border-purple-500/20 flex items-center gap-1">
-                                            {p} <button onClick={() => onUpdate(node.id, { namePatterns: node.namePatterns.filter((_, idx) => idx !== i) })}><X size={10}/></button>
-                                        </span>
-                                    ))}
-                                </div>
-                                <input 
-                                    type="text" 
-                                    placeholder="Keywords nombre..." 
-                                    onKeyDown={e => {
-                                        if (e.key === 'Enter') {
-                                            const val = e.currentTarget.value.trim();
-                                            if (val) {
-                                                onUpdate(node.id, { namePatterns: [...node.namePatterns, val] });
-                                                e.currentTarget.value = '';
-                                            }
-                                        }
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
-                                />
-                            </div>
+                            <input 
+                                type="text" placeholder="Ej: novelas, turcas..."
+                                onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { folderPatterns: [...node.folderPatterns, e.currentTarget.value] }); e.currentTarget.value = ''; }}}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
+                            />
                         </div>
-                        <p className="text-[9px] text-slate-500 italic">Detección prioritaria: Carpeta Contenedora &gt; Ruta &gt; Nombre.</p>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1">
+                                <Hash size={12}/> Keywords en Archivo
+                            </label>
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                {node.namePatterns.map((p, i) => (
+                                    <span key={i} className="bg-purple-500/10 text-purple-400 text-[10px] font-bold px-2 py-0.5 rounded border border-purple-500/20 flex items-center gap-1">
+                                        {p} <button onClick={() => onUpdate(node.id, { namePatterns: node.namePatterns.filter((_, idx) => idx !== i) })}><X size={10}/></button>
+                                    </span>
+                                ))}
+                            </div>
+                            <input 
+                                type="text" placeholder="Ej: HD, Trailer..."
+                                onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { namePatterns: [...node.namePatterns, e.currentTarget.value] }); e.currentTarget.value = ''; }}}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
+                            />
+                        </div>
+                        <p className="text-[9px] text-slate-500 italic">Los nombres de carpetas se convertirán automáticamente en subcategorías jerárquicas.</p>
                     </div>
                 )}
             </div>
 
             {isExpanded && node.children && node.children.length > 0 && (
-                <div className="border-l border-slate-800 ml-4 pl-2 space-y-2">
+                <div className="space-y-2">
                     {node.children.map(child => (
                         <CategoryNode 
                             key={child.id} 
@@ -228,27 +188,9 @@ export default function AdminConfig() {
         setLoading(true);
         try {
             const s: any = await db.getSystemSettings();
-            
-            let cats = s.customCategories;
-            if (!Array.isArray(cats) || (cats.length > 0 && typeof cats[0] === 'string')) {
-                const standard = Object.values(VideoCategory).filter(v => !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v));
-                const custom = Array.isArray(cats) ? cats : [];
-                const merged = Array.from(new Set([...standard, ...custom]));
-                
-                cats = merged.map(name => ({
-                    id: name,
-                    name: name.replace('_', ' '),
-                    price: s.categoryPrices?.[name] || 1.00,
-                    folderPatterns: [name],
-                    parentFolderPatterns: [],
-                    namePatterns: [],
-                    children: []
-                }));
-            }
-            
-            setSettings({ ...s, customCategories: cats });
+            setSettings(s);
         } catch(e) {
-            toast.error("Error al cargar configuración");
+            toast.error("Error al cargar");
         } finally {
             setLoading(false);
         }
@@ -256,54 +198,38 @@ export default function AdminConfig() {
 
     useEffect(() => { loadSettings(); }, []);
 
-    const handleSaveConfig = async () => {
+    const handleSave = async () => {
         if (!settings) return;
         setSaving(true);
         try {
-            const cleanSettings = {
-                ...settings,
-                videoCommission: Number(settings.videoCommission),
-                marketCommission: Number(settings.marketCommission),
-                transferFee: Number(settings.transferFee || 5),
-                batchSize: Number(settings.batchSize),
-                maxDuration: Number(settings.maxDuration),
-                maxResolution: Number(settings.maxResolution),
-                currencyConversion: Number(settings.currencyConversion)
-            };
-            await db.updateSystemSettings(cleanSettings);
+            await db.updateSystemSettings(settings);
             toast.success("Configuración guardada");
             await loadSettings();
         } catch(e: any) {
-            toast.error("Error al guardar: " + e.message);
+            toast.error("Error: " + e.message);
         } finally {
             setSaving(false);
         }
     };
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500"/></div>;
-    if (!settings) return <div className="p-10 text-center text-red-400">Error.</div>;
+    if (!settings) return null;
 
     return (
         <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-24 px-2">
-            <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-white">Configuración StreamPay</h2>
-                <button onClick={handleSaveConfig} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold py-2 px-6 rounded-xl flex items-center gap-2 shadow-lg active:scale-95 transition-all text-sm">
-                    {saving ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>}
-                    {saving ? '...' : 'Guardar Todo'}
+            <div className="flex justify-between items-center px-2">
+                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Administración</h2>
+                <button onClick={handleSave} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold py-2 px-6 rounded-xl flex items-center gap-2 shadow-lg active:scale-95 transition-all text-sm">
+                    {saving ? <Loader2 size={16} className="animate-spin"/> : <Save size={16}/>}
+                    {saving ? 'Guardando' : 'Guardar'}
                 </button>
             </div>
 
-            <ConfigSection 
-                title="Categorías & Organización Inteligente" 
-                icon={FolderTree} 
-                isOpen={openSection === 'PRICES'} 
-                onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}
-            >
-                <div className="space-y-3">
+            <ConfigSection title="Categorías Jerárquicas" icon={FolderTree} isOpen={openSection === 'PRICES'} onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}>
+                <div className="space-y-4">
                     {settings.customCategories.map((cat: CategoryConfig) => (
                         <CategoryNode 
-                            key={cat.id} 
-                            node={cat} 
+                            key={cat.id} node={cat} 
                             onUpdate={(id, updates) => {
                                 const newCats = settings.customCategories.map((c: any) => c.id === id ? { ...c, ...updates } : c);
                                 setSettings({...settings, customCategories: newCats});
@@ -315,175 +241,56 @@ export default function AdminConfig() {
                         />
                     ))}
                     <button onClick={() => {
-                        const newCat: CategoryConfig = { id: `CAT_${Date.now()}`, name: 'Nueva Categoría', price: 1.0, folderPatterns: [], parentFolderPatterns: [], namePatterns: [], children: [] };
+                        const newCat: CategoryConfig = { id: `CAT_${Date.now()}`, name: 'Nueva Categoría', price: 1.0, folderPatterns: [], namePatterns: [], autoGroupFolders: true, children: [] };
                         setSettings({...settings, customCategories: [...settings.customCategories, newCat]});
-                    }} className="w-full mt-4 py-3 border border-dashed border-slate-700 text-slate-500 hover:text-white hover:bg-slate-900 rounded-xl transition-all flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest">
-                        <Plus size={16}/> Añadir Categoría Principal
+                    }} className="w-full mt-4 py-4 border-2 border-dashed border-slate-700 text-slate-500 hover:text-white hover:bg-slate-800/50 rounded-2xl transition-all flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest">
+                        <Plus size={18}/> Añadir Raíz
                     </button>
                 </div>
             </ConfigSection>
 
-            <ConfigSection 
-                title="Sistema & Horarios" 
-                icon={Settings} 
-                isOpen={openSection === 'SYSTEM'} 
-                onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}
-            >
-                <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800 mb-4">
-                    <div>
-                        <h4 className="font-bold text-white text-sm flex items-center gap-2"><FileText size={16} className="text-indigo-400"/> Registro de Logs</h4>
-                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Errores y eventos en debug_log.txt</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" checked={settings.enableDebugLog ?? true} onChange={e => setSettings({...settings, enableDebugLog: e.target.checked})} className="sr-only peer"/>
-                        <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                    </label>
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Inicio Descarga</label>
-                        <input type="time" value={settings.downloadStartTime} onChange={e => setSettings({...settings, downloadStartTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Fin Descarga</label>
-                        <input type="time" value={settings.downloadEndTime} onChange={e => setSettings({...settings, downloadEndTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                    </div>
-                </div>
-                
+            <ConfigSection title="Economía & Saldo P2P" icon={Landmark} isOpen={openSection === 'ECONOMY'} onToggle={() => setOpenSection(openSection === 'ECONOMY' ? '' : 'ECONOMY')}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta yt-dlp</label>
-                        <input type="text" value={settings.ytDlpPath || ''} onChange={e => setSettings({...settings, ytDlpPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs" placeholder="/usr/local/bin/yt-dlp"/>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Comisión Videos (%)</label>
+                        <input type="number" value={settings.videoCommission} onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value)})} className="w-full bg-transparent text-white font-mono outline-none" />
                     </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta FFmpeg</label>
-                        <input type="text" value={settings.ffmpegPath || ''} onChange={e => setSettings({...settings, ffmpegPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs" placeholder="ffmpeg"/>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Comisión Tienda (%)</label>
+                        <input type="number" value={settings.marketCommission} onChange={e => setSettings({...settings, marketCommission: parseInt(e.target.value)})} className="w-full bg-transparent text-white font-mono outline-none" />
                     </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Batch Size</label>
-                        <input type="number" value={settings.batchSize} onChange={e => setSettings({...settings, batchSize: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white" />
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Fee Transferencia P2P (%)</label>
+                        <input type="number" value={settings.transferFee} onChange={e => setSettings({...settings, transferFee: parseInt(e.target.value)})} className="w-full bg-transparent text-white font-mono outline-none" />
                     </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Máx. Resolución</label>
-                        <input type="number" value={settings.maxResolution} onChange={e => setSettings({...settings, maxResolution: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white" />
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Conversión Saldo/EUR</label>
+                        <input type="number" value={settings.currencyConversion} onChange={e => setSettings({...settings, currencyConversion: parseFloat(e.target.value)})} className="w-full bg-transparent text-white font-mono outline-none" />
                     </div>
                 </div>
             </ConfigSection>
 
-            <ConfigSection 
-                title="Conversión Automática (FFmpeg)" 
-                icon={Cpu} 
-                isOpen={openSection === 'TRANSCODE'} 
-                onToggle={() => setOpenSection(openSection === 'TRANSCODE' ? '' : 'TRANSCODE')}
-            >
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
-                        <div>
-                            <h4 className="font-bold text-white text-sm">Procesamiento Automático</h4>
-                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Convierte automáticamente videos incompatibles</p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" checked={settings.autoTranscode || false} onChange={e => setSettings({...settings, autoTranscode: e.target.checked})} className="sr-only peer"/>
-                            <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                        </label>
-                    </div>
-
-                    {settings.autoTranscode && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top-2">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Cpu size={12}/> Preset FFmpeg</label>
-                                <select value={settings.transcodePreset || 'superfast'} onChange={e => setSettings({...settings, transcodePreset: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
-                                    <option value="ultrafast">Ultrafast (CPU bajo)</option>
-                                    <option value="superfast">Superfast (Equilibrado)</option>
-                                    <option value="fast">Fast</option>
-                                    <option value="medium">Medium</option>
-                                </select>
-                            </div>
-                            <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-lg p-3 text-[10px] text-indigo-300 leading-relaxed">
-                                <Sparkles size={14} className="mb-1"/>
-                                <strong>FastStart habilitado:</strong> Los metadatos se mueven al inicio para reproducción instantánea.
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Integraciones API & IA" 
-                icon={DownloadCloud} 
-                isOpen={openSection === 'API'} 
-                onToggle={() => setOpenSection(openSection === 'API' ? '' : 'API')}
-            >
+            <ConfigSection title="Servidor & Paquete Mapper" icon={LayoutTemplate} isOpen={openSection === 'SYSTEM'} onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}>
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Gemini API Key</label>
-                        <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings({...settings, geminiKey: e.target.value})} className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500" placeholder="AIza..."/>
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Ruta Biblioteca Local (NAS)</label>
+                        <input type="text" value={settings.localLibraryPath} onChange={e => setSettings({...settings, localLibraryPath: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-indigo-300 font-mono outline-none" />
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2"><Globe size={12}/> HTTP Proxy</label>
-                        <input type="text" value={settings.proxyUrl || ''} onChange={e => setSettings({...settings, proxyUrl: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="http://user:pass@host:port"/>
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Paquete Mapper (JSON)</label>
+                        <textarea 
+                            value={typeof settings.paqueteMapper === 'string' ? settings.paqueteMapper : JSON.stringify(settings.paqueteMapper || {}, null, 2)} 
+                            onChange={e => { try { setSettings({...settings, paqueteMapper: JSON.parse(e.target.value)}); } catch(err) { setSettings({...settings, paqueteMapper: e.target.value}); }}}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-emerald-400 font-mono h-32 outline-none"
+                        />
                     </div>
                 </div>
             </ConfigSection>
 
-            <ConfigSection 
-                title="Economía & Saldo P2P" 
-                icon={Landmark} 
-                isOpen={openSection === 'ECONOMY'} 
-                onToggle={() => setOpenSection(openSection === 'ECONOMY' ? '' : 'ECONOMY')}
-            >
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Videos (%)</label>
-                        <input type="number" value={settings.videoCommission} onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none"/>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Tienda (%)</label>
-                        <input type="number" value={settings.marketCommission} onChange={e => setSettings({...settings, marketCommission: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none"/>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2"><ArrowRightLeft size={12}/> Tasa Transferencia (%)</label>
-                        <input type="number" value={settings.transferFee} onChange={e => setSettings({...settings, transferFee: parseInt(e.target.value) || 0})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none"/>
-                    </div>
-                </div>
-                <div className="pt-2">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2"><Globe size={12}/> Conversión (Saldo por 1 EUR)</label>
-                    <input type="number" value={settings.currencyConversion} onChange={e => setSettings({...settings, currencyConversion: parseFloat(e.target.value) || 1})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none" placeholder="300.00"/>
-                </div>
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Paquete Mapper & Rutas" 
-                icon={LayoutTemplate} 
-                isOpen={openSection === 'MAPPER'} 
-                onToggle={() => setOpenSection(openSection === 'MAPPER' ? '' : 'MAPPER')}
-            >
-                <p className="text-[10px] text-slate-500 uppercase font-bold mb-4">Mapeos JSON para rutas físicas.</p>
-                <textarea 
-                    value={typeof settings.paqueteMapper === 'string' ? settings.paqueteMapper : JSON.stringify(settings.paqueteMapper || {}, null, 2)} 
-                    onChange={e => {
-                        try { setSettings({...settings, paqueteMapper: JSON.parse(e.target.value)}); } 
-                        catch(err) { setSettings({...settings, paqueteMapper: e.target.value}); }
-                    }}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-xs font-mono text-indigo-300 h-32 outline-none focus:border-indigo-500"
-                    placeholder='{ "CINE": "/path/to/movies" }'
-                />
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Biblioteca Local (NAS)" 
-                icon={HardDriveDownload} 
-                isOpen={openSection === 'LIBRARY'} 
-                onToggle={() => setOpenSection(openSection === 'LIBRARY' ? '' : 'LIBRARY')}
-            >
+            <ConfigSection title="Inteligencia Artificial" icon={Sparkles} isOpen={openSection === 'AI'} onToggle={() => setOpenSection(openSection === 'AI' ? '' : 'AI')}>
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta Biblioteca Local</label>
-                    <input type="text" value={settings.localLibraryPath} onChange={e => setSettings({...settings, localLibraryPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-xs font-mono" placeholder="/volume1/videos"/>
-                    <p className="text-[9px] text-slate-500 mt-2">Ruta absoluta donde el servidor buscará archivos para el escaneo.</p>
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Google Gemini API Key</label>
+                    <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings({...settings, geminiKey: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-indigo-500" placeholder="AIza..." />
                 </div>
             </ConfigSection>
         </div>

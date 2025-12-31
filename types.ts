@@ -24,10 +24,10 @@ export interface CategoryConfig {
     id: string;
     name: string;
     price: number;
-    folderPatterns: string[];       // Agrupar por ruta completa
-    parentFolderPatterns: string[]; // NUEVO: Agrupar por nombre de carpeta contenedora
-    namePatterns: string[];         // Agrupar por nombre de archivo
-    children?: CategoryConfig[];    // Subcategorías
+    folderPatterns: string[];       // Palabras clave en la ruta
+    namePatterns: string[];         // Palabras clave en el archivo
+    autoGroupFolders: boolean;      // NUEVO: ¿Usar nombres de subcarpetas como categorías?
+    children?: CategoryConfig[];    // Subcategorías manuales
 }
 
 export interface User {
@@ -97,117 +97,12 @@ export interface VipPlan {
   highlight?: boolean;
 }
 
-export interface Comment {
-    id: string;
-    userId: string;
-    username: string;
-    userAvatarUrl?: string;
-    text: string;
-    timestamp: number;
-}
-
-export interface UserInteraction {
-    liked: boolean;
-    disliked: boolean;
-    isWatched: boolean;
-    newLikeCount?: number;
-}
-
-export interface Notification {
-    id: string;
-    userId: string;
-    text: string;
-    type: 'SALE' | 'UPLOAD' | 'SYSTEM';
-    link: string;
-    isRead: boolean;
-    timestamp: number;
-    avatarUrl?: string;
-    metadata?: any;
-}
-
-export interface VideoResult {
-    id: string;
-    title: string;
-    thumbnail: string;
-    downloadUrl: string;
-    source: string;
-    author: string;
-    duration?: number;
-}
-
-export interface ContentRequest {
-    id: string;
-    userId: string;
-    query: string;
-    status: 'PENDING' | 'COMPLETED' | 'FAILED';
-    createdAt: number;
-    username?: string;
-}
-
-export interface MarketplaceItem {
-    id: string;
-    title: string;
-    description: string;
-    price: number;
-    originalPrice?: number;
-    discountPercent?: number;
-    stock?: number;
-    category?: string;
-    condition?: string;
-    sellerId: string;
-    sellerName: string;
-    sellerAvatarUrl?: string;
-    images?: string[];
-    status?: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO';
-    rating?: number;
-    reviewCount?: number;
-    createdAt: number;
-}
-
-export interface CartItem extends MarketplaceItem {
-    quantity: number;
-}
-
-export interface MarketplaceReview {
-    id: string;
-    itemId: string;
-    userId: string;
-    username: string;
-    userAvatarUrl?: string;
-    rating: number;
-    comment: string;
-    timestamp: number;
-}
-
-export interface BalanceRequest {
-    id: string;
-    userId: string;
-    username: string;
-    amount: number;
-    createdAt: number;
-}
-
-export interface VipRequest {
-    id: string;
-    userId: string;
-    username: string;
-    planSnapshot: any;
-    paymentRef?: string;
-    createdAt: number;
-}
-
-export interface SmartCleanerResult {
-    preview: Video[];
-    stats: {
-        spaceReclaimed: string;
-    };
-}
-
-export interface FtpFile {
-    name: string;
-    path: string;
-    type: 'file' | 'dir';
-    size?: string;
+export interface FtpSettings {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  rootPath: string;
 }
 
 export interface SystemSettings {
@@ -238,11 +133,123 @@ export interface SystemSettings {
   proxyUrl?: string;
   paqueteMapper?: any;
   is_transcoder_active?: boolean;
-  ftpSettings?: {
-      host: string;
-      port: number;
-      user: string;
-      pass: string;
-      rootPath: string;
+  ftpSettings?: FtpSettings;
+}
+
+// Add missing exports for entities used in other files
+export interface Comment {
+  id: string;
+  userId: string;
+  username: string;
+  userAvatarUrl?: string;
+  text: string;
+  timestamp: number;
+}
+
+export interface UserInteraction {
+  liked: boolean;
+  disliked: boolean;
+  isWatched: boolean;
+  newLikeCount?: number;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: 'SALE' | 'UPLOAD' | 'SYSTEM';
+  text: string;
+  link: string;
+  isRead: boolean;
+  timestamp: number;
+  avatarUrl?: string;
+  metadata?: any;
+}
+
+export interface VideoResult {
+  id: string;
+  title: string;
+  thumbnail: string;
+  downloadUrl: string;
+  source: string;
+  author: string;
+  duration?: number;
+}
+
+export interface ContentRequest {
+  id: string;
+  userId: string;
+  query: string;
+  status: 'PENDING' | 'COMPLETED' | 'FAILED';
+  createdAt: number;
+  isVip: boolean;
+}
+
+export interface MarketplaceItem {
+  id: string;
+  title: string;
+  description: string;
+  price: number;
+  originalPrice: number;
+  discountPercent: number;
+  stock: number;
+  category: string;
+  condition: string;
+  images: string[];
+  sellerId: string;
+  sellerName: string;
+  sellerAvatarUrl?: string;
+  createdAt: number;
+  status: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO';
+  rating?: number;
+  reviewCount?: number;
+}
+
+export interface MarketplaceReview {
+  id: string;
+  itemId: string;
+  userId: string;
+  username: string;
+  userAvatarUrl?: string;
+  rating: number;
+  comment: string;
+  timestamp: number;
+}
+
+export interface CartItem extends MarketplaceItem {
+  quantity: number;
+}
+
+export interface BalanceRequest {
+  id: string;
+  userId: string;
+  username: string;
+  amount: number;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  createdAt: number;
+}
+
+export interface VipRequest {
+  id: string;
+  userId: string;
+  username: string;
+  planId: string;
+  planSnapshot: string | any;
+  paymentRef?: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  createdAt: number;
+}
+
+export interface SmartCleanerResult {
+  preview: Video[];
+  stats: {
+    spaceReclaimed: string;
+    count: number;
   };
+}
+
+export interface FtpFile {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  size?: string;
 }
