@@ -8,7 +8,6 @@ export enum UserRole {
   USER = 'USER'
 }
 
-// Added VideoCategory enum for upload and library management
 export enum VideoCategory {
     GENERAL = 'GENERAL',
     MOVIES = 'MOVIES',
@@ -19,6 +18,15 @@ export enum VideoCategory {
     PENDING = 'PENDING',
     PROCESSING = 'PROCESSING',
     FAILED_METADATA = 'FAILED_METADATA'
+}
+
+export interface CategoryConfig {
+    id: string;
+    name: string;
+    price: number;
+    folderPatterns: string[]; // Agrupar por carpeta
+    namePatterns: string[];   // Agrupar por nombre
+    children?: CategoryConfig[]; // Subcategorías
 }
 
 export interface User {
@@ -55,7 +63,6 @@ export interface Video {
   isLocal?: boolean | number | string;
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
-  // Backend dynamic properties
   size_fmt?: string;
   transcode_progress?: number;
   needs_transcode?: boolean | number;
@@ -89,7 +96,6 @@ export interface VipPlan {
   highlight?: boolean;
 }
 
-// Added Comment interface for video discussions
 export interface Comment {
     id: string;
     userId: string;
@@ -99,7 +105,6 @@ export interface Comment {
     timestamp: number;
 }
 
-// Added UserInteraction for tracking likes and watch status
 export interface UserInteraction {
     liked: boolean;
     disliked: boolean;
@@ -107,7 +112,6 @@ export interface UserInteraction {
     newLikeCount?: number;
 }
 
-// Added Notification for system and user events
 export interface Notification {
     id: string;
     userId: string;
@@ -120,7 +124,6 @@ export interface Notification {
     metadata?: any;
 }
 
-// Added VideoResult for external search results
 export interface VideoResult {
     id: string;
     title: string;
@@ -131,7 +134,6 @@ export interface VideoResult {
     duration?: number;
 }
 
-// Added ContentRequest for user-submitted content ideas
 export interface ContentRequest {
     id: string;
     userId: string;
@@ -141,7 +143,6 @@ export interface ContentRequest {
     username?: string;
 }
 
-// Added MarketplaceItem for the store
 export interface MarketplaceItem {
     id: string;
     title: string;
@@ -162,12 +163,10 @@ export interface MarketplaceItem {
     createdAt: number;
 }
 
-// Added CartItem for shopping cart management
 export interface CartItem extends MarketplaceItem {
     quantity: number;
 }
 
-// Added MarketplaceReview for product feedback
 export interface MarketplaceReview {
     id: string;
     itemId: string;
@@ -179,7 +178,6 @@ export interface MarketplaceReview {
     timestamp: number;
 }
 
-// Added BalanceRequest for tracking pending deposits
 export interface BalanceRequest {
     id: string;
     userId: string;
@@ -188,7 +186,6 @@ export interface BalanceRequest {
     createdAt: number;
 }
 
-// Added VipRequest for tracking pending membership activations
 export interface VipRequest {
     id: string;
     userId: string;
@@ -198,7 +195,6 @@ export interface VipRequest {
     createdAt: number;
 }
 
-// Added SmartCleanerResult for system maintenance tools
 export interface SmartCleanerResult {
     preview: Video[];
     stats: {
@@ -206,7 +202,6 @@ export interface SmartCleanerResult {
     };
 }
 
-// Added FtpFile for remote file browsing
 export interface FtpFile {
     name: string;
     path: string;
@@ -228,7 +223,7 @@ export interface SystemSettings {
   ffmpegPath: string;
   enableYoutube: boolean; 
   categoryPrices: Record<string, number>; 
-  customCategories: string[]; 
+  customCategories: any; // Cambiado a any para soportar CategoryConfig[]
   localLibraryPath: string; 
   videoCommission: number;
   marketCommission: number;
@@ -237,7 +232,6 @@ export interface SystemSettings {
   paymentInstructions?: string;
   currencyConversion?: number;
   enableDebugLog?: boolean;
-  // Added missing settings for transcoding and FTP integration
   autoTranscode?: boolean;
   transcodePreset?: string;
   proxyUrl?: string;

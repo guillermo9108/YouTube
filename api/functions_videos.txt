@@ -179,29 +179,22 @@ function video_update_metadata($pdo, $post, $files) {
     $sql = "UPDATE videos SET category = 'PROCESSING', duration = ?, processing_attempts = 0";
     $params = [$duration];
     
-    // Si el cliente reporta incompatibilidad (o no mandó thumb pero tiene duración), intentamos extracción local
     if ($clientIncompatible && !isset($files['thumbnail'])) {
         $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
         $ffmpeg = $stmtS->fetchColumn() ?: 'ffmpeg';
-        
         $stmtV = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
         $stmtV->execute([$id]);
         $videoUrl = $stmtV->fetchColumn();
-        
         $realPath = resolve_video_path($videoUrl);
         if ($realPath && file_exists($realPath)) {
             $tDir = 'uploads/thumbnails/';
             if (!is_dir($tDir)) mkdir($tDir, 0777, true);
             $thumbName = "{$id}.jpg";
             $thumbPath = $tDir . $thumbName;
-            // Intentar extraer miniatura en el segundo 2
             $cmd = "\"$ffmpeg\" -ss 00:00:02 -i \"$realPath\" -vframes 1 -q:v 2 \"$thumbPath\" -y 2>&1";
             @exec($cmd);
-            if (file_exists($thumbPath)) {
-                $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; 
-            }
+            if (file_exists($thumbPath)) { $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; }
         }
-        // Marcar para transcodificación automática obligatoria ya que el browser no lo reproduce
         $sql .= ", needs_transcode = 1, transcode_status = 'WAITING'";
     }
 
@@ -209,15 +202,12 @@ function video_update_metadata($pdo, $post, $files) {
         $tDir = 'uploads/thumbnails/';
         if (!is_dir($tDir)) mkdir($tDir, 0777, true);
         $thumbPath = "{$tDir}{$id}.jpg";
-        if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) {
-            $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; 
-        }
+        if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) { $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; }
     }
 
     $sql .= " WHERE id = ?"; $params[] = $id;
     $pdo->prepare($sql)->execute($params);
 
-    // Organización inmediata
     $settingsFull = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     if ($settingsFull) {
         $customCats = json_decode($settingsFull['customCategories'] ?? '[]', true);
@@ -242,29 +232,14 @@ function video_fix_metadata($pdo) {
     $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
-    
-    // 1. Resetear videos rotos a PENDING
-    $sqlBroken = "UPDATE videos 
-                  SET category = 'PENDING', processing_attempts = 0 
-                  WHERE duration <= 0 OR thumbnailUrl LIKE '%default.jpg%' OR thumbnailUrl IS NULL";
+    $sqlBroken = "UPDATE videos SET category = 'PENDING', processing_attempts = 0 WHERE duration <= 0 OR thumbnailUrl LIKE '%default.jpg%' OR thumbnailUrl IS NULL";
     $stmtBroken = $pdo->query($sqlBroken);
     $fixedBroken = $stmtBroken->rowCount();
-
-    // 2. Re-categorizar videos en GENERAL
     $stmtGen = $pdo->query("SELECT id FROM videos WHERE category = 'GENERAL' LIMIT 500");
     $genIds = $stmtGen->fetchAll(PDO::FETCH_COLUMN);
     $reCategorized = 0;
-    
-    foreach ($genIds as $id) {
-        if (internal_organize_video($pdo, $id, $settings, $customCats)) {
-            $reCategorized++;
-        }
-    }
-
-    respond(true, [
-        'fixedBroken' => $fixedBroken,
-        'reCategorized' => $reCategorized
-    ]);
+    foreach ($genIds as $id) { if (internal_organize_video($pdo, $id, $settings, $customCats)) { $reCategorized++; } }
+    respond(true, ['fixedBroken' => $fixedBroken, 'reCategorized' => $reCategorized]);
 }
 
 function internal_organize_video($pdo, $id, $settings, $customCategories) {
@@ -272,11 +247,16 @@ function internal_organize_video($pdo, $id, $settings, $customCategories) {
     $stmt->execute([$id]);
     $v = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$v) return false;
+    
     $smart = smartParseFilename($v['videoUrl'], null, $customCategories);
     $newTitle = $smart['title'];
     $newCat = $smart['category']; 
+    
     if (!$newCat || in_array($newCat, ['OTHER', 'PROCESSING', 'PENDING'])) $newCat = 'GENERAL';
+    
+    // Obtener precio basado en la nueva lógica jerárquica
     $newPrice = getPriceForCategory($newCat, $settings);
+    
     $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, price = ? WHERE id = ?");
     return $updateStmt->execute([$newTitle, $newCat, $newPrice, $v['id']]);
 }
@@ -289,13 +269,10 @@ function video_delete($pdo, $input) {
     $stmt->execute([$id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$video) respond(false, null, "No encontrado");
-    
     $stmtU = $pdo->prepare("SELECT role FROM users WHERE id = ?");
-    $stmtU->execute([$uid]); // CORRECCIÓN: Se asegura el uso de $uid como variable
+    $stmtU->execute([$uid]);
     $role = $stmtU->fetchColumn();
-    
     if ($video['creatorId'] !== $uid && $role !== 'ADMIN') respond(false, null, "No autorizado");
-    
     $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
     if (strpos($video['videoUrl'] ?? '', 'uploads/videos/') !== false) {
         $vPath = str_replace('api/', '', $video['videoUrl']);
