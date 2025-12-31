@@ -63,12 +63,12 @@ function get_youtube_video($query, $config) {
 }
 
 function getPriceForCategory($cat, $settings) {
-    // Si la categoría tiene formato "PADRE / HIJO", buscamos el precio específico del hijo en la config jerárquica
     $categories = is_array($settings['customCategories']) ? $settings['customCategories'] : json_decode($settings['customCategories'] ?? '[]', true);
     
     $findPrice = function($nodes, $targetId) use (&$findPrice) {
         foreach($nodes as $node) {
-            if ($node['id'] === $targetId) return $node['price'];
+            // Comparar por ID (que puede ser el nombre formateado "PADRE / HIJO")
+            if ($node['id'] === $targetId || $node['name'] === $targetId) return $node['price'];
             if (!empty($node['children'])) {
                 $p = $findPrice($node['children'], $targetId);
                 if ($p !== null) return $p;
@@ -80,7 +80,6 @@ function getPriceForCategory($cat, $settings) {
     $specificPrice = $findPrice($categories, $cat);
     if ($specificPrice !== null) return floatval($specificPrice);
 
-    // Fallback a precios planos antiguos
     $prices = is_array($settings['categoryPrices']) ? $settings['categoryPrices'] : json_decode($settings['categoryPrices'] ?? '{}', true);
     return isset($prices[$cat]) ? floatval($prices[$cat]) : 1.00; 
 }
@@ -88,7 +87,7 @@ function getPriceForCategory($cat, $settings) {
 function smartParseFilename($fullPath, $existingCategory = null, $categoriesConfig = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
-    $pathParts = explode('/', dirname($fullPathNormalized));
+    $parentDirName = strtoupper(basename(dirname($fullPathNormalized))); // Nombre de la carpeta inmediata superior
     
     $junkPatterns = ['/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i', '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i', '/\b(aac|ac3|eac3|dts|truehd|flac|mp3|atmos|dd5\.1|dd\+|5\.1|7\.1)\b/i', '/\b(hdr|hdr10|dv|dolby|vision|10bit|8bit|sdr)\b/i', '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i', '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i', '/\b(mkv|mp4|avi|mov|wmv|flv|ts)\b/i', '/www\.[a-z0-9-]+\.[a-z]+/i'];
     
@@ -105,21 +104,27 @@ function smartParseFilename($fullPath, $existingCategory = null, $categoriesConf
     $pathString = strtoupper($fullPathNormalized);
     $nameString = strtoupper($filename);
 
-    // Función recursiva para buscar en el árbol de categorías
-    $searchCategory = function($nodes, $parentName = "") use (&$searchCategory, $pathString, $nameString) {
+    $searchCategory = function($nodes, $parentName = "") use (&$searchCategory, $pathString, $nameString, $parentDirName) {
         foreach ($nodes as $node) {
             $match = false;
             $nodeId = $node['id'];
-            $fullName = $parentName ? "$parentName / $nodeId" : $nodeId;
+            $fullName = $parentName ? "$parentName / " . $node['name'] : $node['name'];
 
-            // Regla por Carpeta
-            if (!empty($node['folderPatterns'])) {
+            // 1. Regla por Carpeta Padre (Específica)
+            if (!empty($node['parentFolderPatterns'])) {
+                foreach ($node['parentFolderPatterns'] as $p) {
+                    if ($parentDirName === strtoupper(trim($p))) { $match = true; break; }
+                }
+            }
+
+            // 2. Regla por Carpeta (Ruta Completa)
+            if (!$match && !empty($node['folderPatterns'])) {
                 foreach ($node['folderPatterns'] as $p) {
                     if (strpos($pathString, strtoupper(trim($p))) !== false) { $match = true; break; }
                 }
             }
 
-            // Regla por Nombre (si no hubo match por carpeta)
+            // 3. Regla por Nombre de Archivo
             if (!$match && !empty($node['namePatterns'])) {
                 foreach ($node['namePatterns'] as $p) {
                     if (strpos($nameString, strtoupper(trim($p))) !== false) { $match = true; break; }
@@ -127,7 +132,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $categoriesConf
             }
 
             if ($match) {
-                // Si hay match, intentamos buscar un hijo que también haga match (más específico)
                 if (!empty($node['children'])) {
                     $childMatch = $searchCategory($node['children'], $fullName);
                     if ($childMatch !== "GENERAL") return $childMatch;
@@ -135,7 +139,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $categoriesConf
                 return $fullName;
             }
             
-            // Si no hace match el padre, pero quizá un hijo sí (búsqueda profunda)
             if (!empty($node['children'])) {
                 $deepMatch = $searchCategory($node['children'], $fullName);
                 if ($deepMatch !== "GENERAL") return $deepMatch;

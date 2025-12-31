@@ -24,9 +24,10 @@ export interface CategoryConfig {
     id: string;
     name: string;
     price: number;
-    folderPatterns: string[]; // Agrupar por carpeta
-    namePatterns: string[];   // Agrupar por nombre
-    children?: CategoryConfig[]; // Subcategorías
+    folderPatterns: string[];       // Agrupar por ruta completa
+    parentFolderPatterns: string[]; // NUEVO: Agrupar por nombre de carpeta contenedora
+    namePatterns: string[];         // Agrupar por nombre de archivo
+    children?: CategoryConfig[];    // Subcategorías
 }
 
 export interface User {
@@ -223,18 +224,19 @@ export interface SystemSettings {
   ffmpegPath: string;
   enableYoutube: boolean; 
   categoryPrices: Record<string, number>; 
-  customCategories: any; // Cambiado a any para soportar CategoryConfig[]
+  customCategories: any; 
   localLibraryPath: string; 
   videoCommission: number;
   marketCommission: number;
-  transferFee?: number;
+  transferFee: number;
   vipPlans?: VipPlan[];
   paymentInstructions?: string;
-  currencyConversion?: number;
+  currencyConversion: number;
   enableDebugLog?: boolean;
   autoTranscode?: boolean;
   transcodePreset?: string;
   proxyUrl?: string;
+  paqueteMapper?: any;
   is_transcoder_active?: boolean;
   ftpSettings?: {
       host: string;
