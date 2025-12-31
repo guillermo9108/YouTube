@@ -238,6 +238,35 @@ function video_smart_organize($pdo) {
     respond(true, ['processed' => $processed, 'remaining' => $remaining]);
 }
 
+function video_fix_metadata($pdo) {
+    $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
+    $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
+    $customCats = json_decode($settings['customCategories'] ?? '[]', true);
+    
+    // 1. Resetear videos rotos a PENDING
+    $sqlBroken = "UPDATE videos 
+                  SET category = 'PENDING', processing_attempts = 0 
+                  WHERE duration <= 0 OR thumbnailUrl LIKE '%default.jpg%' OR thumbnailUrl IS NULL";
+    $stmtBroken = $pdo->query($sqlBroken);
+    $fixedBroken = $stmtBroken->rowCount();
+
+    // 2. Re-categorizar videos en GENERAL
+    $stmtGen = $pdo->query("SELECT id FROM videos WHERE category = 'GENERAL' LIMIT 500");
+    $genIds = $stmtGen->fetchAll(PDO::FETCH_COLUMN);
+    $reCategorized = 0;
+    
+    foreach ($genIds as $id) {
+        if (internal_organize_video($pdo, $id, $settings, $customCats)) {
+            $reCategorized++;
+        }
+    }
+
+    respond(true, [
+        'fixedBroken' => $fixedBroken,
+        'reCategorized' => $reCategorized
+    ]);
+}
+
 function internal_organize_video($pdo, $id, $settings, $customCategories) {
     $stmt = $pdo->prepare("SELECT id, title, videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);

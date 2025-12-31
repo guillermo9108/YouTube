@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -102,20 +102,26 @@ export default function AdminLibrary() {
     const [isIndexing, setIsIndexing] = useState(false);
     const [activeScan, setActiveScan] = useState(false);
     const [isOrganizing, setIsOrganizing] = useState(false);
+    const [isFixing, setIsFixing] = useState(false);
     const [scanLog, setScanLog] = useState<string[]>([]);
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
     const [currentScanIndex, setCurrentScanIndex] = useState(0);
-    const [stats, setStats] = useState({ pending: 0, processing: 0, public: 0 });
+    const [stats, setStats] = useState({ pending: 0, processing: 0, public: 0, broken: 0, general: 0 });
 
     const loadStats = async () => {
         try {
             const all = await db.getAllVideos();
             const unprocessed = await db.getUnprocessedVideos(9999, 'normal');
             const procCount = all.filter(v => v.category === 'PROCESSING').length;
+            const brokenCount = all.filter(v => Number(v.duration) <= 0 || v.thumbnailUrl.includes('default.jpg')).length;
+            const generalCount = all.filter(v => v.category === 'GENERAL').length;
+            
             setStats({ 
                 pending: unprocessed.length, 
                 processing: procCount,
-                public: all.length 
+                public: all.length,
+                broken: brokenCount,
+                general: generalCount
             });
         } catch(e) {}
     };
@@ -197,13 +203,32 @@ export default function AdminLibrary() {
         finally { setIsOrganizing(false); }
     };
 
+    const handleStep4 = async () => {
+        setIsFixing(true);
+        addToLog("Iniciando Mantenimiento Avanzado...");
+        try {
+            const res = await db.fixLibraryMetadata();
+            addToLog(`Mantenimiento completado.`);
+            addToLog(`- Videos rotos reseteados: ${res.fixedBroken}`);
+            addToLog(`- Videos re-categorizados: ${res.reCategorized}`);
+            if (res.fixedBroken > 0 || res.reCategorized > 0) {
+                toast.success("Mantenimiento finalizado");
+                db.setHomeDirty();
+            } else {
+                addToLog("No se requirieron cambios.");
+            }
+            loadStats();
+        } catch (e: any) { addToLog(`Error: ${e.message}`); }
+        finally { setIsFixing(false); }
+    };
+
     return (
         <div className="space-y-6 pb-20 max-w-4xl mx-auto">
             <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
                 <Database className="text-indigo-400"/> Gestión de Librería
             </h2>
             
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P1: Registro</div>
                     <div className="text-xl font-black text-amber-500 flex items-center justify-center gap-1"><Clock size={16}/> {stats.pending}</div>
@@ -215,6 +240,10 @@ export default function AdminLibrary() {
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P3: Listos</div>
                     <div className="text-xl font-black text-emerald-500 flex items-center justify-center gap-1"><CheckCircle2 size={16}/> {stats.public}</div>
+                </div>
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P4: Mantenimiento</div>
+                    <div className="text-xl font-black text-red-500 flex items-center justify-center gap-1"><ShieldAlert size={16}/> {stats.broken + stats.general}</div>
                 </div>
             </div>
             
@@ -243,6 +272,14 @@ export default function AdminLibrary() {
                     <p className="text-xs text-slate-500 mb-4">Organiza por categorías y asigna precios finales.</p>
                     <button onClick={handleStep3} disabled={isOrganizing || stats.processing === 0} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-purple-900/20 transition-all flex items-center justify-center gap-2">
                         {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} Publicar ({stats.processing})
+                    </button>
+                </div>
+
+                <div className="border-l-4 border-red-500 pl-4">
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">4. Mantenimiento Avanzado</h3>
+                    <p className="text-xs text-slate-500 mb-4">Corrige videos rotos ({stats.broken}) y re-categoriza videos GENERAL ({stats.general}).</p>
+                    <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.general === 0)} className="w-full bg-slate-800 border border-red-500/30 hover:bg-slate-700 disabled:bg-slate-900 disabled:opacity-50 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all flex items-center justify-center gap-2">
+                        {isFixing ? <RefreshCw className="animate-spin" size={18}/> : <ShieldAlert className="text-red-500" size={18}/>} Ejecutar Mantenimiento
                     </button>
                 </div>
             </div>

@@ -358,14 +358,14 @@ class DBService {
 
     public async updateRequestStatus(id: string, status: string): Promise<void> {
         return this.request<void>(`action=update_request_status`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ id, status })
         });
     }
 
     public async deleteRequest(id: string): Promise<void> {
         return this.request<void>(`action=delete_request`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ id })
         });
     }
@@ -400,7 +400,7 @@ class DBService {
 
     public async adminDeleteListing(itemId: string): Promise<void> {
         return this.request<void>(`action=admin_delete_listing`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ id: itemId })
         });
     }
@@ -431,14 +431,14 @@ class DBService {
 
     public async handleBalanceRequest(adminId: string, reqId: string, status: string): Promise<void> {
         return this.request<void>(`action=handle_balance_request`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ adminId, reqId, status })
         });
     }
 
     public async handleVipRequest(adminId: string, reqId: string, status: string): Promise<void> {
         return this.request<void>(`action=handle_vip_request`, { 
-            method: 'POST',
+            method: 'POST', 
             body: JSON.stringify({ adminId, reqId, status })
         });
     }
@@ -525,6 +525,10 @@ class DBService {
 
     public async smartOrganizeLibrary(): Promise<any> {
         return this.request<any>(`action=smart_organize_library`, { method: 'POST' });
+    }
+
+    public async fixLibraryMetadata(): Promise<any> {
+        return this.request<any>(`action=fix_library_metadata`, { method: 'POST' });
     }
 
     public async adminCleanupSystemFiles(): Promise<any> {
