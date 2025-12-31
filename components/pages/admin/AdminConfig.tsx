@@ -3,11 +3,13 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, VideoCategory, VipPlan, CategoryConfig } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
+/* Fixed: Added missing HardDriveDownload import from lucide-react */
 import { 
     Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, 
     DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles, 
     Globe, Cpu, FileText, FolderTree, Edit3, ChevronRight, Hash, Layers,
-    ArrowRightLeft, Landmark, FolderInput, LayoutTemplate
+    ArrowRightLeft, Landmark, FolderInput, LayoutTemplate, Clock, BarChart3,
+    HardDriveDownload
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -103,13 +105,12 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                 {showRules && (
                     <div className="mt-4 p-4 bg-slate-900/50 rounded-xl border border-indigo-500/20 space-y-4 animate-in slide-in-from-top-1">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {/* Carpeta Padre */}
                             <div>
                                 <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-1"><FolderInput size={10}/> Carpeta Contenedora</label>
                                 <div className="flex flex-wrap gap-2 mb-2">
                                     {(node.parentFolderPatterns || []).map((p, i) => (
                                         <span key={i} className="bg-indigo-500/10 text-indigo-400 text-[10px] font-bold px-2 py-1 rounded-md border border-indigo-500/20 flex items-center gap-1">
-                                            {p} <button onClick={() => onUpdate(node.id, { parentFolderPatterns: node.parentFolderPatterns.filter((_, idx) => idx !== i) })}><X size={10}/></button>
+                                            {p} <button onClick={() => onUpdate(node.id, { parentFolderPatterns: (node.parentFolderPatterns || []).filter((_, idx) => idx !== i) })}><X size={10}/></button>
                                         </span>
                                     ))}
                                 </div>
@@ -128,12 +129,11 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
                                 />
                             </div>
-                            {/* Carpeta Ruta */}
                             <div>
                                 <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1"><FolderTree size={10}/> Ruta (Keywords)</label>
                                 <div className="flex flex-wrap gap-2 mb-2">
                                     {node.folderPatterns.map((p, i) => (
-                                        <span key={i} className="bg-slate-500/10 text-slate-400 text-[10px] font-bold px-2 py-1 rounded-md border border-slate-500/20 flex items-center gap-1">
+                                        <span key={i} className="bg-slate-500/10 text-slate-400 text-[10px] font-bold px-2 py-1 rounded-md border border-indigo-500/20 flex items-center gap-1">
                                             {p} <button onClick={() => onUpdate(node.id, { folderPatterns: node.folderPatterns.filter((_, idx) => idx !== i) })}><X size={10}/></button>
                                         </span>
                                     ))}
@@ -153,7 +153,6 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
                                 />
                             </div>
-                            {/* Nombre Archivo */}
                             <div>
                                 <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1"><Hash size={10}/> Archivo (Keywords)</label>
                                 <div className="flex flex-wrap gap-2 mb-2">
@@ -179,7 +178,7 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                                 />
                             </div>
                         </div>
-                        <p className="text-[9px] text-slate-500 italic">Detección prioritaria: Carpeta Contenedora > Ruta > Nombre.</p>
+                        <p className="text-[9px] text-slate-500 italic">Detección prioritaria: Carpeta Contenedora &gt; Ruta &gt; Nombre.</p>
                     </div>
                 )}
             </div>
@@ -290,12 +289,12 @@ export default function AdminConfig() {
                 <h2 className="text-xl font-bold text-white">Configuración StreamPay</h2>
                 <button onClick={handleSaveConfig} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold py-2 px-6 rounded-xl flex items-center gap-2 shadow-lg active:scale-95 transition-all text-sm">
                     {saving ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>}
-                    {saving ? '...' : 'Guardar'}
+                    {saving ? '...' : 'Guardar Todo'}
                 </button>
             </div>
 
             <ConfigSection 
-                title="Categorías & Organización Móvil" 
+                title="Categorías & Organización Inteligente" 
                 icon={FolderTree} 
                 isOpen={openSection === 'PRICES'} 
                 onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}
@@ -321,6 +320,113 @@ export default function AdminConfig() {
                     }} className="w-full mt-4 py-3 border border-dashed border-slate-700 text-slate-500 hover:text-white hover:bg-slate-900 rounded-xl transition-all flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest">
                         <Plus size={16}/> Añadir Categoría Principal
                     </button>
+                </div>
+            </ConfigSection>
+
+            <ConfigSection 
+                title="Sistema & Horarios" 
+                icon={Settings} 
+                isOpen={openSection === 'SYSTEM'} 
+                onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}
+            >
+                <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800 mb-4">
+                    <div>
+                        <h4 className="font-bold text-white text-sm flex items-center gap-2"><FileText size={16} className="text-indigo-400"/> Registro de Logs</h4>
+                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Errores y eventos en debug_log.txt</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" checked={settings.enableDebugLog ?? true} onChange={e => setSettings({...settings, enableDebugLog: e.target.checked})} className="sr-only peer"/>
+                        <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Inicio Descarga</label>
+                        <input type="time" value={settings.downloadStartTime} onChange={e => setSettings({...settings, downloadStartTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Fin Descarga</label>
+                        <input type="time" value={settings.downloadEndTime} onChange={e => setSettings({...settings, downloadEndTime: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
+                    </div>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta yt-dlp</label>
+                        <input type="text" value={settings.ytDlpPath || ''} onChange={e => setSettings({...settings, ytDlpPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs" placeholder="/usr/local/bin/yt-dlp"/>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta FFmpeg</label>
+                        <input type="text" value={settings.ffmpegPath || ''} onChange={e => setSettings({...settings, ffmpegPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs" placeholder="ffmpeg"/>
+                    </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Batch Size</label>
+                        <input type="number" value={settings.batchSize} onChange={e => setSettings({...settings, batchSize: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white" />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Máx. Resolución</label>
+                        <input type="number" value={settings.maxResolution} onChange={e => setSettings({...settings, maxResolution: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white" />
+                    </div>
+                </div>
+            </ConfigSection>
+
+            <ConfigSection 
+                title="Conversión Automática (FFmpeg)" 
+                icon={Cpu} 
+                isOpen={openSection === 'TRANSCODE'} 
+                onToggle={() => setOpenSection(openSection === 'TRANSCODE' ? '' : 'TRANSCODE')}
+            >
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
+                        <div>
+                            <h4 className="font-bold text-white text-sm">Procesamiento Automático</h4>
+                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Convierte automáticamente videos incompatibles</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" checked={settings.autoTranscode || false} onChange={e => setSettings({...settings, autoTranscode: e.target.checked})} className="sr-only peer"/>
+                            <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </div>
+
+                    {settings.autoTranscode && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Cpu size={12}/> Preset FFmpeg</label>
+                                <select value={settings.transcodePreset || 'superfast'} onChange={e => setSettings({...settings, transcodePreset: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
+                                    <option value="ultrafast">Ultrafast (CPU bajo)</option>
+                                    <option value="superfast">Superfast (Equilibrado)</option>
+                                    <option value="fast">Fast</option>
+                                    <option value="medium">Medium</option>
+                                </select>
+                            </div>
+                            <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-lg p-3 text-[10px] text-indigo-300 leading-relaxed">
+                                <Sparkles size={14} className="mb-1"/>
+                                <strong>FastStart habilitado:</strong> Los metadatos se mueven al inicio para reproducción instantánea.
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </ConfigSection>
+
+            <ConfigSection 
+                title="Integraciones API & IA" 
+                icon={DownloadCloud} 
+                isOpen={openSection === 'API'} 
+                onToggle={() => setOpenSection(openSection === 'API' ? '' : 'API')}
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Gemini API Key</label>
+                        <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings({...settings, geminiKey: e.target.value})} className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500" placeholder="AIza..."/>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2"><Globe size={12}/> HTTP Proxy</label>
+                        <input type="text" value={settings.proxyUrl || ''} onChange={e => setSettings({...settings, proxyUrl: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="http://user:pass@host:port"/>
+                    </div>
                 </div>
             </ConfigSection>
 
@@ -356,7 +462,7 @@ export default function AdminConfig() {
                 isOpen={openSection === 'MAPPER'} 
                 onToggle={() => setOpenSection(openSection === 'MAPPER' ? '' : 'MAPPER')}
             >
-                <p className="text-[10px] text-slate-500 uppercase font-bold mb-4">Define mapeos específicos para rutas de discos externos o paquetes.</p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-4">Mapeos JSON para rutas físicas.</p>
                 <textarea 
                     value={typeof settings.paqueteMapper === 'string' ? settings.paqueteMapper : JSON.stringify(settings.paqueteMapper || {}, null, 2)} 
                     onChange={e => {
@@ -369,20 +475,15 @@ export default function AdminConfig() {
             </ConfigSection>
 
             <ConfigSection 
-                title="Sistema & Local Library" 
-                icon={Settings} 
-                isOpen={openSection === 'SYSTEM'} 
-                onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}
+                title="Biblioteca Local (NAS)" 
+                icon={HardDriveDownload} 
+                isOpen={openSection === 'LIBRARY'} 
+                onToggle={() => setOpenSection(openSection === 'LIBRARY' ? '' : 'LIBRARY')}
             >
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta Biblioteca Local</label>
-                        <input type="text" value={settings.localLibraryPath} onChange={e => setSettings({...settings, localLibraryPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-xs font-mono" placeholder="/volume1/videos"/>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta FFmpeg</label>
-                        <input type="text" value={settings.ffmpegPath} onChange={e => setSettings({...settings, ffmpegPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-xs font-mono" placeholder="/usr/bin/ffmpeg"/>
-                    </div>
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ruta Biblioteca Local</label>
+                    <input type="text" value={settings.localLibraryPath} onChange={e => setSettings({...settings, localLibraryPath: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-xs font-mono" placeholder="/volume1/videos"/>
+                    <p className="text-[9px] text-slate-500 mt-2">Ruta absoluta donde el servidor buscará archivos para el escaneo.</p>
                 </div>
             </ConfigSection>
         </div>
