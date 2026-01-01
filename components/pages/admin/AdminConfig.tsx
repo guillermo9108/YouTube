@@ -7,7 +7,7 @@ import {
     Save, DollarSign, Loader2, Trash2, Plus, X, 
     FolderTree, ChevronRight, Sparkles, 
     Layers, Landmark, ChevronDown, ChevronUp,
-    Cpu, CreditCard, Settings2
+    Cpu, CreditCard, Settings2, Globe, ShieldCheck, Zap
 } from 'lucide-react';
 
 const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
@@ -33,13 +33,7 @@ interface CategoryNodeProps {
     level?: number;
 }
 
-const CategoryNode: React.FC<CategoryNodeProps> = ({ 
-    node, 
-    onUpdate, 
-    onDelete, 
-    onAddChild,
-    level = 0 
-}) => {
+const CategoryNode: React.FC<CategoryNodeProps> = ({ node, onUpdate, onDelete, onAddChild, level = 0 }) => {
     const [isExpanded, setIsExpanded] = useState(true);
     const [showRules, setShowRules] = useState(false);
 
@@ -52,41 +46,27 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                             <ChevronRight size={16}/>
                         </button>
                         <input 
-                            type="text" 
-                            value={node.name || ''} 
-                            placeholder="Nombre de la categoría..."
+                            type="text" value={node.name || ''} placeholder="Nombre de categoría..."
                             onChange={e => onUpdate(node.id, { name: e.target.value })}
                             className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white outline-none flex-1 focus:border-indigo-500 transition-all placeholder:text-slate-600"
                         />
                     </div>
-
                     <div className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-white/5">
                         <div className="flex items-center gap-2">
                             <DollarSign size={14} className="text-amber-500"/>
                             <input 
-                                type="number" 
-                                value={node.price} 
+                                type="number" value={node.price} 
                                 onChange={e => onUpdate(node.id, { price: parseFloat(e.target.value) || 0 })}
                                 className="bg-transparent text-sm font-black text-amber-400 outline-none w-16"
                             />
                         </div>
-                        
                         <div className="flex gap-1">
-                            <button onClick={() => setShowRules(!showRules)} title="Reglas Inteligentes" className={`p-2 rounded-lg border transition-all ${showRules ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
-                                <Layers size={14}/>
-                            </button>
-                            <button onClick={() => onAddChild(node.id)} title="Nueva Subcategoría" className="p-2 bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 hover:text-white hover:bg-indigo-600 rounded-lg transition-all">
-                                <Plus size={14}/>
-                            </button>
-                            {level > 0 && (
-                                <button onClick={() => onDelete(node.id)} title="Eliminar" className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-500 rounded-lg transition-colors">
-                                    <Trash2 size={14}/>
-                                </button>
-                            )}
+                            <button onClick={() => setShowRules(!showRules)} className={`p-2 rounded-lg border transition-all ${showRules ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}><Layers size={14}/></button>
+                            <button onClick={() => onAddChild(node.id)} className="p-2 bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 hover:text-white hover:bg-indigo-600 rounded-lg transition-all"><Plus size={14}/></button>
+                            {level > 0 && <button onClick={() => onDelete(node.id)} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-500 rounded-lg transition-colors"><Trash2 size={14}/></button>}
                         </div>
                     </div>
                 </div>
-
                 {showRules && (
                     <div className="mt-4 p-4 bg-slate-900 rounded-xl border border-indigo-500/20 space-y-4 animate-in slide-in-from-top-1">
                         <div>
@@ -99,7 +79,7 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                                 ))}
                             </div>
                             <input 
-                                type="text" placeholder="Keyword y Enter..."
+                                type="text" placeholder="Nueva keyword y Enter..."
                                 onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { folderPatterns: [...(node.folderPatterns || []), e.currentTarget.value] }); e.currentTarget.value = ''; }}}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
                             />
@@ -107,18 +87,10 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                     </div>
                 )}
             </div>
-
             {isExpanded && node.children && node.children.length > 0 && (
                 <div className="space-y-2">
                     {node.children.map(child => (
-                        <CategoryNode 
-                            key={child.id} 
-                            node={child} 
-                            level={level + 1} 
-                            onUpdate={onUpdate}
-                            onDelete={onDelete}
-                            onAddChild={onAddChild}
-                        />
+                        <CategoryNode key={child.id} node={child} level={level + 1} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} />
                     ))}
                 </div>
             )}
@@ -206,9 +178,9 @@ export default function AdminConfig() {
         setSaving(true);
         try {
             await db.updateSystemSettings(settings);
-            toast.success("Ajustes sincronizados");
+            toast.success("Ajustes sincronizados con MariaDB");
             await loadSettings();
-        } catch(e: any) { toast.error("Error: " + e.message); }
+        } catch(e: any) { toast.error("Error al guardar: " + e.message); }
         finally { setSaving(false); }
     };
 
@@ -218,13 +190,13 @@ export default function AdminConfig() {
     return (
         <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-24 px-2">
             <div className="flex justify-between items-center px-2">
-                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Panel Maestro</h2>
-                <button onClick={handleSave} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-lg transition-all text-sm">
-                    {saving ? <Loader2 size={16} className="animate-spin"/> : <Save size={16}/>} Sincronizar Cambios
+                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Panel de Configuración</h2>
+                <button onClick={handleSave} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-lg active:scale-95 transition-all text-sm">
+                    {saving ? <Loader2 size={16} className="animate-spin"/> : <Save size={16}/>} Guardar Cambios
                 </button>
             </div>
 
-            <ConfigSection title="Categorías y Precios Jerárquicos" icon={FolderTree} isOpen={openSection === 'PRICES'} onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}>
+            <ConfigSection title="Categorías y Precios" icon={FolderTree} isOpen={openSection === 'PRICES'} onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}>
                 <div className="space-y-4">
                     {settings.customCategories.map((cat: CategoryConfig) => (
                         <CategoryNode key={cat.id} node={cat} onUpdate={updateCategoryTree} onDelete={deleteFromTree} onAddChild={addChildToTree} />
@@ -236,14 +208,6 @@ export default function AdminConfig() {
             <ConfigSection title="Economía y Comisiones" icon={Landmark} isOpen={openSection === 'ECONOMY'} onToggle={() => setOpenSection(openSection === 'ECONOMY' ? '' : 'ECONOMY')}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Tropipay Client ID</label>
-                        <input type="text" value={(settings as any).tropipayClientId || ''} onChange={e => setSettings({...settings, tropipayClientId: e.target.value} as any)} className="w-full bg-transparent text-white font-mono text-xs outline-none" />
-                    </div>
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Conversión Saldo / EUR</label>
-                        <input type="number" value={settings.currencyConversion} onChange={e => setSettings({...settings, currencyConversion: parseFloat(e.target.value)})} className="w-full bg-transparent text-amber-400 font-mono font-bold outline-none" />
-                    </div>
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Comisión Videos (%)</label>
                         <input type="number" value={settings.videoCommission} onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value)})} className="w-full bg-transparent text-white font-mono outline-none" />
                     </div>
@@ -251,24 +215,42 @@ export default function AdminConfig() {
                         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Fee Transferencia P2P (%)</label>
                         <input type="number" value={settings.transferFee} onChange={e => setSettings({...settings, transferFee: parseInt(e.target.value)})} className="w-full bg-transparent text-white font-mono outline-none" />
                     </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 col-span-2">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Conversión Saldo / EUR (Tropipay)</label>
+                        <input type="number" value={settings.currencyConversion} onChange={e => setSettings({...settings, currencyConversion: parseFloat(e.target.value)})} className="w-full bg-transparent text-amber-400 font-mono font-bold outline-none" />
+                    </div>
                 </div>
             </ConfigSection>
 
-            <ConfigSection title="Servidor y Metadatos IA" icon={Cpu} isOpen={openSection === 'SYSTEM'} onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}>
+            <ConfigSection title="Pasarelas y Pago (Tropipay)" icon={CreditCard} isOpen={openSection === 'PAY'} onToggle={() => setOpenSection(openSection === 'PAY' ? '' : 'PAY')}>
+                <div className="space-y-4">
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Tropipay Client ID</label>
+                        <input type="text" value={(settings as any).tropipayClientId || ''} onChange={e => setSettings({...settings, tropipayClientId: e.target.value} as any)} className="w-full bg-transparent text-white font-mono text-xs outline-none" />
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Tropipay Client Secret</label>
+                        <input type="password" value={(settings as any).tropipayClientSecret || ''} onChange={e => setSettings({...settings, tropipayClientSecret: e.target.value} as any)} className="w-full bg-transparent text-white font-mono text-xs outline-none" />
+                    </div>
+                </div>
+            </ConfigSection>
+
+            <ConfigSection title="Inteligencia Artificial" icon={Sparkles} isOpen={openSection === 'IA'} onToggle={() => setOpenSection(openSection === 'IA' ? '' : 'IA')}>
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Gemini API Key</label>
+                    <input type="password" value={settings.geminiKey} onChange={e => setSettings({...settings, geminiKey: e.target.value})} className="w-full bg-transparent text-indigo-300 font-mono text-xs outline-none" />
+                </div>
+            </ConfigSection>
+
+            <ConfigSection title="Sistema y Rutas" icon={Cpu} isOpen={openSection === 'SYSTEM'} onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}>
                 <div className="space-y-4">
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Ruta Biblioteca Local (NAS)</label>
                         <input type="text" value={settings.localLibraryPath} onChange={e => setSettings({...settings, localLibraryPath: e.target.value})} className="w-full bg-transparent text-indigo-300 font-mono text-sm outline-none focus:border-indigo-500" />
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Ruta FFmpeg</label>
-                            <input type="text" value={settings.ffmpegPath} onChange={e => setSettings({...settings, ffmpegPath: e.target.value})} className="w-full bg-transparent text-white font-mono text-xs outline-none" />
-                        </div>
-                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Gemini API Key</label>
-                            <input type="password" value={settings.geminiKey} onChange={e => setSettings({...settings, geminiKey: e.target.value})} className="w-full bg-transparent text-indigo-300 font-mono text-xs outline-none" />
-                        </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Ruta Binario FFmpeg</label>
+                        <input type="text" value={settings.ffmpegPath} onChange={e => setSettings({...settings, ffmpegPath: e.target.value})} className="w-full bg-transparent text-white font-mono text-xs outline-none" />
                     </div>
                 </div>
             </ConfigSection>
