@@ -1,96 +1,45 @@
 <?php
 
 /**
- * Motor Avanzado de Descomposición de Rutas Jerárquicas
+ * Sistema de Logs Centralizado Mejorado
  */
-function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
-    $filename = pathinfo($fullPath, PATHINFO_FILENAME);
-    $fullPathNormalized = str_replace('\\', '/', $fullPath);
-    $pathParts = explode('/', $fullPathNormalized);
+function write_log($message, $level = 'INFO') {
+    $logFile = __DIR__ . '/debug_log.txt';
     
-    // 1. Limpieza de Título (Standard)
-    $junkPatterns = ['/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i', '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i', '/\b(aac|ac3|eac3|dts|truehd|flac|mp3|atmos|dd5\.1|dd\+|5\.1|7\.1)\b/i', '/\b(hdr|hdr10|dv|dolby|vision|10bit|8bit|sdr)\b/i', '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i', '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i', '/\b(mkv|mp4|avi|mov|wmv|flv|ts)\b/i', '/www\.[a-z0-9-]+\.[a-z]+/i'];
-    $cleanText = function($txt) use ($junkPatterns) {
-        $t = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $txt);
-        foreach ($junkPatterns as $p) { $t = preg_replace($p, '', $t); }
-        return trim(preg_replace('/\s+/', ' ', $t));
-    };
-    $cleanName = $cleanText($filename);
-
-    // 2. Traversal Profundo de Categoría
-    $detectedCat = 'GENERAL';
-    $detectedParent = null;
+    // Si es un error crítico, ignoramos verificaciones y tratamos de escribir
+    $timestamp = date('Y-m-d H:i:s');
     
-    // Si no hay jerarquía, usamos el legacy behavior
-    if (empty($hierarchy)) return ['title' => ucwords(strtolower($cleanName)), 'category' => 'GENERAL', 'parent_category' => null, 'collection' => null];
-
-    // Buscamos coincidencia en cada parte de la ruta, de atrás hacia adelante
-    foreach (array_reverse($pathParts) as $segment) {
-        if (empty($segment) || $segment === $filename) continue;
-        
-        $segUpper = strtoupper($segment);
-        foreach ($hierarchy as $node) {
-            $keywords = isset($node['keywords']) ? array_map('strtoupper', array_map('trim', explode(',', $node['keywords']))) : [];
-            // Coincidencia por nombre exacto o palabras clave
-            if ($segUpper === strtoupper($node['name']) || in_array($segUpper, $keywords)) {
-                $detectedCat = $node['name'];
-                $detectedParent = $node['parent'] ?? null;
-                break 2;
-            }
+    // Formatear mensaje con contexto si es un error
+    $trace = '';
+    if ($level === 'ERROR' || $level === 'FATAL') {
+        $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
+        if (isset($bt[1])) {
+            $file = basename($bt[1]['file'] ?? 'unknown');
+            $line = $bt[1]['line'] ?? '0';
+            $trace = " [File: $file, Line: $line]";
         }
     }
 
-    // 3. Lógica de Colección (Agrupación por Carpeta)
-    $parentFolder = (count($pathParts) > 1) ? $pathParts[count($pathParts)-2] : null;
-
-    return [
-        'title' => ucwords(strtolower($cleanName)), 
-        'category' => $detectedCat,
-        'parent_category' => $detectedParent,
-        'collection' => $parentFolder
-    ];
-}
-
-/**
- * Buscador de Precios Recursivo (Herencia)
- */
-function getPriceForCategory($catName, $settings) {
-    $hierarchy = json_decode($settings['categoryHierarchy'] ?? '[]', true);
+    $formattedMessage = "[$timestamp] [$level]$trace $message" . PHP_EOL;
     
-    $findPrice = function($name) use (&$findPrice, $hierarchy) {
-        foreach ($hierarchy as $node) {
-            if ($node['name'] === $name) {
-                if (isset($node['price']) && floatval($node['price']) > 0) {
-                    return floatval($node['price']);
-                }
-                if (!empty($node['parent'])) {
-                    return $findPrice($node['parent']);
-                }
-            }
-        }
-        return null;
-    };
-
-    $price = $findPrice($catName);
-    if ($price !== null) return $price;
-
-    // Fallback a precios planos legacy
-    $prices = is_array($settings['categoryPrices']) ? $settings['categoryPrices'] : json_decode($settings['categoryPrices'] ?? '{}', true);
-    return isset($prices[$catName]) ? floatval($prices[$catName]) : 1.00; 
-}
-
-function write_log($message, $level = 'INFO') {
-    $logFile = __DIR__ . '/debug_log.txt';
-    $timestamp = date('Y-m-d H:i:s');
-    $formattedMessage = "[$timestamp] [$level] $message" . PHP_EOL;
+    // Escribir al archivo. Si falla, PHP reportará al error_log del sistema.
     @file_put_contents($logFile, $formattedMessage, FILE_APPEND);
 }
 
+/**
+ * Traduce una URL o ruta relativa a una ruta absoluta del sistema de archivos.
+ */
 function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
     if (file_exists($pathOrUrl)) return realpath($pathOrUrl);
-    $cleanPath = (strpos($pathOrUrl, 'api/') === 0) ? substr($pathOrUrl, 4) : $pathOrUrl;
+
+    $cleanPath = $pathOrUrl;
+    if (strpos($cleanPath, 'api/') === 0) {
+        $cleanPath = substr($cleanPath, 4);
+    }
+
     if (file_exists($cleanPath)) return realpath($cleanPath);
+
     if (strpos($cleanPath, 'uploads/') !== false) {
         $baseDir = dirname(__DIR__); 
         $fullPath = $baseDir . DIRECTORY_SEPARATOR . $cleanPath;
@@ -100,8 +49,62 @@ function resolve_video_path($pathOrUrl) {
 }
 
 function fix_url($url) {
-    if (!empty($url) && strpos($url, 'uploads/') === 0) return 'api/' . $url;
+    if (!empty($url) && strpos($url, 'uploads/') === 0) {
+        return 'api/' . $url;
+    }
     return $url;
+}
+
+// ... resto de funciones (get_youtube_video, etc) se mantienen igual ...
+function get_youtube_video($query, $config) {
+    putenv("LC_ALL=C.UTF-8"); 
+    $bin = $config['ytDlpPath'] ?: 'yt-dlp';
+    $safeQuery = escapeshellarg($query);
+    $isUrl = filter_var($query, FILTER_VALIDATE_URL) && strpos($query, 'youtube.com') !== false;
+    $searchArg = $isUrl ? $safeQuery : escapeshellarg("ytsearch12:$query");
+    $cmd = "\"$bin\" $searchArg --dump-json --no-warnings --no-check-certificate 2>&1";
+    exec($cmd, $output, $res);
+    if ($res !== 0) throw new Exception("yt-dlp error: " . implode(" ", $output));
+    $results = [];
+    foreach ($output as $line) {
+        $data = json_decode($line, true);
+        if ($data && isset($data['id'])) {
+            $results[] = [
+                'id' => $data['id'], 'source' => 'YouTube',
+                'thumbnail' => $data['thumbnail'] ?? '',
+                'title' => $data['title'], 'duration' => $data['duration'] ?? 0,
+                'downloadUrl' => $data['webpage_url'], 'author' => $data['uploader'] ?? 'YouTube'
+            ];
+        }
+    }
+    return $results;
+}
+
+function getPriceForCategory($cat, $settings) {
+    $prices = is_array($settings['categoryPrices']) ? $settings['categoryPrices'] : json_decode($settings['categoryPrices'] ?? '{}', true);
+    return isset($prices[$cat]) ? floatval($prices[$cat]) : 1.00; 
+}
+
+function smartParseFilename($fullPath, $existingCategory = null, $customCategories = []) {
+    $filename = pathinfo($fullPath, PATHINFO_FILENAME);
+    $fullPathNormalized = str_replace('\\', '/', $fullPath);
+    $pathParts = explode('/', dirname($fullPathNormalized));
+    $junkPatterns = ['/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i', '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i', '/\b(aac|ac3|eac3|dts|truehd|flac|mp3|atmos|dd5\.1|dd\+|5\.1|7\.1)\b/i', '/\b(hdr|hdr10|dv|dolby|vision|10bit|8bit|sdr)\b/i', '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i', '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i', '/\b(mkv|mp4|avi|mov|wmv|flv|ts)\b/i', '/www\.[a-z0-9-]+\.[a-z]+/i'];
+    $cleanText = function($txt) use ($junkPatterns) {
+        $t = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $txt);
+        foreach ($junkPatterns as $p) { $t = preg_replace($p, '', $t); }
+        return trim(preg_replace('/\s+/', ' ', $t));
+    };
+    $cleanName = $cleanText($filename);
+    if (strlen($cleanName) < 2) $cleanName = $filename;
+    $detectedCategory = 'GENERAL';
+    $ancestors = array_reverse($pathParts);
+    foreach ($ancestors as $folder) {
+        $folderUpper = strtoupper(trim($folder));
+        if (in_array($folderUpper, $customCategories)) { $detectedCategory = $folderUpper; break; }
+        foreach ($customCategories as $cc) { if (strpos($folderUpper, $cc) !== false) { $detectedCategory = $cc; break 2; } }
+    }
+    return ['title' => ucwords(strtolower($cleanName)), 'category' => $detectedCategory];
 }
 
 function streamVideo($id, $pdo) {

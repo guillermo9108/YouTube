@@ -8,6 +8,7 @@ export enum UserRole {
   USER = 'USER'
 }
 
+// Added VideoCategory enum for upload and library management
 export enum VideoCategory {
     GENERAL = 'GENERAL',
     MOVIES = 'MOVIES',
@@ -42,8 +43,6 @@ export interface Video {
   description: string;
   price: number;
   category: string;
-  parent_category?: string; // Nuevo: Categoría raíz o padre
-  collection?: string;      // Nuevo: Identificador de grupo (carpeta)
   duration: number;
   thumbnailUrl: string;
   videoUrl: string;
@@ -56,66 +55,12 @@ export interface Video {
   isLocal?: boolean | number | string;
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
+  // Backend dynamic properties
   size_fmt?: string;
   transcode_progress?: number;
   needs_transcode?: boolean | number;
   processing_attempts?: number;
   fileHash?: string;
-}
-
-// Added VipPlan interface to fix Module '"../types"' has no exported member 'VipPlan'
-export interface VipPlan {
-  id: string;
-  name: string;
-  price: number;
-  durationDays: number;
-  highlight?: boolean;
-  type?: 'ACCESS' | 'BONUS';
-  bonusPercent?: number;
-}
-
-// Added FtpSettings interface for SystemSettings
-export interface FtpSettings {
-  host: string;
-  port: number;
-  user: string;
-  pass: string;
-  rootPath: string;
-}
-
-export interface SystemSettings {
-  downloadStartTime: string; 
-  downloadEndTime: string;   
-  isQueuePaused: boolean;
-  batchSize: number;         
-  maxDuration: number;       
-  maxResolution: number;     
-  pexelsKey: string;
-  pixabayKey: string;
-  geminiKey: string;
-  ytDlpPath: string;
-  ffmpegPath: string;
-  enableYoutube: boolean; 
-  categoryPrices: Record<string, number>; 
-  customCategories: string[]; 
-  categoryHierarchy?: string; // Nuevo: JSON String con el árbol de categorías
-  autoGroupFolders?: boolean | number; // Nuevo: Switch para agrupar videos automáticamente
-  localLibraryPath: string; 
-  videoCommission: number;
-  marketCommission: number;
-  transferFee?: number;
-  // Fixed: Update vipPlans type and add missing properties used in admin pages
-  vipPlans?: VipPlan[];
-  ftpSettings?: FtpSettings;
-  is_transcoder_active?: boolean | number;
-  is_transcoding?: boolean | number;
-  paymentInstructions?: string;
-  currencyConversion?: number;
-  enableDebugLog?: boolean;
-  // Fix: Added missing properties used in AdminConfig to resolve type errors
-  autoTranscode?: boolean | number;
-  tropipayClientId?: string;
-  tropipayClientSecret?: string;
 }
 
 export interface Transaction {
@@ -133,6 +78,18 @@ export interface Transaction {
   senderName?: string;
 }
 
+export interface VipPlan {
+  id: string;
+  name: string;
+  price: number;
+  type: 'ACCESS' | 'BALANCE';
+  durationDays?: number;
+  bonusPercent?: number;
+  description?: string;
+  highlight?: boolean;
+}
+
+// Added Comment interface for video discussions
 export interface Comment {
     id: string;
     userId: string;
@@ -142,6 +99,7 @@ export interface Comment {
     timestamp: number;
 }
 
+// Added UserInteraction for tracking likes and watch status
 export interface UserInteraction {
     liked: boolean;
     disliked: boolean;
@@ -149,6 +107,7 @@ export interface UserInteraction {
     newLikeCount?: number;
 }
 
+// Added Notification for system and user events
 export interface Notification {
     id: string;
     userId: string;
@@ -161,6 +120,7 @@ export interface Notification {
     metadata?: any;
 }
 
+// Added VideoResult for external search results
 export interface VideoResult {
     id: string;
     title: string;
@@ -171,6 +131,7 @@ export interface VideoResult {
     duration?: number;
 }
 
+// Added ContentRequest for user-submitted content ideas
 export interface ContentRequest {
     id: string;
     userId: string;
@@ -180,6 +141,7 @@ export interface ContentRequest {
     username?: string;
 }
 
+// Added MarketplaceItem for the store
 export interface MarketplaceItem {
     id: string;
     title: string;
@@ -200,10 +162,12 @@ export interface MarketplaceItem {
     createdAt: number;
 }
 
+// Added CartItem for shopping cart management
 export interface CartItem extends MarketplaceItem {
     quantity: number;
 }
 
+// Added MarketplaceReview for product feedback
 export interface MarketplaceReview {
     id: string;
     itemId: string;
@@ -215,6 +179,7 @@ export interface MarketplaceReview {
     timestamp: number;
 }
 
+// Added BalanceRequest for tracking pending deposits
 export interface BalanceRequest {
     id: string;
     userId: string;
@@ -223,6 +188,7 @@ export interface BalanceRequest {
     createdAt: number;
 }
 
+// Added VipRequest for tracking pending membership activations
 export interface VipRequest {
     id: string;
     userId: string;
@@ -232,6 +198,7 @@ export interface VipRequest {
     createdAt: number;
 }
 
+// Added SmartCleanerResult for system maintenance tools
 export interface SmartCleanerResult {
     preview: Video[];
     stats: {
@@ -239,9 +206,47 @@ export interface SmartCleanerResult {
     };
 }
 
+// Added FtpFile for remote file browsing
 export interface FtpFile {
     name: string;
     path: string;
     type: 'file' | 'dir';
     size?: string;
+}
+
+export interface SystemSettings {
+  downloadStartTime: string; 
+  downloadEndTime: string;   
+  isQueuePaused: boolean;
+  batchSize: number;         
+  maxDuration: number;       
+  maxResolution: number;     
+  pexelsKey: string;
+  pixabayKey: string;
+  geminiKey: string;
+  ytDlpPath: string;
+  ffmpegPath: string;
+  enableYoutube: boolean; 
+  categoryPrices: Record<string, number>; 
+  customCategories: string[]; 
+  localLibraryPath: string; 
+  videoCommission: number;
+  marketCommission: number;
+  transferFee?: number;
+  vipPlans?: VipPlan[];
+  paymentInstructions?: string;
+  currencyConversion?: number;
+  enableDebugLog?: boolean;
+  // Added missing settings for transcoding and FTP integration
+  autoTranscode?: boolean;
+  transcodePreset?: string;
+  proxyUrl?: string;
+  is_transcoder_active?: boolean;
+  ftpSettings?: {
+      host: string;
+      port: number;
+      user: string;
+      pass: string;
+      rootPath: string;
+  };
 }
