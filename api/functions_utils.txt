@@ -11,66 +11,59 @@ function write_log($message, $level = 'INFO') {
 }
 
 function fix_url($url) {
-    if (!empty($url) && strpos($url, 'uploads/') === 0) { return 'api/' . $url; }
+    if (empty($url)) return 'api/uploads/thumbnails/default.jpg';
+    if (strpos($url, 'uploads/') === 0) return 'api/' . $url;
     return $url;
 }
 
 function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
+    
+    // Si la ruta ya es absoluta y existe
     if (file_exists($pathOrUrl)) return realpath($pathOrUrl);
+    
+    // Si es una ruta relativa de la aplicación (uploads/videos/...)
     $cleanPath = $pathOrUrl;
     if (strpos($cleanPath, 'api/') === 0) { $cleanPath = substr($cleanPath, 4); }
-    if (file_exists($cleanPath)) return realpath($cleanPath);
+    
+    $localAppPath = __DIR__ . '/' . $cleanPath;
+    if (file_exists($localAppPath)) return realpath($localAppPath);
+
     return false;
 }
 
 /**
- * Busca recursivamente en el árbol de categorías por nombre
+ * Recorre el árbol de categorías buscando la mejor coincidencia para una ruta
  */
-function findCategoryInTree($name, $nodes) {
-    if (!is_array($nodes)) return null;
-    foreach ($nodes as $node) {
-        if (strcasecmp($node['name'] ?? '', $name) === 0) return $node;
-        // También buscar en patrones de carpeta
-        $patterns = $node['folderPatterns'] ?? [];
-        foreach ($patterns as $p) {
-            if (strcasecmp($p, $name) === 0) return $node;
-        }
-        if (!empty($node['children'])) {
-            $found = findCategoryInTree($name, $node['children']);
-            if ($found) return $found;
-        }
-    }
-    return null;
-}
+function matchCategoryRecursive($pathParts, $nodes, $currentBreadcrumb = []) {
+    if (empty($pathParts) || empty($nodes)) return $currentBreadcrumb;
 
-/**
- * Calcula el precio basado en el breadcrumb final
- */
-function getPriceForCategory($breadcrumb, $settings) {
-    $categories = is_array($settings['customCategories']) ? $settings['customCategories'] : json_decode($settings['customCategories'] ?? '[]', true);
-    $parts = explode(' / ', $breadcrumb);
+    $firstPart = strtoupper($pathParts[0]);
     
-    $lastPrice = isset($settings['categoryPrices']['GENERAL']) ? floatval($settings['categoryPrices']['GENERAL']) : 1.00;
-    $currentLevel = $categories;
-
-    foreach ($parts as $part) {
-        $found = false;
-        foreach ($currentLevel as $node) {
-            if (strcasecmp($node['name'], $part) === 0) {
-                if (isset($node['price'])) $lastPrice = floatval($node['price']);
-                $currentLevel = $node['children'] ?? [];
-                $found = true;
-                break;
+    foreach ($nodes as $node) {
+        $nodeName = strtoupper($node['name'] ?? '');
+        $patterns = array_map('strtoupper', $node['folderPatterns'] ?? []);
+        
+        if ($nodeName === $firstPart || in_array($firstPart, $patterns)) {
+            $newBreadcrumb = array_merge($currentBreadcrumb, [$node['name']]);
+            if (!empty($node['children'])) {
+                return matchCategoryRecursive(array_slice($pathParts, 1), $node['children'], $newBreadcrumb);
             }
+            return $newBreadcrumb;
         }
-        if (!$found) break;
     }
-    return $lastPrice;
+    
+    // Si no hay match en este nivel pero ya traemos un breadcrumb, los hijos de carpetas son categorías dinámicas
+    if (!empty($currentBreadcrumb)) {
+        $currentBreadcrumb[] = ucwords(strtolower($pathParts[0]));
+        return $currentBreadcrumb;
+    }
+
+    return matchCategoryRecursive(array_slice($pathParts, 1), $nodes, $currentBreadcrumb);
 }
 
 /**
- * Motor de Inteligencia Jerárquica V5 - Resolución de Rutas NAS
+ * Motor de Inteligencia Jerárquica V6
  */
 function smartParseFilename($fullPath, $categoriesConfig = []) {
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
@@ -79,45 +72,24 @@ function smartParseFilename($fullPath, $categoriesConfig = []) {
     
     // 1. Limpieza de nombre
     $cleanName = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $filename);
-    $cleanName = preg_replace('/\b(2160p|1080p|720p|480p|4k|x264|x265|h264|h265|hevc|aac|ac3|dts|mp3|bluray|web-dl|webrip)\b/i', '', $cleanName);
+    $cleanName = preg_replace('/\b(2160p|1080p|720p|480p|4k|x264|x265|h264|h265|hevc|aac|ac3|bluray|web-dl)\b/i', '', $cleanName);
     $cleanName = trim(preg_replace('/\s+/', ' ', $cleanName));
 
-    // 2. Análisis de Breadcrumb por Carpetas
+    // 2. Análisis Jerárquico
     $pathParts = explode('/', trim($dirPath, '/'));
-    $detectedBreadcrumb = [];
-    $currentNodeLevel = $categoriesConfig;
+    $ignore = ['VAR', 'WWW', 'HTML', 'API', 'UPLOADS', 'VIDEOS', 'VOLUME1', 'VOLUME2', 'DATA', 'SHARE', 'PUBLIC'];
+    $filteredParts = array_values(array_filter($pathParts, function($p) use ($ignore) {
+        return !empty($p) && !in_array(strtoupper($p), $ignore);
+    }));
+
+    $breadcrumb = matchCategoryRecursive($filteredParts, $categoriesConfig);
     
-    // Ignorar carpetas raíz del sistema o de red
-    $ignore = ['VAR', 'WWW', 'HTML', 'API', 'UPLOADS', 'VIDEOS', 'VOLUME1', 'VOLUME2', 'DATA', 'SHARE', 'PUBLIC', 'DS', 'NAS', 'STORAGE'];
-    
-    foreach ($pathParts as $part) {
-        if (empty($part) || in_array(strtoupper($part), $ignore)) continue;
-
-        $match = null;
-        foreach ($currentNodeLevel as $node) {
-            $patterns = array_map('strtoupper', $node['folderPatterns'] ?? []);
-            if (strcasecmp($node['name'] ?? '', $part) === 0 || in_array(strtoupper($part), $patterns)) {
-                $match = $node;
-                break;
-            }
-        }
-
-        if ($match) {
-            $detectedBreadcrumb[] = $match['name'];
-            $currentNodeLevel = $match['children'] ?? [];
-        } else if (!empty($detectedBreadcrumb)) {
-            // Si ya estamos bajo una categoría reconocida, las subcarpetas son subcategorías automáticas
-            $detectedBreadcrumb[] = ucwords(strtolower($part));
-            $currentNodeLevel = []; // No buscamos más nodos manuales profundos
-        }
-    }
-
-    // 3. Fallback: Búsqueda por keywords en el nombre del archivo si no hay carpetas útiles
-    if (empty($detectedBreadcrumb)) {
+    // 3. Fallback Keywords
+    if (empty($breadcrumb)) {
         foreach ($categoriesConfig as $node) {
             foreach (($node['namePatterns'] ?? []) as $p) {
                 if (stripos($filename, $p) !== false) {
-                    $detectedBreadcrumb[] = $node['name'];
+                    $breadcrumb = [$node['name']];
                     break 2;
                 }
             }
@@ -126,7 +98,7 @@ function smartParseFilename($fullPath, $categoriesConfig = []) {
 
     return [
         'title' => ucwords(strtolower($cleanName)), 
-        'category' => empty($detectedBreadcrumb) ? 'GENERAL' : implode(' / ', $detectedBreadcrumb)
+        'category' => empty($breadcrumb) ? 'GENERAL' : implode(' / ', $breadcrumb)
     ];
 }
 ?>
