@@ -46,6 +46,76 @@ function getAppSchema() {
                 'reason' => 'TEXT DEFAULT NULL'
             ]
         ],
+        'marketplace_items' => [
+            'cols' => [
+                'id' => 'VARCHAR(50) PRIMARY KEY',
+                'title' => 'VARCHAR(255) NOT NULL',
+                'description' => 'TEXT',
+                'price' => 'DECIMAL(10, 2)',
+                'originalPrice' => 'DECIMAL(10, 2)',
+                'discountPercent' => 'INT DEFAULT 0',
+                'stock' => 'INT DEFAULT 1',
+                'images' => 'JSON',
+                'sellerId' => 'VARCHAR(50)',
+                'category' => 'VARCHAR(50)',
+                'itemCondition' => 'VARCHAR(50)',
+                'status' => "ENUM('ACTIVO', 'AGOTADO', 'ELIMINADO') DEFAULT 'ACTIVO'",
+                'createdAt' => 'BIGINT'
+            ]
+        ],
+        'marketplace_reviews' => [
+            'cols' => [
+                'id' => 'VARCHAR(50) PRIMARY KEY',
+                'itemId' => 'VARCHAR(50)',
+                'userId' => 'VARCHAR(50)',
+                'rating' => 'INT',
+                'comment' => 'TEXT',
+                'timestamp' => 'BIGINT'
+            ]
+        ],
+        'subscriptions' => [
+            'cols' => [
+                'subscriberId' => 'VARCHAR(50)',
+                'creatorId' => 'VARCHAR(50)',
+                'createdAt' => 'BIGINT'
+            ],
+            'pk' => 'PRIMARY KEY (subscriberId, creatorId)'
+        ],
+        'comments' => [
+            'cols' => [
+                'id' => 'VARCHAR(50) PRIMARY KEY',
+                'videoId' => 'VARCHAR(50)',
+                'userId' => 'VARCHAR(50)',
+                'text' => 'TEXT',
+                'timestamp' => 'BIGINT'
+            ]
+        ],
+        'balance_requests' => [
+            'cols' => [
+                'id' => 'VARCHAR(50) PRIMARY KEY',
+                'userId' => 'VARCHAR(50)',
+                'amount' => 'DECIMAL(10, 2)',
+                'status' => "ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING'",
+                'createdAt' => 'BIGINT'
+            ]
+        ],
+        'vip_requests' => [
+            'cols' => [
+                'id' => 'VARCHAR(50) PRIMARY KEY',
+                'userId' => 'VARCHAR(50)',
+                'planSnapshot' => 'JSON',
+                'paymentRef' => 'VARCHAR(100)',
+                'status' => "ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING'",
+                'createdAt' => 'BIGINT'
+            ]
+        ],
+        'transcode_profiles' => [
+            'cols' => [
+                'extension' => 'VARCHAR(10) PRIMARY KEY',
+                'command_args' => 'TEXT',
+                'description' => 'VARCHAR(255)'
+            ]
+        ],
         'system_settings' => [
             'cols' => [
                 'id' => 'INT PRIMARY KEY DEFAULT 1',
@@ -57,6 +127,10 @@ function getAppSchema() {
                 'maxResolution' => 'INT DEFAULT 1080',
                 'ytDlpPath' => 'VARCHAR(255)',
                 'ffmpegPath' => 'VARCHAR(255) DEFAULT "ffmpeg"',
+                'geminiKey' => 'VARCHAR(255)',
+                'tropipayClientId' => 'VARCHAR(255)',
+                'tropipayClientSecret' => 'VARCHAR(255)',
+                'currencyConversion' => 'DECIMAL(10, 2) DEFAULT 300.00',
                 'enableYoutube' => 'TINYINT(1) DEFAULT 0',
                 'autoTranscode' => 'TINYINT(1) DEFAULT 0',
                 'is_transcoder_active' => 'TINYINT(1) DEFAULT 0',
@@ -67,6 +141,7 @@ function getAppSchema() {
                 'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
                 'videoCommission' => 'INT DEFAULT 20',
                 'marketCommission' => 'INT DEFAULT 25',
+                'transferFee' => 'DECIMAL(10, 2) DEFAULT 5.00',
                 'vipPlans' => 'JSON DEFAULT NULL',
                 'paqueteMapper' => 'JSON DEFAULT NULL',
                 'enableDebugLog' => 'TINYINT(1) DEFAULT 1'

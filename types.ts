@@ -112,6 +112,10 @@ export interface SystemSettings {
   paymentInstructions?: string;
   currencyConversion?: number;
   enableDebugLog?: boolean;
+  // Fix: Added missing properties used in AdminConfig to resolve type errors
+  autoTranscode?: boolean | number;
+  tropipayClientId?: string;
+  tropipayClientSecret?: string;
 }
 
 export interface Transaction {

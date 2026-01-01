@@ -33,6 +33,100 @@ function video_get_one($pdo, $id) {
     respond(false, null, 'Video no encontrado');
 }
 
+function video_get_by_creator($pdo, $userId) {
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? ORDER BY v.createdAt DESC");
+    $stmt->execute([$userId]);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
+}
+
+function video_get_unprocessed($pdo) {
+    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
+    $mode = $_GET['mode'] ?? 'normal';
+    
+    $sql = "SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3";
+    if ($mode === 'random') $sql .= " ORDER BY RAND()";
+    else $sql .= " ORDER BY createdAt ASC";
+    $sql .= " LIMIT $limit";
+    
+    $stmt = $pdo->query($sql);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
+}
+
+function video_scan_local($pdo, $input) {
+    set_time_limit(600);
+    $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
+    if (!$rawPath || !is_dir($rawPath)) respond(false, null, "Ruta de librería inválida o inaccesible");
+
+    $rootPath = realpath($rawPath);
+    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+    $addedCount = 0;
+    $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'ts', 'flv'];
+
+    $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
+    $iterator = new RecursiveIteratorIterator($dirIterator);
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($iterator as $file) {
+            if (!$file->isFile()) continue;
+            $ext = strtolower($file->getExtension());
+            if (!in_array($ext, $allowedExts)) continue;
+
+            $fullPath = str_replace('\\', '/', $file->getPathname());
+            $vidId = 'loc_' . md5($fullPath);
+            
+            // Verificar si ya existe
+            $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE id = ?");
+            $check->execute([$vidId]);
+            if ($check->fetchColumn() > 0) continue;
+
+            $title = basename($fullPath);
+            $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, isLocal) VALUES (?, ?, 'Local Library', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 1)");
+            $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
+            $addedCount++;
+        }
+        $pdo->commit();
+        respond(true, ['newToImport' => $addedCount]);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        respond(false, null, $e->getMessage());
+    }
+}
+
+function video_upload($pdo, $post, $files) {
+    $id = 'v_' . uniqid();
+    $title = $post['title'] ?? 'Sin título';
+    $desc = $post['description'] ?? '';
+    $price = floatval($post['price'] ?? 0);
+    $cat = $post['category'] ?? 'GENERAL';
+    $dur = intval($post['duration'] ?? 0);
+    $uid = $post['userId'] ?? '';
+    if (!$uid) respond(false, null, 'ID de usuario faltante');
+    $videoUrl = null;
+    $thumbUrl = 'api/uploads/thumbnails/default.jpg';
+    if (isset($files['video']) && $files['video']['error'] === UPLOAD_ERR_OK) {
+        $vDir = 'uploads/videos/';
+        if (!is_dir($vDir)) mkdir($vDir, 0777, true);
+        $ext = pathinfo($files['video']['name'], PATHINFO_EXTENSION);
+        $vPath = "{$vDir}{$id}.{$ext}";
+        if (move_uploaded_file($files['video']['tmp_name'], $vPath)) { $videoUrl = "api/" . $vPath; }
+    }
+    if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
+        $tDir = 'uploads/thumbnails/';
+        if (!is_dir($tDir)) mkdir($tDir, 0777, true);
+        $tPath = "{$tDir}{$id}.jpg";
+        if (move_uploaded_file($files['thumbnail']['tmp_name'], $tPath)) { $thumbUrl = "api/" . $tPath; }
+    }
+    if (!$videoUrl) respond(false, null, 'Fallo al mover video');
+    $sql = "INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)";
+    $pdo->prepare($sql)->execute([$id, $title, $desc, $price, $thumbUrl, $videoUrl, $uid, time(), $cat, $dur]);
+    respond(true, ['id' => $id]);
+}
+
 function video_update_metadata($pdo, $post, $files) {
     $id = $post['id'] ?? '';
     $duration = isset($post['duration']) ? floatval($post['duration']) : 0;
@@ -82,15 +176,6 @@ function video_smart_organize($pdo) {
         if (internal_organize_video($pdo, $vid, $settings, $hierarchy)) $processed++;
     }
 
-    // Auto-detección de colecciones (Series) basado en switch
-    if ($settings['autoGroupFolders']) {
-        $sql = "UPDATE videos v 
-                JOIN (SELECT collection, COUNT(*) as c FROM videos WHERE collection IS NOT NULL GROUP BY collection HAVING c > 3) series 
-                ON v.collection = series.collection 
-                SET v.category = 'SERIES' WHERE v.category = 'GENERAL'";
-        $pdo->exec($sql);
-    }
-
     $remaining = $pdo->query("SELECT COUNT(*) FROM videos WHERE category = 'PROCESSING'")->fetchColumn();
     respond(true, ['processed' => $processed, 'remaining' => $remaining]);
 }
@@ -120,72 +205,5 @@ function internal_organize_video($pdo, $id, $settings, $hierarchy) {
         $pdo->rollBack();
         return false;
     }
-}
-
-function video_get_related($pdo, $id) {
-    $stmt = $pdo->prepare("SELECT id, videoUrl, category, parent_category, collection, title, creatorId FROM videos WHERE id = ?");
-    $stmt->execute([$id]);
-    $current = $stmt->fetch();
-    if (!$current) respond(true, []);
-
-    // PRIORIDAD 1: Siguiente video en la misma colección (Orden alfabético para episodios)
-    $candidates = [];
-    if ($current['collection']) {
-        $stmtColl = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.collection = ? AND v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.title ASC LIMIT 20");
-        $stmtColl->execute([$current['collection'], $id]);
-        $candidates = $stmtColl->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Re-ordenar para que el que sigue alfabéticamente esté de primero
-        usort($candidates, function($a, $b) use ($current) {
-            $aFollows = strnatcasecmp($a['title'], $current['title']) > 0;
-            $bFollows = strnatcasecmp($b['title'], $current['title']) > 0;
-            if ($aFollows && !$bFollows) return -1;
-            if (!$aFollows && $bFollows) return 1;
-            return strnatcasecmp($a['title'], $b['title']);
-        });
-    }
-
-    // PRIORIDAD 2: Misma Categoría (si faltan sugerencias)
-    if (count($candidates) < 10) {
-        $needed = 15 - count($candidates);
-        $excludeIds = array_column($candidates, 'id');
-        $excludeIds[] = $id;
-        $inClause = "'" . implode("','", $excludeIds) . "'";
-        $stmtCat = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category = ? AND v.id NOT IN ($inClause) AND v.category NOT IN ('PENDING', 'PROCESSING') LIMIT $needed");
-        $stmtCat->execute([$current['category']]);
-        $candidates = array_merge($candidates, $stmtCat->fetchAll(PDO::FETCH_ASSOC));
-    }
-
-    video_process_rows($candidates);
-    respond(true, $candidates);
-}
-
-function video_get_unprocessed($pdo) {
-    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
-    $sql = "SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 ORDER BY createdAt ASC LIMIT $limit";
-    $stmt = $pdo->query($sql);
-    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    video_process_rows($videos);
-    respond(true, $videos);
-}
-
-function video_delete($pdo, $input) {
-    $id = $input['id'] ?? '';
-    $uid = $input['userId'] ?? '';
-    if (!$id || !$uid) respond(false, null, 'ID o Usuario faltante');
-    $stmt = $pdo->prepare("SELECT creatorId, videoUrl, thumbnailUrl FROM videos WHERE id = ?");
-    $stmt->execute([$id]);
-    $video = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$video) respond(false, null, "No encontrado");
-    $stmtU = $pdo->prepare("SELECT role FROM users WHERE id = ?");
-    $stmtU->execute([$uid]); 
-    $role = $stmtU->fetchColumn();
-    if ($video['creatorId'] !== $uid && $role !== 'ADMIN') respond(false, null, "No autorizado");
-    $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
-    if (strpos($video['videoUrl'] ?? '', 'uploads/videos/') !== false) {
-        $vPath = str_replace('api/', '', $video['videoUrl']);
-        if (file_exists($vPath)) @unlink($vPath);
-    }
-    respond(true);
 }
 ?>
