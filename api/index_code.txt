@@ -111,6 +111,7 @@ try {
         case 'scan_local_library': video_scan_local($pdo, $input); break;
         case 'smart_organize_library': video_smart_organize($pdo); break;
         case 'fix_library_metadata': video_fix_metadata($pdo); break;
+        case 'recategorize_all': video_recategorize_all($pdo); break;
         case 'stream': streamVideo($_GET['id'] ?? '', $pdo); break;
 
         // --- INTERACCIONES ---

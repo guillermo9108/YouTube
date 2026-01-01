@@ -39,12 +39,12 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
     onAddChild,
     level = 0 
 }) => {
-    const [isExpanded, setIsExpanded] = useState(level < 1);
+    const [isExpanded, setIsExpanded] = useState(true);
     const [showRules, setShowRules] = useState(false);
 
     return (
         <div className="space-y-2">
-            <div className={`bg-slate-950 p-4 rounded-xl border transition-all ${level > 0 ? 'ml-4 border-l-indigo-500/50 border-slate-800' : 'border-slate-700'}`}>
+            <div className={`bg-slate-950 p-4 rounded-xl border transition-all ${level > 0 ? 'ml-6 border-l-indigo-500 border-slate-800' : 'border-slate-700'}`}>
                 {/* Header: Nombre y Precio */}
                 <div className="flex flex-col gap-3">
                     <div className="flex items-center gap-2">
@@ -72,14 +72,14 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                         </div>
                         
                         <div className="flex gap-1">
-                            <button onClick={() => setShowRules(!showRules)} className={`p-2 rounded-lg border transition-all ${showRules ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
+                            <button onClick={() => setShowRules(!showRules)} title="Configurar Reglas" className={`p-2 rounded-lg border transition-all ${showRules ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
                                 <Layers size={14}/>
                             </button>
-                            <button onClick={() => onAddChild(node.id)} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-emerald-400 rounded-lg transition-colors">
+                            <button onClick={() => onAddChild(node.id)} title="Añadir Subcategoría" className="p-2 bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 hover:text-white hover:bg-indigo-600 rounded-lg transition-all">
                                 <Plus size={14}/>
                             </button>
                             {level > 0 && (
-                                <button onClick={() => onDelete(node.id)} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-500 rounded-lg transition-colors">
+                                <button onClick={() => onDelete(node.id)} title="Eliminar" className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-500 rounded-lg transition-colors">
                                     <Trash2 size={14}/>
                                 </button>
                             )}
@@ -91,7 +91,7 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                 {showRules && (
                     <div className="mt-4 p-4 bg-slate-900 rounded-xl border border-indigo-500/20 space-y-4 animate-in slide-in-from-top-1">
                         <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Keywords en Carpeta</label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Palabras clave en Carpetas (NAS)</label>
                             <div className="flex flex-wrap gap-1.5 mb-2">
                                 {(node.folderPatterns || []).map((p, i) => (
                                     <span key={i} className="bg-indigo-500/10 text-indigo-400 text-[10px] font-bold px-2 py-0.5 rounded border border-indigo-500/20 flex items-center gap-1">
@@ -100,13 +100,13 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                                 ))}
                             </div>
                             <input 
-                                type="text" placeholder="Pulsa Enter para añadir..."
+                                type="text" placeholder="Escribe y pulsa Enter..."
                                 onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { folderPatterns: [...(node.folderPatterns || []), e.currentTarget.value] }); e.currentTarget.value = ''; }}}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
                             />
                         </div>
                         <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Keywords en Archivo</label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Palabras clave en Archivos</label>
                             <div className="flex flex-wrap gap-1.5 mb-2">
                                 {(node.namePatterns || []).map((p, i) => (
                                     <span key={i} className="bg-purple-500/10 text-purple-400 text-[10px] font-bold px-2 py-0.5 rounded border border-purple-500/20 flex items-center gap-1">
@@ -115,7 +115,7 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                                 ))}
                             </div>
                             <input 
-                                type="text" placeholder="Pulsa Enter para añadir..."
+                                type="text" placeholder="Escribe y pulsa Enter..."
                                 onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { namePatterns: [...(node.namePatterns || []), e.currentTarget.value] }); e.currentTarget.value = ''; }}}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
                             />
@@ -153,7 +153,6 @@ export default function AdminConfig() {
         setLoading(true);
         try {
             const s: any = await db.getSystemSettings();
-            // Asegurar que customCategories sea siempre un array
             if (!Array.isArray(s.customCategories)) s.customCategories = [];
             setSettings(s);
         } catch(e) {
@@ -165,10 +164,8 @@ export default function AdminConfig() {
 
     useEffect(() => { loadSettings(); }, []);
 
-    // Función de generación de IDs únicos robustos
     const generateUID = () => Math.random().toString(36).substring(2, 11).toUpperCase();
 
-    // Lógica de actualización FUNCIONAL para evitar cierres de estado obsoletos
     const updateCategoryTree = useCallback((id: string, updates: Partial<CategoryConfig>) => {
         setSettings(prev => {
             if (!prev) return prev;
@@ -233,7 +230,7 @@ export default function AdminConfig() {
         setSaving(true);
         try {
             await db.updateSystemSettings(settings);
-            toast.success("Configuración guardada en el servidor");
+            toast.success("Configuración guardada");
             await loadSettings();
         } catch(e: any) {
             toast.error("Error al guardar: " + e.message);

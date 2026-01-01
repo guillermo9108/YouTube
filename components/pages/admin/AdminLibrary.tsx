@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, LayoutGrid } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -22,11 +22,9 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         vid.src = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
         vid.muted = true;
         
-        // Timeout de seguridad: si en 10 segundos no capturamos, forzamos reporte
         timeoutRef.current = window.setTimeout(() => {
             if (!processedRef.current) {
                 const dur = (vid.duration && isFinite(vid.duration)) ? vid.duration : 0;
-                // Si llegamos aquí, informamos que el cliente no pudo renderizar pero tenemos duración
                 onComplete(dur, null, dur > 0, true);
                 processedRef.current = true;
             }
@@ -43,7 +41,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
     const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
-        // Detección de video interpretado como audio (MP4 HEVC en navegadores no compatibles)
         if (vid.videoWidth === 0 && vid.duration > 0) {
             processedRef.current = true;
             setStatus('Incompatible (Audio Mode)');
@@ -55,7 +52,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const vid = e.currentTarget;
         if (processedRef.current) return;
 
-        // Captura normal si hay dimensiones
         if (vid.currentTime > 1.2 && vid.videoWidth > 0) {
             processedRef.current = true;
             setStatus('Capturando...');
@@ -103,6 +99,7 @@ export default function AdminLibrary() {
     const [activeScan, setActiveScan] = useState(false);
     const [isOrganizing, setIsOrganizing] = useState(false);
     const [isFixing, setIsFixing] = useState(false);
+    const [isRecategorizing, setIsRecategorizing] = useState(false);
     const [scanLog, setScanLog] = useState<string[]>([]);
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
     const [currentScanIndex, setCurrentScanIndex] = useState(0);
@@ -113,7 +110,7 @@ export default function AdminLibrary() {
             const all = await db.getAllVideos();
             const unprocessed = await db.getUnprocessedVideos(9999, 'normal');
             const procCount = all.filter(v => v.category === 'PROCESSING').length;
-            const brokenCount = all.filter(v => Number(v.duration) <= 0 || v.thumbnailUrl.includes('default.jpg')).length;
+            const brokenCount = all.filter(v => Number(v.duration) <= 0 || (v.thumbnailUrl && v.thumbnailUrl.includes('default.jpg'))).length;
             const generalCount = all.filter(v => v.category === 'GENERAL').length;
             
             setStats({ 
@@ -139,7 +136,7 @@ export default function AdminLibrary() {
         addToLog('Iniciando escaneo de disco...');
         try {
             await db.updateSystemSettings({ localLibraryPath: localPath });
-            const res = await db.scanLocalLibrary(localPath);
+            const res: any = await db.scanLocalLibrary(localPath);
             if (res.message) addToLog(res.message);
             addToLog(`Escaneo completado. Encontrados: ${res.totalFound}. Nuevos: ${res.newToImport}`);
             toast.success("Paso 1 Finalizado");
@@ -192,7 +189,7 @@ export default function AdminLibrary() {
         setIsOrganizing(true);
         addToLog("Iniciando Organización de videos...");
         try {
-            const res = await db.smartOrganizeLibrary();
+            const res: any = await db.smartOrganizeLibrary();
             addToLog(`Procesados: ${res.processed}. Pendientes: ${res.remaining}`);
             if (res.processed > 0) {
                 toast.success("Publicación completada");
@@ -207,7 +204,7 @@ export default function AdminLibrary() {
         setIsFixing(true);
         addToLog("Iniciando Mantenimiento Avanzado...");
         try {
-            const res = await db.fixLibraryMetadata();
+            const res: any = await db.fixLibraryMetadata();
             addToLog(`Mantenimiento completado.`);
             addToLog(`- Videos rotos reseteados: ${res.fixedBroken}`);
             addToLog(`- Videos re-categorizados: ${res.reCategorized}`);
@@ -222,32 +219,51 @@ export default function AdminLibrary() {
         finally { setIsFixing(false); }
     };
 
+    const handleStep5 = async () => {
+        if (!confirm("Esto re-analizará TODA la librería pública (incluyendo series/películas ya categorizadas) para aplicar las reglas de carpetas actuales. ¿Continuar?")) return;
+        setIsRecategorizing(true);
+        addToLog("Iniciando Re-categorización Masiva...");
+        try {
+            const res: any = await db.recategorizeAll();
+            addToLog(`Re-categorización finalizada.`);
+            addToLog(`- Total videos analizados: ${res.processed}`);
+            toast.success("Librería actualizada");
+            db.setHomeDirty();
+            loadStats();
+        } catch (e: any) { addToLog(`Error: ${e.message}`); }
+        finally { setIsRecategorizing(false); }
+    };
+
     return (
         <div className="space-y-6 pb-20 max-w-4xl mx-auto">
             <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
                 <Database className="text-indigo-400"/> Gestión de Librería
             </h2>
             
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
-                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P1: Registro</div>
-                    <div className="text-xl font-black text-amber-500 flex items-center justify-center gap-1"><Clock size={16}/> {stats.pending}</div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-3">
+                <div className="bg-slate-900 p-2 md:p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[8px] md:text-[10px] font-black uppercase mb-1">P1: Registro</div>
+                    <div className="text-lg md:text-xl font-black text-amber-500 flex items-center justify-center gap-1"><Clock size={14}/> {stats.pending}</div>
                 </div>
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
-                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P2: Extracción</div>
-                    <div className="text-xl font-black text-blue-500 flex items-center justify-center gap-1"><RefreshCw size={16}/> {stats.processing}</div>
+                <div className="bg-slate-900 p-2 md:p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[8px] md:text-[10px] font-black uppercase mb-1">P2: Extracción</div>
+                    <div className="text-lg md:text-xl font-black text-blue-500 flex items-center justify-center gap-1"><RefreshCw size={14}/> {stats.processing}</div>
                 </div>
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
-                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P3: Listos</div>
-                    <div className="text-xl font-black text-emerald-500 flex items-center justify-center gap-1"><CheckCircle2 size={16}/> {stats.public}</div>
+                <div className="bg-slate-900 p-2 md:p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[8px] md:text-[10px] font-black uppercase mb-1">P3: Listos</div>
+                    <div className="text-lg md:text-xl font-black text-emerald-500 flex items-center justify-center gap-1"><CheckCircle2 size={14}/> {stats.public}</div>
                 </div>
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
-                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P4: Mantenimiento</div>
-                    <div className="text-xl font-black text-red-500 flex items-center justify-center gap-1"><ShieldAlert size={16}/> {stats.broken + stats.general}</div>
+                <div className="bg-slate-900 p-2 md:p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[8px] md:text-[10px] font-black uppercase mb-1">P4: Fixer</div>
+                    <div className="text-lg md:text-xl font-black text-red-500 flex items-center justify-center gap-1"><AlertTriangle size={14}/> {stats.broken}</div>
+                </div>
+                <div className="bg-slate-900 p-2 md:p-3 rounded-xl border border-slate-800 text-center shadow-lg col-span-2 md:col-span-1">
+                    <div className="text-slate-500 text-[8px] md:text-[10px] font-black uppercase mb-1">P5: Mapper</div>
+                    <div className="text-lg md:text-xl font-black text-purple-500 flex items-center justify-center gap-1"><LayoutGrid size={14}/> {stats.public}</div>
                 </div>
             </div>
             
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-8">
                 <div className="border-l-4 border-blue-500 pl-4">
                     <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">1. Registro Físico</h3>
                     <p className="text-xs text-slate-500 mb-4">Sincroniza los archivos del disco duro con la base de datos.</p>
@@ -276,10 +292,18 @@ export default function AdminLibrary() {
                 </div>
 
                 <div className="border-l-4 border-red-500 pl-4">
-                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">4. Mantenimiento Avanzado</h3>
-                    <p className="text-xs text-slate-500 mb-4">Corrige videos rotos ({stats.broken}) y re-categoriza videos GENERAL ({stats.general}).</p>
-                    <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.general === 0)} className="w-full bg-slate-800 border border-red-500/30 hover:bg-slate-700 disabled:bg-slate-900 disabled:opacity-50 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all flex items-center justify-center gap-2">
-                        {isFixing ? <RefreshCw className="animate-spin" size={18}/> : <ShieldAlert className="text-red-500" size={18}/>} Ejecutar Mantenimiento
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">4. Reparación de Datos</h3>
+                    <p className="text-xs text-slate-500 mb-4">Re-escanea videos con miniaturas rotas o duración en cero.</p>
+                    <button onClick={handleStep4} disabled={isFixing || stats.broken === 0} className="w-full bg-slate-800 border border-red-500/30 hover:bg-slate-700 disabled:bg-slate-900 disabled:opacity-50 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all flex items-center justify-center gap-2">
+                        {isFixing ? <Loader2 className="animate-spin" size={18}/> : <ShieldAlert className="text-red-500" size={18}/>} Reparar {stats.broken} Videos
+                    </button>
+                </div>
+
+                <div className="border-l-4 border-indigo-500 pl-4">
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">5. Re-categorización Total</h3>
+                    <p className="text-xs text-slate-500 mb-4">Aplica las reglas actuales a toda la librería. Útil tras cambiar la estructura de Config.</p>
+                    <button onClick={handleStep5} disabled={isRecategorizing || stats.public === 0} className="w-full bg-indigo-900/40 border border-indigo-500/30 hover:bg-indigo-900/60 disabled:bg-slate-900 disabled:opacity-50 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all flex items-center justify-center gap-2">
+                        {isRecategorizing ? <RefreshCw className="animate-spin" size={18}/> : <LayoutGrid className="text-indigo-400" size={18}/>} Re-categorizar Todo ({stats.public})
                     </button>
                 </div>
             </div>

@@ -317,6 +317,24 @@ function video_fix_metadata($pdo) {
     respond(true, ['fixedBroken' => $fixedBroken, 'reCategorized' => $reCategorized]);
 }
 
+function video_recategorize_all($pdo) {
+    $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
+    $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
+    $customCats = json_decode($settings['customCategories'] ?? '[]', true);
+    
+    // Obtenemos videos que ya están en el catálogo público
+    $stmt = $pdo->query("SELECT id FROM videos WHERE category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')");
+    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    $processed = 0;
+    foreach ($ids as $id) {
+        if (internal_organize_video($pdo, $id, $settings, $customCats)) {
+            $processed++;
+        }
+    }
+    respond(true, ['processed' => $processed]);
+}
+
 function internal_organize_video($pdo, $id, $settings, $customCategories) {
     $stmt = $pdo->prepare("SELECT id, title, videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);

@@ -531,6 +531,10 @@ class DBService {
         return this.request<any>(`action=fix_library_metadata`, { method: 'POST' });
     }
 
+    public async recategorizeAll(): Promise<any> {
+        return this.request<any>(`action=recategorize_all`, { method: 'POST' });
+    }
+
     public async adminCleanupSystemFiles(): Promise<any> {
         return this.request<any>(`action=admin_cleanup_files`, { method: 'POST' });
     }
