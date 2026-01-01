@@ -1,8 +1,81 @@
 <?php
 
 /**
- * Sistema de Logs Centralizado
+ * Motor Avanzado de Descomposición de Rutas Jerárquicas
  */
+function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
+    $filename = pathinfo($fullPath, PATHINFO_FILENAME);
+    $fullPathNormalized = str_replace('\\', '/', $fullPath);
+    $pathParts = explode('/', $fullPathNormalized);
+    
+    // 1. Limpieza de Título (Standard)
+    $junkPatterns = ['/\b(2160p|1080p|720p|480p|4k|8k|hd|sd|fhd|uhd)\b/i', '/\b(x264|x265|h264|h265|hevc|av1|divx|xvid|mpeg4|mpeg)\b/i', '/\b(aac|ac3|eac3|dts|truehd|flac|mp3|atmos|dd5\.1|dd\+|5\.1|7\.1)\b/i', '/\b(hdr|hdr10|dv|dolby|vision|10bit|8bit|sdr)\b/i', '/\b(bluray|web-dl|webrip|hdrip|hdtv|dvdrip|camrip|remux|bdrip|web)\b/i', '/\b(amzn|nf|hulu|dsnp|netflix|amazon|rarbg|yify|eztv|etrg|psa)\b/i', '/\b(mkv|mp4|avi|mov|wmv|flv|ts)\b/i', '/www\.[a-z0-9-]+\.[a-z]+/i'];
+    $cleanText = function($txt) use ($junkPatterns) {
+        $t = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $txt);
+        foreach ($junkPatterns as $p) { $t = preg_replace($p, '', $t); }
+        return trim(preg_replace('/\s+/', ' ', $t));
+    };
+    $cleanName = $cleanText($filename);
+
+    // 2. Traversal Profundo de Categoría
+    $detectedCat = 'GENERAL';
+    $detectedParent = null;
+    
+    // Buscamos coincidencia en cada parte de la ruta
+    foreach (array_reverse($pathParts) as $segment) {
+        $segUpper = strtoupper($segment);
+        foreach ($hierarchy as $node) {
+            $keywords = isset($node['keywords']) ? array_map('strtoupper', array_map('trim', explode(',', $node['keywords']))) : [];
+            // Coincidencia por nombre exacto o palabras clave
+            if ($segUpper === strtoupper($node['name']) || in_array($segUpper, $keywords)) {
+                $detectedCat = $node['name'];
+                $detectedParent = $node['parent'] ?? null;
+                break 2;
+            }
+        }
+    }
+
+    // 3. Lógica de Colección (Agrupación por Carpeta)
+    // Si la carpeta contenedora se repite en otros videos, el Paso 3 (Organización) la marcará.
+    $parentFolder = (count($pathParts) > 1) ? $pathParts[count($pathParts)-2] : null;
+
+    return [
+        'title' => ucwords(strtolower($cleanName)), 
+        'category' => $detectedCat,
+        'parent_category' => $detectedParent,
+        'collection' => $parentFolder
+    ];
+}
+
+/**
+ * Buscador de Precios Recursivo (Herencia)
+ */
+function getPriceForCategory($catName, $settings) {
+    $hierarchy = json_decode($settings['categoryHierarchy'] ?? '[]', true);
+    
+    $findPrice = function($name) use (&$findPrice, $hierarchy) {
+        foreach ($hierarchy as $node) {
+            if ($node['name'] === $name) {
+                if (!empty($node['price']) && floatval($node['price']) > 0) {
+                    return floatval($node['price']);
+                }
+                if (!empty($node['parent'])) {
+                    return $findPrice($node['parent']);
+                }
+            }
+        }
+        return null;
+    };
+
+    $price = $findPrice($catName);
+    if ($price !== null) return $price;
+
+    // Fallback a precios planos legacy
+    $prices = is_array($settings['categoryPrices']) ? $settings['categoryPrices'] : json_decode($settings['categoryPrices'] ?? '{}', true);
+    return isset($prices[$catName]) ? floatval($prices[$catName]) : 1.00; 
+}
+
+// ... Resto de funciones (resolve_video_path, fix_url, streamVideo, etc) ...
 function write_log($message, $level = 'INFO') {
     $logFile = __DIR__ . '/debug_log.txt';
     $timestamp = date('Y-m-d H:i:s');
@@ -10,124 +83,48 @@ function write_log($message, $level = 'INFO') {
     @file_put_contents($logFile, $formattedMessage, FILE_APPEND);
 }
 
-function fix_url($url) {
-    if (empty($url)) return 'api/uploads/thumbnails/default.jpg';
-    if (strpos($url, 'http') === 0) return $url;
-    if (strpos($url, 'uploads/') === 0) return 'api/' . $url;
-    return $url;
-}
-
-/**
- * Resuelve una ruta de video (NAS o Uploads) a una ruta física absoluta
- */
 function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
-    
-    // 1. Limpiar prefijos de URL si vienen de la base de datos
-    $cleanPath = $pathOrUrl;
-    if (strpos($cleanPath, 'api/') === 0) { $cleanPath = substr($cleanPath, 4); }
-    
-    // 2. Probar si es una ruta relativa a la carpeta API (Uploads)
-    $localAppPath = __DIR__ . '/' . $cleanPath;
-    if (file_exists($localAppPath) && is_file($localAppPath)) return realpath($localAppPath);
-
-    // 3. Probar si es una ruta absoluta (NAS)
-    if (file_exists($pathOrUrl) && is_file($pathOrUrl)) return realpath($pathOrUrl);
-
+    if (file_exists($pathOrUrl)) return realpath($pathOrUrl);
+    $cleanPath = (strpos($pathOrUrl, 'api/') === 0) ? substr($pathOrUrl, 4) : $pathOrUrl;
+    if (file_exists($cleanPath)) return realpath($cleanPath);
+    if (strpos($cleanPath, 'uploads/') !== false) {
+        $baseDir = dirname(__DIR__); 
+        $fullPath = $baseDir . DIRECTORY_SEPARATOR . $cleanPath;
+        if (file_exists($fullPath)) return realpath($fullPath);
+    }
     return false;
 }
 
-/**
- * Busca el precio configurado para una categoría específica en la jerarquía
- */
-function getPriceForCategory($breadcrumb, $settings) {
-    $categories = is_array($settings['customCategories']) ? $settings['customCategories'] : json_decode($settings['customCategories'] ?? '[]', true);
-    $parts = explode(' / ', $breadcrumb);
-    
-    // Precio base por defecto (GENERAL)
-    $lastPrice = 1.00;
-    if (isset($settings['categoryPrices']['GENERAL'])) {
-        $lastPrice = floatval($settings['categoryPrices']['GENERAL']);
-    }
-
-    $currentLevel = $categories;
-    foreach ($parts as $part) {
-        $found = false;
-        if (!is_array($currentLevel)) break;
-        foreach ($currentLevel as $node) {
-            if (isset($node['name']) && strcasecmp($node['name'], $part) === 0) {
-                if (isset($node['price'])) $lastPrice = floatval($node['price']);
-                $currentLevel = $node['children'] ?? [];
-                $found = true;
-                break;
-            }
-        }
-        if (!$found) break;
-    }
-    return $lastPrice;
+function fix_url($url) {
+    if (!empty($url) && strpos($url, 'uploads/') === 0) return 'api/' . $url;
+    return $url;
 }
 
-/**
- * Motor de Inteligencia Jerárquica V7
- */
-function smartParseFilename($fullPath, $categoriesConfig = []) {
-    $fullPathNormalized = str_replace('\\', '/', $fullPath);
-    $filename = pathinfo($fullPathNormalized, PATHINFO_FILENAME);
-    $dirPath = dirname($fullPathNormalized);
-    
-    // 1. Limpieza de nombre (Quitar basura común de archivos)
-    $cleanName = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $filename);
-    $cleanName = preg_replace('/\b(2160p|1080p|720p|480p|4k|x264|x265|h264|h265|hevc|aac|ac3|bluray|web-dl)\b/i', '', $cleanName);
-    $cleanName = trim(preg_replace('/\s+/', ' ', $cleanName));
-
-    // 2. Análisis Jerárquico de Carpetas
-    $pathParts = explode('/', trim($dirPath, '/'));
-    $ignore = ['VAR', 'WWW', 'HTML', 'API', 'UPLOADS', 'VIDEOS', 'VOLUME1', 'VOLUME2', 'DATA', 'SHARE', 'PUBLIC'];
-    
-    $filteredParts = array_values(array_filter($pathParts, function($p) use ($ignore) {
-        return !empty($p) && !in_array(strtoupper($p), $ignore);
-    }));
-
-    $detectedBreadcrumb = [];
-    $currentNodeLevel = $categoriesConfig;
-
-    foreach ($filteredParts as $part) {
-        $match = null;
-        if (is_array($currentNodeLevel)) {
-            foreach ($currentNodeLevel as $node) {
-                $patterns = array_map('strtoupper', $node['folderPatterns'] ?? []);
-                if (strcasecmp($node['name'] ?? '', $part) === 0 || in_array(strtoupper($part), $patterns)) {
-                    $match = $node;
-                    break;
-                }
-            }
-        }
-
-        if ($match) {
-            $detectedBreadcrumb[] = $match['name'];
-            $currentNodeLevel = $match['children'] ?? [];
-        } else if (!empty($detectedBreadcrumb)) {
-            // Dinámico: Si ya estamos en una categoría, las subcarpetas son subcategorías
-            $detectedBreadcrumb[] = ucwords(strtolower($part));
-            $currentNodeLevel = [];
-        }
-    }
-
-    // 3. Fallback: Búsqueda por keywords en el nombre del archivo
-    if (empty($detectedBreadcrumb)) {
-        foreach ($categoriesConfig as $node) {
-            foreach (($node['namePatterns'] ?? []) as $p) {
-                if (stripos($filename, $p) !== false) {
-                    $detectedBreadcrumb[] = $node['name'];
-                    break 2;
-                }
-            }
-        }
-    }
-
-    return [
-        'title' => ucwords(strtolower($cleanName)), 
-        'category' => empty($detectedBreadcrumb) ? 'GENERAL' : implode(' / ', $detectedBreadcrumb)
-    ];
+function streamVideo($id, $pdo) {
+    while (ob_get_level()) ob_end_clean();
+    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $videoUrl = $stmt->fetchColumn();
+    if (!$videoUrl) { header("HTTP/1.0 404 Not Found"); exit; }
+    $realPath = resolve_video_path($videoUrl);
+    if (!$realPath || !file_exists($realPath)) { header("HTTP/1.0 404 Not Found"); exit; }
+    $fileSize = sprintf("%u", filesize($realPath));
+    $fp = fopen($realPath, 'rb');
+    header('Content-Type: video/mp4');
+    header('Accept-Ranges: bytes');
+    header('Cache-Control: public, max-age=3600');
+    if (isset($_SERVER['HTTP_RANGE'])) {
+        preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
+        $offset = intval($matches[1]);
+        $end = isset($matches[2]) ? intval($matches[2]) : $fileSize - 1;
+        header('HTTP/1.1 206 Partial Content');
+        header("Content-Range: bytes $offset-$end/$fileSize");
+        header("Content-Length: " . ($end - $offset + 1));
+        fseek($fp, $offset);
+    } else { header("Content-Length: $fileSize"); }
+    while (!feof($fp)) { echo fread($fp, 131072); flush(); if (connection_aborted()) break; }
+    fclose($fp);
+    exit;
 }
 ?>

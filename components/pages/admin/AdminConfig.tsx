@@ -1,259 +1,203 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
-import { SystemSettings, CategoryConfig } from '../../../types';
+import { SystemSettings } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { 
-    Save, DollarSign, Loader2, Trash2, Plus, X, 
-    FolderTree, ChevronRight, Sparkles, 
-    Layers, Landmark, ChevronDown, ChevronUp,
-    Cpu, CreditCard, Settings2, Globe, ShieldCheck, Zap
+    Settings, Save, ChevronDown, ChevronUp, Tag, Loader2, 
+    Trash2, Plus, X, Sparkles, FolderTree, ArrowRight, 
+    DollarSign, Search, Layers, ShieldCheck,
+    Percent // Added missing import
 } from 'lucide-react';
 
-const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
-    <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden transition-all duration-300 shadow-lg mb-4">
-        <button 
-            onClick={onToggle}
-            className="w-full px-5 py-4 flex justify-between items-center bg-slate-900 hover:bg-slate-800/50 transition-colors"
-        >
-            <div className="flex items-center gap-3 font-black text-white text-sm uppercase tracking-tighter">
-                <Icon size={18} className="text-indigo-400" /> {title}
-            </div>
-            {isOpen ? <ChevronUp size={18} className="text-slate-500"/> : <ChevronDown size={18} className="text-slate-500"/>}
-        </button>
-        {isOpen && <div className="px-5 pb-6 pt-2 border-t border-slate-800/50 space-y-6 animate-in slide-in-from-top-2 fade-in">{children}</div>}
-    </div>
-);
-
-interface CategoryNodeProps {
-    node: CategoryConfig;
-    onUpdate: (id: string, updates: Partial<CategoryConfig>) => void;
-    onDelete: (id: string) => void;
-    onAddChild: (parentId: string) => void;
-    level?: number;
+interface CategoryNode {
+    id: string;
+    name: string;
+    parent: string | null;
+    price: number;
+    keywords: string;
 }
-
-const CategoryNode: React.FC<CategoryNodeProps> = ({ node, onUpdate, onDelete, onAddChild, level = 0 }) => {
-    const [isExpanded, setIsExpanded] = useState(true);
-    const [showRules, setShowRules] = useState(false);
-
-    return (
-        <div className="space-y-2">
-            <div className={`bg-slate-950 p-4 rounded-xl border transition-all ${level > 0 ? 'ml-6 border-l-indigo-500 border-slate-800' : 'border-slate-700'}`}>
-                <div className="flex flex-col gap-3">
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => setIsExpanded(!isExpanded)} className={`p-1 text-slate-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
-                            <ChevronRight size={16}/>
-                        </button>
-                        <input 
-                            type="text" value={node.name || ''} placeholder="Nombre de categoría..."
-                            onChange={e => onUpdate(node.id, { name: e.target.value })}
-                            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-white outline-none flex-1 focus:border-indigo-500 transition-all placeholder:text-slate-600"
-                        />
-                    </div>
-                    <div className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-white/5">
-                        <div className="flex items-center gap-2">
-                            <DollarSign size={14} className="text-amber-500"/>
-                            <input 
-                                type="number" value={node.price} 
-                                onChange={e => onUpdate(node.id, { price: parseFloat(e.target.value) || 0 })}
-                                className="bg-transparent text-sm font-black text-amber-400 outline-none w-16"
-                            />
-                        </div>
-                        <div className="flex gap-1">
-                            <button onClick={() => setShowRules(!showRules)} className={`p-2 rounded-lg border transition-all ${showRules ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}><Layers size={14}/></button>
-                            <button onClick={() => onAddChild(node.id)} className="p-2 bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 hover:text-white hover:bg-indigo-600 rounded-lg transition-all"><Plus size={14}/></button>
-                            {level > 0 && <button onClick={() => onDelete(node.id)} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-red-500 rounded-lg transition-colors"><Trash2 size={14}/></button>}
-                        </div>
-                    </div>
-                </div>
-                {showRules && (
-                    <div className="mt-4 p-4 bg-slate-900 rounded-xl border border-indigo-500/20 space-y-4 animate-in slide-in-from-top-1">
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Keywords en Carpetas</label>
-                            <div className="flex flex-wrap gap-1.5 mb-2">
-                                {(node.folderPatterns || []).map((p, i) => (
-                                    <span key={i} className="bg-indigo-500/10 text-indigo-400 text-[10px] font-bold px-2 py-0.5 rounded border border-indigo-500/20 flex items-center gap-1">
-                                        {p} <button onClick={() => onUpdate(node.id, { folderPatterns: (node.folderPatterns || []).filter((_, idx) => idx !== i) })}><X size={10}/></button>
-                                    </span>
-                                ))}
-                            </div>
-                            <input 
-                                type="text" placeholder="Nueva keyword y Enter..."
-                                onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { folderPatterns: [...(node.folderPatterns || []), e.currentTarget.value] }); e.currentTarget.value = ''; }}}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white outline-none focus:border-indigo-500"
-                            />
-                        </div>
-                    </div>
-                )}
-            </div>
-            {isExpanded && node.children && node.children.length > 0 && (
-                <div className="space-y-2">
-                    {node.children.map(child => (
-                        <CategoryNode key={child.id} node={child} level={level + 1} onUpdate={onUpdate} onDelete={onDelete} onAddChild={onAddChild} />
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-};
 
 export default function AdminConfig() {
     const toast = useToast();
     const [settings, setSettings] = useState<SystemSettings | null>(null);
-    const [openSection, setOpenSection] = useState<string>('PRICES');
+    const [openSection, setOpenSection] = useState<string>('HIERARCHY');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-
-    const generateUID = () => `C_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`.toUpperCase();
+    const [hierarchy, setHierarchy] = useState<CategoryNode[]>([]);
 
     const loadSettings = async () => {
         setLoading(true);
         try {
             const s: any = await db.getSystemSettings();
-            if (Array.isArray(s.customCategories)) {
-                s.customCategories = s.customCategories.map((c: any) => {
-                    if (typeof c === 'string') return { id: generateUID(), name: c, price: 1.0, folderPatterns: [], children: [] };
-                    if (!c.id) return { ...c, id: generateUID() };
-                    return c;
-                });
-            } else { s.customCategories = []; }
             setSettings(s);
-        } catch(e) { toast.error("Error al conectar con MariaDB"); }
+            const h = JSON.parse(s.categoryHierarchy || '[]');
+            setHierarchy(h);
+        } catch(e) { toast.error("Error al cargar configuración"); }
         finally { setLoading(false); }
     };
 
     useEffect(() => { loadSettings(); }, []);
 
-    const updateCategoryTree = useCallback((id: string, updates: Partial<CategoryConfig>) => {
-        setSettings(prev => {
-            if (!prev) return prev;
-            const newS = JSON.parse(JSON.stringify(prev));
-            const recursive = (nodes: CategoryConfig[]): CategoryConfig[] => {
-                return nodes.map(n => {
-                    if (n.id === id) return { ...n, ...updates };
-                    if (n.children && n.children.length > 0) return { ...n, children: recursive(n.children) };
-                    return n;
-                });
-            };
-            newS.customCategories = recursive(newS.customCategories);
-            return newS;
-        });
-    }, []);
-
-    const deleteFromTree = useCallback((id: string) => {
-        setSettings(prev => {
-            if (!prev) return prev;
-            const newS = JSON.parse(JSON.stringify(prev));
-            const recursive = (nodes: CategoryConfig[]): CategoryConfig[] => {
-                return nodes.filter(n => n.id !== id).map(n => {
-                    if (n.children && n.children.length > 0) return { ...n, children: recursive(n.children) };
-                    return n;
-                });
-            };
-            newS.customCategories = recursive(newS.customCategories);
-            return newS;
-        });
-    }, []);
-
-    const addChildToTree = useCallback((parentId: string) => {
-        setSettings(prev => {
-            if (!prev) return prev;
-            const newS = JSON.parse(JSON.stringify(prev));
-            const newChild: CategoryConfig = { id: generateUID(), name: '', price: 1.0, folderPatterns: [], namePatterns: [], autoGroupFolders: true, children: [] };
-            const recursive = (nodes: CategoryConfig[]): CategoryConfig[] => {
-                return nodes.map(n => {
-                    if (n.id === parentId) return { ...n, children: [...(n.children || []), newChild] };
-                    if (n.children && n.children.length > 0) return { ...n, children: recursive(n.children) };
-                    return n;
-                });
-            };
-            newS.customCategories = recursive(newS.customCategories);
-            return newS;
-        });
-    }, []);
-
-    const handleSave = async () => {
+    const handleSaveConfig = async () => {
         if (!settings) return;
         setSaving(true);
         try {
-            await db.updateSystemSettings(settings);
-            toast.success("Ajustes sincronizados con MariaDB");
+            const updated = {
+                ...settings,
+                categoryHierarchy: JSON.stringify(hierarchy),
+                autoGroupFolders: settings.autoGroupFolders ? 1 : 0
+            };
+            await db.updateSystemSettings(updated);
+            toast.success("Jerarquía y configuración sincronizadas");
             await loadSettings();
         } catch(e: any) { toast.error("Error al guardar: " + e.message); }
         finally { setSaving(false); }
     };
 
-    if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>;
-    if (!settings) return null;
+    const addCategory = (parentId: string | null = null) => {
+        const name = prompt("Nombre de la nueva categoría:");
+        if (!name) return;
+        const newNode: CategoryNode = {
+            id: 'cat_' + Math.random().toString(36).substr(2, 9),
+            name: name.toUpperCase(),
+            parent: parentId,
+            price: 0,
+            keywords: name.toLowerCase()
+        };
+        setHierarchy([...hierarchy, newNode]);
+    };
+
+    const updateNode = (id: string, field: keyof CategoryNode, value: any) => {
+        setHierarchy(prev => prev.map(n => n.id === id ? { ...n, [field]: value } : n));
+    };
+
+    const removeNode = (id: string) => {
+        if (!confirm("¿Eliminar categoría y todas sus subcategorías?")) return;
+        const toRemoveIds = new Set<string>([id]);
+        // Búsqueda recursiva de hijos
+        let size;
+        do {
+            size = toRemoveIds.size;
+            hierarchy.forEach(n => { if (n.parent && toRemoveIds.has(n.parent)) toRemoveIds.add(n.id); });
+        } while (toRemoveIds.size !== size);
+        setHierarchy(prev => prev.filter(n => !toRemoveIds.has(n.id)));
+    };
+
+    const renderTree = (parentId: string | null = null, depth = 0) => {
+        const nodes = hierarchy.filter(n => n.parent === parentId);
+        return nodes.map(node => (
+            <div key={node.id} className="mt-2 animate-in slide-in-from-left-2" style={{ marginLeft: `${depth * 20}px` }}>
+                <div className={`flex flex-wrap items-center gap-2 p-3 rounded-xl border group transition-all ${depth === 0 ? 'bg-slate-900 border-slate-700' : 'bg-slate-950 border-slate-800'}`}>
+                    <FolderTree size={14} className={depth === 0 ? 'text-indigo-400' : 'text-slate-500'} />
+                    <input 
+                        className="bg-transparent text-sm font-black text-white uppercase outline-none focus:text-indigo-400 w-32" 
+                        value={node.name} 
+                        onChange={e => updateNode(node.id, 'name', e.target.value.toUpperCase())}
+                    />
+                    
+                    <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-lg border border-slate-700">
+                        <DollarSign size={10} className="text-amber-500" />
+                        <input 
+                            type="number" step="0.1"
+                            className="bg-transparent text-[11px] font-bold text-amber-400 w-12 outline-none" 
+                            value={node.price} 
+                            placeholder="Heredar"
+                            onChange={e => updateNode(node.id, 'price', parseFloat(e.target.value))}
+                        />
+                    </div>
+
+                    <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-lg border border-slate-700 flex-1 min-w-[120px]">
+                        <Search size={10} className="text-slate-500" />
+                        <input 
+                            className="bg-transparent text-[10px] text-slate-400 w-full outline-none" 
+                            value={node.keywords} 
+                            placeholder="Keywords (cine, hq...)"
+                            onChange={e => updateNode(node.id, 'keywords', e.target.value)}
+                        />
+                    </div>
+
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => addCategory(node.id)} className="p-1.5 hover:bg-emerald-500/20 text-emerald-500 rounded" title="Añadir Subcategoría"><Plus size={14}/></button>
+                        <button onClick={() => removeNode(node.id)} className="p-1.5 hover:bg-red-500/20 text-red-500 rounded"><Trash2 size={14}/></button>
+                    </div>
+                </div>
+                {renderTree(node.id, depth + 1)}
+            </div>
+        ));
+    };
+
+    if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500"/></div>;
 
     return (
-        <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-24 px-2">
-            <div className="flex justify-between items-center px-2">
-                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Panel de Configuración</h2>
-                <button onClick={handleSave} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold py-2.5 px-6 rounded-xl flex items-center gap-2 shadow-lg active:scale-95 transition-all text-sm">
-                    {saving ? <Loader2 size={16} className="animate-spin"/> : <Save size={16}/>} Guardar Cambios
+        <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-20">
+            <div className="flex justify-between items-center bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
+                <div>
+                    <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Motor de Categorías</h2>
+                    <p className="text-xs text-slate-500">Configura jerarquías, precios y reglas de herencia.</p>
+                </div>
+                <button onClick={handleSaveConfig} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-3 px-8 rounded-2xl flex items-center gap-2 shadow-2xl active:scale-95 transition-all">
+                    {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar Cambios
                 </button>
             </div>
 
-            <ConfigSection title="Categorías y Precios" icon={FolderTree} isOpen={openSection === 'PRICES'} onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}>
-                <div className="space-y-4">
-                    {settings.customCategories.map((cat: CategoryConfig) => (
-                        <CategoryNode key={cat.id} node={cat} onUpdate={updateCategoryTree} onDelete={deleteFromTree} onAddChild={addChildToTree} />
-                    ))}
-                    <button onClick={() => setSettings({...settings, customCategories: [...settings.customCategories, { id: generateUID(), name: '', price: 1.0, folderPatterns: [], children: [] }]})} className="w-full mt-4 py-4 border-2 border-dashed border-slate-700 text-slate-500 hover:text-white hover:bg-slate-800/50 rounded-2xl transition-all flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest"><Plus size={18}/> Nueva Categoría Raíz</button>
+            {/* Tree Section */}
+            <div className="bg-slate-900 rounded-[32px] border border-slate-800 p-8 shadow-2xl">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-black text-white uppercase text-xs tracking-[0.2em] flex items-center gap-2">
+                        <Layers size={16} className="text-indigo-400"/> Árbol de Organización
+                    </h3>
+                    <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase group-hover:text-slate-300">Auto-Agrupación</span>
+                            <div className={`w-10 h-5 rounded-full transition-all relative ${settings?.autoGroupFolders ? 'bg-indigo-600' : 'bg-slate-700'}`} onClick={() => setSettings(p => p ? {...p, autoGroupFolders: !p.autoGroupFolders} : null)}>
+                                <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${settings?.autoGroupFolders ? 'left-6' : 'left-1'}`}></div>
+                            </div>
+                        </label>
+                        <button onClick={() => addCategory(null)} className="bg-white/5 hover:bg-white/10 text-white font-bold py-2 px-4 rounded-xl text-xs flex items-center gap-2 border border-white/10 transition-all">
+                            <Plus size={14}/> Nueva Raíz
+                        </button>
+                    </div>
                 </div>
-            </ConfigSection>
 
-            <ConfigSection title="Economía y Comisiones" icon={Landmark} isOpen={openSection === 'ECONOMY'} onToggle={() => setOpenSection(openSection === 'ECONOMY' ? '' : 'ECONOMY')}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Comisión Videos (%)</label>
-                        <input type="number" value={settings.videoCommission} onChange={e => setSettings({...settings, videoCommission: parseInt(e.target.value)})} className="w-full bg-transparent text-white font-mono outline-none" />
-                    </div>
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Fee Transferencia P2P (%)</label>
-                        <input type="number" value={settings.transferFee} onChange={e => setSettings({...settings, transferFee: parseInt(e.target.value)})} className="w-full bg-transparent text-white font-mono outline-none" />
-                    </div>
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 col-span-2">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Conversión Saldo / EUR (Tropipay)</label>
-                        <input type="number" value={settings.currencyConversion} onChange={e => setSettings({...settings, currencyConversion: parseFloat(e.target.value)})} className="w-full bg-transparent text-amber-400 font-mono font-bold outline-none" />
-                    </div>
+                <div className="space-y-2 max-h-[600px] overflow-y-auto custom-scrollbar pr-4">
+                    {hierarchy.length === 0 ? (
+                        <div className="py-20 text-center text-slate-600 border-2 border-dashed border-slate-800 rounded-3xl">
+                            <Layers size={48} className="mx-auto mb-4 opacity-20"/>
+                            <p className="text-sm">No has definido jerarquías aún.</p>
+                        </div>
+                    ) : renderTree(null)}
                 </div>
-            </ConfigSection>
 
-            <ConfigSection title="Pasarelas y Pago (Tropipay)" icon={CreditCard} isOpen={openSection === 'PAY'} onToggle={() => setOpenSection(openSection === 'PAY' ? '' : 'PAY')}>
-                <div className="space-y-4">
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Tropipay Client ID</label>
-                        <input type="text" value={(settings as any).tropipayClientId || ''} onChange={e => setSettings({...settings, tropipayClientId: e.target.value} as any)} className="w-full bg-transparent text-white font-mono text-xs outline-none" />
-                    </div>
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Tropipay Client Secret</label>
-                        <input type="password" value={(settings as any).tropipayClientSecret || ''} onChange={e => setSettings({...settings, tropipayClientSecret: e.target.value} as any)} className="w-full bg-transparent text-white font-mono text-xs outline-none" />
+                <div className="mt-8 p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-2xl flex items-start gap-4">
+                    <Sparkles className="text-indigo-400 shrink-0" size={20}/>
+                    <div className="text-[11px] text-indigo-300 leading-relaxed">
+                        <strong>Lógica de Herencia:</strong> El sistema prioriza el precio de la subcategoría. Si es 0 o vacío, hereda el del padre. Las keywords sirven para que el motor de escaneo clasifique automáticamente videos nuevos basados en su ruta física.
                     </div>
                 </div>
-            </ConfigSection>
+            </div>
 
-            <ConfigSection title="Inteligencia Artificial" icon={Sparkles} isOpen={openSection === 'IA'} onToggle={() => setOpenSection(openSection === 'IA' ? '' : 'IA')}>
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Gemini API Key</label>
-                    <input type="password" value={settings.geminiKey} onChange={e => setSettings({...settings, geminiKey: e.target.value})} className="w-full bg-transparent text-indigo-300 font-mono text-xs outline-none" />
-                </div>
-            </ConfigSection>
-
-            <ConfigSection title="Sistema y Rutas" icon={Cpu} isOpen={openSection === 'SYSTEM'} onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}>
-                <div className="space-y-4">
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Ruta Biblioteca Local (NAS)</label>
-                        <input type="text" value={settings.localLibraryPath} onChange={e => setSettings({...settings, localLibraryPath: e.target.value})} className="w-full bg-transparent text-indigo-300 font-mono text-sm outline-none focus:border-indigo-500" />
-                    </div>
-                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Ruta Binario FFmpeg</label>
-                        <input type="text" value={settings.ffmpegPath} onChange={e => setSettings({...settings, ffmpegPath: e.target.value})} className="w-full bg-transparent text-white font-mono text-xs outline-none" />
+            {/* Legacy/System Config */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 space-y-4">
+                    <h4 className="font-bold text-white text-sm uppercase flex items-center gap-2"><Percent size={16} className="text-emerald-400"/> Comisiones</h4>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Corte Plataforma Videos (%)</label>
+                            <input type="number" value={settings?.videoCommission} onChange={e => setSettings(p => p ? {...p, videoCommission: parseInt(e.target.value)} : null)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white"/>
+                        </div>
                     </div>
                 </div>
-            </ConfigSection>
+                <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 space-y-4">
+                    <h4 className="font-bold text-white text-sm uppercase flex items-center gap-2"><ShieldCheck size={16} className="text-purple-400"/> Seguridad</h4>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Tamaño Lote Procesamiento</label>
+                            <input type="number" value={settings?.batchSize} onChange={e => setSettings(p => p ? {...p, batchSize: parseInt(e.target.value)} : null)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white"/>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }
