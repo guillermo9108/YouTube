@@ -6,8 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    Download, WifiOff, SkipForward, AlertCircle, MonitorPlay, 
-    Layers, ChevronRight, Home, Play
+    Download, SkipForward, ChevronRight, Home, Play
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -22,9 +21,7 @@ export default function Watch() {
     const [loading, setLoading] = useState(true);
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
-    const [comments, setComments] = useState<Comment[]>([]);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
-    const [watchedHistory, setWatchedHistory] = useState<string[]>([]);
     const isPurchasingRef = useRef(false);
 
     useEffect(() => { window.scrollTo(0, 0); }, [id]);
@@ -38,16 +35,13 @@ export default function Watch() {
                 if (v) {
                     setVideo(v);
                     db.getRelatedVideos(v.id).then(setRelatedVideos);
-                    db.getComments(v.id).then(setComments);
                     if (user) {
-                        const [access, interact, act] = await Promise.all([
+                        const [access, interact] = await Promise.all([
                             db.hasPurchased(user.id, v.id),
-                            db.getInteraction(user.id, v.id),
-                            db.getUserActivity(user.id)
+                            db.getInteraction(user.id, v.id)
                         ]);
                         setIsUnlocked(access || user.role === 'ADMIN' || user.id === v.creatorId);
                         setInteraction(interact);
-                        setWatchedHistory(act.watched || []);
                     }
                 }
             } catch (e) {} finally { setLoading(false); }
@@ -55,27 +49,16 @@ export default function Watch() {
         fetchMeta();
     }, [id, user?.id]);
 
-    // LÓGICA DE AUTO-PURCHASE (Integrada v1.7)
-    useEffect(() => {
-        if (user && video && !loading && !isUnlocked && !isPurchasingRef.current) {
-            const price = Number(video.price);
-            const limit = Number(user.autoPurchaseLimit || 0);
-            if (price > 0 && price <= limit && Number(user.balance) >= price) {
-                handlePurchase(true);
-            }
-        }
-    }, [user, video, isUnlocked, loading]);
-
     const handlePurchase = async (skipConfirm = false) => {
         if (!user || !video || isPurchasingRef.current) return;
         if (Number(user.balance) < video.price) { navigate('/vip'); return; }
-        if (skipConfirm || confirm(`¿Desbloquear video por ${video.price} $?`)) {
+        if (skipConfirm || confirm(`¿Desbloquear contenido por ${video.price} $?`)) {
             isPurchasingRef.current = true;
             try {
                 await db.purchaseVideo(user.id, video.id);
                 setIsUnlocked(true);
                 refreshUser();
-                toast.success(skipConfirm ? `Auto-compra: ${video.price} $` : "Desbloqueado");
+                toast.success("Contenido desbloqueado");
             } catch (e: any) { toast.error(e.message); isPurchasingRef.current = false; }
         }
     };
@@ -83,10 +66,11 @@ export default function Watch() {
     const handleVideoEnded = () => {
         if (!user || !video) return;
         db.markWatched(user.id, video.id).catch(() => {});
-        // Priorizar el siguiente video de la colección si existe
+        
+        // Si hay un siguiente video en la colección, saltar automáticamente
         if (relatedVideos.length > 0) {
             const next = relatedVideos[0];
-            toast.info(`Siguiente: ${next.title} en 3s...`);
+            toast.info(`Siguiente episodio: ${next.title} en 3s...`);
             setTimeout(() => navigate(`/watch/${next.id}`), 3000);
         }
     };
@@ -97,7 +81,6 @@ export default function Watch() {
 
     return (
         <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in">
-            {/* Player Area */}
             <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-white/5">
                 <div className="relative aspect-video max-w-[1600px] mx-auto">
                     {isUnlocked ? (
@@ -118,14 +101,12 @@ export default function Watch() {
                                 <div className="px-6 py-2 bg-amber-500 text-black font-black rounded-full text-lg shadow-xl shadow-amber-900/20 active:scale-95 transition-all">
                                     DESBLOQUEAR POR {video?.price} $
                                 </div>
-                                <p className="text-[10px] text-white/40 uppercase font-black tracking-widest mt-4">Toca para comprar acceso instantáneo</p>
                             </div>
                         </div>
                     )}
                 </div>
             </div>
 
-            {/* Content Area */}
             <div className="max-w-7xl mx-auto w-full p-4 lg:p-8 flex flex-col lg:flex-row gap-8">
                 <div className="flex-1 space-y-6">
                     <div>
@@ -143,10 +124,6 @@ export default function Watch() {
                                     <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <button className="p-3 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 hover:text-indigo-400 transition-all"><Heart size={20} fill={interaction?.liked ? "currentColor" : "none"}/></button>
-                                <button className="p-3 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 hover:text-red-400 transition-all"><ThumbsDown size={20}/></button>
-                            </div>
                         </div>
                         <div className="mt-6 text-slate-300 text-sm leading-relaxed bg-slate-900/30 p-6 rounded-3xl border border-white/5">
                             {video?.description || "Sin descripción."}
@@ -154,10 +131,9 @@ export default function Watch() {
                     </div>
                 </div>
 
-                {/* Suggestions Sidebar */}
                 <div className="lg:w-80 space-y-4">
                     <h3 className="font-black text-white text-xs uppercase tracking-[0.2em] flex items-center gap-2 mb-4">
-                        <SkipForward size={16} className="text-indigo-400"/> {video?.collection ? 'Siguiente en Colección' : 'Sugerencias Premium'}
+                        <SkipForward size={16} className="text-indigo-400"/> {video?.collection ? 'Próximos en esta Serie' : 'Sugeridos para ti'}
                     </h3>
                     <div className="flex flex-col gap-4">
                         {relatedVideos.map(v => (
@@ -165,7 +141,7 @@ export default function Watch() {
                                 <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shadow-lg">
                                     <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"/>
                                     {v.collection && (
-                                        <div className="absolute top-1 left-1 bg-indigo-600/90 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg uppercase">SERIE</div>
+                                        <div className="absolute top-1 left-1 bg-indigo-600/90 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg uppercase tracking-tighter">COLECCIÓN</div>
                                     )}
                                 </div>
                                 <div className="flex-1 min-w-0 py-1">

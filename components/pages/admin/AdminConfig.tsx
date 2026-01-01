@@ -6,8 +6,7 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     Settings, Save, ChevronDown, ChevronUp, Tag, Loader2, 
     Trash2, Plus, X, Sparkles, FolderTree, ArrowRight, 
-    DollarSign, Search, Layers, ShieldCheck,
-    Percent // Added missing import
+    DollarSign, Search, Layers, ShieldCheck, Percent
 } from 'lucide-react';
 
 interface CategoryNode {
@@ -21,7 +20,6 @@ interface CategoryNode {
 export default function AdminConfig() {
     const toast = useToast();
     const [settings, setSettings] = useState<SystemSettings | null>(null);
-    const [openSection, setOpenSection] = useState<string>('HIERARCHY');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [hierarchy, setHierarchy] = useState<CategoryNode[]>([]);
@@ -49,7 +47,7 @@ export default function AdminConfig() {
                 autoGroupFolders: settings.autoGroupFolders ? 1 : 0
             };
             await db.updateSystemSettings(updated);
-            toast.success("Jerarquía y configuración sincronizadas");
+            toast.success("Jerarquía sincronizada con el servidor");
             await loadSettings();
         } catch(e: any) { toast.error("Error al guardar: " + e.message); }
         finally { setSaving(false); }
@@ -75,7 +73,6 @@ export default function AdminConfig() {
     const removeNode = (id: string) => {
         if (!confirm("¿Eliminar categoría y todas sus subcategorías?")) return;
         const toRemoveIds = new Set<string>([id]);
-        // Búsqueda recursiva de hijos
         let size;
         do {
             size = toRemoveIds.size;
@@ -133,19 +130,18 @@ export default function AdminConfig() {
         <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-20">
             <div className="flex justify-between items-center bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
                 <div>
-                    <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Motor de Categorías</h2>
-                    <p className="text-xs text-slate-500">Configura jerarquías, precios y reglas de herencia.</p>
+                    <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Jerarquía de Contenido</h2>
+                    <p className="text-xs text-slate-500">Configura el árbol de clasificación y reglas de precio.</p>
                 </div>
                 <button onClick={handleSaveConfig} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-3 px-8 rounded-2xl flex items-center gap-2 shadow-2xl active:scale-95 transition-all">
-                    {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar Cambios
+                    {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar Árbol
                 </button>
             </div>
 
-            {/* Tree Section */}
             <div className="bg-slate-900 rounded-[32px] border border-slate-800 p-8 shadow-2xl">
                 <div className="flex justify-between items-center mb-6">
                     <h3 className="font-black text-white uppercase text-xs tracking-[0.2em] flex items-center gap-2">
-                        <Layers size={16} className="text-indigo-400"/> Árbol de Organización
+                        <Layers size={16} className="text-indigo-400"/> Estructura de Navegación
                     </h3>
                     <div className="flex items-center gap-4">
                         <label className="flex items-center gap-2 cursor-pointer group">
@@ -164,7 +160,7 @@ export default function AdminConfig() {
                     {hierarchy.length === 0 ? (
                         <div className="py-20 text-center text-slate-600 border-2 border-dashed border-slate-800 rounded-3xl">
                             <Layers size={48} className="mx-auto mb-4 opacity-20"/>
-                            <p className="text-sm">No has definido jerarquías aún.</p>
+                            <p className="text-sm">Define tu primera categoría para empezar.</p>
                         </div>
                     ) : renderTree(null)}
                 </div>
@@ -172,12 +168,11 @@ export default function AdminConfig() {
                 <div className="mt-8 p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-2xl flex items-start gap-4">
                     <Sparkles className="text-indigo-400 shrink-0" size={20}/>
                     <div className="text-[11px] text-indigo-300 leading-relaxed">
-                        <strong>Lógica de Herencia:</strong> El sistema prioriza el precio de la subcategoría. Si es 0 o vacío, hereda el del padre. Las keywords sirven para que el motor de escaneo clasifique automáticamente videos nuevos basados en su ruta física.
+                        <strong>Inteligencia de Precios:</strong> El sistema prioriza el precio de la subcategoría. Si es 0, hereda automáticamente el del padre. Las Keywords permiten que el motor de escaneo clasifique videos nuevos analizando su ruta física en el NAS.
                     </div>
                 </div>
             </div>
 
-            {/* Legacy/System Config */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 space-y-4">
                     <h4 className="font-bold text-white text-sm uppercase flex items-center gap-2"><Percent size={16} className="text-emerald-400"/> Comisiones</h4>
@@ -189,10 +184,10 @@ export default function AdminConfig() {
                     </div>
                 </div>
                 <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 space-y-4">
-                    <h4 className="font-bold text-white text-sm uppercase flex items-center gap-2"><ShieldCheck size={16} className="text-purple-400"/> Seguridad</h4>
+                    <h4 className="font-bold text-white text-sm uppercase flex items-center gap-2"><ShieldCheck size={16} className="text-purple-400"/> Motor de Procesamiento</h4>
                     <div className="space-y-4">
                         <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Tamaño Lote Procesamiento</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Tamaño de Lote</label>
                             <input type="number" value={settings?.batchSize} onChange={e => setSettings(p => p ? {...p, batchSize: parseInt(e.target.value)} : null)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white"/>
                         </div>
                     </div>

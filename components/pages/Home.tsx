@@ -7,12 +7,12 @@ import { Video } from '../../types';
 import { 
     RefreshCw, Search, X, Sparkles, ChevronRight, LayoutGrid, 
     Wallet, Zap, Plus, Shuffle, Filter, Home as HomeIcon, ChevronLeft,
-    Layers // Added missing import
+    Layers
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from '../Router';
 
-const Breadcrumbs = ({ path, onNavigate }: { path: any[], onNavigate: (cat: string | null) => void }) => (
-    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in">
+const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: string | null) => void }) => (
+    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in sticky top-0 bg-black/80 backdrop-blur-md z-20">
         <button onClick={() => onNavigate(null)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
             <HomeIcon size={16}/>
         </button>
@@ -21,7 +21,7 @@ const Breadcrumbs = ({ path, onNavigate }: { path: any[], onNavigate: (cat: stri
                 <ChevronRight size={12} className="text-slate-600 shrink-0"/>
                 <button 
                     onClick={() => onNavigate(cat)}
-                    className={`whitespace-nowrap px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${i === path.length - 1 ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                    className={`whitespace-nowrap px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${i === path.length - 1 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-500 hover:text-slate-300'}`}
                 >
                     {cat}
                 </button>
@@ -31,9 +31,8 @@ const Breadcrumbs = ({ path, onNavigate }: { path: any[], onNavigate: (cat: stri
 );
 
 export default function Home() {
-  const { user, refreshUser } = useAuth();
+  const { user } = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -48,7 +47,6 @@ export default function Home() {
         try {
             const [vids, sets] = await Promise.all([db.getAllVideos(), db.getSystemSettings()]);
             setAllVideos(vids.filter(v => !['PENDING', 'PROCESSING'].includes(v.category)));
-            // Fixed type error: categoryHierarchy added to SystemSettings interface
             setHierarchy(JSON.parse(sets.categoryHierarchy || '[]'));
             if (user) {
                 const act = await db.getUserActivity(user.id);
@@ -59,7 +57,6 @@ export default function Home() {
     loadData();
   }, [user?.id, location.pathname]);
 
-  // Lógica de Breadcrumbs (Calcula ancestros de la categoría activa)
   const breadcrumbPath = useMemo(() => {
       if (!activeCategory) return [];
       const path = [activeCategory];
@@ -71,7 +68,6 @@ export default function Home() {
       return path;
   }, [activeCategory, hierarchy]);
 
-  // Subcategorías del nivel actual
   const currentSubCategories = useMemo(() => {
       return hierarchy.filter(h => h.parent === activeCategory);
   }, [activeCategory, hierarchy]);
@@ -83,7 +79,6 @@ export default function Home() {
           
           if (!activeCategory) return matchSearch;
 
-          // Si filtramos por categoría, incluimos videos de esa categoría Y sus subcategorías descendientes
           const getAllDescendants = (cat: string): string[] => {
               const children = hierarchy.filter(h => h.parent === cat).map(h => h.name);
               let all = [...children];
@@ -104,12 +99,11 @@ export default function Home() {
   return (
     <div className="pb-20 space-y-8 px-2 md:px-0">
       
-      {/* Header Sticky con Buscador y Breadcrumbs */}
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
           <div className="flex gap-2 mb-4">
               <div className="relative flex-1">
                   <Search className="absolute left-4 top-3 text-slate-500" size={18} />
-                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="¿Qué quieres ver hoy?" className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-4 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" />
+                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar en el catálogo..." className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-4 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" />
                   {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-4 top-3 text-slate-500 hover:text-white"><X size={16} /></button>}
               </div>
           </div>
@@ -124,7 +118,7 @@ export default function Home() {
                         onClick={() => setActiveCategory(sub.name)}
                         className="whitespace-nowrap px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 hover:text-white hover:border-indigo-500/50 transition-all flex items-center gap-2 group"
                       >
-                         <Layers size={12} className="text-indigo-400 group-hover:scale-110 transition-transform" /> {sub.name}
+                         <Layers size={12} className="text-indigo-400 group-hover:rotate-12 transition-transform" /> {sub.name}
                       </button>
                   ))}
               </div>
@@ -148,7 +142,7 @@ export default function Home() {
                 onClick={() => setVisibleCount(p => p + 12)}
                 className="px-10 py-4 bg-slate-900 border border-slate-800 text-white font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-slate-800 active:scale-95 transition-all shadow-xl"
               >
-                  Ver más contenido
+                  Ver más resultados
               </button>
           </div>
       )}
@@ -156,7 +150,7 @@ export default function Home() {
       {filteredList.length === 0 && (
           <div className="text-center py-40">
               <Shuffle className="mx-auto mb-4 text-slate-800" size={64}/>
-              <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">No hay resultados en esta selección</p>
+              <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">No hay contenido en esta categoría</p>
           </div>
       )}
     </div>

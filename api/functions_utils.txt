@@ -21,8 +21,13 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
     $detectedCat = 'GENERAL';
     $detectedParent = null;
     
-    // Buscamos coincidencia en cada parte de la ruta
+    // Si no hay jerarquía, usamos el legacy behavior
+    if (empty($hierarchy)) return ['title' => ucwords(strtolower($cleanName)), 'category' => 'GENERAL', 'parent_category' => null, 'collection' => null];
+
+    // Buscamos coincidencia en cada parte de la ruta, de atrás hacia adelante
     foreach (array_reverse($pathParts) as $segment) {
+        if (empty($segment) || $segment === $filename) continue;
+        
         $segUpper = strtoupper($segment);
         foreach ($hierarchy as $node) {
             $keywords = isset($node['keywords']) ? array_map('strtoupper', array_map('trim', explode(',', $node['keywords']))) : [];
@@ -36,7 +41,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
     }
 
     // 3. Lógica de Colección (Agrupación por Carpeta)
-    // Si la carpeta contenedora se repite en otros videos, el Paso 3 (Organización) la marcará.
     $parentFolder = (count($pathParts) > 1) ? $pathParts[count($pathParts)-2] : null;
 
     return [
@@ -56,7 +60,7 @@ function getPriceForCategory($catName, $settings) {
     $findPrice = function($name) use (&$findPrice, $hierarchy) {
         foreach ($hierarchy as $node) {
             if ($node['name'] === $name) {
-                if (!empty($node['price']) && floatval($node['price']) > 0) {
+                if (isset($node['price']) && floatval($node['price']) > 0) {
                     return floatval($node['price']);
                 }
                 if (!empty($node['parent'])) {
@@ -75,7 +79,6 @@ function getPriceForCategory($catName, $settings) {
     return isset($prices[$catName]) ? floatval($prices[$catName]) : 1.00; 
 }
 
-// ... Resto de funciones (resolve_video_path, fix_url, streamVideo, etc) ...
 function write_log($message, $level = 'INFO') {
     $logFile = __DIR__ . '/debug_log.txt';
     $timestamp = date('Y-m-d H:i:s');

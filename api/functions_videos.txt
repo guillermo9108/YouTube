@@ -82,12 +82,12 @@ function video_smart_organize($pdo) {
         if (internal_organize_video($pdo, $vid, $settings, $hierarchy)) $processed++;
     }
 
-    // Auto-detección de colecciones (Series)
+    // Auto-detección de colecciones (Series) basado en switch
     if ($settings['autoGroupFolders']) {
         $sql = "UPDATE videos v 
                 JOIN (SELECT collection, COUNT(*) as c FROM videos WHERE collection IS NOT NULL GROUP BY collection HAVING c > 3) series 
                 ON v.collection = series.collection 
-                SET v.category = 'SERIES'";
+                SET v.category = 'SERIES' WHERE v.category = 'GENERAL'";
         $pdo->exec($sql);
     }
 
@@ -110,8 +110,16 @@ function internal_organize_video($pdo, $id, $settings, $hierarchy) {
     if (!$newCat || in_array($newCat, ['OTHER', 'PROCESSING', 'PENDING'])) $newCat = 'GENERAL';
     $newPrice = getPriceForCategory($newCat, $settings);
 
-    $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?");
-    return $updateStmt->execute([$newTitle, $newCat, $newParent, $newCollection, $newPrice, $v['id']]);
+    $pdo->beginTransaction();
+    try {
+        $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?");
+        $updateStmt->execute([$newTitle, $newCat, $newParent, $newCollection, $newPrice, $v['id']]);
+        $pdo->commit();
+        return true;
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        return false;
+    }
 }
 
 function video_get_related($pdo, $id) {
@@ -120,24 +128,45 @@ function video_get_related($pdo, $id) {
     $current = $stmt->fetch();
     if (!$current) respond(true, []);
 
-    // PRIORIDAD 1: Misma Colección (Episodios)
+    // PRIORIDAD 1: Siguiente video en la misma colección (Orden alfabético para episodios)
     $candidates = [];
     if ($current['collection']) {
         $stmtColl = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.collection = ? AND v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.title ASC LIMIT 20");
         $stmtColl->execute([$current['collection'], $id]);
         $candidates = $stmtColl->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Re-ordenar para que el que sigue alfabéticamente esté de primero
+        usort($candidates, function($a, $b) use ($current) {
+            $aFollows = strnatcasecmp($a['title'], $current['title']) > 0;
+            $bFollows = strnatcasecmp($b['title'], $current['title']) > 0;
+            if ($aFollows && !$bFollows) return -1;
+            if (!$aFollows && $bFollows) return 1;
+            return strnatcasecmp($a['title'], $b['title']);
+        });
     }
 
-    // PRIORIDAD 2: Misma Categoría (si no hay suficientes en colección)
+    // PRIORIDAD 2: Misma Categoría (si faltan sugerencias)
     if (count($candidates) < 10) {
         $needed = 15 - count($candidates);
-        $stmtCat = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category = ? AND v.id != ? AND v.id NOT IN ('".implode("','", array_column($candidates, 'id'))."') AND v.category NOT IN ('PENDING', 'PROCESSING') LIMIT $needed");
-        $stmtCat->execute([$current['category'], $id]);
+        $excludeIds = array_column($candidates, 'id');
+        $excludeIds[] = $id;
+        $inClause = "'" . implode("','", $excludeIds) . "'";
+        $stmtCat = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category = ? AND v.id NOT IN ($inClause) AND v.category NOT IN ('PENDING', 'PROCESSING') LIMIT $needed");
+        $stmtCat->execute([$current['category']]);
         $candidates = array_merge($candidates, $stmtCat->fetchAll(PDO::FETCH_ASSOC));
     }
 
     video_process_rows($candidates);
     respond(true, $candidates);
+}
+
+function video_get_unprocessed($pdo) {
+    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
+    $sql = "SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 ORDER BY createdAt ASC LIMIT $limit";
+    $stmt = $pdo->query($sql);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
 }
 
 function video_delete($pdo, $input) {
