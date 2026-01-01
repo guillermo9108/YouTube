@@ -41,6 +41,55 @@ function video_get_by_creator($pdo, $userId) {
     respond(true, $videos);
 }
 
+function video_get_related($pdo, $videoId) {
+    // 1. Obtener datos del video actual
+    $stmt = $pdo->prepare("SELECT id, collection, category, creatorId FROM videos WHERE id = ?");
+    $stmt->execute([$videoId]);
+    $curr = $stmt->fetch();
+    
+    if (!$curr) respond(true, []);
+
+    // 2. Query de recomendación con prioridades
+    // Prioridad 1: Misma Colección (orden alfabético para episodios)
+    // Prioridad 2: Misma Categoría
+    // Prioridad 3: Mismo Creador
+    $sql = "
+        SELECT v.*, u.username as creatorName 
+        FROM videos v 
+        LEFT JOIN users u ON v.creatorId = u.id 
+        WHERE v.id != ? 
+        AND v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')
+        ORDER BY 
+            (CASE WHEN v.collection = ? AND v.collection IS NOT NULL THEN 1 ELSE 0 END) DESC,
+            (CASE WHEN v.category = ? THEN 1 ELSE 0 END) DESC,
+            (CASE WHEN v.creatorId = ? THEN 1 ELSE 0 END) DESC,
+            v.createdAt DESC
+        LIMIT 15
+    ";
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$videoId, $curr['collection'], $curr['category'], $curr['creatorId']]);
+    $related = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    video_process_rows($related);
+    respond(true, $related);
+}
+
+function video_fix_metadata($pdo) {
+    // Detectar videos "rotos" (sin duración o con thumb default)
+    $sql = "UPDATE videos SET category = 'PENDING', processing_attempts = 0 
+            WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg%') 
+            AND category NOT IN ('PENDING', 'PROCESSING')";
+    $count = $pdo->exec($sql);
+    
+    // También re-categorizar videos GENERAL que tengan parent_category NULL (intentar re-parseo)
+    $sqlGen = "UPDATE videos SET category = 'PROCESSING' 
+               WHERE category = 'GENERAL' AND parent_category IS NULL";
+    $countGen = $pdo->exec($sqlGen);
+
+    respond(true, ['fixedBroken' => $count, 'reCategorized' => $countGen]);
+}
+
 function video_get_unprocessed($pdo) {
     $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 50;
     $mode = $_GET['mode'] ?? 'normal';
@@ -205,5 +254,25 @@ function internal_organize_video($pdo, $id, $settings, $hierarchy) {
         $pdo->rollBack();
         return false;
     }
+}
+
+function video_delete($pdo, $input) {
+    $id = $input['id'] ?? '';
+    $uid = $input['userId'] ?? '';
+    if (!$id || !$uid) respond(false, null, 'ID o Usuario faltante');
+    $stmt = $pdo->prepare("SELECT creatorId, videoUrl, thumbnailUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $video = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$video) respond(false, null, "No encontrado");
+    $stmtU = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+    $stmtU->execute([$uid]); 
+    $role = $stmtU->fetchColumn();
+    if ($video['creatorId'] !== $uid && $role !== 'ADMIN') respond(false, null, "No autorizado");
+    $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+    if (strpos($video['videoUrl'] ?? '', 'uploads/videos/') !== false) {
+        $vPath = str_replace('api/', '', $video['videoUrl']);
+        if (file_exists($vPath)) @unlink($vPath);
+    }
+    respond(true);
 }
 ?>

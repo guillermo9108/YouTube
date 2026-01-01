@@ -6,7 +6,8 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     Settings, Save, ChevronDown, ChevronUp, Tag, Loader2, 
     Trash2, Plus, X, Sparkles, FolderTree, ArrowRight, 
-    DollarSign, Search, Layers, ShieldCheck, Percent, Cpu, Globe, CreditCard
+    DollarSign, Search, Layers, ShieldCheck, Percent, Cpu, Globe, CreditCard,
+    Type, Edit3, Palette
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -79,10 +80,23 @@ export default function AdminConfig() {
                     </div>
                 </div>
 
+                {/* Personalización y Pagos Manuales */}
+                <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 space-y-4">
+                    <h3 className="font-bold text-white text-sm uppercase flex items-center gap-2">
+                        <Palette size={16} className="text-pink-400"/> Personalización & Pagos
+                    </h3>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">Instrucciones de Pago Manual <InfoTooltip text="Este texto se mostrará a los usuarios cuando quieran recargar saldo."/></label>
+                            <textarea value={settings?.paymentInstructions || ''} onChange={e => updateValue('paymentInstructions', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs min-h-[100px]" placeholder="Ej: Envía transferencia a la tarjeta XXXX y adjunta comprobante..."/>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Pasarela Tropipay */}
                 <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 space-y-4">
                     <h3 className="font-bold text-white text-sm uppercase flex items-center gap-2">
-                        <CreditCard size={16} className="text-blue-400"/> Pagos Automatizados
+                        <CreditCard size={16} className="text-blue-400"/> Pagos Automatizados (Tropipay)
                     </h3>
                     <div className="space-y-4">
                         <div>
@@ -119,29 +133,6 @@ export default function AdminConfig() {
                         <div>
                             <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">Tarifa Transferencia P2P (%) <InfoTooltip text="Costo por enviar saldo entre usuarios."/></label>
                             <input type="number" value={settings?.transferFee || 5} onChange={e => updateValue('transferFee', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs"/>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Límites de Servidor */}
-                <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 space-y-4">
-                    <h3 className="font-bold text-white text-sm uppercase flex items-center gap-2">
-                        <Globe size={16} className="text-amber-400"/> Límites & Restricciones
-                    </h3>
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">Duración Máx (Seg)</label>
-                                <input type="number" value={settings?.maxDuration || 600} onChange={e => updateValue('maxDuration', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">Tamaño Lote (Archivos)</label>
-                                <input type="number" value={settings?.batchSize || 2} onChange={e => updateValue('batchSize', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs"/>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">Ruta yt-dlp <InfoTooltip text="Requerido para importar desde YouTube."/></label>
-                            <input type="text" value={settings?.ytDlpPath || ''} onChange={e => updateValue('ytDlpPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs font-mono"/>
                         </div>
                     </div>
                 </div>

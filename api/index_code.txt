@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V11.2
+ * StreamPay - Core Controller V11.5
  */
 
 ob_start(); 
@@ -134,6 +134,8 @@ try {
         case 'create_listing': market_create_listing($pdo, $_POST, $_FILES); break;
         case 'edit_listing': market_edit_listing($pdo, $input); break;
         case 'checkout_cart': market_checkout($pdo, $input); break;
+        case 'get_reviews': market_get_reviews($pdo, $_GET['itemId'] ?? ''); break;
+        case 'add_review': market_add_review($pdo, $input); break;
 
         // --- ADMINISTRACIÓN ---
         case 'get_system_settings': admin_get_settings($pdo); break;
