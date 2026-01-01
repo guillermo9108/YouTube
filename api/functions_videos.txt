@@ -185,7 +185,7 @@ function video_scan_local($pdo, $input) {
     while (ob_get_level() > 0) ob_end_clean();
     ob_start();
     try {
-        set_time_limit(1200); ini_set('memory_limit', '1024M');
+        set_time_limit(1800); ini_set('memory_limit', '512M');
         $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
         if (!$rawPath || !is_dir($rawPath)) throw new Exception("Ruta inaccesible");
         $rootPath = realpath($rawPath);
@@ -195,8 +195,8 @@ function video_scan_local($pdo, $input) {
         $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store'];
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Local', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
         
-        $dirIterator = new RecursiveDirectoryIterator($rootPath, 4608);
-        $iterator = new RecursiveIteratorIterator($dirIterator, 1, 16);
+        $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::LEAVES_ONLY);
         
         foreach ($iterator as $file) {
             try {
@@ -214,7 +214,13 @@ function video_scan_local($pdo, $input) {
                 $vidId = 'loc_' . md5($fullPath); 
                 $insert->execute([$vidId, $title, $fullPath, $adminId, time()]);
                 if ($insert->rowCount() > 0) $addedCount++;
-                if ($addedCount >= 1000) break;
+                
+                // Liberar memoria periódicamente
+                if ($totalScanned % 100 === 0) {
+                    gc_collect_cycles();
+                }
+
+                if ($addedCount >= 2000) break; // Límite por ejecución
             } catch (Exception $inner) { continue; }
         }
         respond(true, ['totalFound' => $totalScanned, 'newToImport' => $addedCount, 'message' => "Registrados $addedCount nuevos archivos válidos."]);

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, VideoCategory, CategoryConfig } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
@@ -26,11 +26,11 @@ const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) =
 );
 
 // Nodo de Categoría optimizado para móvil (Vertical)
-// Fix: Explicitly define props interface for CategoryNode to fix TS key prop error
 interface CategoryNodeProps {
     node: CategoryConfig;
     onUpdate: (id: string, updates: Partial<CategoryConfig>) => void;
     onDelete: (id: string) => void;
+    onAddChild: (parentId: string) => void;
     level?: number;
 }
 
@@ -38,24 +38,11 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
     node, 
     onUpdate, 
     onDelete, 
+    onAddChild,
     level = 0 
 }) => {
     const [isExpanded, setIsExpanded] = useState(level < 1);
     const [showRules, setShowRules] = useState(false);
-
-    const addChild = () => {
-        const newChild: CategoryConfig = {
-            id: `SUB_${Date.now()}`,
-            name: 'Nueva Subcategoría',
-            price: node.price,
-            folderPatterns: [],
-            namePatterns: [],
-            autoGroupFolders: true,
-            children: []
-        };
-        onUpdate(node.id, { children: [...(node.children || []), newChild] });
-        setIsExpanded(true);
-    };
 
     return (
         <div className="space-y-2">
@@ -89,7 +76,7 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                             <button onClick={() => setShowRules(!showRules)} className={`p-2 rounded-lg border transition-all ${showRules ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}>
                                 <Layers size={14}/>
                             </button>
-                            <button onClick={addChild} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-emerald-400 rounded-lg">
+                            <button onClick={() => onAddChild(node.id)} className="p-2 bg-slate-800 border border-slate-700 text-slate-400 hover:text-emerald-400 rounded-lg">
                                 <Plus size={14}/>
                             </button>
                             {level > 0 && (
@@ -109,7 +96,7 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                                 <FolderTree size={12}/> Keywords en Carpeta
                             </label>
                             <div className="flex flex-wrap gap-1.5 mb-2">
-                                {node.folderPatterns.map((p, i) => (
+                                {(node.folderPatterns || []).map((p, i) => (
                                     <span key={i} className="bg-indigo-500/10 text-indigo-400 text-[10px] font-bold px-2 py-0.5 rounded border border-indigo-500/20 flex items-center gap-1">
                                         {p} <button onClick={() => onUpdate(node.id, { folderPatterns: node.folderPatterns.filter((_, idx) => idx !== i) })}><X size={10}/></button>
                                     </span>
@@ -117,7 +104,7 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                             </div>
                             <input 
                                 type="text" placeholder="Ej: novelas, turcas..."
-                                onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { folderPatterns: [...node.folderPatterns, e.currentTarget.value] }); e.currentTarget.value = ''; }}}
+                                onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { folderPatterns: [...(node.folderPatterns || []), e.currentTarget.value] }); e.currentTarget.value = ''; }}}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
                             />
                         </div>
@@ -126,7 +113,7 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                                 <Hash size={12}/> Keywords en Archivo
                             </label>
                             <div className="flex flex-wrap gap-1.5 mb-2">
-                                {node.namePatterns.map((p, i) => (
+                                {(node.namePatterns || []).map((p, i) => (
                                     <span key={i} className="bg-purple-500/10 text-purple-400 text-[10px] font-bold px-2 py-0.5 rounded border border-purple-500/20 flex items-center gap-1">
                                         {p} <button onClick={() => onUpdate(node.id, { namePatterns: node.namePatterns.filter((_, idx) => idx !== i) })}><X size={10}/></button>
                                     </span>
@@ -134,11 +121,10 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                             </div>
                             <input 
                                 type="text" placeholder="Ej: HD, Trailer..."
-                                onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { namePatterns: [...node.namePatterns, e.currentTarget.value] }); e.currentTarget.value = ''; }}}
+                                onKeyDown={e => { if(e.key === 'Enter') { onUpdate(node.id, { namePatterns: [...(node.namePatterns || []), e.currentTarget.value] }); e.currentTarget.value = ''; }}}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white"
                             />
                         </div>
-                        <p className="text-[9px] text-slate-500 italic">Los nombres de carpetas se convertirán automáticamente en subcategorías jerárquicas.</p>
                     </div>
                 )}
             </div>
@@ -150,25 +136,9 @@ const CategoryNode: React.FC<CategoryNodeProps> = ({
                             key={child.id} 
                             node={child} 
                             level={level + 1} 
-                            onUpdate={(id, updates) => {
-                                const recursiveUpdate = (nodes: CategoryConfig[]): CategoryConfig[] => {
-                                    return nodes.map(n => {
-                                        if (n.id === id) return { ...n, ...updates };
-                                        if (n.children) return { ...n, children: recursiveUpdate(n.children) };
-                                        return n;
-                                    });
-                                };
-                                onUpdate(node.id, { children: recursiveUpdate(node.children!) });
-                            }}
-                            onDelete={(id) => {
-                                const recursiveDelete = (nodes: CategoryConfig[]): CategoryConfig[] => {
-                                    return nodes.filter(n => n.id !== id).map(n => {
-                                        if (n.children) return { ...n, children: recursiveDelete(n.children) };
-                                        return n;
-                                    });
-                                };
-                                onUpdate(node.id, { children: recursiveDelete(node.children!) });
-                            }}
+                            onUpdate={onUpdate}
+                            onDelete={onDelete}
+                            onAddChild={onAddChild}
                         />
                     ))}
                 </div>
@@ -197,6 +167,69 @@ export default function AdminConfig() {
     };
 
     useEffect(() => { loadSettings(); }, []);
+
+    // Función de actualización de árbol inmutable y segura
+    const updateCategoryTree = useCallback((id: string, updates: Partial<CategoryConfig>) => {
+        if (!settings) return;
+        
+        const recursive = (nodes: CategoryConfig[]): CategoryConfig[] => {
+            return nodes.map(n => {
+                if (n.id === id) return { ...n, ...updates };
+                if (n.children && n.children.length > 0) {
+                    return { ...n, children: recursive(n.children) };
+                }
+                return n;
+            });
+        };
+
+        const newCats = recursive(settings.customCategories);
+        setSettings({ ...settings, customCategories: newCats });
+    }, [settings]);
+
+    const deleteFromTree = useCallback((id: string) => {
+        if (!settings) return;
+        
+        const recursive = (nodes: CategoryConfig[]): CategoryConfig[] => {
+            return nodes.filter(n => n.id !== id).map(n => {
+                if (n.children && n.children.length > 0) {
+                    return { ...n, children: recursive(n.children) };
+                }
+                return n;
+            });
+        };
+
+        const newCats = recursive(settings.customCategories);
+        setSettings({ ...settings, customCategories: newCats });
+    }, [settings]);
+
+    const addChildToTree = useCallback((parentId: string) => {
+        if (!settings) return;
+
+        const newChild: CategoryConfig = {
+            id: `SUB_${Date.now()}`,
+            name: 'Nueva Subcategoría',
+            price: 1.0,
+            folderPatterns: [],
+            namePatterns: [],
+            autoGroupFolders: true,
+            children: []
+        };
+        
+        const recursive = (nodes: CategoryConfig[]): CategoryConfig[] => {
+            return nodes.map(n => {
+                if (n.id === parentId) {
+                    return { ...n, children: [...(n.children || []), newChild] };
+                }
+                if (n.children && n.children.length > 0) {
+                    return { ...n, children: recursive(n.children) };
+                }
+                return n;
+            });
+        };
+
+        const newCats = recursive(settings.customCategories);
+        setSettings({ ...settings, customCategories: newCats });
+    }, [settings]);
 
     const handleSave = async () => {
         if (!settings) return;
@@ -227,22 +260,18 @@ export default function AdminConfig() {
 
             <ConfigSection title="Categorías Jerárquicas" icon={FolderTree} isOpen={openSection === 'PRICES'} onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}>
                 <div className="space-y-4">
-                    {settings.customCategories.map((cat: CategoryConfig) => (
+                    {(settings.customCategories || []).map((cat: CategoryConfig) => (
                         <CategoryNode 
-                            key={cat.id} node={cat} 
-                            onUpdate={(id, updates) => {
-                                const newCats = settings.customCategories.map((c: any) => c.id === id ? { ...c, ...updates } : c);
-                                setSettings({...settings, customCategories: newCats});
-                            }} 
-                            onDelete={(id) => {
-                                const newCats = settings.customCategories.filter((c: any) => c.id !== id);
-                                setSettings({...settings, customCategories: newCats});
-                            }}
+                            key={cat.id} 
+                            node={cat} 
+                            onUpdate={updateCategoryTree} 
+                            onDelete={deleteFromTree}
+                            onAddChild={addChildToTree}
                         />
                     ))}
                     <button onClick={() => {
                         const newCat: CategoryConfig = { id: `CAT_${Date.now()}`, name: 'Nueva Categoría', price: 1.0, folderPatterns: [], namePatterns: [], autoGroupFolders: true, children: [] };
-                        setSettings({...settings, customCategories: [...settings.customCategories, newCat]});
+                        setSettings({...settings, customCategories: [...(settings.customCategories || []), newCat]});
                     }} className="w-full mt-4 py-4 border-2 border-dashed border-slate-700 text-slate-500 hover:text-white hover:bg-slate-800/50 rounded-2xl transition-all flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest">
                         <Plus size={18}/> Añadir Raíz
                     </button>
@@ -284,13 +313,6 @@ export default function AdminConfig() {
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-emerald-400 font-mono h-32 outline-none"
                         />
                     </div>
-                </div>
-            </ConfigSection>
-
-            <ConfigSection title="Inteligencia Artificial" icon={Sparkles} isOpen={openSection === 'AI'} onToggle={() => setOpenSection(openSection === 'AI' ? '' : 'AI')}>
-                <div>
-                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Google Gemini API Key</label>
-                    <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings({...settings, geminiKey: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-indigo-500" placeholder="AIza..." />
                 </div>
             </ConfigSection>
         </div>
