@@ -27,14 +27,19 @@ function resolve_video_path($pathOrUrl) {
 function getPriceForCategory($cat, $settings) {
     $categories = is_array($settings['customCategories']) ? $settings['customCategories'] : json_decode($settings['customCategories'] ?? '[]', true);
     
-    // Función para buscar precio en el árbol (incluso si es dinámico)
+    // Función para buscar precio en el árbol
     $findPrice = function($nodes, $targetId) use (&$findPrice) {
+        if (!is_array($nodes)) return null;
         foreach($nodes as $node) {
-            // Si el ID coincide o el target contiene el ID (jerarquía)
-            if ($node['id'] === $targetId || strpos($targetId, $node['name']) !== false) return $node['price'];
-            if (!empty($node['children'])) {
-                $p = $findPrice($node['children'], $targetId);
-                if ($p !== null) return $p;
+            if (!is_array($node)) continue;
+            // Si el nombre de la categoría actual está contenido en la ruta jerárquica final
+            if (isset($node['name']) && stripos($targetId, $node['name']) !== false) {
+                 // Si hay subcategoría dinámica, intentamos devolver el precio del nodo más profundo posible
+                 $subPrice = null;
+                 if (!empty($node['children'])) {
+                     $subPrice = $findPrice($node['children'], $targetId);
+                 }
+                 return ($subPrice !== null) ? $subPrice : (isset($node['price']) ? floatval($node['price']) : null);
             }
         }
         return null;
@@ -48,7 +53,7 @@ function getPriceForCategory($cat, $settings) {
 }
 
 /**
- * Motor de Inteligencia Jerárquica V2
+ * Motor de Inteligencia Jerárquica V3 - Agrupación por Carpeta Padre
  */
 function smartParseFilename($fullPath, $existingCategory = null, $categoriesConfig = []) {
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
@@ -62,41 +67,47 @@ function smartParseFilename($fullPath, $existingCategory = null, $categoriesConf
     $cleanName = trim(preg_replace('/\s+/', ' ', $cleanName));
 
     // 2. Análisis Jerárquico de Carpetas
-    // Dividimos la ruta en partes
     $pathParts = explode('/', $dirPath);
     $detectedBreadcrumb = [];
-    
-    // Buscamos coincidencias desde la raíz hacia adentro
-    $currentNodeLevel = $categoriesConfig;
+    $currentNodeLevel = is_array($categoriesConfig) ? $categoriesConfig : [];
     $matchedManual = false;
+    $manualMatches = [];
 
     foreach ($pathParts as $part) {
         $partUpper = strtoupper(trim($part));
-        if (empty($partUpper) || in_array($partUpper, ['VAR', 'WWW', 'HTML', 'API', 'UPLOADS', 'VIDEOS', 'VOLUME1', 'DATA'])) continue;
+        if (empty($partUpper) || in_array($partUpper, ['VAR', 'WWW', 'HTML', 'API', 'UPLOADS', 'VIDEOS', 'VOLUME1', 'VOLUME2', 'DATA'])) continue;
 
         $matchNode = null;
-        foreach ($currentNodeLevel as $node) {
-            $patterns = array_map('strtoupper', $node['folderPatterns'] ?? []);
-            if ($node['id'] === $partUpper || in_array($partUpper, $patterns)) {
-                $matchNode = $node;
-                break;
+        if (is_array($currentNodeLevel)) {
+            foreach ($currentNodeLevel as $node) {
+                if (!is_array($node)) continue;
+                $patterns = array_map('strtoupper', $node['folderPatterns'] ?? []);
+                if ((isset($node['id']) && $node['id'] === $partUpper) || in_array($partUpper, $patterns)) {
+                    $matchNode = $node;
+                    break;
+                }
             }
         }
 
         if ($matchNode) {
-            $detectedBreadcrumb[] = $matchNode['name'];
-            $currentNodeLevel = $matchNode['children'] ?? [];
+            $name = $matchNode['name'] ?? $part;
+            $detectedBreadcrumb[] = $name;
+            $manualMatches[] = strtoupper($name);
+            $currentNodeLevel = is_array($matchNode['children'] ?? null) ? $matchNode['children'] : [];
             $matchedManual = true;
         } else if ($matchedManual) {
-            // Si ya entramos en una categoría padre (ej: Novelas) y hay más carpetas, 
-            // las agregamos automáticamente como subcategorías
-            $detectedBreadcrumb[] = ucwords(strtolower($part));
+            // Si ya estamos dentro de una categoría detectada, las carpetas siguientes son subcategorías dinámicas
+            // Evitamos duplicar nombres que ya están en el breadcrumb
+            if (!in_array($partUpper, $manualMatches)) {
+                $detectedBreadcrumb[] = ucwords(strtolower($part));
+            }
         }
     }
 
-    // Si no se detectó nada por ruta, probamos por patrones en el nombre de archivo
-    if (empty($detectedBreadcrumb)) {
+    // 3. Si no hay ruta detectada, probamos por nombre de archivo
+    if (empty($detectedBreadcrumb) && is_array($categoriesConfig)) {
         foreach ($categoriesConfig as $node) {
+            if (!is_array($node)) continue;
             foreach ($node['namePatterns'] as $p) {
                 if (stripos($filename, $p) !== false) {
                     $detectedBreadcrumb[] = $node['name'];
@@ -106,6 +117,8 @@ function smartParseFilename($fullPath, $existingCategory = null, $categoriesConf
         }
     }
 
+    // 4. Limpieza final: El título del video no debe contener las categorías padre si el usuario lo desea
+    // Pero por ahora solo formateamos el breadcrumb
     $finalCategory = empty($detectedBreadcrumb) ? 'GENERAL' : implode(' / ', $detectedBreadcrumb);
 
     return [

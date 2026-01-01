@@ -1,5 +1,74 @@
 <?php
 
+/**
+ * Función Maestra de Streaming (Byte-Range Support)
+ */
+function streamVideo($id, $pdo) {
+    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $video = $stmt->fetch();
+
+    if (!$video) {
+        header("HTTP/1.1 404 Not Found");
+        exit;
+    }
+
+    $path = resolve_video_path($video['videoUrl']);
+
+    if (!$path || !file_exists($path)) {
+        header("HTTP/1.1 404 Not Found");
+        exit;
+    }
+
+    $size = filesize($path);
+    $fm = @fopen($path, 'rb');
+    if (!$fm) {
+        header("HTTP/1.1 500 Internal Server Error");
+        exit;
+    }
+
+    $begin = 0;
+    $end = $size - 1;
+
+    if (isset($_SERVER['HTTP_RANGE'])) {
+        if (preg_match('/bytes=\h*(\d+)-(\d*)[\D.*]?/i', $_SERVER['HTTP_RANGE'], $matches)) {
+            $begin = intval($matches[1]);
+            if (!empty($matches[2])) {
+                $end = intval($matches[2]);
+            }
+        }
+    }
+
+    if (isset($_SERVER['HTTP_RANGE'])) {
+        header('HTTP/1.1 206 Partial Content');
+    } else {
+        header('HTTP/1.1 200 OK');
+    }
+
+    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    $mime = 'video/mp4';
+    if ($ext === 'mkv') $mime = 'video/x-matroska';
+    if ($ext === 'webm') $mime = 'video/webm';
+    if ($ext === 'avi') $mime = 'video/x-msvideo';
+
+    header("Content-Type: $mime");
+    header('Cache-Control: public, max-age=3600');
+    header('Accept-Ranges: bytes');
+    header("Content-Range: bytes $begin-$end/$size");
+    $length = ($end - $begin) + 1;
+    header("Content-Length: $length");
+
+    fseek($fm, $begin);
+    $cur = $begin;
+    while (!feof($fm) && $cur <= $end && (connection_status() == 0)) {
+        print fread($fm, min(1024 * 16, ($end - $cur) + 1));
+        $cur += 1024 * 16;
+        flush();
+    }
+    fclose($fm);
+    exit;
+}
+
 function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
