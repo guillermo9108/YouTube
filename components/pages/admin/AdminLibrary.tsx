@@ -220,7 +220,7 @@ export default function AdminLibrary() {
     };
 
     const handleStep5 = async () => {
-        if (!confirm("Esto re-analizará TODA la librería pública (incluyendo series/películas ya categorizadas) para aplicar las reglas de carpetas actuales. ¿Continuar?")) return;
+        if (!confirm("Esto re-analizará TODA la librería pública aplicando las reglas de carpetas actuales. ¿Continuar?")) return;
         setIsRecategorizing(true);
         addToLog("Iniciando Re-categorización Masiva...");
         try {
@@ -266,7 +266,6 @@ export default function AdminLibrary() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-8">
                 <div className="border-l-4 border-blue-500 pl-4">
                     <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">1. Registro Físico</h3>
-                    <p className="text-xs text-slate-500 mb-4">Sincroniza los archivos del disco duro con la base de datos.</p>
                     <div className="flex gap-2">
                         <input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-indigo-300 outline-none focus:border-indigo-500" placeholder="/volume1/videos/..." />
                         <button onClick={handleStep1} disabled={isIndexing} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 px-6 rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all flex items-center gap-2">
@@ -277,7 +276,6 @@ export default function AdminLibrary() {
 
                 <div className="border-l-4 border-emerald-500 pl-4">
                     <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">2. Extracción de Metadatos</h3>
-                    <p className="text-xs text-slate-500 mb-4">Captura miniaturas y duración. Si el navegador no puede, se delegará al servidor.</p>
                     <button onClick={handleStep2} disabled={activeScan || stats.pending === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-emerald-900/20 transition-all flex items-center justify-center gap-2">
                         <Film size={18}/> Iniciar Extracción ({stats.pending})
                     </button>
@@ -285,23 +283,20 @@ export default function AdminLibrary() {
 
                 <div className="border-l-4 border-purple-500 pl-4">
                     <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">3. Publicación Inteligente</h3>
-                    <p className="text-xs text-slate-500 mb-4">Organiza por categorías y asigna precios finales.</p>
                     <button onClick={handleStep3} disabled={isOrganizing || stats.processing === 0} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-purple-900/20 transition-all flex items-center justify-center gap-2">
                         {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} Publicar ({stats.processing})
                     </button>
                 </div>
 
                 <div className="border-l-4 border-red-500 pl-4">
-                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">4. Reparación de Datos</h3>
-                    <p className="text-xs text-slate-500 mb-4">Re-escanea videos con miniaturas rotas o duración en cero.</p>
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">4. Reparación de Datos (Fixer)</h3>
                     <button onClick={handleStep4} disabled={isFixing || stats.broken === 0} className="w-full bg-slate-800 border border-red-500/30 hover:bg-slate-700 disabled:bg-slate-900 disabled:opacity-50 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all flex items-center justify-center gap-2">
                         {isFixing ? <Loader2 className="animate-spin" size={18}/> : <ShieldAlert className="text-red-500" size={18}/>} Reparar {stats.broken} Videos
                     </button>
                 </div>
 
                 <div className="border-l-4 border-indigo-500 pl-4">
-                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">5. Re-categorización Total</h3>
-                    <p className="text-xs text-slate-500 mb-4">Aplica las reglas actuales a toda la librería. Útil tras cambiar la estructura de Config.</p>
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">5. Re-categorización Masiva (Mapper)</h3>
                     <button onClick={handleStep5} disabled={isRecategorizing || stats.public === 0} className="w-full bg-indigo-900/40 border border-indigo-500/30 hover:bg-indigo-900/60 disabled:bg-slate-900 disabled:opacity-50 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all flex items-center justify-center gap-2">
                         {isRecategorizing ? <RefreshCw className="animate-spin" size={18}/> : <LayoutGrid className="text-indigo-400" size={18}/>} Re-categorizar Todo ({stats.public})
                     </button>
@@ -326,11 +321,8 @@ export default function AdminLibrary() {
                         <h4 className="font-black text-white mb-2 flex items-center justify-center gap-2 uppercase tracking-tighter text-lg">
                             <Film size={20} className="text-emerald-400"/> {currentScanIndex + 1} / {scanQueue.length}
                         </h4>
-                        <p className="text-[10px] text-slate-500 mb-6 truncate font-mono bg-black/30 p-2 rounded-lg">{scanQueue[currentScanIndex].title}</p>
-                        
                         <ScannerPlayer key={scanQueue[currentScanIndex].id} video={scanQueue[currentScanIndex]} onComplete={handleVideoProcessed} />
-                        
-                        <button onClick={() => setActiveScan(false)} className="mt-8 bg-red-950/20 hover:bg-red-900/40 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] py-3 px-10 rounded-xl border border-red-900/30 transition-all">Cancelar</button>
+                        <button onClick={() => setActiveScan(false)} className="mt-8 bg-red-950/20 hover:bg-red-900/40 text-red-500 text-[10px] font-black uppercase py-3 px-10 rounded-xl border border-red-900/30 transition-all">Cancelar</button>
                     </div>
                 </div>
             )}
