@@ -112,7 +112,6 @@ function video_get_related($pdo, $id) {
     $parts = explode('/', $path);
     $parentDir = (count($parts) > 1) ? $parts[count($parts)-2] : null;
     
-    // Búsqueda por categoría exacta o por carpeta contenedora
     $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
                            FROM videos v 
                            LEFT JOIN users u ON v.creatorId = u.id 
@@ -136,15 +135,15 @@ function video_get_by_creator($pdo, $userId) {
 }
 
 function video_scan_local($pdo, $input) {
-    // Limpiar cualquier salida previa para evitar JSON corrupto
-    while (ob_get_level() > 0) ob_end_clean();
+    // Asegurar que no hay salida basura que rompa el JSON
+    while (ob_get_level()) ob_end_clean();
     
     try {
         set_time_limit(1800); 
         ini_set('memory_limit', '512M');
         
         $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
-        if (!$rawPath || !is_dir($rawPath)) throw new Exception("Ruta NAS inaccesible");
+        if (!$rawPath || !is_dir($rawPath)) throw new Exception("Ruta NAS inaccesible: $rawPath");
         
         $rootPath = realpath($rawPath);
         $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
@@ -154,44 +153,50 @@ function video_scan_local($pdo, $input) {
         $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'ts', 'flv'];
         $ignoreFolders = ['@eaDir', '#recycle', '.thumbnails', '.DS_Store', 'SAMPLE', 'TRAILER'];
         
+        // Preparar sentencia fuera del bucle para ahorrar memoria y CPU
         $insert = $pdo->prepare("INSERT IGNORE INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, transcode_status) VALUES (?, ?, 'Local', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0, 1, 'NONE')");
         
-        $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::LEAVES_ONLY);
-        
-        foreach ($iterator as $file) {
-            try {
-                $pathName = $file->getPathname();
-                
-                // Filtros rápidos para ahorrar memoria
-                foreach ($ignoreFolders as $ignore) {
-                    if (stripos($pathName, $ignore) !== false) continue 2;
-                }
-                
-                if (!$file->isFile()) continue;
-                $ext = strtolower($file->getExtension());
-                if (!in_array($ext, $allowedExts)) continue;
-                
-                $totalScanned++;
-                $fullPath = str_replace('\\', '/', $pathName);
-                $vidId = 'loc_' . md5($fullPath); 
-                
-                // Ejecución directa para no acumular arrays gigantes en RAM
-                $insert->execute([$vidId, basename($fullPath), $fullPath, $adminId, time()]);
-                if ($insert->rowCount() > 0) $addedCount++;
-                
-                // Liberación de memoria cada 100 archivos
-                if ($totalScanned % 100 === 0) {
-                    gc_collect_cycles();
-                }
+        // Iterador optimizado que no carga todo el árbol en memoria de golpe
+        $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
+        $iterator->setMaxDepth(10); // Límite de profundidad para evitar bucles infinitos en enlaces simbólicos
 
-                if ($addedCount >= 3000) break; 
-            } catch (Exception $inner) { continue; }
+        foreach ($iterator as $file) {
+            // Liberar memoria periódicamente
+            if ($totalScanned % 100 === 0) {
+                gc_collect_cycles();
+            }
+
+            $pathName = $file->getPathname();
+            
+            // Filtros rápidos
+            foreach ($ignoreFolders as $ignore) {
+                if (stripos($pathName, $ignore) !== false) continue 2;
+            }
+            
+            if (!$file->isFile()) continue;
+            
+            $ext = strtolower($file->getExtension());
+            if (!in_array($ext, $allowedExts)) continue;
+            
+            $totalScanned++;
+            $fullPath = str_replace('\\', '/', $pathName);
+            $vidId = 'loc_' . md5($fullPath); 
+            
+            $insert->execute([$vidId, basename($fullPath), $fullPath, $adminId, time()]);
+            if ($insert->rowCount() > 0) $addedCount++;
+
+            // Detener si llegamos a un lote muy grande para no saturar la respuesta JSON
+            if ($addedCount >= 2000) break; 
         }
         
-        respond(true, ['totalFound' => $totalScanned, 'newToImport' => $addedCount, 'message' => "Escaneo finalizado. $addedCount nuevos archivos registrados."]);
+        respond(true, [
+            'totalFound' => $totalScanned, 
+            'newToImport' => $addedCount, 
+            'message' => "Escaneo finalizado. Registrados $addedCount nuevos de $totalScanned analizados."
+        ]);
     } catch (Exception $e) {
-        respond(false, null, "Error crítico: " . $e->getMessage());
+        respond(false, null, $e->getMessage());
     }
 }
 
@@ -229,7 +234,7 @@ function video_update_metadata($pdo, $post, $files) {
     $sql .= " WHERE id = ?"; $params[] = $id;
     $pdo->prepare($sql)->execute($params);
 
-    // Activar inmediatamente el organizador para este video
+    // Organización inmediata para este video
     $settingsFull = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     if ($settingsFull) {
         $customCats = json_decode($settingsFull['customCategories'] ?? '[]', true);
@@ -260,7 +265,6 @@ function video_recategorize_all($pdo) {
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $customCats = json_decode($settings['customCategories'] ?? '[]', true);
     
-    // Solo re-categorizamos videos públicos para no interferir con los pendientes
     $stmt = $pdo->query("SELECT id FROM videos WHERE category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')");
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     
@@ -283,10 +287,8 @@ function internal_organize_video($pdo, $id, $settings, $customCategories) {
     $newTitle = $smart['title'];
     $newCat = $smart['category']; 
     
-    // Si no se detectó nada, forzamos GENERAL
     if (!$newCat || $newCat === 'PENDING') $newCat = 'GENERAL';
     
-    // Obtener precio basado en la nueva jerarquía de categorías
     $newPrice = getPriceForCategory($newCat, $settings);
     
     $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, price = ? WHERE id = ?");
@@ -296,7 +298,8 @@ function internal_organize_video($pdo, $id, $settings, $customCategories) {
 function video_delete($pdo, $input) {
     $id = $input['id'] ?? '';
     $uid = $input['userId'] ?? '';
-    if (!$id || !$uid) respond(false, null, 'ID o Usuario faltante');
+    if (!$id || !$uid) respond(false, null, 'Faltan parámetros');
+    
     $stmt = $pdo->prepare("SELECT creatorId, videoUrl, thumbnailUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $video = $stmt->fetch(PDO::FETCH_ASSOC);

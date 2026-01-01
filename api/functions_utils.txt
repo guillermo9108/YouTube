@@ -25,87 +25,97 @@ function resolve_video_path($pathOrUrl) {
 }
 
 /**
- * Busca el precio más específico en el árbol de categorías
+ * Busca recursivamente en el árbol de categorías por nombre
+ */
+function findCategoryInTree($name, $nodes) {
+    if (!is_array($nodes)) return null;
+    foreach ($nodes as $node) {
+        if (strcasecmp($node['name'] ?? '', $name) === 0) return $node;
+        // También buscar en patrones de carpeta
+        $patterns = $node['folderPatterns'] ?? [];
+        foreach ($patterns as $p) {
+            if (strcasecmp($p, $name) === 0) return $node;
+        }
+        if (!empty($node['children'])) {
+            $found = findCategoryInTree($name, $node['children']);
+            if ($found) return $found;
+        }
+    }
+    return null;
+}
+
+/**
+ * Calcula el precio basado en el breadcrumb final
  */
 function getPriceForCategory($breadcrumb, $settings) {
     $categories = is_array($settings['customCategories']) ? $settings['customCategories'] : json_decode($settings['customCategories'] ?? '[]', true);
-    
-    // El breadcrumb viene como "Padre / Hijo / Nieto"
     $parts = explode(' / ', $breadcrumb);
+    
+    $lastPrice = isset($settings['categoryPrices']['GENERAL']) ? floatval($settings['categoryPrices']['GENERAL']) : 1.00;
     $currentLevel = $categories;
-    $lastFoundPrice = isset($settings['categoryPrices']['GENERAL']) ? floatval($settings['categoryPrices']['GENERAL']) : 1.00;
 
     foreach ($parts as $part) {
         $found = false;
-        if (!is_array($currentLevel)) break;
-        
         foreach ($currentLevel as $node) {
-            if (isset($node['name']) && strcasecmp($node['name'], $part) === 0) {
-                if (isset($node['price'])) $lastFoundPrice = floatval($node['price']);
-                $currentLevel = $node['children'] ?? null;
+            if (strcasecmp($node['name'], $part) === 0) {
+                if (isset($node['price'])) $lastPrice = floatval($node['price']);
+                $currentLevel = $node['children'] ?? [];
                 $found = true;
                 break;
             }
         }
-        if (!$found) break; // Si no hay más nodos manuales, nos quedamos con el último precio encontrado
+        if (!$found) break;
     }
-
-    return $lastFoundPrice;
+    return $lastPrice;
 }
 
 /**
- * Motor de Inteligencia Jerárquica V4 - Traversal Profundo
+ * Motor de Inteligencia Jerárquica V5 - Resolución de Rutas NAS
  */
 function smartParseFilename($fullPath, $categoriesConfig = []) {
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
     $filename = pathinfo($fullPathNormalized, PATHINFO_FILENAME);
     $dirPath = dirname($fullPathNormalized);
     
-    // 1. Limpieza de nombre de archivo
-    $junk = ['/\b(2160p|1080p|720p|480p|4k|8k|hd|sd)\b/i', '/\b(x264|x265|h264|h265|hevc)\b/i', '/\b(aac|ac3|dts|mp3|5\.1|7\.1)\b/i', '/\b(bluray|web-dl|webrip|hdrip)\b/i', '/www\.[a-z0-9-]+\.[a-z]+/i'];
+    // 1. Limpieza de nombre
     $cleanName = str_replace(['.', '_', '-', '[', ']', '(', ')'], ' ', $filename);
-    foreach ($junk as $p) { $cleanName = preg_replace($p, '', $cleanName); }
+    $cleanName = preg_replace('/\b(2160p|1080p|720p|480p|4k|x264|x265|h264|h265|hevc|aac|ac3|dts|mp3|bluray|web-dl|webrip)\b/i', '', $cleanName);
     $cleanName = trim(preg_replace('/\s+/', ' ', $cleanName));
 
-    // 2. Análisis Jerárquico de Carpetas
+    // 2. Análisis de Breadcrumb por Carpetas
     $pathParts = explode('/', trim($dirPath, '/'));
     $detectedBreadcrumb = [];
     $currentNodeLevel = $categoriesConfig;
     
-    // Saltamos carpetas de sistema si la ruta es absoluta
-    $skipFolders = ['VAR', 'WWW', 'HTML', 'API', 'UPLOADS', 'VIDEOS', 'VOLUME1', 'VOLUME2', 'DATA', 'SHARE', 'PUBLIC'];
+    // Ignorar carpetas raíz del sistema o de red
+    $ignore = ['VAR', 'WWW', 'HTML', 'API', 'UPLOADS', 'VIDEOS', 'VOLUME1', 'VOLUME2', 'DATA', 'SHARE', 'PUBLIC', 'DS', 'NAS', 'STORAGE'];
     
     foreach ($pathParts as $part) {
-        $partUpper = strtoupper(trim($part));
-        if (empty($partUpper) || in_array($partUpper, $skipFolders)) continue;
+        if (empty($part) || in_array(strtoupper($part), $ignore)) continue;
 
-        $matchNode = null;
-        if (is_array($currentNodeLevel)) {
-            foreach ($currentNodeLevel as $node) {
-                $patterns = array_map('strtoupper', $node['folderPatterns'] ?? []);
-                // Empareja si el nombre coincide o si está en las keywords de carpeta
-                if (strcasecmp($node['name'] ?? '', $part) === 0 || in_array($partUpper, $patterns)) {
-                    $matchNode = $node;
-                    break;
-                }
+        $match = null;
+        foreach ($currentNodeLevel as $node) {
+            $patterns = array_map('strtoupper', $node['folderPatterns'] ?? []);
+            if (strcasecmp($node['name'] ?? '', $part) === 0 || in_array(strtoupper($part), $patterns)) {
+                $match = $node;
+                break;
             }
         }
 
-        if ($matchNode) {
-            $detectedBreadcrumb[] = $matchNode['name'];
-            $currentNodeLevel = $matchNode['children'] ?? [];
+        if ($match) {
+            $detectedBreadcrumb[] = $match['name'];
+            $currentNodeLevel = $match['children'] ?? [];
         } else if (!empty($detectedBreadcrumb)) {
-            // Si ya entramos en una categoría raíz, cualquier carpeta hija es una subcategoría dinámica
+            // Si ya estamos bajo una categoría reconocida, las subcarpetas son subcategorías automáticas
             $detectedBreadcrumb[] = ucwords(strtolower($part));
-            $currentNodeLevel = null; // Detenemos búsqueda de nodos manuales
+            $currentNodeLevel = []; // No buscamos más nodos manuales profundos
         }
     }
 
-    // 3. Fallback por Keywords en Nombre de Archivo
+    // 3. Fallback: Búsqueda por keywords en el nombre del archivo si no hay carpetas útiles
     if (empty($detectedBreadcrumb)) {
         foreach ($categoriesConfig as $node) {
-            $namePatterns = $node['namePatterns'] ?? [];
-            foreach ($namePatterns as $p) {
+            foreach (($node['namePatterns'] ?? []) as $p) {
                 if (stripos($filename, $p) !== false) {
                     $detectedBreadcrumb[] = $node['name'];
                     break 2;
@@ -114,11 +124,9 @@ function smartParseFilename($fullPath, $categoriesConfig = []) {
         }
     }
 
-    $finalCategory = empty($detectedBreadcrumb) ? 'GENERAL' : implode(' / ', $detectedBreadcrumb);
-
     return [
         'title' => ucwords(strtolower($cleanName)), 
-        'category' => $finalCategory
+        'category' => empty($detectedBreadcrumb) ? 'GENERAL' : implode(' / ', $detectedBreadcrumb)
     ];
 }
 ?>
