@@ -33,9 +33,18 @@ export default function AdminConfig() {
         setLoading(true);
         try {
             const s: any = await db.getSystemSettings();
+            
+            // Sanitización de datos entrantes para evitar crasheos de React
             if (Array.isArray(s.categoryPrices) || !s.categoryPrices) {
                 s.categoryPrices = {};
             }
+            if (!Array.isArray(s.customCategories)) {
+                s.customCategories = [];
+            }
+            if (!Array.isArray(s.vipPlans)) {
+                s.vipPlans = [];
+            }
+            
             setSettings(s);
         } catch(e) {
             toast.error("Error al cargar configuración");
@@ -52,7 +61,7 @@ export default function AdminConfig() {
         if (!settings) return;
         setSaving(true);
         try {
-            // Aseguramos que los valores numéricos sean números
+            // Aseguramos la integridad de los arreglos antes de enviar al servidor
             const cleanSettings = {
                 ...settings,
                 videoCommission: Number(settings.videoCommission),
@@ -60,12 +69,15 @@ export default function AdminConfig() {
                 batchSize: Number(settings.batchSize),
                 maxDuration: Number(settings.maxDuration),
                 maxResolution: Number(settings.maxResolution),
-                currencyConversion: Number(settings.currencyConversion)
+                currencyConversion: Number(settings.currencyConversion),
+                // Limpiar categorías de posibles objetos malformados
+                customCategories: Array.isArray(settings.customCategories) 
+                    ? settings.customCategories.filter(c => typeof c === 'string' && c.trim() !== '')
+                    : []
             };
             
             await db.updateSystemSettings(cleanSettings);
             toast.success("Configuración guardada exitosamente");
-            // Recargar para confirmar persistencia
             await loadSettings();
         } catch(e: any) {
             toast.error("Error al guardar: " + e.message);
@@ -97,7 +109,7 @@ export default function AdminConfig() {
         setSettings((prev: SystemSettings | null) => {
             if (!prev) return null;
             
-            const currentCustom = prev.customCategories || [];
+            const currentCustom = Array.isArray(prev.customCategories) ? prev.customCategories : [];
             if (standardCats.includes(catKey) || currentCustom.includes(catKey)) {
                 toast.error("Esta categoría ya existe");
                 return prev;
@@ -111,7 +123,7 @@ export default function AdminConfig() {
                 customCategories: [...currentCustom, catKey],
                 categoryPrices: {
                     ...currentPrices,
-                    [catKey]: 0 // Init price
+                    [catKey]: 0 
                 }
             };
         });
@@ -121,7 +133,7 @@ export default function AdminConfig() {
     const handleRemoveCategory = (catToRemove: string) => {
         setSettings((prev: SystemSettings | null) => {
             if (!prev) return null;
-            const updatedCustom = (prev.customCategories || []).filter((c: string) => c !== catToRemove);
+            const updatedCustom = (Array.isArray(prev.customCategories) ? prev.customCategories : []).filter((c: string) => c !== catToRemove);
             const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
             const updatedPrices = { ...currentPrices };
             delete updatedPrices[catToRemove];
@@ -145,14 +157,15 @@ export default function AdminConfig() {
                 durationDays: 30,
                 description: ''
             };
-            return {...prev, vipPlans: [...(prev.vipPlans || []), newPlan]};
+            const currentVips = Array.isArray(prev.vipPlans) ? prev.vipPlans : [];
+            return {...prev, vipPlans: [...currentVips, newPlan]};
         });
     };
 
     const removeVipPlan = (id: string) => {
         setSettings((prev: SystemSettings | null) => {
             if (!prev) return null;
-            return {...prev, vipPlans: (prev.vipPlans || []).filter((p: VipPlan) => p.id !== id)};
+            return {...prev, vipPlans: (Array.isArray(prev.vipPlans) ? prev.vipPlans : []).filter((p: VipPlan) => p.id !== id)};
         });
     };
 
@@ -161,7 +174,7 @@ export default function AdminConfig() {
             if (!prev) return null;
             return {
                 ...prev,
-                vipPlans: (prev.vipPlans || []).map((p: VipPlan) => p.id === id ? {...p, [field]: value} : p)
+                vipPlans: (Array.isArray(prev.vipPlans) ? prev.vipPlans : []).map((p: VipPlan) => p.id === id ? {...p, [field]: value} : p)
             };
         });
     };
@@ -171,7 +184,7 @@ export default function AdminConfig() {
 
     const allCategories = [
         ...Object.values(VideoCategory),
-        ...(settings.customCategories || [])
+        ...(Array.isArray(settings.customCategories) ? settings.customCategories : [])
     ];
 
     return (
@@ -306,7 +319,7 @@ export default function AdminConfig() {
                 onToggle={() => setOpenSection(openSection === 'VIP' ? '' : 'VIP')}
             >
                 <div className="space-y-4">
-                    {settings.vipPlans && settings.vipPlans.map((plan: any) => (
+                    {Array.isArray(settings.vipPlans) && settings.vipPlans.map((plan: any) => (
                         <div key={plan.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative">
                             <button onClick={() => removeVipPlan(plan.id)} className="absolute top-2 right-2 text-slate-600 hover:text-red-500 p-1"><Trash2 size={16}/></button>
                             
@@ -357,19 +370,22 @@ export default function AdminConfig() {
                 onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}
             >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    {allCategories.map(cat => {
-                        const isCustom = !Object.values(VideoCategory).includes(cat as any);
-                        const currentPrice = settings.categoryPrices?.[cat] ?? 0;
+                    {allCategories.map((cat, idx) => {
+                        // Sanitización por si cat no es string
+                        const catLabel = typeof cat === 'string' ? cat : String(cat);
+                        const isCustom = !Object.values(VideoCategory).includes(catLabel as any);
+                        const currentPrices = Array.isArray(settings.categoryPrices) ? {} : (settings.categoryPrices || {});
+                        const currentPrice = currentPrices[catLabel] ?? 0;
                         
                         return (
-                            <div key={cat} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800 group">
+                            <div key={`${catLabel}-${idx}`} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800 group">
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs font-bold text-slate-300 uppercase">
-                                        {cat.replace('_', ' ')}
+                                        {catLabel.replace('_', ' ')}
                                     </span>
                                     {isCustom && (
                                         <button 
-                                            onClick={() => handleRemoveCategory(cat)} 
+                                            onClick={() => handleRemoveCategory(catLabel)} 
                                             className="text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
                                         >
                                             <X size={12}/>
@@ -382,7 +398,7 @@ export default function AdminConfig() {
                                         type="number" 
                                         min="0"
                                         value={currentPrice}
-                                        onChange={(e) => updateCategoryPrice(cat, parseFloat(e.target.value) || 0)}
+                                        onChange={(e) => updateCategoryPrice(catLabel, parseFloat(e.target.value) || 0)}
                                         className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-6 pr-2 py-1.5 text-sm text-amber-400 font-bold outline-none focus:border-indigo-500 text-right"
                                     />
                                 </div>

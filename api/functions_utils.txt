@@ -55,7 +55,6 @@ function fix_url($url) {
     return $url;
 }
 
-// ... resto de funciones (get_youtube_video, etc) se mantienen igual ...
 function get_youtube_video($query, $config) {
     putenv("LC_ALL=C.UTF-8"); 
     $bin = $config['ytDlpPath'] ?: 'yt-dlp';
@@ -99,10 +98,22 @@ function smartParseFilename($fullPath, $existingCategory = null, $customCategori
     if (strlen($cleanName) < 2) $cleanName = $filename;
     $detectedCategory = 'GENERAL';
     $ancestors = array_reverse($pathParts);
+
+    // Asegurar que customCategories sea un arreglo
+    $safeCustomCats = is_array($customCategories) ? $customCategories : [];
+
     foreach ($ancestors as $folder) {
         $folderUpper = strtoupper(trim($folder));
-        if (in_array($folderUpper, $customCategories)) { $detectedCategory = $folderUpper; break; }
-        foreach ($customCategories as $cc) { if (strpos($folderUpper, $cc) !== false) { $detectedCategory = $cc; break 2; } }
+        
+        // CORRECCIÓN: Validar que $cc sea un string antes de usar strpos
+        foreach ($safeCustomCats as $cc) { 
+            if (is_string($cc) && !empty($cc)) {
+                if (strpos($folderUpper, $cc) !== false) { 
+                    $detectedCategory = $cc; 
+                    break 2; 
+                }
+            }
+        }
     }
     return ['title' => ucwords(strtolower($cleanName)), 'category' => $detectedCategory];
 }

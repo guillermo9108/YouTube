@@ -7,10 +7,19 @@ function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($settings) {
+        // CORRECCIÓN: Asegurar que se decodifique como arreglo asociativo pero manejando JSON malformado
         $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}', true);
+        if (!is_array($settings['categoryPrices'])) $settings['categoryPrices'] = (object)[];
+        
         $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]', true);
+        if (!is_array($settings['customCategories'])) $settings['customCategories'] = [];
+        
         $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true);
+        if (!is_array($settings['vipPlans'])) $settings['vipPlans'] = [];
+        
         $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? '{}', true);
+        if (!is_array($settings['ftpSettings'])) $settings['ftpSettings'] = (object)[];
+        
         respond(true, $settings);
     }
     respond(false, null, "No se pudo cargar la configuración");
@@ -32,6 +41,10 @@ function admin_update_settings($pdo, $input) {
     foreach ($input as $key => $val) {
         if (in_array($key, $allowed)) {
             $fields[] = "$key = ?";
+            // CORRECCIÓN: Validar integridad de customCategories antes de codificar
+            if ($key === 'customCategories' && is_array($val)) {
+                $val = array_values(array_filter($val, function($c) { return is_string($c) && !empty($c); }));
+            }
             $params[] = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
         }
     }
