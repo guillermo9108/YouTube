@@ -124,6 +124,8 @@ export interface SystemSettings {
     rootPath: string;
   };
   is_transcoder_active?: boolean;
+  // Added missing maxResolution property used in AdminConfig.tsx
+  maxResolution?: number;
 }
 
 export interface Transaction {

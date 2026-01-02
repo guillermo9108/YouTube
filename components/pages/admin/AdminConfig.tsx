@@ -6,7 +6,8 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
     CreditCard, Globe, Palette, ChevronRight, 
-    FolderTree, DollarSign, Settings2, Info, RefreshCw, Database
+    FolderTree, DollarSign, Settings2, Info, RefreshCw, Database,
+    Clock, Percent, HardDrive, ShieldCheck, Zap
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -17,7 +18,6 @@ export default function AdminConfig() {
     const [saving, setSaving] = useState(false);
     const [syncing, setSyncing] = useState(false);
     
-    // UI Helpers
     const [activeSection, setActiveSection] = useState<string | null>('CATEGORIES');
 
     const loadSettings = async () => {
@@ -141,7 +141,7 @@ export default function AdminConfig() {
                                             <input 
                                                 type="number" 
                                                 value={cat.price} 
-                                                step="0.5"
+                                                step="0.1"
                                                 onChange={e => updateCategory(cat.id, 'price', parseFloat(e.target.value))}
                                                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 outline-none"
                                             />
@@ -166,7 +166,67 @@ export default function AdminConfig() {
                 )}
             </div>
 
-            {/* 2. INTELIGENCIA IA */}
+            {/* 2. ECONOMÍA & COMISIONES */}
+            <div className="space-y-3">
+                <SectionHeader id="FINANCE" label="Economía del Sistema" icon={Percent} />
+                {activeSection === 'FINANCE' && (
+                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Comisión Video (%)</label>
+                                <input type="number" value={settings?.videoCommission || 20} onChange={e => updateValue('videoCommission', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Comisión Tienda (%)</label>
+                                <input type="number" value={settings?.marketCommission || 25} onChange={e => updateValue('marketCommission', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Tarifa Transferencia P2P (%)</label>
+                            <input type="number" step="0.1" value={settings?.transferFee || 5.0} onChange={e => updateValue('transferFee', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* 3. LÍMITES & AUTOMATIZACIÓN */}
+            <div className="space-y-3">
+                <SectionHeader id="AUTOMATION" label="Límites & Escaneo" icon={HardDrive} />
+                {activeSection === 'AUTOMATION' && (
+                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta Librería NAS/Local</label>
+                            <input type="text" value={settings?.localLibraryPath || ''} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs font-mono" placeholder="/volume1/videos/..."/>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Lote Escaneo (Paso 2)</label>
+                                <input type="number" value={settings?.batchSize || 2} onChange={e => updateValue('batchSize', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Resolución Máx</label>
+                                <select value={settings?.maxResolution || 1080} onChange={e => updateValue('maxResolution', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold">
+                                    <option value={720}>720p</option>
+                                    <option value={1080}>1080p</option>
+                                    <option value={2160}>4K</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Inicio Descargas</label>
+                                <input type="time" value={settings?.downloadStartTime || '01:00'} onChange={e => updateValue('downloadStartTime', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Fin Descargas</label>
+                                <input type="time" value={settings?.downloadEndTime || '06:00'} onChange={e => updateValue('downloadEndTime', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* 4. INTELIGENCIA IA */}
             <div className="space-y-3">
                 <SectionHeader id="AI" label="Inteligencia & Media" icon={Sparkles} />
                 {activeSection === 'AI' && (
@@ -183,7 +243,7 @@ export default function AdminConfig() {
                 )}
             </div>
 
-            {/* 3. PAGOS & PASARELA */}
+            {/* 5. PAGOS & PASARELA */}
             <div className="space-y-3">
                 <SectionHeader id="PAYMENTS" label="Pagos (Tropipay)" icon={CreditCard} />
                 {activeSection === 'PAYMENTS' && (
