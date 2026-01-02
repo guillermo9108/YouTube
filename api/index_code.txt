@@ -1,3 +1,4 @@
+
 <?php
 /**
  * StreamPay - Core Controller V11.5
@@ -85,6 +86,9 @@ $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
 try {
     switch ($action) {
+        // --- SISTEMA ---
+        case 'check_installation': respond(true, ['status' => 'ready']); break;
+
         // --- AUTH & USUARIOS ---
         case 'login': auth_login($pdo, $input); break;
         case 'register': auth_register($pdo, $input); break;

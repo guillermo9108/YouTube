@@ -1,5 +1,5 @@
 
-import React, { Suspense, useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect, Component, ErrorInfo } from 'react';
 // Page Imports
 import Login from './components/pages/Login';
 import Home from './components/pages/Home';
@@ -20,7 +20,6 @@ import VipStore from './components/pages/VipStore';
 
 // Components & Context
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
-// Fix: Import missing Layout component
 import Layout from './components/Layout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UploadProvider } from './context/UploadContext';
@@ -29,7 +28,61 @@ import { ServerTaskProvider } from './context/ServerTaskContext';
 import { ToastProvider } from './context/ToastContext';
 import { GridProvider } from './context/GridContext';
 import { db } from './services/db';
-import { Loader2, WifiOff } from 'lucide-react';
+import { Loader2, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
+
+// --- Error Boundary ---
+/**
+ * Interfaces to define the shape of props and state for GlobalErrorBoundary
+ * to fix TypeScript property access errors.
+ */
+interface GlobalErrorBoundaryProps {
+  // Fix: Make children optional to avoid 'missing property children' error when used as a wrapper in JSX
+  children?: React.ReactNode;
+}
+
+interface GlobalErrorBoundaryState {
+  hasError: boolean;
+  error: any;
+}
+
+// Fix: Explicitly extend the 'Component' base class with defined interfaces to resolve 'Property state/props does not exist' errors
+class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErrorBoundaryState> {
+  constructor(props: GlobalErrorBoundaryProps) { 
+    super(props); 
+    // Fix: Initialize state correctly within constructor
+    this.state = { hasError: false, error: null }; 
+  }
+  
+  static getDerivedStateFromError(error: any): GlobalErrorBoundaryState { 
+    return { hasError: true, error }; 
+  }
+  
+  componentDidCatch(error: any, errorInfo: ErrorInfo) { 
+    console.error("PWA Crash:", error, errorInfo); 
+  }
+  
+  render() {
+    // Fix: Check this.state.hasError which is now properly recognized by the compiler
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
+            <AlertTriangle className="text-red-500" size={40} />
+          </div>
+          <h1 className="text-2xl font-black text-white uppercase mb-2">Error Crítico de Renderizado</h1>
+          <p className="text-slate-400 text-sm max-w-md mb-8 font-mono bg-black/40 p-4 rounded-xl border border-white/5">
+            {this.state.error?.message || "Error desconocido en el módulo React"}
+          </p>
+          <button onClick={() => window.location.reload()} className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl flex items-center gap-2">
+            <RefreshCw size={18}/> Reiniciar Aplicación
+          </button>
+        </div>
+      );
+    }
+    // Fix: Return children from props which is now properly recognized by the compiler
+    return this.props.children;
+  }
+}
 
 const OfflineBanner = () => {
     const [online, setOnline] = useState(navigator.onLine);
@@ -43,9 +96,7 @@ const OfflineBanner = () => {
             window.removeEventListener('offline', handleOffline);
         };
     }, []);
-
     if (online) return null;
-
     return (
         <div className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-red-600/90 text-white text-center py-2 z-[100] text-xs font-bold flex items-center justify-center gap-2 backdrop-blur-sm">
             <WifiOff size={14} /> Estás desconectado. Mostrando contenido caché.
@@ -54,14 +105,9 @@ const OfflineBanner = () => {
 };
 
 // --- Guards ---
-
 const ProtectedRoute = ({ children }: { children?: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
-  
-  if (isLoading) {
-      return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-indigo-500" size={32} /></div>;
-  }
-
+  if (isLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-indigo-500" size={32} /></div>;
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
@@ -74,82 +120,77 @@ const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
 };
 
 const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
-  const [checkDone, setCheckDone] = useState(false);
-  const [needsSetup, setNeedsSetup] = useState(false);
+  const [status, setStatus] = useState<'LOADING' | 'READY' | 'SETUP' | 'ERROR'>('LOADING');
 
   useEffect(() => {
-    // Verificación robusta del estado de instalación
     db.checkInstallation()
-      .then((res) => {
-         // Con el db.ts arreglado, res es solo { status: 'installed'|'not_installed' }
-         if (res && res.status === 'not_installed') {
-             setNeedsSetup(true);
-         }
-         setCheckDone(true);
+      .then(() => {
+         setStatus('READY');
       })
       .catch((err) => {
-         // Si hay un error de conexión, no forzamos setup a menos que sea explícito
-         console.warn("Verificación de instalación ignorada por error de red", err);
-         setCheckDone(true);
+         if (err.message === 'SYSTEM_NOT_INSTALLED') {
+            setStatus('SETUP');
+         } else {
+            console.error("API Connection Error:", err);
+            setStatus('ERROR');
+         }
       });
   }, []);
 
-  if (!checkDone) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500">Conectando...</div>;
-
-  if (needsSetup) {
-    return <Navigate to="/setup" replace />;
-  }
+  if (status === 'LOADING') return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> Conectando con NAS...</div>;
+  if (status === 'ERROR') return (
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+        <AlertTriangle className="text-amber-500 mb-4" size={48} />
+        <h2 className="text-white font-bold text-xl">Error de Conexión</h2>
+        <p className="text-slate-400 text-sm mt-2">No se pudo contactar con el backend PHP.<br/>Verifica que MariaDB y Apache estén activos.</p>
+        <button onClick={() => window.location.reload()} className="mt-6 text-indigo-400 font-bold uppercase text-xs tracking-widest underline">Reintentar</button>
+    </div>
+  );
+  if (status === 'SETUP') return <Navigate to="/setup" replace />;
   return <>{children}</>;
 };
 
-// --- App ---
-
 export default function App() {
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <UploadProvider>
-            <ServerTaskProvider>
-                <CartProvider>
-                    <GridProvider>
-                        <HashRouter>
-                        <OfflineBanner />
-                        <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>}>
-                            <Routes>
-                            <Route path="/setup" element={<Setup />} />
-                            
-                            <Route path="/login" element={
-                                <SetupGuard>
-                                <Login />
-                                </SetupGuard>
-                            } />
-                            
-                            <Route element={<Layout />}>
-                                <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
-                                <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
-                            </Route>
-
-                            <Route path="*" element={<Navigate to="/" />} />
-                            </Routes>
-                        </Suspense>
-                        </HashRouter>
-                    </GridProvider>
-                </CartProvider>
-            </ServerTaskProvider>
-        </UploadProvider>
-      </AuthProvider>
-    </ToastProvider>
+    <GlobalErrorBoundary>
+      <ToastProvider>
+        <AuthProvider>
+          <UploadProvider>
+              <ServerTaskProvider>
+                  <CartProvider>
+                      <GridProvider>
+                          <HashRouter>
+                          <OfflineBanner />
+                          <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando módulos...</div>}>
+                              <Routes>
+                              <Route path="/setup" element={<Setup />} />
+                              <Route path="/login" element={<SetupGuard><Login /></SetupGuard>} />
+                              <Route element={<Layout />}>
+                                  <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
+                                  <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                              </Route>
+                              <Route path="*" element={<Navigate to="/" />} />
+                              </Routes>
+                          </Suspense>
+                          </HashRouter>
+                      </GridProvider>
+                  </CartProvider>
+              </ServerTaskProvider>
+          </UploadProvider>
+        </AuthProvider>
+      </ToastProvider>
+    </GlobalErrorBoundary>
   );
 }

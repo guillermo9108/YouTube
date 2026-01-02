@@ -19,19 +19,32 @@ class DBService {
     const token = localStorage.getItem('sp_session_token');
     const url = `${this.apiBase}?${query}${token ? `&token=${token}` : ''}`;
     
-    const res = await fetch(url, options);
-    
-    if (res.status === 401) {
-      window.dispatchEvent(new Event('sp_session_expired'));
-      throw new Error("Session expired");
+    try {
+      const res = await fetch(url, options);
+      
+      if (res.status === 401) {
+        window.dispatchEvent(new Event('sp_session_expired'));
+        throw new Error("Session expired");
+      }
+
+      const json = await res.json().catch(() => {
+        throw new Error("Respuesta del servidor inválida (No JSON)");
+      });
+
+      // El backend PHP de StreamPay siempre devuelve { success: boolean, data?: any, error?: string }
+      if (json.success === false) {
+        // Caso especial: El guard de App.tsx busca este mensaje para redirigir a /setup
+        if (json.error === 'Sistema no instalado') {
+          throw new Error('SYSTEM_NOT_INSTALLED');
+        }
+        throw new Error(json.error || "Error desconocido en el servidor");
+      }
+      
+      return json.data as T;
+    } catch (err: any) {
+      console.error(`Fetch error [${query}]:`, err);
+      throw err;
     }
-    
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: 'Network error' }));
-      throw new Error(err.message || "Request failed");
-    }
-    
-    return res.json();
   }
 
   // --- Auth & Session ---
@@ -121,7 +134,11 @@ class DBService {
       };
 
       xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        if (xhr.status >= 200 && xhr.status < 300) {
+            const resp = JSON.parse(xhr.responseText);
+            if (resp.success) resolve();
+            else reject(new Error(resp.error || "Upload failed"));
+        }
         else reject(new Error("Upload failed"));
       };
       

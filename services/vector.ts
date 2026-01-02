@@ -8,16 +8,20 @@ env.localModelPath = './models/';
 class VectorService {
     private extractor: any = null;
     private loading = false;
+    private failed = false;
 
     private async init() {
-        if (this.extractor || this.loading) return;
+        if (this.extractor || this.loading || this.failed) return;
         this.loading = true;
         try {
+            console.log("VectorService: Cargando motor de IA local...");
             this.extractor = await pipeline('feature-extraction', 'all-MiniLM-L6-v2', {
                 quantized: true,
             });
+            console.log("VectorService: Motor listo.");
         } catch (e) {
-            console.error("No se pudo cargar el modelo de IA local desde ./models/", e);
+            this.failed = true;
+            console.error("VectorService: Error crítico. El modelo en ./models/ es inaccesible o está corrupto.", e);
         } finally {
             this.loading = false;
         }
@@ -27,6 +31,7 @@ class VectorService {
      * Genera un embedding vectorial a partir de texto
      */
     public async generateEmbedding(text: string): Promise<number[] | null> {
+        if (this.failed) return null;
         await this.init();
         if (!this.extractor) return null;
 
@@ -34,6 +39,7 @@ class VectorService {
             const output = await this.extractor(text, { pooling: 'mean', normalize: true });
             return Array.from(output.data);
         } catch (e) {
+            console.warn("VectorService: No se pudo procesar el texto.");
             return null;
         }
     }
@@ -53,7 +59,8 @@ class VectorService {
         }
         mA = Math.sqrt(mA);
         mB = Math.sqrt(mB);
-        return dotProduct / (mA * mB) || 0;
+        const result = dotProduct / (mA * mB);
+        return isNaN(result) ? 0 : result;
     }
 
     /**
