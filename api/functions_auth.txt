@@ -1,3 +1,4 @@
+
 <?php
 
 /**
@@ -12,7 +13,7 @@ function getBearerToken() {
     elseif (isset($headers['authorization'])) $auth = $headers['authorization'];
     elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) $auth = $_SERVER['HTTP_AUTHORIZATION'];
     elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
-    elseif (isset($_GET['token'])) $auth = $_GET['token']; // Respaldo para servidores que filtran headers
+    elseif (isset($_GET['token'])) $auth = $_GET['token']; // Respaldo para aplicaciones externas (VLC/MX)
     
     if (empty($auth)) return null;
 
@@ -115,7 +116,7 @@ function auth_register($pdo, $input) {
 }
 
 function auth_get_user($pdo, $id) {
-    $id = trim($id, '"\' '); // Limpieza crítica de comillas
+    $id = trim($id, '"\' '); 
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
     $stmt->execute([$id]);
     $u = $stmt->fetch(PDO::FETCH_ASSOC);

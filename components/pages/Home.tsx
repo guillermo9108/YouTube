@@ -43,54 +43,41 @@ const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick
     }, [videos]);
 
     return (
-        <div className="flex flex-col gap-3 group">
-            <button 
-                onClick={onClick}
-                className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-sm hover:shadow-xl hover:shadow-indigo-500/10 hover:scale-[1.02] transition-all duration-300 ring-1 ring-white/5"
-            >
-                {randomThumb ? (
-                    <img 
-                        src={randomThumb} 
-                        className="w-full h-full object-cover opacity-60 group-hover:opacity-80 group-hover:scale-110 transition-all duration-700" 
-                        alt={name} 
-                    />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-700">
-                        <Folder size={48} />
-                    </div>
-                )}
-                
-                {/* Overlay oscuro para texto */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
-                
-                {/* Badge de Colección */}
-                <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-indigo-600 px-2 py-1 rounded-md shadow-lg border border-white/10">
-                    <Layers size={10} className="text-white"/>
-                    <span className="text-[9px] font-black text-white uppercase tracking-tighter">COLECCIÓN</span>
+        <button 
+            onClick={onClick}
+            className="group relative aspect-video rounded-xl overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-sm hover:shadow-xl hover:shadow-indigo-500/10 hover:scale-[1.02] transition-all duration-300 ring-1 ring-white/5"
+        >
+            {randomThumb ? (
+                <img 
+                    src={randomThumb} 
+                    className="w-full h-full object-cover opacity-50 group-hover:opacity-70 group-hover:scale-110 transition-all duration-700" 
+                    alt={name} 
+                />
+            ) : (
+                <div className="w-full h-full flex items-center justify-center text-slate-700">
+                    <Folder size={48} />
                 </div>
+            )}
+            
+            {/* Overlay oscuro profundo para contraste de texto */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent"></div>
+            
+            {/* Badge de Colección Minimal */}
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-indigo-600/90 backdrop-blur-md px-2 py-1 rounded-md shadow-lg border border-white/10">
+                <Layers size={10} className="text-white"/>
+                <span className="text-[8px] font-black text-white uppercase tracking-widest">COLECCIÓN</span>
+            </div>
 
-                {/* Info inferior */}
-                <div className="absolute inset-x-0 bottom-0 p-4">
-                    <h3 className="text-base font-black text-white uppercase tracking-tighter leading-tight drop-shadow-md group-hover:text-indigo-300 transition-colors truncate">
-                        {name}
-                    </h3>
-                    <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{videos.length} Elementos</span>
-                    </div>
-                </div>
-            </button>
-
-            {/* Simular fila de metadatos de VideoCard para consistencia */}
-            <div className="flex gap-3 px-1 md:px-0">
-                <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center shrink-0 border border-white/5">
-                    <Folder size={16} className="text-indigo-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold text-white uppercase tracking-tighter truncate">{name}</div>
-                    <div className="text-[11px] text-slate-500 font-bold uppercase tracking-widest">Carpeta de Contenido</div>
+            {/* Info Centralizada */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
+                <h3 className="text-lg md:text-xl font-black text-white uppercase tracking-tighter leading-none drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors">
+                    {name}
+                </h3>
+                <div className="mt-2 bg-black/40 backdrop-blur-md px-3 py-0.5 rounded-full border border-white/5">
+                    <span className="text-[10px] text-slate-300 font-black uppercase tracking-widest">{videos.length} Elementos</span>
                 </div>
             </div>
-        </div>
+        </button>
     );
 };
 
