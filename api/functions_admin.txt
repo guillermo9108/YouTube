@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V11.2
+ * ADMINISTRACIÓN - CORE FUNCTIONS V11.3
  */
 
 function admin_get_settings($pdo) {
@@ -9,6 +9,7 @@ function admin_get_settings($pdo) {
     if ($settings) {
         $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}', true);
         $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]', true);
+        $settings['categories'] = json_decode($settings['categories'] ?? '[]', true);
         $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true);
         $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? '{}', true);
         respond(true, $settings);
@@ -17,6 +18,7 @@ function admin_get_settings($pdo) {
 }
 
 function admin_update_settings($pdo, $input) {
+    // Lista blanca de campos que se permite actualizar en la tabla system_settings
     $allowed = [
         'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
         'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 
@@ -24,23 +26,40 @@ function admin_update_settings($pdo, $input) {
         'customCategories', 'localLibraryPath', 'videoCommission', 
         'marketCommission', 'transferFee', 'vipPlans', 'paymentInstructions',
         'currencyConversion', 'enableDebugLog', 'autoTranscode', 'transcodePreset',
-        'proxyUrl', 'ftpSettings'
+        'proxyUrl', 'ftpSettings', 'categories', 'tropipayClientId', 'tropipayClientSecret'
     ];
 
     $fields = [];
     $params = [];
+    
     foreach ($input as $key => $val) {
         if (in_array($key, $allowed)) {
-            $fields[] = "$key = ?";
-            $params[] = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
+            $fields[] = "`$key` = ?";
+            // Si el valor es un array u objeto (como 'categories' o 'vipPlans'), lo convertimos a JSON
+            if (is_array($val) || is_object($val)) {
+                $params[] = json_encode($val, JSON_UNESCAPED_UNICODE);
+            } else {
+                $params[] = $val;
+            }
         }
     }
 
-    if (empty($fields)) respond(true);
+    if (empty($fields)) {
+        write_log("Intento de actualización de configuración sin campos válidos.", 'WARNING');
+        respond(true, null, "No hay cambios válidos que guardar");
+    }
 
     $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
-    $pdo->prepare($sql)->execute($params);
-    respond(true);
+    
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        write_log("Configuración del sistema actualizada correctamente.", 'INFO');
+        respond(true);
+    } catch (Exception $e) {
+        write_log("Error al actualizar system_settings: " . $e->getMessage(), 'ERROR');
+        respond(false, null, "Error en base de datos: " . $e->getMessage());
+    }
 }
 
 function admin_add_balance($pdo, $input) {
