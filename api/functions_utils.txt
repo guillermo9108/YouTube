@@ -16,19 +16,33 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
 
     $detectedCat = 'GENERAL';
     $detectedParent = null;
+    $detectedCollection = null;
 
     // 2. Buscar coincidencia en la ruta con las categorías del administrador
+    // Recorremos las partes de la ruta para detectar Categoría, Padre y Colección
+    $partsCount = count($pathParts);
     foreach (array_reverse($pathParts) as $index => $segment) {
         if (empty($segment) || $segment === $filename) continue;
 
         foreach ($hierarchy as $cat) {
             if (strcasecmp($segment, $cat['name']) === 0) {
                 $detectedCat = $cat['name'];
+                
+                // Si la categoría tiene auto-subcategorías (Modo Carpeta)
                 if (!empty($cat['autoSub'])) {
+                    // El índice original en el array $pathParts
                     $originalIndex = array_search($segment, $pathParts);
+                    
+                    // Si hay una subcarpeta después de la categoría detectada
                     if ($originalIndex !== false && isset($pathParts[$originalIndex + 1]) && $pathParts[$originalIndex + 1] !== $filename) {
                         $detectedParent = $cat['name'];
                         $detectedCat = $pathParts[$originalIndex + 1];
+                        
+                        // Si hay OTRA subcarpeta adicional, la tratamos como Colección/Serie
+                        if (isset($pathParts[$originalIndex + 2]) && $pathParts[$originalIndex + 2] !== $filename) {
+                            $detectedCollection = $pathParts[$originalIndex + 1];
+                            $detectedCat = $pathParts[$originalIndex + 2];
+                        }
                     }
                 }
                 break 2;
@@ -39,7 +53,8 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
     return [
         'title' => ucwords(strtolower($cleanName)), 
         'category' => $detectedCat,
-        'parent_category' => $detectedParent
+        'parent_category' => $detectedParent,
+        'collection' => $detectedCollection
     ];
 }
 

@@ -68,7 +68,7 @@ function video_get_related($pdo, $videoId) {
     ";
     
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$videoId, $curr['collection'], $curr['category'], $curr['creatorId']]);
+    $stmt->execute([$videoId, $curr['collection'] ?? null, $curr['category'], $curr['creatorId']]);
     $related = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     video_process_rows($related);
@@ -119,7 +119,7 @@ function video_scan_local($pdo, $input) {
     $pdo->beginTransaction();
     try {
         foreach ($iterator as $file) {
-            if (!$file->isFile()) continue;
+            if (!$file.isFile()) continue;
             $ext = strtolower($file->getExtension());
             if (!in_array($ext, $allowedExts)) continue;
 
@@ -234,8 +234,8 @@ function internal_organize_video($pdo, $id, $settings, $hierarchy) {
     $smart = smartParseFilename($v['videoUrl'], null, $hierarchy);
     $newTitle = $smart['title'];
     $newCat = $smart['category']; 
-    $newParent = $smart['parent_category'];
-    $newCollection = $smart['collection'];
+    $newParent = $smart['parent_category'] ?? null;
+    $newCollection = $smart['collection'] ?? null;
 
     if (!$newCat || in_array($newCat, ['OTHER', 'PROCESSING', 'PENDING'])) $newCat = 'GENERAL';
     $newPrice = getPriceForCategory($newCat, $settings);
