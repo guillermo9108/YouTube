@@ -63,6 +63,7 @@ export interface Video {
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
   transcode_progress?: number;
+  size_fmt?: string; // Formatted size for admin panels (e.g. "1.2 GB")
 }
 
 /* Added Comment interface as required by Watch.tsx and Shorts.tsx */
