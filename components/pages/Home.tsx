@@ -8,7 +8,6 @@ import {
     RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder 
 } from 'lucide-react';
 import { useLocation } from '../Router';
-/* Added AIConcierge import to provide recommendation features */
 import AIConcierge from '../AIConcierge';
 
 const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: string | null) => void }) => (
@@ -36,9 +35,7 @@ interface SubCategoryCardProps {
     onClick: () => void;
 }
 
-/* Fix: Use React.FC to correctly handle special React props like 'key' in TypeScript environments */
 const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick }) => {
-    // Seleccionar una miniatura aleatoria de los videos que contiene esta subcategoría
     const randomThumb = useMemo(() => {
         if (videos.length === 0) return null;
         const randomIndex = Math.floor(Math.random() * videos.length);
@@ -46,29 +43,54 @@ const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick
     }, [videos]);
 
     return (
-        <button 
-            onClick={onClick}
-            className="group relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-lg transition-all active:scale-95"
-        >
-            {randomThumb ? (
-                <img src={randomThumb} className="w-full h-full object-cover opacity-40 group-hover:opacity-60 group-hover:scale-110 transition-all duration-700" alt={name} />
-            ) : (
-                <div className="w-full h-full flex items-center justify-center text-slate-700">
-                    <Folder size={40} />
-                </div>
-            )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
-            <div className="absolute inset-0 p-4 flex flex-col justify-end">
-                <div className="flex items-center gap-2 mb-1">
-                    <div className="w-6 h-6 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg group-hover:rotate-12 transition-transform">
-                        <Layers size={12} className="text-white"/>
+        <div className="flex flex-col gap-3 group">
+            <button 
+                onClick={onClick}
+                className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-sm hover:shadow-xl hover:shadow-indigo-500/10 hover:scale-[1.02] transition-all duration-300 ring-1 ring-white/5"
+            >
+                {randomThumb ? (
+                    <img 
+                        src={randomThumb} 
+                        className="w-full h-full object-cover opacity-60 group-hover:opacity-80 group-hover:scale-110 transition-all duration-700" 
+                        alt={name} 
+                    />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-700">
+                        <Folder size={48} />
                     </div>
-                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Colección</span>
+                )}
+                
+                {/* Overlay oscuro para texto */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                
+                {/* Badge de Colección */}
+                <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-indigo-600 px-2 py-1 rounded-md shadow-lg border border-white/10">
+                    <Layers size={10} className="text-white"/>
+                    <span className="text-[9px] font-black text-white uppercase tracking-tighter">COLECCIÓN</span>
                 </div>
-                <h3 className="text-sm font-black text-white uppercase tracking-tighter truncate group-hover:text-indigo-300 transition-colors">{name}</h3>
-                <p className="text-[9px] text-slate-400 font-bold uppercase">{videos.length} elementos</p>
+
+                {/* Info inferior */}
+                <div className="absolute inset-x-0 bottom-0 p-4">
+                    <h3 className="text-base font-black text-white uppercase tracking-tighter leading-tight drop-shadow-md group-hover:text-indigo-300 transition-colors truncate">
+                        {name}
+                    </h3>
+                    <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{videos.length} Elementos</span>
+                    </div>
+                </div>
+            </button>
+
+            {/* Simular fila de metadatos de VideoCard para consistencia */}
+            <div className="flex gap-3 px-1 md:px-0">
+                <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center shrink-0 border border-white/5">
+                    <Folder size={16} className="text-indigo-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                    <div className="text-sm font-bold text-white uppercase tracking-tighter truncate">{name}</div>
+                    <div className="text-[11px] text-slate-500 font-bold uppercase tracking-widest">Carpeta de Contenido</div>
+                </div>
             </div>
-        </button>
+        </div>
     );
 };
 
@@ -99,11 +121,8 @@ export default function Home() {
     loadData();
   }, [user?.id, location.pathname]);
 
-  // Construir breadcrumbs basado en la jerarquía del video o selección actual
   const breadcrumbPath = useMemo(() => {
       if (!activeCategory) return [];
-      
-      // Intentamos ver si es una subcategoría de una categoría raíz (usando metadatos de los videos cargados)
       const currentVideoSample = allVideos.find(v => v.category === activeCategory);
       if (currentVideoSample && currentVideoSample.parent_category) {
           return [currentVideoSample.parent_category, activeCategory];
@@ -111,10 +130,8 @@ export default function Home() {
       return [activeCategory];
   }, [activeCategory, allVideos]);
 
-  // Obtener subcategorías si estamos en la raíz o en una categoría padre
   const currentSubCategories = useMemo(() => {
       if (!activeCategory) {
-          // Raíz: Mostrar las categorías principales configuradas que no tienen padre (o todas si no hay jerarquía)
           return categories.map(c => ({ 
               name: c.name, 
               id: c.id, 
@@ -122,7 +139,6 @@ export default function Home() {
           })).filter(c => c.videos.length > 0);
       }
       
-      // Estamos dentro de una categoría: Ver si tiene subcarpetas dinámicas
       const rootCat = categories.find(c => c.name === activeCategory);
       if (rootCat && rootCat.autoSub) {
           const subs = Array.from(new Set(
@@ -146,14 +162,10 @@ export default function Home() {
                               v.creatorName.toLowerCase().includes(searchQuery.toLowerCase());
           
           if (!activeCategory) return matchSearch;
-
-          // Si seleccionamos una categoría, mostrarla a ella y a todas sus sub-categorías automáticas
           const matchCat = v.category === activeCategory || v.parent_category === activeCategory;
-
           return matchSearch && matchCat;
       });
 
-      // APLICAR MOTOR DE ORDENAMIENTO PERSONALIZADO
       const currentCatSettings = categories.find(c => c.name === activeCategory || c.name === list[0]?.parent_category);
       const sortMode = currentCatSettings?.sortOrder || 'LATEST';
 
@@ -162,8 +174,6 @@ export default function Home() {
               list.sort((a, b) => a.title.localeCompare(b.title));
               break;
           case 'RANDOM':
-              // Usar un seed basado en el día para que no cambie en cada clic, pero sea "aleatorio"
-              const daySeed = new Date().getUTCDate();
               list.sort(() => (Math.random() - 0.5)); 
               break;
           case 'LATEST':
@@ -193,21 +203,20 @@ export default function Home() {
           <Breadcrumbs path={breadcrumbPath} onNavigate={setActiveCategory} />
       </div>
 
-      {/* Grid de Subcategorías / Carpetas (Si existen) */}
-      {currentSubCategories.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-4 duration-500">
-              {currentSubCategories.map(sub => (
-                  <SubCategoryCard 
-                      key={sub.id} 
-                      name={sub.name} 
-                      videos={sub.videos} 
-                      onClick={() => setActiveCategory(sub.name)} 
-                  />
-              ))}
-          </div>
-      )}
+      {/* Grid unificado: Colecciones y Videos */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 animate-in fade-in duration-500">
+          
+          {/* Renderizar Subcategorías/Carpetas primero en el mismo grid */}
+          {currentSubCategories.map(sub => (
+              <SubCategoryCard 
+                  key={sub.id} 
+                  name={sub.name} 
+                  videos={sub.videos} 
+                  onClick={() => setActiveCategory(sub.name)} 
+              />
+          ))}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10">
+          {/* Renderizar Videos después */}
           {filteredList.slice(0, visibleCount).map((v: Video) => (
               <VideoCard 
                 key={v.id} 
@@ -236,7 +245,6 @@ export default function Home() {
           </div>
       )}
 
-      {/* AI Concierge integration to help users navigate the current catalog */}
       <AIConcierge videos={allVideos} />
     </div>
   );
