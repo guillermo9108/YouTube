@@ -205,7 +205,26 @@ function video_smart_organize($pdo) {
 }
 
 /**
- * Motor interno de organización (compartido por Pasos 2, 3 y 4)
+ * PASO 5: Re-organización Global
+ * Recorre TODOS los videos y vuelve a aplicar reglas de categorías y precios
+ */
+function video_reorganize_all($pdo) {
+    set_time_limit(600);
+    $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
+    $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
+    $hierarchy = json_decode($settings['categories'] ?? '[]', true);
+    
+    $stmt = $pdo->query("SELECT id FROM videos");
+    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $processed = 0;
+    foreach ($ids as $vid) { 
+        if (internal_organize_video($pdo, $vid, $settings, $hierarchy)) $processed++; 
+    }
+    respond(true, ['processed' => $processed, 'total' => count($ids)]);
+}
+
+/**
+ * Motor interno de organización (compartido por Pasos 2, 3, 4 y 5)
  */
 function internal_organize_video($pdo, $id, $settings, $hierarchy) {
     $stmt = $pdo->prepare("SELECT id, title, videoUrl, isLocal FROM videos WHERE id = ?");
@@ -221,11 +240,19 @@ function internal_organize_video($pdo, $id, $settings, $hierarchy) {
         $newParent = $smart['parent_category'] ?? null;
         $newCollection = $smart['collection'] ?? null;
     } else {
-        // Para videos subidos, mantener título original y solo limpiar estado PROCESSING
+        // Para videos subidos, mantener título original
         $newTitle = $v['title'];
         $newCat = 'GENERAL';
         $newParent = null;
         $newCollection = null;
+        
+        // Intentar detectar categoría si el título coincide exactamente con alguna configurada
+        foreach ($hierarchy as $cat) {
+            if (strcasecmp($newTitle, $cat['name']) === 0) {
+                $newCat = $cat['name'];
+                break;
+            }
+        }
     }
 
     // Regla de Oro: Solo dejar en GENERAL si no se detectó nada

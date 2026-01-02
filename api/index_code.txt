@@ -106,6 +106,7 @@ try {
         case 'delete_video': video_delete($pdo, $input); break;
         case 'scan_local_library': video_scan_local($pdo, $input); break;
         case 'smart_organize_library': video_smart_organize($pdo); break;
+        case 'reorganize_all_videos': video_reorganize_all($pdo); break;
         case 'fix_library_metadata': video_fix_metadata($pdo); break;
         case 'stream': streamVideo($_GET['id'] ?? '', $pdo); break;
 

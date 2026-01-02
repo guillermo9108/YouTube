@@ -527,6 +527,10 @@ class DBService {
         return this.request<any>(`action=smart_organize_library`, { method: 'POST' });
     }
 
+    public async reorganizeAllVideos(): Promise<any> {
+        return this.request<any>(`action=reorganize_all_videos`, { method: 'POST' });
+    }
+
     public async fixLibraryMetadata(): Promise<any> {
         return this.request<any>(`action=fix_library_metadata`, { method: 'POST' });
     }

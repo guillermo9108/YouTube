@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles } from 'lucide-react';
+import { FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers } from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -102,11 +102,12 @@ export default function AdminLibrary() {
     const [isIndexing, setIsIndexing] = useState(false);
     const [activeScan, setActiveScan] = useState(false);
     const [isOrganizing, setIsOrganizing] = useState(false);
+    const [isReorganizingAll, setIsReorganizingAll] = useState(false);
     const [isFixing, setIsFixing] = useState(false);
     const [scanLog, setScanLog] = useState<string[]>([]);
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
     const [currentScanIndex, setCurrentScanIndex] = useState(0);
-    const [stats, setStats] = useState({ pending: 0, processing: 0, public: 0, broken: 0, general: 0 });
+    const [stats, setStats] = useState({ pending: 0, processing: 0, public: 0, broken: 0, general: 0, total: 0 });
 
     const loadStats = async () => {
         try {
@@ -119,9 +120,10 @@ export default function AdminLibrary() {
             setStats({ 
                 pending: unprocessed.length, 
                 processing: procCount,
-                public: all.length,
+                public: all.filter(v => !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category)).length,
                 broken: brokenCount,
-                general: generalCount
+                general: generalCount,
+                total: all.length + unprocessed.length
             });
         } catch(e) {}
     };
@@ -222,13 +224,29 @@ export default function AdminLibrary() {
         finally { setIsFixing(false); }
     };
 
+    const handleStep5 = async () => {
+        if (!confirm("Esto analizará TODOS los videos de la base de datos y los moverá a sus categorías/precios correctos según la configuración actual de Admin. ¿Continuar?")) return;
+        
+        setIsReorganizingAll(true);
+        addToLog("Iniciando Re-sincronización Global...");
+        try {
+            const res = await db.reorganizeAllVideos();
+            addToLog(`Re-sincronización finalizada.`);
+            addToLog(`- Videos actualizados: ${res.processed} de ${res.total}`);
+            toast.success("Librería actualizada al 100%");
+            db.setHomeDirty();
+            loadStats();
+        } catch (e: any) { addToLog(`Error Global: ${e.message}`); }
+        finally { setIsReorganizingAll(false); }
+    };
+
     return (
         <div className="space-y-6 pb-20 max-w-4xl mx-auto">
             <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
                 <Database className="text-indigo-400"/> Gestión de Librería
             </h2>
             
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P1: Registro</div>
                     <div className="text-xl font-black text-amber-500 flex items-center justify-center gap-1"><Clock size={16}/> {stats.pending}</div>
@@ -244,6 +262,10 @@ export default function AdminLibrary() {
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P4: Mantenimiento</div>
                     <div className="text-xl font-black text-red-500 flex items-center justify-center gap-1"><ShieldAlert size={16}/> {stats.broken + stats.general}</div>
+                </div>
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                    <div className="text-slate-500 text-[10px] font-black uppercase mb-1">TOTAL DB</div>
+                    <div className="text-xl font-black text-indigo-400 flex items-center justify-center gap-1"><Layers size={16}/> {stats.total}</div>
                 </div>
             </div>
             
@@ -280,6 +302,14 @@ export default function AdminLibrary() {
                     <p className="text-xs text-slate-500 mb-4">Corrige videos rotos ({stats.broken}) y re-categoriza videos GENERAL ({stats.general}).</p>
                     <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.general === 0)} className="w-full bg-slate-800 border border-red-500/30 hover:bg-slate-700 disabled:bg-slate-900 disabled:opacity-50 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all flex items-center justify-center gap-2">
                         {isFixing ? <RefreshCw className="animate-spin" size={18}/> : <ShieldAlert className="text-red-500" size={18}/>} Ejecutar Mantenimiento
+                    </button>
+                </div>
+
+                <div className="border-l-4 border-indigo-600 pl-4 pt-2">
+                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">5. Re-sincronización Global</h3>
+                    <p className="text-xs text-slate-500 mb-4">Re-evalúa TODA la base de datos con las categorías y precios actuales.</p>
+                    <button onClick={handleStep5} disabled={isReorganizingAll || stats.total === 0} className="w-full bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-800 py-4 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-2xl transition-all flex items-center justify-center gap-2 border border-indigo-500/30">
+                        {isReorganizingAll ? <Loader2 className="animate-spin" size={18}/> : <Layers size={18}/>} Re-categorizar Todo el Catálogo
                     </button>
                 </div>
             </div>
