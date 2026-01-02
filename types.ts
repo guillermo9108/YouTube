@@ -3,46 +3,6 @@
  * Global Type Definitions for StreamPay
  */
 
-export enum UserRole {
-  ADMIN = 'ADMIN',
-  USER = 'USER'
-}
-
-/* Added VideoCategory enum as required by Upload.tsx and others */
-export enum VideoCategory {
-  GENERAL = 'GENERAL',
-  MOVIES = 'MOVIES',
-  SERIES = 'SERIES',
-  SPORTS = 'SPORTS',
-  MUSIC = 'MUSIC',
-  OTHER = 'OTHER'
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  price: number;
-  autoSub: boolean; // Activar subcategorías automáticas por carpeta
-  parent?: string | null;
-  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM'; // Nuevo: Ordenamiento personalizado
-}
-
-export interface User {
-  id: string;
-  username: string;
-  role: UserRole | string;
-  balance: number;
-  sessionToken?: string;
-  avatarUrl?: string;
-  lastActive?: number;
-  lastDeviceId?: string;
-  watchLater: string[];
-  autoPurchaseLimit: number;
-  defaultPrices?: Record<string, number>;
-  shippingDetails?: any;
-  vipExpiry?: number;
-}
-
 export interface Video {
   id: string;
   title: string;
@@ -64,10 +24,55 @@ export interface Video {
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
   transcode_progress?: number;
-  size_fmt?: string; // Formatted size for admin panels (e.g. "1.2 GB")
+  size_fmt?: string;
+  vector?: number[]; // Vector de 384 dimensiones (all-MiniLM-L6-v2)
 }
 
-/* Added Comment interface as required by Watch.tsx and Shorts.tsx */
+export interface Category {
+  id: string;
+  name: string;
+  price: number;
+  autoSub: boolean;
+  parent?: string | null;
+  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM' | 'AI_VECTOR'; // Nuevo: Sugerencias por IA
+}
+
+export interface User {
+  id: string;
+  username: string;
+  role: string;
+  balance: number;
+  sessionToken?: string;
+  avatarUrl?: string;
+  lastActive?: number;
+  watchLater: string[];
+  autoPurchaseLimit: number;
+  interestVector?: number[]; // Perfil semántico del usuario
+  vipExpiry?: number;
+  // Fix: Add missing properties used in Profile and Admin
+  lastDeviceId?: string;
+  defaultPrices?: Record<string, number>;
+  shippingDetails?: {
+    fullName: string;
+    address: string;
+    city: string;
+    zipCode: string;
+    country: string;
+    phoneNumber: string;
+  };
+}
+
+// Fix: Add missing VideoCategory enum
+export enum VideoCategory {
+  GENERAL = 'GENERAL',
+  MOVIES = 'MOVIES',
+  SERIES = 'SERIES',
+  SPORTS = 'SPORTS',
+  MUSIC = 'MUSIC',
+  OTHER = 'OTHER'
+}
+
+// Fix: Add missing Comment interface
 export interface Comment {
   id: string;
   videoId: string;
@@ -78,83 +83,46 @@ export interface Comment {
   timestamp: number;
 }
 
-/* Added UserInteraction interface as required by Watch.tsx and Shorts.tsx */
+// Fix: Add missing UserInteraction interface
 export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
+  watched: boolean;
   newLikeCount?: number;
 }
 
-export interface VipPlan {
-  id: string;
-  name: string;
-  price: number;
-  durationDays: number;
-  highlight?: boolean;
-}
-
-export interface SystemSettings {
-  downloadStartTime: string; 
-  downloadEndTime: string;   
-  isQueuePaused: boolean;
-  batchSize: number;         
-  maxDuration: number;       
-  geminiKey: string;
-  ytDlpPath: string;
-  ffmpegPath: string;
-  categories: Category[]; // Cambio crítico: Ahora es una lista de objetos
-  localLibraryPath: string; 
-  videoCommission: number;
-  marketCommission: number;
-  transferFee?: number;
-  vipPlans?: VipPlan[];
-  paymentInstructions?: string;
-  currencyConversion?: number;
-  enableDebugLog?: boolean;
-  autoTranscode?: boolean | number;
-  tropipayClientId?: string;
-  tropipayClientSecret?: string;
-  /* Added missing properties used in Admin panels and Upload */
-  customCategories?: string[];
-  categoryPrices?: Record<string, number>;
-  ftpSettings?: {
-    host: string;
-    port: number;
-    user: string;
-    pass: string;
-    rootPath: string;
-  };
-  is_transcoder_active?: boolean;
-  // Added missing maxResolution property used in AdminConfig.tsx
-  maxResolution?: number;
-}
-
+// Fix: Add missing Transaction interface
 export interface Transaction {
   id: string;
-  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP' | 'TRANSFER_SENT' | 'TRANSFER_RECV';
-  amount: number | string;
-  buyerId?: string;
-  videoTitle?: string;
+  userId: string;
+  type: string;
+  amount: number;
   timestamp: number;
+  recipientId?: string;
   recipientName?: string;
+  senderId?: string;
   senderName?: string;
-  creatorId?: string; // Used in Profile logic
+  creatorId?: string;
+  videoTitle?: string;
+  itemTitle?: string;
+  adminFee?: number;
+  buyerName?: string;
+  sellerName?: string;
 }
 
+// Fix: Add missing Notification interface
 export interface Notification {
-    id: string;
-    userId: string;
-    text: string;
-    type: 'SALE' | 'UPLOAD' | 'SYSTEM';
-    link: string;
-    isRead: boolean;
-    timestamp: number;
-    metadata?: any;
-    /* Added avatarUrl property as required by Layout.tsx */
-    avatarUrl?: string;
+  id: string;
+  userId: string;
+  text: string;
+  type: 'SYSTEM' | 'SALE' | 'UPLOAD' | 'ALERT';
+  link: string;
+  isRead: boolean;
+  timestamp: number;
+  avatarUrl?: string;
 }
 
-/* Added VideoResult interface as required by Requests.tsx */
+// Fix: Add missing VideoResult interface
 export interface VideoResult {
   id: string;
   title: string;
@@ -165,79 +133,117 @@ export interface VideoResult {
   duration?: number;
 }
 
-/* Added ContentRequest interface as required by Requests.tsx and AdminRequests.tsx */
+// Fix: Add missing ContentRequest interface
 export interface ContentRequest {
   id: string;
   userId: string;
   username?: string;
   query: string;
-  status: 'PENDING' | 'COMPLETED' | 'FAILED' | string;
+  status: string;
   createdAt: number;
-  isVip: boolean;
 }
 
+// Fix: Add missing Marketplace types
 export interface MarketplaceItem {
-    id: string;
-    title: string;
-    description: string;
-    price: number;
-    originalPrice?: number;
-    stock?: number;
-    category?: string;
-    condition?: string;
-    sellerId: string;
-    sellerName: string;
-    images?: string[];
-    status?: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO';
-    /* Added missing properties used in Marketplace and Edit pages */
-    createdAt: number;
-    discountPercent?: number;
-    rating?: number;
-    reviewCount?: number;
-    sellerAvatarUrl?: string;
+  id: string;
+  title: string;
+  description: string;
+  price: number;
+  originalPrice?: number;
+  discountPercent?: number;
+  category: string;
+  condition: string;
+  status: string;
+  stock: number;
+  sellerId: string;
+  sellerName: string;
+  sellerAvatarUrl?: string;
+  images: string[];
+  rating?: number;
+  reviewCount?: number;
+  createdAt: number;
 }
 
 export interface CartItem extends MarketplaceItem {
-    quantity: number;
+  quantity: number;
 }
 
 export interface MarketplaceReview {
-    id: string;
-    itemId: string;
-    userId: string;
-    username: string;
-    userAvatarUrl?: string;
-    rating: number;
-    comment: string;
-    timestamp: number;
+  id: string;
+  itemId: string;
+  userId: string;
+  username: string;
+  userAvatarUrl?: string;
+  rating: number;
+  comment: string;
+  timestamp: number;
 }
 
+// Fix: Add missing Finance request types
 export interface BalanceRequest {
-    id: string;
-    userId: string;
-    username: string;
-    amount: number;
-    createdAt: number;
+  id: string;
+  userId: string;
+  username: string;
+  amount: number;
+  createdAt: number;
+  status: string;
 }
 
 export interface VipRequest {
-    id: string;
-    userId: string;
-    username: string;
-    planSnapshot: any;
-    paymentRef?: string;
-    createdAt: number;
+  id: string;
+  userId: string;
+  username: string;
+  planId: string;
+  planSnapshot: any;
+  paymentRef: string;
+  status: string;
+  createdAt: number;
 }
 
-/* Added SmartCleanerResult interface as required by AdminMaintenance.tsx */
+// Fix: Add missing VipPlan and SystemSettings types
+export interface VipPlan {
+  id: string;
+  name: string;
+  price: number;
+  durationDays: number;
+  highlight?: boolean;
+}
+
+export interface SystemSettings {
+  categories: Category[];
+  customCategories?: string[];
+  categoryPrices?: Record<string, number>;
+  videoCommission?: number;
+  marketCommission?: number;
+  transferFee?: number;
+  localLibraryPath?: string;
+  batchSize?: number;
+  maxResolution?: number;
+  downloadStartTime?: string;
+  downloadEndTime?: string;
+  geminiKey?: string;
+  ffmpegPath?: string;
+  tropipayClientId?: string;
+  tropipayClientSecret?: string;
+  currencyConversion?: number;
+  vipPlans?: VipPlan[];
+  is_transcoder_active?: boolean;
+}
+
+// Fix: Add missing Admin utility types
 export interface SmartCleanerResult {
-  preview: any[];
   stats: {
     spaceReclaimed: string;
   };
+  preview: Array<{
+    id: string;
+    title: string;
+    views: number;
+    size_fmt: string;
+    reason: string;
+  }>;
 }
 
-/* Added FtpFile interface as required by AdminFtp.tsx */
 export interface FtpFile {
   name: string;
   path: string;
