@@ -1,443 +1,213 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
-import { SystemSettings, VideoCategory, VipPlan } from '../../../types';
+import { SystemSettings, Category } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { Settings, Save, Percent, ChevronDown, ChevronUp, DownloadCloud, Tag, DollarSign, Loader2, Crown, Trash2, Plus, CreditCard, X, Sparkles, Globe, Cpu, FileText } from 'lucide-react';
+import { 
+    Save, Tag, Loader2, Trash2, Plus, Sparkles, 
+    CreditCard, Globe, Palette, ChevronRight, 
+    FolderTree, DollarSign, Settings2, Info
+} from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
-
-const ConfigSection = ({ title, icon: Icon, children, isOpen, onToggle }: any) => (
-    <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden transition-all duration-300">
-        <button 
-            onClick={onToggle}
-            className="w-full px-6 py-4 flex justify-between items-center bg-slate-900 hover:bg-slate-800/50 transition-colors"
-        >
-            <div className="flex items-center gap-3 font-bold text-white">
-                <Icon size={20} className="text-indigo-400" /> {title}
-            </div>
-            {isOpen ? <ChevronUp size={18} className="text-slate-500"/> : <ChevronDown size={18} className="text-slate-500"/>}
-        </button>
-        {isOpen && <div className="px-6 pb-6 pt-2 border-t border-slate-800/50 space-y-4 animate-in slide-in-from-top-2 fade-in">{children}</div>}
-    </div>
-);
 
 export default function AdminConfig() {
     const toast = useToast();
     const [settings, setSettings] = useState<SystemSettings | null>(null);
-    const [openSection, setOpenSection] = useState<string>('SYSTEM');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [newCatName, setNewCatName] = useState('');
+    
+    // UI Helpers
+    const [activeSection, setActiveSection] = useState<string | null>('CATEGORIES');
 
     const loadSettings = async () => {
         setLoading(true);
         try {
             const s: any = await db.getSystemSettings();
-            
-            // Sanitización de datos entrantes para evitar crasheos de React
-            if (Array.isArray(s.categoryPrices) || !s.categoryPrices) {
-                s.categoryPrices = {};
-            }
-            if (!Array.isArray(s.customCategories)) {
-                s.customCategories = [];
-            }
-            if (!Array.isArray(s.vipPlans)) {
-                s.vipPlans = [];
-            }
-            
+            if (!s.categories) s.categories = [];
             setSettings(s);
-        } catch(e) {
-            toast.error("Error al cargar configuración");
-        } finally {
-            setLoading(false);
-        }
+        } catch(e) { toast.error("Error al cargar configuración"); }
+        finally { setLoading(false); }
     };
 
-    useEffect(() => {
-        loadSettings();
-    }, []);
+    useEffect(() => { loadSettings(); }, []);
 
     const handleSaveConfig = async () => {
         if (!settings) return;
         setSaving(true);
         try {
-            // Aseguramos la integridad de los arreglos antes de enviar al servidor
-            const cleanSettings = {
-                ...settings,
-                videoCommission: Number(settings.videoCommission),
-                marketCommission: Number(settings.marketCommission),
-                batchSize: Number(settings.batchSize),
-                maxDuration: Number(settings.maxDuration),
-                maxResolution: Number(settings.maxResolution),
-                currencyConversion: Number(settings.currencyConversion),
-                // Limpiar categorías de posibles objetos malformados
-                customCategories: Array.isArray(settings.customCategories) 
-                    ? settings.customCategories.filter(c => typeof c === 'string' && c.trim() !== '')
-                    : []
-            };
-            
-            await db.updateSystemSettings(cleanSettings);
-            toast.success("Configuración guardada exitosamente");
+            await db.updateSystemSettings(settings);
+            toast.success("Sistema Sincronizado");
             await loadSettings();
-        } catch(e: any) {
-            toast.error("Error al guardar: " + e.message);
-        } finally {
-            setSaving(false);
-        }
+        } catch(e: any) { toast.error("Error al guardar: " + e.message); }
+        finally { setSaving(false); }
     };
 
-    const updateCategoryPrice = (cat: string, price: number) => {
-        setSettings((prev: SystemSettings | null) => {
-            if (!prev) return null;
-            const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
-            return {
-                ...prev,
-                categoryPrices: {
-                    ...currentPrices, 
-                    [cat]: price
-                }
-            };
-        });
+    const updateValue = (key: keyof SystemSettings, val: any) => {
+        setSettings(prev => prev ? { ...prev, [key]: val } : null);
     };
 
-    const handleAddCategory = () => {
-        if (!newCatName.trim()) return;
-        
-        const catKey = newCatName.trim().toUpperCase().replace(/\s+/g, '_');
-        const standardCats = Object.values(VideoCategory) as string[];
-        
-        setSettings((prev: SystemSettings | null) => {
-            if (!prev) return null;
-            
-            const currentCustom = Array.isArray(prev.customCategories) ? prev.customCategories : [];
-            if (standardCats.includes(catKey) || currentCustom.includes(catKey)) {
-                toast.error("Esta categoría ya existe");
-                return prev;
-            }
-
-            const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
-
-            toast.success("Categoría añadida (Recuerda Guardar)");
-            return {
-                ...prev,
-                customCategories: [...currentCustom, catKey],
-                categoryPrices: {
-                    ...currentPrices,
-                    [catKey]: 0 
-                }
-            };
-        });
-        setNewCatName('');
+    // --- Category Management ---
+    const addCategory = () => {
+        const newCat: Category = { id: 'c_' + Date.now(), name: 'NUEVA CATEGORÍA', price: 1.00, autoSub: false };
+        updateValue('categories', [...(settings?.categories || []), newCat]);
     };
 
-    const handleRemoveCategory = (catToRemove: string) => {
-        setSettings((prev: SystemSettings | null) => {
-            if (!prev) return null;
-            const updatedCustom = (Array.isArray(prev.customCategories) ? prev.customCategories : []).filter((c: string) => c !== catToRemove);
-            const currentPrices = Array.isArray(prev.categoryPrices) ? {} : (prev.categoryPrices || {});
-            const updatedPrices = { ...currentPrices };
-            delete updatedPrices[catToRemove];
-
-            return {
-                ...prev,
-                customCategories: updatedCustom,
-                categoryPrices: updatedPrices
-            };
-        });
+    const updateCategory = (id: string, field: keyof Category, val: any) => {
+        const next = settings?.categories.map(c => c.id === id ? { ...c, [field]: val } : c) || [];
+        updateValue('categories', next);
     };
 
-    const addVipPlan = () => {
-        setSettings((prev: SystemSettings | null) => {
-            if (!prev) return null;
-            const newPlan: VipPlan = {
-                id: 'v_' + Date.now(),
-                name: 'Nuevo Plan',
-                price: 100,
-                type: 'ACCESS',
-                durationDays: 30,
-                description: ''
-            };
-            const currentVips = Array.isArray(prev.vipPlans) ? prev.vipPlans : [];
-            return {...prev, vipPlans: [...currentVips, newPlan]};
-        });
+    const removeCategory = (id: string) => {
+        updateValue('categories', settings?.categories.filter(c => c.id !== id) || []);
     };
 
-    const removeVipPlan = (id: string) => {
-        setSettings((prev: SystemSettings | null) => {
-            if (!prev) return null;
-            return {...prev, vipPlans: (Array.isArray(prev.vipPlans) ? prev.vipPlans : []).filter((p: VipPlan) => p.id !== id)};
-        });
-    };
+    if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>;
 
-    const updateVipPlan = (id: string, field: keyof VipPlan, value: any) => {
-        setSettings((prev: SystemSettings | null) => {
-            if (!prev) return null;
-            return {
-                ...prev,
-                vipPlans: (Array.isArray(prev.vipPlans) ? prev.vipPlans : []).map((p: VipPlan) => p.id === id ? {...p, [field]: value} : p)
-            };
-        });
-    };
-
-    if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500"/></div>;
-    if (!settings) return <div className="p-10 text-center text-red-400">Error cargando configuración.</div>;
-
-    const allCategories = [
-        ...Object.values(VideoCategory),
-        ...(Array.isArray(settings.customCategories) ? settings.customCategories : [])
-    ];
+    const SectionHeader = ({ id, label, icon: Icon }: any) => (
+        <button 
+            onClick={() => setActiveSection(activeSection === id ? null : id)}
+            className={`w-full flex items-center justify-between p-5 bg-slate-900 border border-slate-800 rounded-2xl transition-all ${activeSection === id ? 'ring-2 ring-indigo-500 ring-offset-4 ring-offset-black' : ''}`}
+        >
+            <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${activeSection === id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                    <Icon size={20} />
+                </div>
+                <span className="font-black text-white uppercase text-xs tracking-widest">{label}</span>
+            </div>
+            <ChevronRight size={20} className={`text-slate-600 transition-transform ${activeSection === id ? 'rotate-90' : ''}`} />
+        </button>
+    );
 
     return (
-        <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in pb-20">
-            <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-white">Configuración del Sistema</h2>
-                <button onClick={handleSaveConfig} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold py-2 px-6 rounded-lg flex items-center gap-2 shadow-lg shadow-indigo-900/20 active:scale-95 transition-all">
-                    {saving ? <Loader2 size={18} className="animate-spin"/> : <Save size={18}/>}
-                    {saving ? 'Guardando...' : 'Guardar Todo'}
+        <div className="max-w-2xl mx-auto space-y-4 animate-in fade-in pb-32 px-2">
+            
+            <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-2xl flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="text-center md:text-left">
+                    <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic">Ajustes Globales</h2>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Configuración del Servidor & Ecosistema</p>
+                </div>
+                <button onClick={handleSaveConfig} disabled={saving} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-4 px-8 rounded-2xl flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition-all">
+                    {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar Cambios
                 </button>
             </div>
 
-            <ConfigSection 
-                title="Sistema & Horarios" 
-                icon={Settings} 
-                isOpen={openSection === 'SYSTEM'} 
-                onToggle={() => setOpenSection(openSection === 'SYSTEM' ? '' : 'SYSTEM')}
-            >
-                <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800 mb-4">
-                    <div>
-                        <h4 className="font-bold text-white text-sm flex items-center gap-2"><FileText size={16} className="text-indigo-400"/> Registro de Logs</h4>
-                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Habilita el guardado de errores y eventos en debug_log.txt</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" checked={settings.enableDebugLog ?? true} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, enableDebugLog: e.target.checked} : null)} className="sr-only peer"/>
-                        <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                    </label>
-                </div>
-
-                <div className="grid grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Inicio Descarga</label>
-                        <input type="time" value={settings.downloadStartTime} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, downloadStartTime: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Hora Fin Descarga</label>
-                        <input type="time" value={settings.downloadEndTime} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, downloadEndTime: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                    </div>
-                </div>
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Ruta yt-dlp <InfoTooltip text="Ruta absoluta al binario en servidor" example="/usr/local/bin/yt-dlp" /></label>
-                        <input type="text" value={settings.ytDlpPath || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, ytDlpPath: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs outline-none focus:border-indigo-500" placeholder="yt-dlp"/>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Ruta FFmpeg <InfoTooltip text="Indispensable para conversiones en NAS" example="/usr/bin/ffmpeg" /></label>
-                        <input type="text" value={settings.ffmpegPath || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, ffmpegPath: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white font-mono text-xs outline-none focus:border-indigo-500" placeholder="ffmpeg"/>
-                    </div>
-                </div>
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Conversión Automática (FFmpeg)" 
-                icon={Cpu} 
-                isOpen={openSection === 'TRANSCODE'} 
-                onToggle={() => setOpenSection(openSection === 'TRANSCODE' ? '' : 'TRANSCODE')}
-            >
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-slate-950 rounded-xl border border-slate-800">
-                        <div>
-                            <h4 className="font-bold text-white text-sm">Procesamiento Automático</h4>
-                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Convierte automáticamente videos incompatibles</p>
+            {/* 1. GESTOR DE CATEGORÍAS */}
+            <div className="space-y-3">
+                <SectionHeader id="CATEGORIES" label="Categorías & Precios" icon={Tag} />
+                {activeSection === 'CATEGORIES' && (
+                    <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
+                        <div className="flex justify-between items-center px-2">
+                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Info size={12}/> Gestiona tu catálogo</span>
+                            <button onClick={addCategory} className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-xl flex items-center gap-1 text-[10px] font-black uppercase shadow-lg active:scale-90 transition-all">
+                                <Plus size={16}/> Nueva
+                            </button>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" checked={settings.autoTranscode || false} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, autoTranscode: e.target.checked} : null)} className="sr-only peer"/>
-                            <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                        </label>
-                    </div>
 
-                    {settings.autoTranscode && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top-2">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1"><Cpu size={12}/> Preset FFmpeg</label>
-                                <select value={settings.transcodePreset || 'superfast'} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, transcodePreset: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
-                                    <option value="ultrafast">Ultrafast (CPU bajo)</option>
-                                    <option value="superfast">Superfast (Equilibrado)</option>
-                                    <option value="veryfast">Veryfast</option>
-                                    <option value="fast">Fast</option>
-                                    <option value="medium">Medium (Lento)</option>
-                                </select>
-                            </div>
-                            <div className="bg-indigo-900/10 border border-indigo-500/20 rounded-lg p-3 text-[10px] text-indigo-300 leading-relaxed">
-                                <Sparkles size={14} className="mb-1"/>
-                                <strong>FastStart:</strong> El motor moverá los metadatos al inicio para habilitar reproducción instantánea en la PWA.
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Integraciones API & IA" 
-                icon={DownloadCloud} 
-                isOpen={openSection === 'API'} 
-                onToggle={() => setOpenSection(openSection === 'API' ? '' : 'API')}
-            >
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2 text-indigo-400"><Sparkles size={12}/> Gemini API Key</label>
-                    <input type="password" value={settings.geminiKey || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, geminiKey: e.target.value} : null)} className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 placeholder-slate-700" placeholder="AIza..."/>
-                </div>
-
-                <div className="bg-slate-950 border border-indigo-900/30 p-4 rounded-lg my-2">
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2"><Globe size={12}/> HTTP Proxy</label>
-                    <input type="text" value={settings.proxyUrl || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, proxyUrl: e.target.value} : null)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500 font-mono text-xs" placeholder="http://user:pass@host:port"/>
-                </div>
-
-                <div className="h-px bg-slate-800 my-2"></div>
-
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">Pexels API Key</label>
-                    <input type="password" value={settings.pexelsKey || ''} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, pexelsKey: e.target.value} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none focus:border-indigo-500"/>
-                </div>
-                
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">YouTube (yt-dlp)</label>
-                    <div className="flex items-center gap-2 p-3 bg-slate-950 rounded-lg border border-slate-700">
-                        <input 
-                            type="checkbox" 
-                            checked={settings.enableYoutube || false} 
-                            onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, enableYoutube: e.target.checked} : null)} 
-                            className="accent-indigo-500 w-4 h-4 cursor-pointer"
-                        />
-                        <span className="text-sm text-slate-300">Habilitar descargas de YouTube</span>
-                    </div>
-                </div>
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Planes VIP & Recargas" 
-                icon={Crown} 
-                isOpen={openSection === 'VIP'} 
-                onToggle={() => setOpenSection(openSection === 'VIP' ? '' : 'VIP')}
-            >
-                <div className="space-y-4">
-                    {Array.isArray(settings.vipPlans) && settings.vipPlans.map((plan: any) => (
-                        <div key={plan.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 relative">
-                            <button onClick={() => removeVipPlan(plan.id)} className="absolute top-2 right-2 text-slate-600 hover:text-red-500 p-1"><Trash2 size={16}/></button>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                                <div>
-                                    <label className="text-[10px] uppercase font-bold text-slate-500">Nombre</label>
-                                    <input type="text" value={plan.name} onChange={e => updateVipPlan(plan.id, 'name', e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-white"/>
-                                </div>
-                                <div>
-                                    <label className="text-[10px] uppercase font-bold text-slate-500">Precio (CUP)</label>
-                                    <input type="number" value={plan.price} onChange={e => updateVipPlan(plan.id, 'price', parseInt(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-emerald-400 font-bold"/>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-4 mb-3">
-                                <div>
-                                    <label className="text-[10px] uppercase font-bold text-slate-500">Tipo</label>
-                                    <select value={plan.type} onChange={e => updateVipPlan(plan.id, 'type', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-sm text-white">
-                                        <option value="ACCESS">Acceso Total</option>
-                                        <option value="BALANCE">Recarga Saldo</option>
-                                    </select>
-                                </div>
-                                {plan.type === 'ACCESS' ? (
-                                    <div className="col-span-2">
-                                        <label className="text-[10px] uppercase font-bold text-slate-500">Días de Duración</label>
-                                        <input type="number" value={plan.durationDays} onChange={e => updateVipPlan(plan.id, 'durationDays', parseInt(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-sm text-white"/>
-                                    </div>
-                                ) : (
-                                    <div className="col-span-2">
-                                        <label className="text-[10px] uppercase font-bold text-slate-500">Bono %</label>
-                                        <input type="number" value={plan.bonusPercent} onChange={e => updateVipPlan(plan.id, 'bonusPercent', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-sm text-white"/>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                    
-                    <button onClick={addVipPlan} className="w-full py-2 border border-dashed border-slate-700 text-slate-400 rounded-xl hover:bg-slate-800 hover:text-white flex items-center justify-center gap-2 text-sm font-bold">
-                        <Plus size={16}/> Agregar Plan
-                    </button>
-                </div>
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Precios Automáticos por Categoría" 
-                icon={Tag} 
-                isOpen={openSection === 'PRICES'} 
-                onToggle={() => setOpenSection(openSection === 'PRICES' ? '' : 'PRICES')}
-            >
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    {allCategories.map((cat, idx) => {
-                        // Sanitización por si cat no es string
-                        const catLabel = typeof cat === 'string' ? cat : String(cat);
-                        const isCustom = !Object.values(VideoCategory).includes(catLabel as any);
-                        const currentPrices = Array.isArray(settings.categoryPrices) ? {} : (settings.categoryPrices || {});
-                        const currentPrice = currentPrices[catLabel] ?? 0;
-                        
-                        return (
-                            <div key={`${catLabel}-${idx}`} className="flex justify-between items-center bg-slate-950 p-3 rounded-lg border border-slate-800 group">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs font-bold text-slate-300 uppercase">
-                                        {catLabel.replace('_', ' ')}
-                                    </span>
-                                    {isCustom && (
-                                        <button 
-                                            onClick={() => handleRemoveCategory(catLabel)} 
-                                            className="text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                                        >
-                                            <X size={12}/>
+                        <div className="space-y-3">
+                            {settings?.categories.map((cat) => (
+                                <div key={cat.id} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-4 group">
+                                    <div className="flex justify-between gap-2">
+                                        <input 
+                                            type="text" 
+                                            value={cat.name} 
+                                            onChange={e => updateCategory(cat.id, 'name', e.target.value.toUpperCase())}
+                                            className="bg-transparent border-b border-slate-800 focus:border-indigo-500 text-white font-black text-sm outline-none flex-1 py-1"
+                                        />
+                                        <button onClick={() => removeCategory(cat.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors">
+                                            <Trash2 size={16}/>
                                         </button>
-                                    )}
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><DollarSign size={10}/> Precio Base</label>
+                                            <input 
+                                                type="number" 
+                                                value={cat.price} 
+                                                step="0.5"
+                                                onChange={e => updateCategory(cat.id, 'price', parseFloat(e.target.value))}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 outline-none"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><FolderTree size={10}/> Modo Carpeta</label>
+                                            <label className="flex items-center gap-2 cursor-pointer bg-slate-900 p-2 rounded-xl border border-slate-800">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={cat.autoSub} 
+                                                    onChange={e => updateCategory(cat.id, 'autoSub', e.target.checked)}
+                                                    className="accent-indigo-500 w-4 h-4"
+                                                />
+                                                <span className="text-[9px] font-black text-slate-400 uppercase">Sub-Auto</span>
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="relative w-24">
-                                    <DollarSign size={12} className="absolute left-2 top-2.5 text-slate-500"/>
-                                    <input 
-                                        type="number" 
-                                        min="0"
-                                        value={currentPrice}
-                                        onChange={(e) => updateCategoryPrice(catLabel, parseFloat(e.target.value) || 0)}
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-6 pr-2 py-1.5 text-sm text-amber-400 font-bold outline-none focus:border-indigo-500 text-right"
-                                    />
+                            ))}
+                            {settings?.categories.length === 0 && (
+                                <div className="p-10 text-center border-2 border-dashed border-slate-800 rounded-3xl opacity-40">
+                                    <Tag className="mx-auto mb-2" size={32}/>
+                                    <p className="text-[10px] font-black uppercase tracking-widest">Sin categorías definidas</p>
                                 </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* 2. INTELIGENCIA IA */}
+            <div className="space-y-3">
+                <SectionHeader id="AI" label="Inteligencia & Media" icon={Sparkles} />
+                {activeSection === 'AI' && (
+                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Google Gemini API Key</label>
+                            <input type="password" value={settings?.geminiKey || ''} onChange={e => updateValue('geminiKey', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono" placeholder="AIza..."/>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta FFmpeg</label>
+                            <input type="text" value={settings?.ffmpegPath || ''} onChange={e => updateValue('ffmpegPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* 3. PAGOS & PASARELA */}
+            <div className="space-y-3">
+                <SectionHeader id="PAYMENTS" label="Pagos (Tropipay)" icon={CreditCard} />
+                {activeSection === 'PAYMENTS' && (
+                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
+                        <div className="grid grid-cols-1 gap-4">
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Tropipay Client ID</label>
+                                <input type="text" value={settings?.tropipayClientId || ''} onChange={e => updateValue('tropipayClientId', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
                             </div>
-                        );
-                    })}
-                </div>
-
-                <div className="flex gap-2 items-center bg-slate-950 p-3 rounded-lg border border-slate-800/50 border-dashed">
-                    <input 
-                        type="text" 
-                        value={newCatName}
-                        onChange={(e) => setNewCatName(e.target.value)}
-                        placeholder="Nueva Categoría (Ej: RETRO)"
-                        className="flex-1 bg-transparent text-sm text-white outline-none uppercase font-bold"
-                    />
-                    <button onClick={handleAddCategory} disabled={!newCatName.trim()} className="bg-slate-800 hover:bg-slate-700 text-white p-2 rounded-lg">
-                        <Plus size={16}/>
-                    </button>
-                </div>
-            </ConfigSection>
-
-            <ConfigSection 
-                title="Economía & Comisiones" 
-                icon={Percent} 
-                isOpen={openSection === 'ECONOMY'} 
-                onToggle={() => setOpenSection(openSection === 'ECONOMY' ? '' : 'ECONOMY')}
-            >
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Videos (%)</label>
-                        <input type="number" value={settings.videoCommission ?? 20} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, videoCommission: parseInt(e.target.value) || 0} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none"/>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Tropipay Secret</label>
+                                <input type="password" value={settings?.tropipayClientSecret || ''} onChange={e => updateValue('tropipayClientSecret', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Conversión Saldo / 1 EUR</label>
+                                <input type="number" value={settings?.currencyConversion || 300} onChange={e => updateValue('currencyConversion', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-black text-lg"/>
+                            </div>
+                        </div>
                     </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Comisión Tienda (%)</label>
-                        <input type="number" value={settings.marketCommission ?? 25} onChange={e => setSettings((p: SystemSettings | null) => p ? {...p, marketCommission: parseInt(e.target.value) || 0} : null)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white outline-none"/>
+                )}
+            </div>
+
+            {/* 4. MARCA & TEXTOS */}
+            <div className="space-y-3">
+                <SectionHeader id="BRAND" label="Personalización" icon={Palette} />
+                {activeSection === 'BRAND' && (
+                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Instrucciones Recarga</label>
+                            <textarea value={settings?.paymentInstructions || ''} onChange={e => updateValue('paymentInstructions', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs min-h-[120px]" placeholder="Ej: Envía a la tarjeta 9225 XXXX..."/>
+                        </div>
                     </div>
-                </div>
-            </ConfigSection>
+                )}
+            </div>
+
         </div>
     );
 }

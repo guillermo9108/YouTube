@@ -1,4 +1,26 @@
 <?php
+
+/**
+ * Obtiene el token de autorización de forma robusta
+ */
+function getBearerToken() {
+    $headers = getallheaders();
+    $auth = '';
+
+    if (isset($headers['Authorization'])) $auth = $headers['Authorization'];
+    elseif (isset($headers['authorization'])) $auth = $headers['authorization'];
+    elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) $auth = $_SERVER['HTTP_AUTHORIZATION'];
+    elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    
+    if (empty($auth)) return null;
+
+    if (preg_match('/Bearer\s(\S+)/', $auth, $matches)) {
+        return $matches[1];
+    }
+    
+    return trim(str_replace('Bearer', '', $auth));
+}
+
 function auth_login($pdo, $input) {
     $user = $input['username'] ?? '';
     $pass = $input['password'] ?? '';
@@ -34,16 +56,15 @@ function auth_logout($pdo, $input) {
 
 function auth_heartbeat($pdo, $input) {
     $uid = $input['userId'] ?? null;
-    $headers = getallheaders();
-    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
-    $token = trim(str_replace('Bearer', '', $authHeader));
+    $token = getBearerToken();
 
     if (!$uid || !$token) {
+        write_log("Heartbeat Denegado: UID($uid) o Token faltante. Request Headers: " . json_encode(getallheaders()), 'WARNING');
         http_response_code(401);
         respond(false, null, 'Sesión no proporcionada');
     }
 
-    $stmt = $pdo->prepare("SELECT currentSessionId FROM users WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT currentSessionId, username FROM users WHERE id = ?");
     $stmt->execute([$uid]);
     $session = $stmt->fetch(PDO::FETCH_ASSOC);
     
@@ -52,6 +73,7 @@ function auth_heartbeat($pdo, $input) {
         respond(true);
     }
 
+    write_log("Heartbeat Error: Conflicto de Sesión para @{$session['username']}. Recibido: $token, Esperado: {$session['currentSessionId']}", 'WARNING');
     http_response_code(401);
     respond(false, null, 'Sesión expirada o abierta en otro dispositivo');
 }
@@ -124,7 +146,6 @@ function auth_search_users($pdo, $input) {
 }
 
 function auth_update_user($pdo, $input) {
-    // Si viene de FormData (POST normal), usamos $_POST, si no, $input (JSON)
     $data = !empty($_POST) ? $_POST : $input;
     $uid = $data['userId'] ?? null;
     if (!$uid) respond(false, null, "ID usuario requerido");
@@ -132,28 +153,24 @@ function auth_update_user($pdo, $input) {
     $fields = [];
     $params = [];
     
-    // 1. Manejo de Avatar (Archivo)
     if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
         $ext = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION));
         $name = "av_{$uid}_" . time() . ".{$ext}";
         if (!is_dir('uploads/avatars/')) mkdir('uploads/avatars/', 0777, true);
         
-        // Borrar anterior si existe
         $old = $pdo->query("SELECT avatarUrl FROM users WHERE id = '$uid'")->fetchColumn();
-        if ($old && strpos($old, 'uploads/') !== false) @unlink($old);
+        if ($old && strpos($old, 'uploads/') !== false && file_exists($old)) @unlink($old);
 
         move_uploaded_file($_FILES['avatar']['tmp_name'], 'uploads/avatars/' . $name);
         $fields[] = "avatarUrl = ?";
         $params[] = 'uploads/avatars/' . $name;
     }
 
-    // 2. Manejo de Password
     if (!empty($data['newPassword'])) {
         $fields[] = "password_hash = ?";
         $params[] = password_hash($data['newPassword'], PASSWORD_DEFAULT);
     }
 
-    // 3. Otros campos permitidos
     $allowed = ['autoPurchaseLimit', 'defaultPrices', 'shippingDetails', 'watchLater'];
     foreach ($data as $key => $val) {
         if (in_array($key, $allowed)) {
@@ -174,10 +191,8 @@ function auth_update_user($pdo, $input) {
     try {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        if (function_exists('write_log')) write_log("Usuario $uid actualizó perfil/seguridad");
         respond(true);
     } catch (Exception $e) {
-        if (function_exists('write_log')) write_log("Error actualizando usuario $uid: " . $e->getMessage(), 'ERROR');
         respond(false, null, $e->getMessage());
     }
 }

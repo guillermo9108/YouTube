@@ -4,7 +4,10 @@ import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
-import { Loader2, CheckCircle2, Heart, ThumbsDown, MessageCircle, Share2, Lock, Play, ArrowLeft, Send, ExternalLink, MonitorPlay, Crown, AlertCircle, ShoppingCart, Download, WifiOff, SkipForward } from 'lucide-react';
+import { 
+    Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
+    Download, SkipForward, ChevronRight, Home, Play
+} from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
@@ -16,515 +19,137 @@ export default function Watch() {
     
     const [video, setVideo] = useState<Video | null>(null);
     const [loading, setLoading] = useState(true);
-    const [checkingAccess, setCheckingAccess] = useState(true); 
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
-    const [comments, setComments] = useState<Comment[]>([]);
-    
-    // Historial para evitar bucles
-    const [watchedHistory, setWatchedHistory] = useState<string[]>([]);
-    
-    // Refs para control de concurrencia
+    const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     const isPurchasingRef = useRef(false);
-    
-    // Offline / Download State
-    const [isDownloaded, setIsDownloaded] = useState(false);
-    const [isDownloading, setIsDownloading] = useState(false);
-    
-    // Related Videos State
-    const [rawRelatedVideos, setRawRelatedVideos] = useState<Video[]>([]);
-    const [loadingRelated, setLoadingRelated] = useState(false);
-    
-    // Comment Form
-    const [newComment, setNewComment] = useState('');
 
-    // Scroll to top on load
-    useEffect(() => {
-        window.scrollTo(0, 0);
-    }, [id]);
+    useEffect(() => { window.scrollTo(0, 0); }, [id]);
 
-    // Load Video Metadata (Only runs on ID change)
     useEffect(() => {
         if (!id) return;
         setLoading(true);
-        setCheckingAccess(true); // Reset access check
-        setVideo(null); // Reset to prevent stale state
-        setIsUnlocked(false); // Reset lock state
-        setRawRelatedVideos([]); // Reset related
-        setLoadingRelated(true); // Start loading related
-        setIsDownloaded(false);
-        isPurchasingRef.current = false; // Reset lock
-
         const fetchMeta = async () => {
             try {
-                // Modified: Now gets from local IDB if offline
                 const v = await db.getVideo(id);
                 if (v) {
                     setVideo(v);
-                    
-                    // Check download status
-                    db.checkDownloadStatus(v.id).then(setIsDownloaded);
-                    
-                    // Load related
-                    db.getRelatedVideos(v.id)
-                      .then((res: Video[]) => setRawRelatedVideos(res))
-                      .catch(err => console.error("Related error", err))
-                      .finally(() => setLoadingRelated(false));
-
-                    // Load comments (Likely network only, but safe to fail)
-                    db.getComments(v.id).then(setComments).catch(() => {});
-                } else {
-                    toast.error("Video no encontrado");
-                    setLoadingRelated(false);
+                    db.getRelatedVideos(v.id).then(setRelatedVideos);
+                    if (user) {
+                        const [access, interact] = await Promise.all([
+                            db.hasPurchased(user.id, v.id),
+                            db.getInteraction(user.id, v.id)
+                        ]);
+                        setIsUnlocked(access || user.role === 'ADMIN' || user.id === v.creatorId);
+                        setInteraction(interact);
+                    }
                 }
-            } catch (e: any) {
-                console.error(e);
-            } finally {
-                setLoading(false);
-            }
+            } catch (e) {} finally { setLoading(false); }
         };
         fetchMeta();
-    }, [id]);
-
-    // Check Permissions, User Interaction & History
-    useEffect(() => {
-        if (!id || !user || !video) return;
-
-        const checkAccess = async () => {
-            setCheckingAccess(true);
-            try {
-                // 0. Load User History (Watched IDs) to prevent loops
-                const activity = await db.getUserActivity(user.id);
-                setWatchedHistory(activity.watched || []);
-
-                // 1. Permissions (Admin or Creator)
-                if (user.role === 'ADMIN' || user.id === video.creatorId) {
-                    setIsUnlocked(true);
-                } else {
-                    // 2. Check DB (Purchase or VIP)
-                    // Note: db.hasPurchased handles VIP check on backend
-                    const status = await db.hasPurchased(user.id, video.id);
-                    if (status) setIsUnlocked(true);
-                }
-
-                // 3. Interactions
-                const interact = await db.getInteraction(user.id, video.id);
-                setInteraction(interact);
-            } catch (e) {
-                console.error("Access Check Error", e);
-            } finally {
-                setCheckingAccess(false); // Signal that check is complete
-            }
-        };
-
-        checkAccess();
-    }, [id, user?.id, video?.id]); 
-
-    // --- SORTING LOGIC: NEXT EPISODES & ALPHABETICAL ---
-    const sortedRelatedVideos = useMemo(() => {
-        if (!video || rawRelatedVideos.length === 0) return [];
-
-        // 1. Filter out already watched videos AND current video
-        let filtered = rawRelatedVideos.filter(v => 
-            v.id !== video.id && 
-            !watchedHistory.includes(v.id)
-        );
-
-        // 2. Natural Sort (Alphanumeric: "Ep 2" comes before "Ep 10")
-        filtered.sort((a, b) => 
-            a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' })
-        );
-
-        // 3. Re-order to put "Next Episodes" first
-        // We compare the current video title with the list to find the split point
-        // Everything alphabetically "after" current title goes to top.
-        // Everything "before" goes to bottom (wrapped around).
-        const currentTitle = video.title;
-        
-        const nextEpisodes: Video[] = [];
-        const prevEpisodes: Video[] = [];
-
-        filtered.forEach(v => {
-            // Using localeCompare to check order
-            // 1 means v.title comes AFTER currentTitle
-            if (v.title.localeCompare(currentTitle, undefined, { numeric: true, sensitivity: 'base' }) > 0) {
-                nextEpisodes.push(v);
-            } else {
-                prevEpisodes.push(v);
-            }
-        });
-
-        return [...nextEpisodes, ...prevEpisodes];
-
-    }, [rawRelatedVideos, watchedHistory, video]);
-
-
-    // AUTO-PURCHASE EFFECT
-    useEffect(() => {
-        // CRITICAL: Run only if metadata loaded AND access check finished AND still locked
-        if (user && video && !loading && !checkingAccess && !isUnlocked && !isPurchasingRef.current) {
-            const price = Number(video.price);
-            const limit = Number(user.autoPurchaseLimit || 0);
-            const balance = Number(user.balance);
-            
-            // Logic: Price > 0, Price <= Limit, User has balance
-            // AND IMPORTANT: Double check we aren't already unlocked to avoid race conditions
-            if (price > 0 && price <= limit && balance >= price) {
-                console.log("Auto-purchasing video:", video.title);
-                handlePurchase(true); // Skip confirmation
-            }
-        }
-    }, [user, video, isUnlocked, loading, checkingAccess]);
+    }, [id, user?.id]);
 
     const handlePurchase = async (skipConfirm = false) => {
         if (!user || !video || isPurchasingRef.current) return;
-        if (isUnlocked) return; // Safety check
-
-        if (user.balance < video.price) {
-            navigate('/vip');
-            return;
-        }
-
-        if(skipConfirm || confirm(`¿Desbloquear video por ${video.price} Saldo?`)) {
+        if (Number(user.balance) < video.price) { navigate('/vip'); return; }
+        if (skipConfirm || confirm(`¿Desbloquear contenido por ${video.price} $?`)) {
             isPurchasingRef.current = true;
             try {
                 await db.purchaseVideo(user.id, video.id);
-                // Optimistic Update
                 setIsUnlocked(true);
-                refreshUser(); // Update balance in background
-                if (!skipConfirm) toast.success("Video desbloqueado");
-                else toast.info(`Auto-compra: -${video.price} Saldo`);
-            } catch (e: any) {
-                toast.error("Error al comprar: " + e.message);
-                isPurchasingRef.current = false;
-            }
+                refreshUser();
+                toast.success("Contenido desbloqueado");
+            } catch (e: any) { toast.error(e.message); isPurchasingRef.current = false; }
         }
     };
 
-    const handleDownload = async () => {
-        if (!video) return;
-        if (!isUnlocked) { toast.error("Debes desbloquear el video primero."); return; }
-        
-        setIsDownloading(true);
-        try {
-            await db.downloadVideoForOffline(video);
-            toast.info("Descarga iniciada en segundo plano.");
-            // We assume success via Background API, checking status later
-            setTimeout(() => db.checkDownloadStatus(video.id).then(setIsDownloaded), 2000);
-        } catch (e: any) {
-            toast.error(e.message);
-        } finally {
-            setIsDownloading(false);
-        }
-    };
-
-    const handleRate = async (type: 'like' | 'dislike') => {
-        if (!user || !video) return;
-        try {
-            const res = await db.rateVideo(user.id, video.id, type);
-            setInteraction(res);
-        } catch (e) {}
-    };
-
-    const handlePostComment = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!user || !video || !newComment.trim()) return;
-        try {
-            const c = await db.addComment(user.id, video.id, newComment);
-            setComments(prev => [c, ...prev]);
-            setNewComment('');
-        } catch(e) { toast.error("Error posting comment"); }
-    };
-
-    const getVideoSrc = (v: Video | null) => {
-        if (!v) return '';
-        
-        // FIX: Force stream for local files
-        const isLocal = Boolean(v.isLocal) || (v as any).isLocal === 1 || (v as any).isLocal === "1";
-        
-        if (isLocal && !v.videoUrl.includes('action=stream')) {
-            return `api/index.php?action=stream&id=${v.id}`;
-        }
-        
-        return v.videoUrl;
-    };
-
-    // --- CONTINUOUS PLAYBACK LOGIC (SMART QUEUE) ---
     const handleVideoEnded = () => {
         if (!user || !video) return;
-
-        // 1. Mark current as watched in DB
-        if (!interaction?.isWatched) {
-            db.markWatched(user.id, video.id).catch(() => {});
-            setInteraction(prev => prev ? {...prev, isWatched: true} : null);
-        }
-
-        // 2. Add current video to local exclusion list immediately
-        const updatedHistory = [...watchedHistory, video.id];
-        setWatchedHistory(updatedHistory);
-
-        // 3. Find Next Video from the ALREADY SORTED list
-        // Since sortedRelatedVideos already filters out 'watchedHistory' (via useMemo dependencies),
-        // the first item in the array is typically the next logical episode.
-        if (sortedRelatedVideos.length > 0) {
-            const nextVideo = sortedRelatedVideos[0];
-            toast.info(`Siguiente: ${nextVideo.title} en 3s...`);
-            setTimeout(() => {
-                navigate(`/watch/${nextVideo.id}`);
-            }, 3000);
-        } else {
-            // Fallback if list is empty (e.g. all watched)
-            // Try fetching fresh related just in case
-            db.getRelatedVideos(video.id).then(res => {
-               const freshCandidates = res.filter(v => v.id !== video.id);
-               if (freshCandidates.length > 0) {
-                   toast.info(`Reproduciendo sugerencia en 5s...`);
-                   setTimeout(() => navigate(`/watch/${freshCandidates[0].id}`), 5000);
-               }
-            });
-        }
-    };
-
-    // --- EXTERNAL PLAYER HELPERS ---
-    const openExternal = (type: 'vlc' | 'intent') => {
-        if (!video) return;
-        const relativeSrc = getVideoSrc(video);
-        const absoluteUrl = new URL(relativeSrc, window.location.href).href;
+        db.markWatched(user.id, video.id).catch(() => {});
         
-        if (type === 'vlc') {
-            window.location.href = `vlc://${absoluteUrl}`;
-        } else {
-            const intent = `intent:${absoluteUrl}#Intent;action=android.intent.action.VIEW;type=video/*;end`;
-            window.location.href = intent;
+        // Si hay un siguiente video en la colección, saltar automáticamente
+        if (relatedVideos.length > 0) {
+            const next = relatedVideos[0];
+            toast.info(`Siguiente episodio: ${next.title} en 3s...`);
+            setTimeout(() => navigate(`/watch/${next.id}`), 3000);
         }
     };
 
-    const videoSrc = getVideoSrc(video);
+    const videoSrc = video ? (video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`) : '';
+
+    if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
     return (
-        <div className="flex flex-col animate-in fade-in min-h-screen bg-slate-950">
-            
-            {/* FULL WIDTH PLAYER */}
-            <div className="w-full bg-black z-40 shadow-2xl border-b border-slate-800 transition-all duration-300 portrait:sticky portrait:top-0 landscape:relative md:sticky md:top-[74px]">
-                <div className={`relative w-full mx-auto max-w-[2000px] ${isUnlocked ? 'aspect-video' : 'aspect-video md:aspect-[21/9] lg:aspect-video'}`}>
-                    {isUnlocked && video ? (
-                        <>
-                            <video 
-                                src={videoSrc} 
-                                poster={video.thumbnailUrl} 
-                                controls 
-                                autoPlay 
-                                playsInline
-                                className="w-full h-full object-contain bg-black"
-                                crossOrigin="anonymous"
-                                onEnded={handleVideoEnded}
-                            />
-                            <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-300 flex gap-2">
-                                {/* Download Button inside Player */}
-                                <button 
-                                    onClick={handleDownload} 
-                                    disabled={isDownloaded || isDownloading}
-                                    className={`p-2 rounded-full backdrop-blur-md border transition-colors ${
-                                        isDownloaded ? 'bg-emerald-600/80 text-white border-emerald-500' : 
-                                        'bg-black/60 text-white hover:bg-indigo-600 border-white/20'
-                                    }`}
-                                    title={isDownloaded ? "Disponible Offline" : "Descargar"}
-                                >
-                                    {isDownloading ? <Loader2 size={20} className="animate-spin"/> : (isDownloaded ? <WifiOff size={20}/> : <Download size={20}/>)}
-                                </button>
-                                
-                                <button onClick={() => openExternal('intent')} className="bg-black/60 text-white p-2 rounded-full backdrop-blur-md hover:bg-indigo-600 border border-white/20">
-                                    <ExternalLink size={20} />
-                                </button>
-                            </div>
-                        </>
+        <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in">
+            <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-white/5">
+                <div className="relative aspect-video max-w-[1600px] mx-auto">
+                    {isUnlocked ? (
+                        <video 
+                            src={videoSrc} controls autoPlay playsInline 
+                            className="w-full h-full object-contain" 
+                            onEnded={handleVideoEnded}
+                            crossOrigin="anonymous"
+                        />
                     ) : (
-                        // LOCKED STATE - ENTIRE CONTAINER IS BUTTON
-                        <div 
-                            onClick={() => !checkingAccess && handlePurchase(false)}
-                            className="absolute inset-0 flex flex-col items-center justify-center z-10 overflow-hidden cursor-pointer group select-none"
-                        >
-                            {/* Background Image */}
-                            <div className="absolute inset-0 z-0">
-                                {video && (
-                                    <img 
-                                        src={video.thumbnailUrl} 
-                                        className="w-full h-full object-cover blur-sm scale-105 group-hover:scale-110 transition-transform duration-700 opacity-60"
-                                        alt="Locked Content"
-                                    />
-                                )}
-                                <div className="absolute inset-0 bg-black/60 group-hover:bg-black/50 transition-colors duration-500"></div>
-                            </div>
-                            
-                            {/* Tap to Unlock UI */}
-                            {video && (
-                                <div className="relative z-20 text-center flex flex-col items-center animate-in zoom-in duration-300">
-                                    {checkingAccess ? (
-                                        <Loader2 className="text-indigo-400 animate-spin mb-4" size={48} />
-                                    ) : (
-                                        <>
-                                            <div className="bg-white/10 backdrop-blur-md p-4 rounded-full border border-white/20 mb-3 group-hover:scale-110 group-active:scale-95 transition-all shadow-xl shadow-indigo-500/20">
-                                                <Lock className="text-white" size={32} />
-                                            </div>
-                                            
-                                            <h2 className="text-xl md:text-3xl font-black text-white mb-1 uppercase tracking-wider drop-shadow-lg">
-                                                Contenido Premium
-                                            </h2>
-                                            
-                                            <div className="flex items-center gap-2 text-slate-300 text-xs md:text-sm font-medium bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm border border-white/10 mt-2">
-                                                <span>Desbloquear por</span>
-                                                <span className="text-amber-400 font-bold text-lg">{video.price} $</span>
-                                            </div>
-
-                                            {user && user.balance < video.price && (
-                                                <div className="mt-4 bg-red-600/90 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg animate-pulse">
-                                                    <AlertCircle size={14}/> Saldo insuficiente ({user.balance.toFixed(2)} $)
-                                                </div>
-                                            )}
-                                            
-                                            <p className="mt-4 text-[10px] text-white/50 uppercase tracking-widest font-bold">Toca para comprar</p>
-                                        </>
-                                    )}
+                        <div onClick={() => handlePurchase(false)} className="absolute inset-0 cursor-pointer group overflow-hidden">
+                            {video && <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-md opacity-40 scale-110 group-hover:scale-105 transition-transform duration-700"/>}
+                            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-center p-6">
+                                <div className="p-5 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full mb-4 group-hover:scale-110 transition-transform shadow-2xl">
+                                    <Lock size={40} className="text-white"/>
                                 </div>
-                            )}
+                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Contenido Premium</h2>
+                                <div className="px-6 py-2 bg-amber-500 text-black font-black rounded-full text-lg shadow-xl shadow-amber-900/20 active:scale-95 transition-all">
+                                    DESBLOQUEAR POR {video?.price} $
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>
             </div>
 
-            {/* Troubleshooting Bar for Codec Issues */}
-            {isUnlocked && (
-                <div className="bg-slate-900 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs md:text-sm">
-                    <span className="text-slate-400 flex items-center gap-2">
-                        <AlertCircle className="text-amber-500" size={14} /> 
-                        ¿Problemas?
-                    </span>
-                    <div className="flex gap-2">
-                        <button onClick={() => openExternal('intent')} className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg border border-slate-700 transition-colors">
-                            <MonitorPlay size={14} /> <span className="font-bold">App Externa</span>
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Main Content Area (Constrained Width) */}
-            <div className="w-full max-w-7xl mx-auto p-4 lg:px-8 flex flex-col lg:flex-row gap-6 mt-4">
-                
-                {/* Info & Comments */}
-                <div className="flex-1 min-w-0">
-                    {/* Info */}
-                    {video && (
-                        <div className="mb-6">
-                            <h1 className="text-xl md:text-2xl font-bold text-white mb-2 leading-tight">{video.title}</h1>
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-                                <div className="flex items-center gap-3">
-                                    <Link to={`/channel/${video.creatorId}`}>
-                                        <div className="w-10 h-10 rounded-full bg-slate-700 overflow-hidden border border-slate-600">
-                                            {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-400">{video.creatorName[0]}</div>}
-                                        </div>
-                                    </Link>
-                                    <div>
-                                        <Link to={`/channel/${video.creatorId}`} className="font-bold text-white hover:underline block">{video.creatorName}</Link>
-                                        <div className="text-xs text-slate-500">{new Date(video.createdAt * 1000).toLocaleDateString()}</div>
-                                    </div>
+            <div className="max-w-7xl mx-auto w-full p-4 lg:p-8 flex flex-col lg:flex-row gap-8">
+                <div className="flex-1 space-y-6">
+                    <div>
+                        <div className="flex items-center gap-2 text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-2">
+                           <Home size={12}/> <ChevronRight size={10}/> {video?.category} {video?.collection && <> <ChevronRight size={10}/> {video.collection}</>}
+                        </div>
+                        <h1 className="text-2xl md:text-3xl font-black text-white leading-tight uppercase italic">{video?.title}</h1>
+                        <div className="flex flex-wrap items-center justify-between gap-4 mt-6 border-y border-white/5 py-4">
+                            <div className="flex items-center gap-4">
+                                <Link to={`/channel/${video?.creatorId}`} className="w-12 h-12 rounded-full bg-slate-800 border border-white/10 overflow-hidden shadow-lg">
+                                    {video?.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-slate-500">{video?.creatorName[0]}</div>}
+                                </Link>
+                                <div>
+                                    <Link to={`/channel/${video?.creatorId}`} className="font-black text-white hover:text-indigo-400 transition-colors">@{video?.creatorName}</Link>
+                                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                                 </div>
-                                
-                                <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                                    <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.liked ? 'text-indigo-400 border-indigo-500/50' : 'text-slate-400'}`}>
-                                        <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"}/>
-                                        <span className="text-sm font-bold">{video.likes}</span>
-                                    </button>
-                                    <button onClick={() => handleRate('dislike')} className={`px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${interaction?.disliked ? 'text-red-400 border-red-500/50' : 'text-slate-400'}`}>
-                                        <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
-                                    </button>
-                                    
-                                    {/* Mobile Download Button in Toolbar */}
-                                    <button 
-                                        onClick={handleDownload}
-                                        disabled={isDownloaded || isDownloading} 
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors ${isDownloaded ? 'text-emerald-400 border-emerald-500/50' : 'text-slate-400'}`}
-                                    >
-                                        {isDownloading ? <Loader2 size={18} className="animate-spin"/> : <Download size={18}/>}
-                                        <span className="hidden md:inline text-sm font-bold">{isDownloaded ? 'Offline' : 'Descargar'}</span>
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div className="bg-slate-900/50 rounded-xl p-4 mt-4 text-sm text-slate-300 whitespace-pre-wrap">
-                                {video.description || "Sin descripción."}
                             </div>
                         </div>
-                    )}
-
-                    {/* Comments */}
-                    <div className="mb-8">
-                        <h3 className="font-bold text-white mb-4 flex items-center gap-2"><MessageCircle size={18}/> Comentarios ({comments.length})</h3>
-                        
-                        {user && (
-                            <form onSubmit={handlePostComment} className="flex gap-3 mb-6">
-                                <div className="w-8 h-8 rounded-full bg-slate-700 shrink-0 overflow-hidden border border-slate-600">
-                                    {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : null}
-                                </div>
-                                <div className="flex-1">
-                                    <input 
-                                        type="text" 
-                                        value={newComment} 
-                                        onChange={e => setNewComment(e.target.value)} 
-                                        className="w-full bg-transparent border-b border-slate-700 text-white pb-2 focus:border-indigo-500 outline-none transition-colors placeholder-slate-600"
-                                        placeholder="Añade un comentario..."
-                                    />
-                                    <div className="flex justify-end mt-2">
-                                        <button disabled={!newComment.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-full text-sm font-bold transition-colors">Comentar</button>
-                                    </div>
-                                </div>
-                            </form>
-                        )}
-
-                        <div className="space-y-4">
-                            {comments.map((c: Comment) => (
-                                <div key={c.id} className="flex gap-3 animate-in fade-in">
-                                    <Link to={`/channel/${c.userId}`} className="w-8 h-8 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-slate-700">
-                                        {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-xs text-slate-500">{c.username[0]}</div>}
-                                    </Link>
-                                    <div>
-                                        <div className="flex items-baseline gap-2">
-                                            <Link to={`/channel/${c.userId}`} className="text-xs font-bold text-white hover:underline">{c.username}</Link>
-                                            <span className="text-[10px] text-slate-600">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
-                                        </div>
-                                        <p className="text-sm text-slate-300 mt-0.5">{c.text}</p>
-                                    </div>
-                                </div>
-                            ))}
+                        <div className="mt-6 text-slate-300 text-sm leading-relaxed bg-slate-900/30 p-6 rounded-3xl border border-white/5">
+                            {video?.description || "Sin descripción."}
                         </div>
                     </div>
                 </div>
 
-                {/* Sidebar: Related - SORTED ALPHABETICALLY */}
-                <div className="w-full lg:w-80 shrink-0">
-                    <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                        <SkipForward size={18} className="text-indigo-400"/> A continuación
+                <div className="lg:w-80 space-y-4">
+                    <h3 className="font-black text-white text-xs uppercase tracking-[0.2em] flex items-center gap-2 mb-4">
+                        <SkipForward size={16} className="text-indigo-400"/> {video?.collection ? 'Próximos en esta Serie' : 'Sugeridos para ti'}
                     </h3>
-                    <div className="flex flex-col gap-3">
-                        {loadingRelated ? (
-                            <div className="text-center py-10 flex flex-col items-center">
-                                <Loader2 className="animate-spin text-indigo-500 mb-2" />
-                                <span className="text-slate-500 text-sm italic">Buscando sugerencias...</span>
-                            </div>
-                        ) : sortedRelatedVideos.length > 0 ? (
-                            sortedRelatedVideos.map((v: Video) => {
-                                // Videos in watched history shouldn't appear due to sortedRelatedVideos filter,
-                                // but we double check visually just in case logic changes
-                                return (
-                                    <div key={v.id}>
-                                        <VideoCard video={v} isUnlocked={false} isWatched={false} />
-                                    </div>
-                                );
-                            })
-                        ) : (
-                            <div className="text-slate-500 text-sm text-center py-10 italic border border-slate-800 rounded-xl bg-slate-900/50">
-                                No hay más videos en esta secuencia.
-                            </div>
-                        )}
+                    <div className="flex flex-col gap-4">
+                        {relatedVideos.map(v => (
+                            <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all border border-transparent hover:border-white/5">
+                                <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shadow-lg">
+                                    <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"/>
+                                    {v.collection && (
+                                        <div className="absolute top-1 left-1 bg-indigo-600/90 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg uppercase tracking-tighter">COLECCIÓN</div>
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0 py-1">
+                                    <h4 className="text-xs font-black text-white line-clamp-2 uppercase tracking-tighter leading-tight group-hover:text-indigo-400 transition-colors">{v.title}</h4>
+                                    <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
+                                </div>
+                            </Link>
+                        ))}
                     </div>
                 </div>
             </div>

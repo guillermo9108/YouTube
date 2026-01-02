@@ -8,17 +8,22 @@ export enum UserRole {
   USER = 'USER'
 }
 
-// Added VideoCategory enum for upload and library management
+/* Added VideoCategory enum as required by Upload.tsx and others */
 export enum VideoCategory {
-    GENERAL = 'GENERAL',
-    MOVIES = 'MOVIES',
-    SERIES = 'SERIES',
-    SPORTS = 'SPORTS',
-    MUSIC = 'MUSIC',
-    OTHER = 'OTHER',
-    PENDING = 'PENDING',
-    PROCESSING = 'PROCESSING',
-    FAILED_METADATA = 'FAILED_METADATA'
+  GENERAL = 'GENERAL',
+  MOVIES = 'MOVIES',
+  SERIES = 'SERIES',
+  SPORTS = 'SPORTS',
+  MUSIC = 'MUSIC',
+  OTHER = 'OTHER'
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  price: number;
+  autoSub: boolean; // Activar subcategorías automáticas por carpeta
+  parent?: string | null;
 }
 
 export interface User {
@@ -43,6 +48,8 @@ export interface Video {
   description: string;
   price: number;
   category: string;
+  parent_category?: string;
+  collection?: string;
   duration: number;
   thumbnailUrl: string;
   videoUrl: string;
@@ -55,59 +62,81 @@ export interface Video {
   isLocal?: boolean | number | string;
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
-  // Backend dynamic properties
-  size_fmt?: string;
   transcode_progress?: number;
-  needs_transcode?: boolean | number;
-  processing_attempts?: number;
-  fileHash?: string;
 }
 
-export interface Transaction {
+/* Added Comment interface as required by Watch.tsx and Shorts.tsx */
+export interface Comment {
   id: string;
-  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP' | 'VIP_REVENUE' | 'TRANSFER_SENT' | 'TRANSFER_RECV';
-  amount: number | string;
-  buyerId?: string;
-  buyerName?: string;
-  creatorId?: string;
-  videoTitle?: string;
-  itemTitle?: string;
+  videoId: string;
+  userId: string;
+  username: string;
+  userAvatarUrl?: string;
+  text: string;
   timestamp: number;
-  adminFee?: number | string;
-  recipientName?: string;
-  senderName?: string;
+}
+
+/* Added UserInteraction interface as required by Watch.tsx and Shorts.tsx */
+export interface UserInteraction {
+  liked: boolean;
+  disliked: boolean;
+  newLikeCount?: number;
 }
 
 export interface VipPlan {
   id: string;
   name: string;
   price: number;
-  type: 'ACCESS' | 'BALANCE';
-  durationDays?: number;
-  bonusPercent?: number;
-  description?: string;
+  durationDays: number;
   highlight?: boolean;
 }
 
-// Added Comment interface for video discussions
-export interface Comment {
-    id: string;
-    userId: string;
-    username: string;
-    userAvatarUrl?: string;
-    text: string;
-    timestamp: number;
+export interface SystemSettings {
+  downloadStartTime: string; 
+  downloadEndTime: string;   
+  isQueuePaused: boolean;
+  batchSize: number;         
+  maxDuration: number;       
+  geminiKey: string;
+  ytDlpPath: string;
+  ffmpegPath: string;
+  categories: Category[]; // Cambio crítico: Ahora es una lista de objetos
+  localLibraryPath: string; 
+  videoCommission: number;
+  marketCommission: number;
+  transferFee?: number;
+  vipPlans?: VipPlan[];
+  paymentInstructions?: string;
+  currencyConversion?: number;
+  enableDebugLog?: boolean;
+  autoTranscode?: boolean | number;
+  tropipayClientId?: string;
+  tropipayClientSecret?: string;
+  /* Added missing properties used in Admin panels and Upload */
+  customCategories?: string[];
+  categoryPrices?: Record<string, number>;
+  ftpSettings?: {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    rootPath: string;
+  };
+  is_transcoder_active?: boolean;
 }
 
-// Added UserInteraction for tracking likes and watch status
-export interface UserInteraction {
-    liked: boolean;
-    disliked: boolean;
-    isWatched: boolean;
-    newLikeCount?: number;
+export interface Transaction {
+  id: string;
+  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP' | 'TRANSFER_SENT' | 'TRANSFER_RECV';
+  amount: number | string;
+  buyerId?: string;
+  videoTitle?: string;
+  timestamp: number;
+  recipientName?: string;
+  senderName?: string;
+  creatorId?: string; // Used in Profile logic
 }
 
-// Added Notification for system and user events
 export interface Notification {
     id: string;
     userId: string;
@@ -116,58 +145,58 @@ export interface Notification {
     link: string;
     isRead: boolean;
     timestamp: number;
-    avatarUrl?: string;
     metadata?: any;
+    /* Added avatarUrl property as required by Layout.tsx */
+    avatarUrl?: string;
 }
 
-// Added VideoResult for external search results
+/* Added VideoResult interface as required by Requests.tsx */
 export interface VideoResult {
-    id: string;
-    title: string;
-    thumbnail: string;
-    downloadUrl: string;
-    source: string;
-    author: string;
-    duration?: number;
+  id: string;
+  title: string;
+  thumbnail: string;
+  downloadUrl: string;
+  source: string;
+  author: string;
+  duration?: number;
 }
 
-// Added ContentRequest for user-submitted content ideas
+/* Added ContentRequest interface as required by Requests.tsx and AdminRequests.tsx */
 export interface ContentRequest {
-    id: string;
-    userId: string;
-    query: string;
-    status: 'PENDING' | 'COMPLETED' | 'FAILED';
-    createdAt: number;
-    username?: string;
+  id: string;
+  userId: string;
+  username?: string;
+  query: string;
+  status: 'PENDING' | 'COMPLETED' | 'FAILED' | string;
+  createdAt: number;
+  isVip: boolean;
 }
 
-// Added MarketplaceItem for the store
 export interface MarketplaceItem {
     id: string;
     title: string;
     description: string;
     price: number;
     originalPrice?: number;
-    discountPercent?: number;
     stock?: number;
     category?: string;
     condition?: string;
     sellerId: string;
     sellerName: string;
-    sellerAvatarUrl?: string;
     images?: string[];
     status?: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO';
+    /* Added missing properties used in Marketplace and Edit pages */
+    createdAt: number;
+    discountPercent?: number;
     rating?: number;
     reviewCount?: number;
-    createdAt: number;
+    sellerAvatarUrl?: string;
 }
 
-// Added CartItem for shopping cart management
 export interface CartItem extends MarketplaceItem {
     quantity: number;
 }
 
-// Added MarketplaceReview for product feedback
 export interface MarketplaceReview {
     id: string;
     itemId: string;
@@ -179,7 +208,6 @@ export interface MarketplaceReview {
     timestamp: number;
 }
 
-// Added BalanceRequest for tracking pending deposits
 export interface BalanceRequest {
     id: string;
     userId: string;
@@ -188,7 +216,6 @@ export interface BalanceRequest {
     createdAt: number;
 }
 
-// Added VipRequest for tracking pending membership activations
 export interface VipRequest {
     id: string;
     userId: string;
@@ -198,55 +225,18 @@ export interface VipRequest {
     createdAt: number;
 }
 
-// Added SmartCleanerResult for system maintenance tools
+/* Added SmartCleanerResult interface as required by AdminMaintenance.tsx */
 export interface SmartCleanerResult {
-    preview: Video[];
-    stats: {
-        spaceReclaimed: string;
-    };
-}
-
-// Added FtpFile for remote file browsing
-export interface FtpFile {
-    name: string;
-    path: string;
-    type: 'file' | 'dir';
-    size?: string;
-}
-
-export interface SystemSettings {
-  downloadStartTime: string; 
-  downloadEndTime: string;   
-  isQueuePaused: boolean;
-  batchSize: number;         
-  maxDuration: number;       
-  maxResolution: number;     
-  pexelsKey: string;
-  pixabayKey: string;
-  geminiKey: string;
-  ytDlpPath: string;
-  ffmpegPath: string;
-  enableYoutube: boolean; 
-  categoryPrices: Record<string, number>; 
-  customCategories: string[]; 
-  localLibraryPath: string; 
-  videoCommission: number;
-  marketCommission: number;
-  transferFee?: number;
-  vipPlans?: VipPlan[];
-  paymentInstructions?: string;
-  currencyConversion?: number;
-  enableDebugLog?: boolean;
-  // Added missing settings for transcoding and FTP integration
-  autoTranscode?: boolean;
-  transcodePreset?: string;
-  proxyUrl?: string;
-  is_transcoder_active?: boolean;
-  ftpSettings?: {
-      host: string;
-      port: number;
-      user: string;
-      pass: string;
-      rootPath: string;
+  preview: any[];
+  stats: {
+    spaceReclaimed: string;
   };
+}
+
+/* Added FtpFile interface as required by AdminFtp.tsx */
+export interface FtpFile {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  size?: string;
 }

@@ -1,10 +1,7 @@
-
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User } from '../types';
 import { db } from '../services/db';
 import { useToast } from './ToastContext';
-import { storage } from '../services/storage';
-import { STORAGE_KEYS } from '../utils/constants';
 
 interface AuthContextType {
   user: User | null;
@@ -34,20 +31,23 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         try { db.logout(user.id).catch(() => {}); } catch(e){}
     }
     setUser(null);
-    storage.clearSession();
+    localStorage.removeItem('sp_current_user_id');
+    localStorage.removeItem('sp_session_token');
+    localStorage.removeItem('sp_offline_user');
     if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
     window.dispatchEvent(new Event('sp_logout'));
   };
 
   useEffect(() => {
+    // ESCUCHADOR GLOBAL DE EXPIRACIÓN (Opción B)
     const handleExpired = () => {
         toast.warning("Sesión cerrada: Has iniciado sesión en otro dispositivo.");
         logout();
     };
     window.addEventListener('sp_session_expired', handleExpired);
 
-    const savedId = localStorage.getItem(STORAGE_KEYS.USER_ID);
-    const savedToken = localStorage.getItem(STORAGE_KEYS.TOKEN);
+    const savedId = localStorage.getItem('sp_current_user_id');
+    const savedToken = localStorage.getItem('sp_session_token');
 
     const initAuth = async () => {
         if (savedId && savedToken) {
@@ -57,12 +57,12 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
                     u.sessionToken = savedToken;
                     u.balance = Number(u.balance);
                     setUser(u);
-                    storage.set(STORAGE_KEYS.OFFLINE_USER, u);
+                    db.saveOfflineUser(u);
                 } else {
                     logout();
                 }
             } catch (err) {
-                const offlineUser = storage.get<User | null>(STORAGE_KEYS.OFFLINE_USER, null);
+                const offlineUser = db.getOfflineUser();
                 if (offlineUser && offlineUser.id === savedId) {
                     setUser(offlineUser);
                 }
@@ -80,13 +80,17 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
 
   useEffect(() => {
     if (user && user.sessionToken) {
-        storage.set(STORAGE_KEYS.OFFLINE_USER, user);
+        db.saveOfflineUser(user);
 
         if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
         
+        // HEARTBEAT (Netflix-Style Check)
+        // Cada 30 segundos verificamos si este dispositivo sigue siendo el activo.
         heartbeatRef.current = window.setInterval(async () => {
+            // CRITICAL GUARD: Only execute heartbeat if user exists and window is active
             if (user && user.id && !document.hidden) {
-                await db.heartbeat(user.id).catch(() => {});
+                await db.heartbeat(user.id);
+                // Si falla (401), el interceptor de db.ts disparará 'sp_session_expired'
             }
         }, 30000);
     } else {
@@ -99,7 +103,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   }, [user]);
 
   const refreshUser = () => {
-     const currentToken = localStorage.getItem(STORAGE_KEYS.TOKEN);
+     const currentToken = localStorage.getItem('sp_session_token');
      if (user && currentToken) {
         db.getUser(user.id).then(u => { 
             if(u && u.id === user.id) {
@@ -109,7 +113,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
                     balance: Number(u.balance)
                 };
                 setUser(refreshed);
-                storage.set(STORAGE_KEYS.OFFLINE_USER, refreshed);
+                db.saveOfflineUser(refreshed);
             }
         }).catch(() => {});
      }
@@ -121,9 +125,9 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         const u = await db.login(username, password);
         u.balance = Number(u.balance);
         setUser(u);
-        storage.set(STORAGE_KEYS.OFFLINE_USER, u);
-        storage.set(STORAGE_KEYS.USER_ID, u.id);
-        if (u.sessionToken) storage.set(STORAGE_KEYS.TOKEN, u.sessionToken);
+        db.saveOfflineUser(u);
+        localStorage.setItem('sp_current_user_id', u.id);
+        if (u.sessionToken) localStorage.setItem('sp_session_token', u.sessionToken);
     } finally {
         setIsLoading(false);
     }
@@ -135,9 +139,9 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         const u = await db.register(username, password, avatar);
         u.balance = Number(u.balance);
         setUser(u);
-        storage.set(STORAGE_KEYS.OFFLINE_USER, u);
-        storage.set(STORAGE_KEYS.USER_ID, u.id);
-        if (u.sessionToken) storage.set(STORAGE_KEYS.TOKEN, u.sessionToken);
+        db.saveOfflineUser(u);
+        localStorage.setItem('sp_current_user_id', u.id);
+        if (u.sessionToken) localStorage.setItem('sp_session_token', u.sessionToken);
     } finally {
         setIsLoading(false);
     }
