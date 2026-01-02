@@ -24,6 +24,7 @@ export interface Category {
   price: number;
   autoSub: boolean; // Activar subcategorías automáticas por carpeta
   parent?: string | null;
+  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM'; // Nuevo: Ordenamiento personalizado
 }
 
 export interface User {

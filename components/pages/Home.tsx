@@ -5,9 +5,11 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Category } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle 
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder 
 } from 'lucide-react';
 import { useLocation } from '../Router';
+/* Added AIConcierge import to provide recommendation features */
+import AIConcierge from '../AIConcierge';
 
 const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: string | null) => void }) => (
     <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in sticky top-0 bg-black/80 backdrop-blur-md z-20">
@@ -27,6 +29,48 @@ const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: s
         ))}
     </div>
 );
+
+interface SubCategoryCardProps {
+    name: string;
+    videos: Video[];
+    onClick: () => void;
+}
+
+/* Fix: Use React.FC to correctly handle special React props like 'key' in TypeScript environments */
+const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick }) => {
+    // Seleccionar una miniatura aleatoria de los videos que contiene esta subcategoría
+    const randomThumb = useMemo(() => {
+        if (videos.length === 0) return null;
+        const randomIndex = Math.floor(Math.random() * videos.length);
+        return videos[randomIndex].thumbnailUrl;
+    }, [videos]);
+
+    return (
+        <button 
+            onClick={onClick}
+            className="group relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-lg transition-all active:scale-95"
+        >
+            {randomThumb ? (
+                <img src={randomThumb} className="w-full h-full object-cover opacity-40 group-hover:opacity-60 group-hover:scale-110 transition-all duration-700" alt={name} />
+            ) : (
+                <div className="w-full h-full flex items-center justify-center text-slate-700">
+                    <Folder size={40} />
+                </div>
+            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
+            <div className="absolute inset-0 p-4 flex flex-col justify-end">
+                <div className="flex items-center gap-2 mb-1">
+                    <div className="w-6 h-6 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg group-hover:rotate-12 transition-transform">
+                        <Layers size={12} className="text-white"/>
+                    </div>
+                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Colección</span>
+                </div>
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter truncate group-hover:text-indigo-300 transition-colors">{name}</h3>
+                <p className="text-[9px] text-slate-400 font-bold uppercase">{videos.length} elementos</p>
+            </div>
+        </button>
+    );
+};
 
 export default function Home() {
   const { user } = useAuth();
@@ -67,26 +111,37 @@ export default function Home() {
       return [activeCategory];
   }, [activeCategory, allVideos]);
 
-  // Obtener subcategorías si estamos en una categoría raíz que tenga autoSub activo
+  // Obtener subcategorías si estamos en la raíz o en una categoría padre
   const currentSubCategories = useMemo(() => {
       if (!activeCategory) {
-          // Si estamos en la raíz, mostrar las categorías de administrador que no tienen padre
-          return categories.map(c => ({ name: c.name, id: c.id }));
+          // Raíz: Mostrar las categorías principales configuradas que no tienen padre (o todas si no hay jerarquía)
+          return categories.map(c => ({ 
+              name: c.name, 
+              id: c.id, 
+              videos: allVideos.filter(v => v.category === c.name || v.parent_category === c.name)
+          })).filter(c => c.videos.length > 0);
       }
       
-      // Si estamos en una categoría raíz, mostrar las subcategorías encontradas en los videos
+      // Estamos dentro de una categoría: Ver si tiene subcarpetas dinámicas
       const rootCat = categories.find(c => c.name === activeCategory);
       if (rootCat && rootCat.autoSub) {
-          const subs = allVideos
-            .filter(v => v.parent_category === activeCategory)
-            .map(v => v.category);
-          return Array.from(new Set(subs)).map(s => ({ name: s, id: s }));
+          const subs = Array.from(new Set(
+              allVideos
+                .filter(v => v.parent_category === activeCategory)
+                .map(v => v.category)
+          ));
+
+          return subs.map(s => ({
+              name: s,
+              id: s,
+              videos: allVideos.filter(v => v.category === s && v.parent_category === activeCategory)
+          }));
       }
       return [];
   }, [activeCategory, categories, allVideos]);
 
   const filteredList = useMemo(() => {
-      return allVideos.filter(v => {
+      let list = allVideos.filter(v => {
           const matchSearch = v.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                               v.creatorName.toLowerCase().includes(searchQuery.toLowerCase());
           
@@ -96,8 +151,29 @@ export default function Home() {
           const matchCat = v.category === activeCategory || v.parent_category === activeCategory;
 
           return matchSearch && matchCat;
-      }).sort((a,b) => b.createdAt - a.createdAt);
-  }, [allVideos, activeCategory, searchQuery]);
+      });
+
+      // APLICAR MOTOR DE ORDENAMIENTO PERSONALIZADO
+      const currentCatSettings = categories.find(c => c.name === activeCategory || c.name === list[0]?.parent_category);
+      const sortMode = currentCatSettings?.sortOrder || 'LATEST';
+
+      switch (sortMode) {
+          case 'ALPHA':
+              list.sort((a, b) => a.title.localeCompare(b.title));
+              break;
+          case 'RANDOM':
+              // Usar un seed basado en el día para que no cambie en cada clic, pero sea "aleatorio"
+              const daySeed = new Date().getUTCDate();
+              list.sort(() => (Math.random() - 0.5)); 
+              break;
+          case 'LATEST':
+          default:
+              list.sort((a,b) => b.createdAt - a.createdAt);
+              break;
+      }
+
+      return list;
+  }, [allVideos, activeCategory, searchQuery, categories]);
 
   const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
@@ -115,21 +191,21 @@ export default function Home() {
           </div>
           
           <Breadcrumbs path={breadcrumbPath} onNavigate={setActiveCategory} />
-
-          {currentSubCategories.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto mt-4 pb-2 scrollbar-hide">
-                  {currentSubCategories.map(sub => (
-                      <button 
-                        key={sub.id} 
-                        onClick={() => setActiveCategory(sub.name)}
-                        className="whitespace-nowrap px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-300 hover:text-white hover:border-indigo-500/50 transition-all flex items-center gap-2 group"
-                      >
-                         <Layers size={12} className="text-indigo-400 group-hover:rotate-12 transition-transform" /> {sub.name}
-                      </button>
-                  ))}
-              </div>
-          )}
       </div>
+
+      {/* Grid de Subcategorías / Carpetas (Si existen) */}
+      {currentSubCategories.length > 0 && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-4 duration-500">
+              {currentSubCategories.map(sub => (
+                  <SubCategoryCard 
+                      key={sub.id} 
+                      name={sub.name} 
+                      videos={sub.videos} 
+                      onClick={() => setActiveCategory(sub.name)} 
+                  />
+              ))}
+          </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10">
           {filteredList.slice(0, visibleCount).map((v: Video) => (
@@ -153,12 +229,15 @@ export default function Home() {
           </div>
       )}
 
-      {filteredList.length === 0 && (
+      {filteredList.length === 0 && currentSubCategories.length === 0 && (
           <div className="text-center py-40">
               <Shuffle className="mx-auto mb-4 text-slate-800" size={64}/>
               <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">No hay contenido</p>
           </div>
       )}
+
+      {/* AI Concierge integration to help users navigate the current catalog */}
+      <AIConcierge videos={allVideos} />
     </div>
   );
 }

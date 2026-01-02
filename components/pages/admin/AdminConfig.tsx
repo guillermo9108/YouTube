@@ -7,7 +7,7 @@ import {
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
     CreditCard, Globe, Palette, ChevronRight, 
     FolderTree, DollarSign, Settings2, Info, RefreshCw, Database,
-    Clock, Percent, HardDrive, ShieldCheck, Zap
+    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -60,7 +60,13 @@ export default function AdminConfig() {
     };
 
     const addCategory = () => {
-        const newCat: Category = { id: 'c_' + Date.now(), name: 'NUEVA CATEGORÍA', price: 1.00, autoSub: false };
+        const newCat: Category = { 
+            id: 'c_' + Date.now(), 
+            name: 'NUEVA CATEGORÍA', 
+            price: 1.00, 
+            autoSub: false,
+            sortOrder: 'LATEST'
+        };
         updateValue('categories', [...(settings?.categories || []), newCat]);
     };
 
@@ -159,6 +165,19 @@ export default function AdminConfig() {
                                             </label>
                                         </div>
                                     </div>
+
+                                    <div className="pt-2 border-t border-slate-800/50">
+                                        <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1 mb-2"><SortAsc size={10}/> Orden de Visualización</label>
+                                        <select 
+                                            value={cat.sortOrder || 'LATEST'}
+                                            onChange={e => updateCategory(cat.id, 'sortOrder', e.target.value)}
+                                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-indigo-300 outline-none"
+                                        >
+                                            <option value="LATEST">Fecha (Más reciente primero)</option>
+                                            <option value="ALPHA">Alfabético (A-Z)</option>
+                                            <option value="RANDOM">Aleatorio (Mezclar)</option>
+                                        </select>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -196,7 +215,7 @@ export default function AdminConfig() {
                     <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
                         <div>
                             <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta Librería NAS/Local</label>
-                            <input type="text" value={settings?.localLibraryPath || ''} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs font-mono" placeholder="/volume1/videos/..."/>
+                            <input type="text" value={settings?.localLibraryPath || ''} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono" placeholder="/volume1/videos/..."/>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div>
