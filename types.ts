@@ -34,7 +34,7 @@ export interface Category {
   price: number;
   autoSub: boolean;
   parent?: string | null;
-  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM' | 'AI_VECTOR'; // Nuevo: Sugerencias por IA
+  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM' | 'AI_VECTOR'; 
 }
 
 export interface User {
@@ -49,7 +49,6 @@ export interface User {
   autoPurchaseLimit: number;
   interestVector?: number[]; // Perfil semántico del usuario
   vipExpiry?: number;
-  // Fix: Add missing properties used in Profile and Admin
   lastDeviceId?: string;
   defaultPrices?: Record<string, number>;
   shippingDetails?: {
@@ -62,7 +61,6 @@ export interface User {
   };
 }
 
-// Fix: Add missing VideoCategory enum
 export enum VideoCategory {
   GENERAL = 'GENERAL',
   MOVIES = 'MOVIES',
@@ -72,7 +70,6 @@ export enum VideoCategory {
   OTHER = 'OTHER'
 }
 
-// Fix: Add missing Comment interface
 export interface Comment {
   id: string;
   videoId: string;
@@ -83,7 +80,6 @@ export interface Comment {
   timestamp: number;
 }
 
-// Fix: Add missing UserInteraction interface
 export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
@@ -91,7 +87,6 @@ export interface UserInteraction {
   newLikeCount?: number;
 }
 
-// Fix: Add missing Transaction interface
 export interface Transaction {
   id: string;
   userId: string;
@@ -110,7 +105,6 @@ export interface Transaction {
   sellerName?: string;
 }
 
-// Fix: Add missing Notification interface
 export interface Notification {
   id: string;
   userId: string;
@@ -122,7 +116,6 @@ export interface Notification {
   avatarUrl?: string;
 }
 
-// Fix: Add missing VideoResult interface
 export interface VideoResult {
   id: string;
   title: string;
@@ -133,7 +126,6 @@ export interface VideoResult {
   duration?: number;
 }
 
-// Fix: Add missing ContentRequest interface
 export interface ContentRequest {
   id: string;
   userId: string;
@@ -143,7 +135,6 @@ export interface ContentRequest {
   createdAt: number;
 }
 
-// Fix: Add missing Marketplace types
 export interface MarketplaceItem {
   id: string;
   title: string;
@@ -179,7 +170,6 @@ export interface MarketplaceReview {
   timestamp: number;
 }
 
-// Fix: Add missing Finance request types
 export interface BalanceRequest {
   id: string;
   userId: string;
@@ -200,7 +190,6 @@ export interface VipRequest {
   createdAt: number;
 }
 
-// Fix: Add missing VipPlan and SystemSettings types
 export interface VipPlan {
   id: string;
   name: string;
@@ -228,9 +217,22 @@ export interface SystemSettings {
   currencyConversion?: number;
   vipPlans?: VipPlan[];
   is_transcoder_active?: boolean;
+  // Campos adicionales para evitar errores de TS
+  isQueuePaused?: boolean;
+  maxDuration?: number;
+  enableYoutube?: boolean;
+  autoTranscode?: boolean;
+  transcodePreset?: string;
+  proxyUrl?: string;
+  ftpSettings?: {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    rootPath: string;
+  };
 }
 
-// Fix: Add missing Admin utility types
 export interface SmartCleanerResult {
   stats: {
     spaceReclaimed: string;
