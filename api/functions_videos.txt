@@ -54,11 +54,23 @@ function video_get_related($pdo, $videoId) {
     respond(true, $related);
 }
 
+/**
+ * PASO 4: Mantenimiento Avanzado
+ * Resetea videos con metadatos fallidos y re-evalúa los que están en 'GENERAL'
+ */
 function video_fix_metadata($pdo) {
-    $sql = "UPDATE videos SET category = 'PENDING', processing_attempts = 0 WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg%') AND category NOT IN ('PENDING', 'PROCESSING')";
+    // 1. Resetear videos sin duración o con imagen por defecto a PENDING (Paso 2)
+    $sql = "UPDATE videos SET category = 'PENDING', processing_attempts = 0 
+            WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg%') 
+            AND category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')";
     $count = $pdo->exec($sql);
-    $sqlGen = "UPDATE videos SET category = 'PROCESSING' WHERE category = 'GENERAL' AND parent_category IS NULL";
+    
+    // 2. Mover videos de 'GENERAL' a 'PROCESSING' (Paso 3) para intentar re-categorizarlos por carpeta
+    // Solo si son locales (tienen ruta de archivo para analizar)
+    $sqlGen = "UPDATE videos SET category = 'PROCESSING' 
+               WHERE category = 'GENERAL' AND isLocal = 1";
     $countGen = $pdo->exec($sqlGen);
+
     respond(true, ['fixedBroken' => $count, 'reCategorized' => $countGen]);
 }
 
@@ -136,25 +148,35 @@ function video_upload($pdo, $post, $files) {
     respond(true, ['id' => $id]);
 }
 
+/**
+ * PASO 2 & COLABORACIÓN: Actualizar duración y miniatura
+ * IMPORTANTE: Dispara automáticamente el Paso 3 (Organización)
+ */
 function video_update_metadata($pdo, $post, $files) {
     $id = $post['id'] ?? '';
     $duration = isset($post['duration']) ? floatval($post['duration']) : 0;
     $isSuccess = isset($post['success']) && ($post['success'] === 'true' || $post['success'] === '1');
     if (!$id) respond(false, null, 'ID faltante');
+
     if (!$isSuccess) {
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, category = IF(processing_attempts >= 3, 'FAILED_METADATA', 'PENDING') WHERE id = ?")->execute([$id]);
         respond(true, ['status' => 'error_logged']); return;
     }
+
     $sql = "UPDATE videos SET category = 'PROCESSING', duration = ?, processing_attempts = 0";
     $params = [$duration];
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         $tDir = 'uploads/thumbnails/';
         if (!is_dir($tDir)) mkdir($tDir, 0777, true);
         $thumbPath = "{$tDir}{$id}.jpg";
-        if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) { $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; }
+        if (move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath)) { 
+            $sql .= ", thumbnailUrl = ?"; $params[] = "api/" . $thumbPath; 
+        }
     }
     $sql .= " WHERE id = ?"; $params[] = $id;
     $pdo->prepare($sql)->execute($params);
+
+    // AUTO-ORGANIZAR AL TERMINAR EXTRACCIÓN (Dispara Paso 3 para este video)
     $settingsFull = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     if ($settingsFull) {
         $hierarchy = json_decode($settingsFull['categories'] ?? '[]', true);
@@ -163,31 +185,54 @@ function video_update_metadata($pdo, $post, $files) {
     respond(true, ['status' => 'published']);
 }
 
+/**
+ * PASO 3: Organización Inteligente masiva
+ */
 function video_smart_organize($pdo) {
     $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
     $hierarchy = json_decode($settings['categories'] ?? '[]', true);
+    
+    // Buscar videos que tengan metadatos pero no categoría final
     $stmt = $pdo->query("SELECT id FROM videos WHERE category = 'PROCESSING' LIMIT 100");
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     $processed = 0;
-    foreach ($ids as $vid) { if (internal_organize_video($pdo, $vid, $settings, $hierarchy)) $processed++; }
+    foreach ($ids as $vid) { 
+        if (internal_organize_video($pdo, $vid, $settings, $hierarchy)) $processed++; 
+    }
     $remaining = $pdo->query("SELECT COUNT(*) FROM videos WHERE category = 'PROCESSING'")->fetchColumn();
     respond(true, ['processed' => $processed, 'remaining' => $remaining]);
 }
 
+/**
+ * Motor interno de organización (compartido por Pasos 2, 3 y 4)
+ */
 function internal_organize_video($pdo, $id, $settings, $hierarchy) {
-    $stmt = $pdo->prepare("SELECT id, title, videoUrl FROM videos WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT id, title, videoUrl, isLocal FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $v = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$v) return false;
-    $smart = smartParseFilename($v['videoUrl'], null, $hierarchy);
-    $newTitle = $smart['title'];
-    $newCat = $smart['category']; 
-    $newParent = $smart['parent_category'] ?? null;
-    $newCollection = $smart['collection'] ?? null;
+
+    // Si es un video subido manualmente, no intentamos parsear ruta a menos que sea local
+    if ($v['isLocal']) {
+        $smart = smartParseFilename($v['videoUrl'], null, $hierarchy);
+        $newTitle = $smart['title'];
+        $newCat = $smart['category']; 
+        $newParent = $smart['parent_category'] ?? null;
+        $newCollection = $smart['collection'] ?? null;
+    } else {
+        // Para videos subidos, mantener título original y solo limpiar estado PROCESSING
+        $newTitle = $v['title'];
+        $newCat = 'GENERAL';
+        $newParent = null;
+        $newCollection = null;
+    }
+
+    // Regla de Oro: Solo dejar en GENERAL si no se detectó nada
     if (!$newCat || in_array($newCat, ['OTHER', 'PROCESSING', 'PENDING'])) $newCat = 'GENERAL';
-    // CORRECCIÓN: Pasar el padre para heredar precio (ej: MUSICA -> 0.5)
+    
     $newPrice = getPriceForCategory($newCat, $settings, $newParent);
+
     $pdo->beginTransaction();
     try {
         $updateStmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?");

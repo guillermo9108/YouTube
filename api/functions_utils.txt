@@ -3,7 +3,8 @@
 function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
-    $pathParts = array_filter(explode('/', $fullPathNormalized));
+    // Filtrar segmentos vacíos (como // en rutas de red)
+    $pathParts = array_values(array_filter(explode('/', $fullPathNormalized)));
     
     // 1. Limpieza básica del nombre
     $cleanText = function($txt) {
@@ -18,29 +19,35 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
     $detectedParent = null;
     $detectedCollection = null;
 
-    $parts = array_values($pathParts);
-    $partsCount = count($parts);
+    $partsCount = count($pathParts);
     
+    // 2. Buscar coincidencia en la ruta con las categorías del administrador
+    // Recorremos las partes de la ruta de ATRÁS HACIA ADELANTE para encontrar la subcarpeta más cercana al video
     for ($i = $partsCount - 1; $i >= 0; $i--) {
-        $segment = trim($parts[$i]);
+        $segment = trim($pathParts[$i]);
         if (empty($segment) || $segment === basename($fullPath)) continue;
 
         foreach ($hierarchy as $cat) {
+            // Comparación insensible a mayúsculas
             if (strcasecmp($segment, $cat['name']) === 0) {
                 $detectedCat = $cat['name'];
                 
+                // Si la categoría tiene auto-subcategorías (Modo Carpeta)
                 if (!empty($cat['autoSub'])) {
-                    if (isset($parts[$i + 1]) && $parts[$i + 1] !== basename($fullPath)) {
+                    // Si hay segmentos DESPUÉS de la categoría detectada pero ANTES del archivo
+                    // Ej: /MOVIES/Action/TheMatrix.mp4 -> segment[i] es MOVIES, segment[i+1] es Action
+                    if (isset($pathParts[$i + 1]) && $pathParts[$i + 1] !== basename($fullPath)) {
                         $detectedParent = $cat['name'];
-                        $detectedCat = $parts[$i + 1];
+                        $detectedCat = $pathParts[$i + 1];
                         
-                        if (isset($parts[$i + 2]) && $parts[$i + 2] !== basename($fullPath)) {
-                            $detectedCollection = $parts[$i + 1];
-                            $detectedCat = $parts[$i + 2];
+                        // Si hay OTRA subcarpeta adicional, la tratamos como Colección/Serie
+                        if (isset($pathParts[$i + 2]) && $pathParts[$i + 2] !== basename($fullPath)) {
+                            $detectedCollection = $pathParts[$i + 1];
+                            $detectedCat = $pathParts[$i + 2];
                         }
                     }
                 }
-                break 2;
+                break 2; // Encontramos la categoría configurada más cercana, salir de los bucles
             }
         }
     }
@@ -59,12 +66,12 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
 function getPriceForCategory($catName, $settings, $parentCatName = null) {
     $categories = is_array($settings['categories']) ? $settings['categories'] : json_decode($settings['categories'] ?? '[]', true);
     
-    // 1. Intentar buscar precio exacto de la categoría
+    // 1. Intentar buscar precio exacto de la categoría detectada (subcarpeta)
     foreach ($categories as $cat) {
         if (strcasecmp($cat['name'], $catName) === 0) return floatval($cat['price']);
     }
     
-    // 2. Si no se encuentra y tiene padre, heredar precio del padre (Ej: MUSICA -> 0.5)
+    // 2. Si no se encuentra (es una subcarpeta dinámica) y tiene padre, heredar precio del padre
     if ($parentCatName) {
         foreach ($categories as $cat) {
             if (strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
