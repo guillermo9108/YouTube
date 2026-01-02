@@ -77,6 +77,7 @@ class DBService {
   }
 
   public async heartbeat(userId: string): Promise<void> {
+    if (!userId) return;
     return this.request<void>(`action=heartbeat&userId=${userId}`);
   }
 
@@ -104,7 +105,8 @@ class DBService {
   }
 
   public async getRelatedVideos(id: string): Promise<Video[]> {
-    return this.request<Video[]>(`action=get_related_videos&id=${id}`);
+    // FIX: El backend espera 'videoId', no 'id' para esta acción específica
+    return this.request<Video[]>(`action=get_related_videos&videoId=${id}`);
   }
 
   public async uploadVideo(

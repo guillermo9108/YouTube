@@ -45,11 +45,11 @@ interface GlobalErrorBoundaryState {
   error: any;
 }
 
-// Fix: Explicitly extend the 'Component' base class with defined interfaces to resolve 'Property state/props does not exist' errors
-class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErrorBoundaryState> {
+// Fix: Explicitly use React.Component with typed generic parameters to resolve 'Property state/props does not exist' errors
+class GlobalErrorBoundary extends React.Component<GlobalErrorBoundaryProps, GlobalErrorBoundaryState> {
   constructor(props: GlobalErrorBoundaryProps) { 
     super(props); 
-    // Fix: Initialize state correctly within constructor
+    // Fix: Correctly initialize state on the instance
     this.state = { hasError: false, error: null }; 
   }
   
@@ -62,7 +62,7 @@ class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErro
   }
   
   render() {
-    // Fix: Check this.state.hasError which is now properly recognized by the compiler
+    // Fix: Access state properties which are now correctly typed through React.Component
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
@@ -79,7 +79,7 @@ class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErro
         </div>
       );
     }
-    // Fix: Return children from props which is now properly recognized by the compiler
+    // Fix: Correctly access children from props via generic context
     return this.props.children;
   }
 }

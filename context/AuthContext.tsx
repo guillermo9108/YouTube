@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User } from '../types';
 import { db } from '../services/db';
@@ -79,7 +80,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    if (user && user.sessionToken) {
+    if (user && user.id && user.sessionToken) {
         db.saveOfflineUser(user);
 
         if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
@@ -89,8 +90,11 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         heartbeatRef.current = window.setInterval(async () => {
             // CRITICAL GUARD: Only execute heartbeat if user exists and window is active
             if (user && user.id && !document.hidden) {
-                await db.heartbeat(user.id);
-                // Si falla (401), el interceptor de db.ts disparará 'sp_session_expired'
+                try {
+                    await db.heartbeat(user.id);
+                } catch(e) {
+                    // Si falla (401), el interceptor de db.ts disparará 'sp_session_expired'
+                }
             }
         }, 30000);
     } else {

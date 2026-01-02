@@ -7,19 +7,13 @@ import { Video } from "../types";
  * Proporciona metadatos automáticos y un conserje interactivo.
  */
 
-const getAIClient = () => {
-    // Fix: Always use process.env.API_KEY string directly in named parameter
-    if (!process.env.API_KEY) return null;
-    return new GoogleGenAI({ apiKey: process.env.API_KEY });
-};
-
 export const aiService = {
     /**
      * Sugiere metadatos (título, descripción, categoría) analizando el nombre del archivo.
      */
     async suggestMetadata(filename: string) {
-        const ai = getAIClient();
-        if (!ai) return null;
+        // Fix: Always use a new GoogleGenAI instance right before making an API call
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
         try {
             const response: GenerateContentResponse = await ai.models.generateContent({
@@ -54,6 +48,7 @@ export const aiService = {
                 }
             });
 
+            // Fix: Extract string output directly from the .text property
             const text = response.text;
             if (!text) return null;
             return JSON.parse(text);
@@ -68,8 +63,8 @@ export const aiService = {
      * Mantiene el contexto de los videos actuales para ofrecer respuestas precisas.
      */
     async chatWithConcierge(userMessage: string, availableVideos: Video[]) {
-        const ai = getAIClient();
-        if (!ai) return "La inteligencia del conserje no está disponible en este momento.";
+        // Fix: Always use a new GoogleGenAI instance right before making an API call
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
         // Inyectamos el catálogo actual como contexto para que la IA sepa qué recomendar
         const context = availableVideos
@@ -97,6 +92,7 @@ export const aiService = {
             });
 
             const result = await chat.sendMessage({ message: userMessage });
+            // Fix: Extract string output directly from the .text property
             return result.text || "Lo siento, mi mente se ha quedado en blanco. ¿Podrías repetir eso?";
         } catch (e) {
             console.error("Concierge Error:", e);
