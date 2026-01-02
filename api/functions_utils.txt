@@ -18,19 +18,13 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
     $detectedParent = null;
 
     // 2. Buscar coincidencia en la ruta con las categorías del administrador
-    // Recorremos las carpetas de la ruta de atrás hacia adelante
     foreach (array_reverse($pathParts) as $index => $segment) {
         if (empty($segment) || $segment === $filename) continue;
 
         foreach ($hierarchy as $cat) {
             if (strcasecmp($segment, $cat['name']) === 0) {
-                // Encontramos una carpeta que coincide con una categoría definida
                 $detectedCat = $cat['name'];
-                
-                // Si esta categoría tiene subcategorías automáticas activas,
-                // la carpeta inmediatamente inferior al segmento actual será la subcategoría.
                 if (!empty($cat['autoSub'])) {
-                    // El segmento hijo en el array original pathParts
                     $originalIndex = array_search($segment, $pathParts);
                     if ($originalIndex !== false && isset($pathParts[$originalIndex + 1]) && $pathParts[$originalIndex + 1] !== $filename) {
                         $detectedParent = $cat['name'];
@@ -51,19 +45,9 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
 
 function getPriceForCategory($catName, $settings) {
     $categories = is_array($settings['categories']) ? $settings['categories'] : json_decode($settings['categories'] ?? '[]', true);
-    
     foreach ($categories as $cat) {
         if ($cat['name'] === $catName) return floatval($cat['price']);
     }
-    
-    // Si es una subcategoría automática, heredar precio del padre
-    $vMeta = smartParseFilename('', $catName, $categories); // Mock
-    if ($vMeta['parent_category']) {
-        foreach ($categories as $cat) {
-            if ($cat['name'] === $vMeta['parent_category']) return floatval($cat['price']);
-        }
-    }
-
     return 1.00; 
 }
 
@@ -76,12 +60,23 @@ function write_log($message, $level = 'INFO') {
 
 function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
-    if (file_exists($pathOrUrl) && is_file($pathOrUrl)) return $pathOrUrl;
+    
+    // Normalizar
     $path = str_replace('\\', '/', $pathOrUrl);
+    
+    // 1. Si es absoluta y existe
+    if (file_exists($path) && is_file($path)) return $path;
+    
+    // 2. Si es relativa a uploads (api/uploads/...)
     $cleanPath = (strpos($path, 'api/') === 0) ? substr($path, 4) : $path;
     $internalPath = __DIR__ . '/' . $cleanPath;
     if (file_exists($internalPath) && is_file($internalPath)) return realpath($internalPath);
-    if (file_exists($path) && is_file($path)) return $path;
+    
+    // 3. Intento de fallback agresivo (quitar api/ si existe)
+    $fallback = str_replace('api/', '', $path);
+    if (file_exists($fallback) && is_file($fallback)) return $fallback;
+
+    write_log("Fallo al resolver ruta: Original($pathOrUrl) -> Intentado($path, $internalPath, $fallback)", 'ERROR');
     return false;
 }
 
@@ -99,15 +94,29 @@ function streamVideo($id, $pdo) {
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $videoUrl = $stmt->fetchColumn();
-    if (!$videoUrl) { header("HTTP/1.0 404 Not Found"); exit; }
+    
+    if (!$videoUrl) { 
+        header("HTTP/1.0 404 Not Found"); 
+        write_log("Stream Error: ID $id no existe en DB", 'ERROR');
+        exit; 
+    }
+    
     $realPath = resolve_video_path($videoUrl);
-    if (!$realPath || !file_exists($realPath)) { header("HTTP/1.0 404 Not Found"); exit; }
+    if (!$realPath || !file_exists($realPath)) { 
+        header("HTTP/1.0 404 Not Found"); 
+        write_log("Stream Error: Archivo físico no existe para ID $id ($videoUrl)", 'ERROR');
+        exit; 
+    }
+
     $fileSize = sprintf("%u", filesize($realPath));
     $fp = fopen($realPath, 'rb');
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     $mime = ($ext === 'mkv') ? 'video/x-matroska' : (($ext === 'webm') ? 'video/webm' : 'video/mp4');
+    
     header("Content-Type: $mime");
     header('Accept-Ranges: bytes');
+    header('Cache-Control: public, max-age=3600');
+
     if (isset($_SERVER['HTTP_RANGE'])) {
         preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
         $offset = intval($matches[1]);
@@ -116,8 +125,15 @@ function streamVideo($id, $pdo) {
         header("Content-Range: bytes $offset-$end/$fileSize");
         header("Content-Length: " . ($end - $offset + 1));
         fseek($fp, $offset);
-    } else { header("Content-Length: $fileSize"); }
-    while (!feof($fp)) { echo fread($fp, 1024 * 128); flush(); if (connection_aborted()) break; }
+    } else { 
+        header("Content-Length: $fileSize"); 
+    }
+
+    while (!feof($fp)) { 
+        echo fread($fp, 1024 * 128); 
+        flush(); 
+        if (connection_aborted()) break; 
+    }
     fclose($fp);
     exit;
 }

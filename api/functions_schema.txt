@@ -33,7 +33,7 @@ function getAppSchema() {
                 'createdAt' => 'BIGINT',
                 'likes' => 'INT DEFAULT 0',
                 'dislikes' => 'INT DEFAULT 0',
-                'category' => "VARCHAR(50) DEFAULT 'OTHER'",
+                'category' => "VARCHAR(50) DEFAULT 'GENERAL'",
                 'parent_category' => "VARCHAR(50) DEFAULT NULL",
                 'collection' => "VARCHAR(100) DEFAULT NULL",
                 'duration' => 'INT DEFAULT 0',
@@ -134,8 +134,7 @@ function getAppSchema() {
                 'enableYoutube' => 'TINYINT(1) DEFAULT 0',
                 'autoTranscode' => 'TINYINT(1) DEFAULT 0',
                 'is_transcoder_active' => 'TINYINT(1) DEFAULT 0',
-                'categoryPrices' => 'JSON DEFAULT NULL',
-                'customCategories' => 'JSON DEFAULT NULL',
+                'categories' => 'JSON DEFAULT NULL',
                 'categoryHierarchy' => 'JSON DEFAULT NULL',
                 'autoGroupFolders' => 'TINYINT(1) DEFAULT 1',
                 'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
@@ -143,7 +142,6 @@ function getAppSchema() {
                 'marketCommission' => 'INT DEFAULT 25',
                 'transferFee' => 'DECIMAL(10, 2) DEFAULT 5.00',
                 'vipPlans' => 'JSON DEFAULT NULL',
-                'paqueteMapper' => 'JSON DEFAULT NULL',
                 'enableDebugLog' => 'TINYINT(1) DEFAULT 1'
             ]
         ],
@@ -210,11 +208,15 @@ function syncTable($pdo, $tableName, $def) {
             $existingCols = array_map('strtolower', array_column($existingColumnsData, 'Field'));
             foreach ($def['cols'] as $colName => $colDef) {
                 if (!in_array(strtolower($colName), $existingCols)) {
+                    // Column doesn't exist, add it
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
+                    write_log("Columna añadida a $tableName: $colName", 'INFO');
                 }
             }
         }
-    } catch (Exception $e) { error_log("Sync Error: " . $e->getMessage()); }
+    } catch (Exception $e) { 
+        write_log("Sync Error en $tableName: " . $e->getMessage(), 'ERROR');
+    }
 }
 ?>

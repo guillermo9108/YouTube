@@ -2,6 +2,7 @@
 
 /**
  * Obtiene el token de autorización de forma robusta
+ * Soporta Header Authorization, $_SERVER y parámetro GET como respaldo
  */
 function getBearerToken() {
     $headers = getallheaders();
@@ -11,6 +12,7 @@ function getBearerToken() {
     elseif (isset($headers['authorization'])) $auth = $headers['authorization'];
     elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) $auth = $_SERVER['HTTP_AUTHORIZATION'];
     elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    elseif (isset($_GET['token'])) $auth = $_GET['token']; // Respaldo para servidores que filtran headers
     
     if (empty($auth)) return null;
 
@@ -22,9 +24,9 @@ function getBearerToken() {
 }
 
 function auth_login($pdo, $input) {
-    $user = $input['username'] ?? '';
+    $user = trim($input['username'] ?? '');
     $pass = $input['password'] ?? '';
-    $deviceId = $input['deviceId'] ?? 'unknown';
+    $deviceId = substr($input['deviceId'] ?? 'unknown', 0, 100);
 
     $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
     $stmt->execute([$user]);
@@ -48,18 +50,19 @@ function auth_login($pdo, $input) {
 }
 
 function auth_logout($pdo, $input) {
-    if (isset($input['userId'])) {
-        $pdo->prepare("UPDATE users SET currentSessionId = NULL WHERE id = ?")->execute([$input['userId']]);
+    $uid = trim($input['userId'] ?? '', '"\' ');
+    if ($uid) {
+        $pdo->prepare("UPDATE users SET currentSessionId = NULL WHERE id = ?")->execute([$uid]);
     }
     respond(true);
 }
 
 function auth_heartbeat($pdo, $input) {
-    $uid = $input['userId'] ?? null;
+    $uid = trim($input['userId'] ?? '', '"\' ');
     $token = getBearerToken();
 
     if (!$uid || !$token) {
-        write_log("Heartbeat Denegado: UID($uid) o Token faltante. Request Headers: " . json_encode(getallheaders()), 'WARNING');
+        write_log("Heartbeat Denegado: UID($uid) o Token faltante.", 'WARNING');
         http_response_code(401);
         respond(false, null, 'Sesión no proporcionada');
     }
@@ -73,15 +76,15 @@ function auth_heartbeat($pdo, $input) {
         respond(true);
     }
 
-    write_log("Heartbeat Error: Conflicto de Sesión para @{$session['username']}. Recibido: $token, Esperado: {$session['currentSessionId']}", 'WARNING');
+    write_log("Heartbeat Error: Conflicto de Sesión para @{$session['username']}. Recibido: $token", 'WARNING');
     http_response_code(401);
     respond(false, null, 'Sesión expirada o abierta en otro dispositivo');
 }
 
 function auth_register($pdo, $input) {
-    $username = $_POST['username'] ?? '';
+    $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
-    $deviceId = $_POST['deviceId'] ?? 'unknown';
+    $deviceId = substr($_POST['deviceId'] ?? 'unknown', 0, 100);
 
     if (!$username || !$password) respond(false, null, 'Campos incompletos');
     
@@ -112,6 +115,7 @@ function auth_register($pdo, $input) {
 }
 
 function auth_get_user($pdo, $id) {
+    $id = trim($id, '"\' '); // Limpieza crítica de comillas
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
     $stmt->execute([$id]);
     $u = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -136,10 +140,11 @@ function auth_get_all_users($pdo) {
 
 function auth_search_users($pdo, $input) {
     $q = trim($input['q'] ?? '');
+    $uid = trim($input['userId'] ?? '', '"\' ');
     if (strlen($q) < 2) respond(true, []);
     
     $stmt = $pdo->prepare("SELECT username, avatarUrl FROM users WHERE username LIKE ? AND id != ? LIMIT 5");
-    $stmt->execute(["%$q%", $input['userId'] ?? '']);
+    $stmt->execute(["%$q%", $uid]);
     $res = $stmt->fetchAll(PDO::FETCH_ASSOC);
     foreach ($res as &$r) { $r['avatarUrl'] = fix_url($r['avatarUrl']); }
     respond(true, $res);
@@ -147,7 +152,7 @@ function auth_search_users($pdo, $input) {
 
 function auth_update_user($pdo, $input) {
     $data = !empty($_POST) ? $_POST : $input;
-    $uid = $data['userId'] ?? null;
+    $uid = trim($data['userId'] ?? '', '"\' ');
     if (!$uid) respond(false, null, "ID usuario requerido");
 
     $fields = [];

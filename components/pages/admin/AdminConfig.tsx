@@ -6,7 +6,7 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
     CreditCard, Globe, Palette, ChevronRight, 
-    FolderTree, DollarSign, Settings2, Info
+    FolderTree, DollarSign, Settings2, Info, RefreshCw, Database
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -15,6 +15,7 @@ export default function AdminConfig() {
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     
     // UI Helpers
     const [activeSection, setActiveSection] = useState<string | null>('CATEGORIES');
@@ -42,11 +43,22 @@ export default function AdminConfig() {
         finally { setSaving(false); }
     };
 
+    const handleRepairDb = async () => {
+        setSyncing(true);
+        try {
+            await db.adminRepairDb();
+            toast.success("Estructura de Base de Datos Reparada");
+        } catch(e: any) { 
+            toast.error("Fallo al sincronizar: " + e.message);
+        } finally { 
+            setSyncing(false); 
+        }
+    };
+
     const updateValue = (key: keyof SystemSettings, val: any) => {
         setSettings(prev => prev ? { ...prev, [key]: val } : null);
     };
 
-    // --- Category Management ---
     const addCategory = () => {
         const newCat: Category = { id: 'c_' + Date.now(), name: 'NUEVA CATEGORÍA', price: 1.00, autoSub: false };
         updateValue('categories', [...(settings?.categories || []), newCat]);
@@ -86,9 +98,14 @@ export default function AdminConfig() {
                     <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic">Ajustes Globales</h2>
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Configuración del Servidor & Ecosistema</p>
                 </div>
-                <button onClick={handleSaveConfig} disabled={saving} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-4 px-8 rounded-2xl flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition-all">
-                    {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar Cambios
-                </button>
+                <div className="flex gap-2 w-full md:w-auto">
+                    <button onClick={handleRepairDb} disabled={syncing} className="flex-1 md:flex-none p-4 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-2xl transition-all active:scale-95" title="Sincronizar DB">
+                        {syncing ? <RefreshCw size={20} className="animate-spin"/> : <Database size={20}/>}
+                    </button>
+                    <button onClick={handleSaveConfig} disabled={saving} className="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-4 px-8 rounded-2xl flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition-all">
+                        {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar
+                    </button>
+                </div>
             </div>
 
             {/* 1. GESTOR DE CATEGORÍAS */}
@@ -144,12 +161,6 @@ export default function AdminConfig() {
                                     </div>
                                 </div>
                             ))}
-                            {settings?.categories.length === 0 && (
-                                <div className="p-10 text-center border-2 border-dashed border-slate-800 rounded-3xl opacity-40">
-                                    <Tag className="mx-auto mb-2" size={32}/>
-                                    <p className="text-[10px] font-black uppercase tracking-widest">Sin categorías definidas</p>
-                                </div>
-                            )}
                         </div>
                     </div>
                 )}
@@ -190,19 +201,6 @@ export default function AdminConfig() {
                                 <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Conversión Saldo / 1 EUR</label>
                                 <input type="number" value={settings?.currencyConversion || 300} onChange={e => updateValue('currencyConversion', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-black text-lg"/>
                             </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 4. MARCA & TEXTOS */}
-            <div className="space-y-3">
-                <SectionHeader id="BRAND" label="Personalización" icon={Palette} />
-                {activeSection === 'BRAND' && (
-                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Instrucciones Recarga</label>
-                            <textarea value={settings?.paymentInstructions || ''} onChange={e => updateValue('paymentInstructions', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs min-h-[120px]" placeholder="Ej: Envía a la tarjeta 9225 XXXX..."/>
                         </div>
                     </div>
                 )}
