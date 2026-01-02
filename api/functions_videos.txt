@@ -119,7 +119,7 @@ function video_scan_local($pdo, $input) {
     $pdo->beginTransaction();
     try {
         foreach ($iterator as $file) {
-            if (!$file.isFile()) continue;
+            if (!$file->isFile()) continue;
             $ext = strtolower($file->getExtension());
             if (!in_array($ext, $allowedExts)) continue;
 
@@ -200,18 +200,20 @@ function video_update_metadata($pdo, $post, $files) {
     $sql .= " WHERE id = ?"; $params[] = $id;
     $pdo->prepare($sql)->execute($params);
 
+    // CORRECCIÓN: Usar la columna 'categories' que es la que se actualiza desde el AdminConfig
     $settingsFull = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
     if ($settingsFull) {
-        $hierarchy = json_decode($settingsFull['categoryHierarchy'] ?? '[]', true);
+        $hierarchy = json_decode($settingsFull['categories'] ?? '[]', true);
         internal_organize_video($pdo, $id, $settingsFull, $hierarchy);
     }
     respond(true, ['status' => 'published']);
 }
 
 function video_smart_organize($pdo) {
+    // CORRECCIÓN: Usar la columna 'categories'
     $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
-    $hierarchy = json_decode($settings['categoryHierarchy'] ?? '[]', true);
+    $hierarchy = json_decode($settings['categories'] ?? '[]', true);
     
     $stmt = $pdo->query("SELECT id FROM videos WHERE category = 'PROCESSING' LIMIT 100");
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);

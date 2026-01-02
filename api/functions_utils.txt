@@ -3,7 +3,7 @@
 function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
-    $pathParts = explode('/', $fullPathNormalized);
+    $pathParts = array_filter(explode('/', $fullPathNormalized));
     
     // 1. Limpieza básica del nombre
     $cleanText = function($txt) {
@@ -19,10 +19,13 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
     $detectedCollection = null;
 
     // 2. Buscar coincidencia en la ruta con las categorías del administrador
-    // Recorremos las partes de la ruta para detectar Categoría, Padre y Colección
-    $partsCount = count($pathParts);
-    foreach (array_reverse($pathParts) as $index => $segment) {
-        if (empty($segment) || $segment === $filename) continue;
+    // Recorremos las partes de la ruta de atrás hacia adelante
+    $parts = array_values($pathParts);
+    $partsCount = count($parts);
+    
+    for ($i = $partsCount - 1; $i >= 0; $i--) {
+        $segment = trim($parts[$i]);
+        if (empty($segment) || $segment === basename($fullPath)) continue;
 
         foreach ($hierarchy as $cat) {
             if (strcasecmp($segment, $cat['name']) === 0) {
@@ -30,22 +33,20 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
                 
                 // Si la categoría tiene auto-subcategorías (Modo Carpeta)
                 if (!empty($cat['autoSub'])) {
-                    // El índice original en el array $pathParts
-                    $originalIndex = array_search($segment, $pathParts);
-                    
-                    // Si hay una subcarpeta después de la categoría detectada
-                    if ($originalIndex !== false && isset($pathParts[$originalIndex + 1]) && $pathParts[$originalIndex + 1] !== $filename) {
+                    // Si hay segmentos después de la categoría detectada pero antes del archivo
+                    // Ej: /MOVIES/Action/TheMatrix.mp4 -> segment es MOVIES, el siguiente es Action
+                    if (isset($parts[$i + 1]) && $parts[$i + 1] !== basename($fullPath)) {
                         $detectedParent = $cat['name'];
-                        $detectedCat = $pathParts[$originalIndex + 1];
+                        $detectedCat = $parts[$i + 1];
                         
                         // Si hay OTRA subcarpeta adicional, la tratamos como Colección/Serie
-                        if (isset($pathParts[$originalIndex + 2]) && $pathParts[$originalIndex + 2] !== $filename) {
-                            $detectedCollection = $pathParts[$originalIndex + 1];
-                            $detectedCat = $pathParts[$originalIndex + 2];
+                        if (isset($parts[$i + 2]) && $parts[$i + 2] !== basename($fullPath)) {
+                            $detectedCollection = $parts[$i + 1];
+                            $detectedCat = $parts[$i + 2];
                         }
                     }
                 }
-                break 2;
+                break 2; // Salir de ambos bucles si encontramos categoría
             }
         }
     }
