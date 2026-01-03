@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft, Play, Pause } from 'lucide-react';
 import { db } from '../../services/db';
@@ -28,7 +27,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   const [comments, setComments] = useState<Comment[]>([]);
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
-  const [likeCount, setLikeCount] = useState(video.likes);
+  const [likeCount, setLikeCount] = useState(video.likes || 0);
   const [isSubscribed, setIsSubscribed] = useState(false);
 
   useEffect(() => {
@@ -72,7 +71,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   const handleScreenTouch = (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // Lógica para detectar doble toque sin interferir con el simple toque
     if (clickTimerRef.current) {
         // DOBLE TOQUE DETECTADO
         clearTimeout(clickTimerRef.current);
@@ -132,9 +130,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
                 className="w-full h-full object-cover"
                 loop playsInline preload={preload} crossOrigin="anonymous"
             />
-            {isBuffering && isActive && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><Loader2 className="animate-spin text-white w-8 h-8" /></div>
-            )}
             {paused && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50">
                     <Pause size={64} fill="currentColor" />
@@ -258,8 +253,7 @@ export default function Shorts() {
   
   useEffect(() => {
     db.getAllVideos().then((all: Video[]) => {
-        // Filtramos shorts (menos de 3 min) y mezclamos aleatoriamente
-        const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
+        const shorts = all.filter(v => v.duration < 180 && !['PENDING', 'PROCESSING'].includes(v.category)).sort(() => Math.random() - 0.5);
         setVideos(shorts);
     });
   }, []);

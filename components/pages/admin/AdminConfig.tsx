@@ -1,13 +1,12 @@
-
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
-import { SystemSettings, Category } from '../../../types';
+import { SystemSettings, Category, VipPlan } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { 
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
     CreditCard, Globe, Palette, ChevronRight, 
     FolderTree, DollarSign, Settings2, Info, RefreshCw, Database,
-    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc, FileText
+    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc, FileText, Crown, Edit3
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -25,6 +24,7 @@ export default function AdminConfig() {
         try {
             const s: any = await db.getSystemSettings();
             if (!s.categories) s.categories = [];
+            if (!s.vipPlans) s.vipPlans = [];
             setSettings(s);
         } catch(e) { toast.error("Error al cargar configuración"); }
         finally { setLoading(false); }
@@ -59,6 +59,7 @@ export default function AdminConfig() {
         setSettings(prev => prev ? { ...prev, [key]: val } : null);
     };
 
+    // --- Categorías ---
     const addCategory = () => {
         const newCat: Category = { 
             id: 'c_' + Date.now(), 
@@ -77,6 +78,27 @@ export default function AdminConfig() {
 
     const removeCategory = (id: string) => {
         updateValue('categories', settings?.categories.filter(c => c.id !== id) || []);
+    };
+
+    // --- VIP Plans ---
+    const addVipPlan = () => {
+        const newPlan: VipPlan = {
+            id: 'plan_' + Date.now(),
+            name: 'NUEVO PLAN VIP',
+            price: 10,
+            durationDays: 30,
+            highlight: false
+        };
+        updateValue('vipPlans', [...(settings?.vipPlans || []), newPlan]);
+    };
+
+    const updateVipPlan = (id: string, field: keyof VipPlan, val: any) => {
+        const next = settings?.vipPlans?.map(p => p.id === id ? { ...p, [field]: val } : p) || [];
+        updateValue('vipPlans', next);
+    };
+
+    const removeVipPlan = (id: string) => {
+        updateValue('vipPlans', settings?.vipPlans?.filter(p => p.id !== id) || []);
     };
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>;
@@ -170,7 +192,7 @@ export default function AdminConfig() {
                                         <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1 mb-2"><SortAsc size={10}/> Orden de Visualización</label>
                                         <select 
                                             value={cat.sortOrder || 'LATEST'}
-                                            onChange={e => updateCategory(cat.id, 'sortOrder', e.target.value)}
+                                            onChange={e => updateCategory(cat.id, 'sortOrder', e.target.value as any)}
                                             className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-indigo-300 outline-none"
                                         >
                                             <option value="LATEST">Fecha (Más reciente primero)</option>
@@ -185,7 +207,75 @@ export default function AdminConfig() {
                 )}
             </div>
 
-            {/* 2. ECONOMÍA & COMISIONES */}
+            {/* 2. PLANES VIP */}
+            <div className="space-y-3">
+                <SectionHeader id="VIP" label="Membresías VIP" icon={Crown} />
+                {activeSection === 'VIP' && (
+                    <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
+                        <div className="flex justify-between items-center px-2">
+                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Zap size={12}/> Define tus pases de acceso</span>
+                            <button onClick={addVipPlan} className="bg-amber-600 hover:bg-amber-500 text-white p-2 rounded-xl flex items-center gap-1 text-[10px] font-black uppercase shadow-lg active:scale-90 transition-all">
+                                <Plus size={16}/> Nuevo Plan
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            {settings?.vipPlans?.map((plan) => (
+                                <div key={plan.id} className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 relative overflow-hidden group">
+                                    {plan.highlight && <div className="absolute -right-10 top-2 rotate-45 bg-amber-500 text-black text-[8px] font-black px-10 py-1 uppercase shadow-xl">Popular</div>}
+                                    
+                                    <div className="flex justify-between gap-2">
+                                        <div className="flex-1">
+                                            <label className="text-[9px] font-black text-slate-600 uppercase block mb-1">Nombre del Plan</label>
+                                            <input 
+                                                type="text" 
+                                                value={plan.name} 
+                                                onChange={e => updateVipPlan(plan.id, 'name', e.target.value)}
+                                                className="bg-transparent border-b border-slate-800 focus:border-amber-500 text-white font-black text-sm outline-none w-full py-1"
+                                            />
+                                        </div>
+                                        <button onClick={() => removeVipPlan(plan.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors self-start mt-4">
+                                            <Trash2 size={16}/>
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><DollarSign size={10}/> Precio ($)</label>
+                                            <input 
+                                                type="number" 
+                                                value={plan.price} 
+                                                onChange={e => updateVipPlan(plan.id, 'price', parseFloat(e.target.value))}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 outline-none"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><Clock size={10}/> Días</label>
+                                            <input 
+                                                type="number" 
+                                                value={plan.durationDays} 
+                                                onChange={e => updateVipPlan(plan.id, 'durationDays', parseInt(e.target.value))}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-blue-400 outline-none"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-600 uppercase block mb-1 text-center">Destacar</label>
+                                            <button 
+                                                onClick={() => updateVipPlan(plan.id, 'highlight', !plan.highlight)}
+                                                className={`w-full py-2 rounded-xl border font-black text-[10px] uppercase transition-all ${plan.highlight ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-slate-900 border-slate-800 text-slate-600'}`}
+                                            >
+                                                {plan.highlight ? 'SÍ' : 'NO'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* 3. ECONOMÍA & COMISIONES */}
             <div className="space-y-3">
                 <SectionHeader id="FINANCE" label="Economía del Sistema" icon={Percent} />
                 {activeSection === 'FINANCE' && (
@@ -208,7 +298,7 @@ export default function AdminConfig() {
                 )}
             </div>
 
-            {/* 3. LÍMITES & AUTOMATIZACIÓN */}
+            {/* 4. LÍMITES & AUTOMATIZACIÓN */}
             <div className="space-y-3">
                 <SectionHeader id="AUTOMATION" label="Límites & Escaneo" icon={HardDrive} />
                 {activeSection === 'AUTOMATION' && (
@@ -249,21 +339,11 @@ export default function AdminConfig() {
                                 </select>
                             </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Inicio Descargas</label>
-                                <input type="time" value={settings?.downloadStartTime || '01:00'} onChange={e => updateValue('downloadStartTime', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Fin Descargas</label>
-                                <input type="time" value={settings?.downloadEndTime || '06:00'} onChange={e => updateValue('downloadEndTime', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
-                            </div>
-                        </div>
                     </div>
                 )}
             </div>
 
-            {/* 4. INTELIGENCIA IA */}
+            {/* 5. INTELIGENCIA IA */}
             <div className="space-y-3">
                 <SectionHeader id="AI" label="Inteligencia & Media" icon={Sparkles} />
                 {activeSection === 'AI' && (
@@ -280,7 +360,7 @@ export default function AdminConfig() {
                 )}
             </div>
 
-            {/* 5. PAGOS & PASARELA */}
+            {/* 6. PAGOS & PASARELA */}
             <div className="space-y-3">
                 <SectionHeader id="PAYMENTS" label="Pagos (Tropipay)" icon={CreditCard} />
                 {activeSection === 'PAYMENTS' && (

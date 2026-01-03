@@ -218,7 +218,13 @@ function interact_rate($pdo, $input) {
     else { $disliked = !$disliked; if($disliked) $liked = 0; }
     $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE liked=VALUES(liked), disliked=VALUES(disliked)")
         ->execute([$userId, $videoId, $liked, $disliked]);
-    respond(true, ['liked' => (bool)$liked, 'disliked' => (bool)$disliked]);
+    
+    // Contar likes actualizados
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM interactions WHERE videoId = ? AND liked = 1");
+    $countStmt->execute([$videoId]);
+    $newLikeCount = (int)$countStmt->fetchColumn();
+    
+    respond(true, ['liked' => (bool)$liked, 'disliked' => (bool)$disliked, 'newLikeCount' => $newLikeCount]);
 }
 
 function interact_mark_watched($pdo, $input) {

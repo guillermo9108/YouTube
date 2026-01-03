@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
@@ -6,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    Download, SkipForward, ChevronRight, Home, Play, Zap, Info, ExternalLink, AlertTriangle, Send, CheckCircle2
+    SkipForward, ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -26,6 +25,7 @@ export default function Watch() {
     // Estados de Interacción
     const [likes, setLikes] = useState(0);
     const [comments, setComments] = useState<Comment[]>([]);
+    const [showComments, setShowComments] = useState(false);
     const [newComment, setNewComment] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -44,6 +44,7 @@ export default function Watch() {
         setLoading(true);
         setPlaybackError(null);
         setCountdown(null);
+        setShowComments(false);
         if (timerRef.current) clearInterval(timerRef.current);
 
         const fetchMeta = async () => {
@@ -169,7 +170,7 @@ export default function Watch() {
                                     
                                     <div className="flex gap-3 mt-8">
                                         <button onClick={openExternalPlayer} className="px-6 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-500">
-                                            <ExternalLink size={16}/> Abrir en VLC/MX
+                                            <ExternalLink size={16}/> Abrir Externo
                                         </button>
                                         <button onClick={handleSkipNext} className="px-6 py-3 bg-slate-800 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2">
                                             <SkipForward size={16}/> Saltar Ya
@@ -238,6 +239,14 @@ export default function Watch() {
                                 >
                                     <ThumbsDown size={18} />
                                 </button>
+                                <div className="w-px h-6 bg-white/10"></div>
+                                <button 
+                                    onClick={() => setShowComments(!showComments)}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${showComments ? 'bg-white text-black' : 'text-slate-400 hover:bg-slate-800'}`}
+                                >
+                                    <MessageCircle size={18} />
+                                    <span className="text-xs font-black">{comments.length}</span>
+                                </button>
                             </div>
                         </div>
 
@@ -246,48 +255,52 @@ export default function Watch() {
                         </div>
 
                         {/* Sección de Comentarios */}
-                        <div className="mt-10 space-y-6">
-                            <h3 className="font-black text-white text-sm uppercase tracking-widest flex items-center gap-2">
-                                <MessageSquare size={18} className="text-indigo-400"/> Comentarios ({comments.length})
-                            </h3>
+                        {showComments && (
+                            <div className="mt-10 space-y-6 animate-in slide-in-from-top-4">
+                                <h3 className="font-black text-white text-sm uppercase tracking-widest flex items-center gap-2">
+                                    <MessageSquare size={18} className="text-indigo-400"/> Comentarios ({comments.length})
+                                </h3>
 
-                            {user && (
-                                <form onSubmit={handleAddComment} className="flex gap-4">
-                                    <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
-                                        {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{user.username[0]}</div>}
-                                    </div>
-                                    <div className="flex-1 flex gap-2">
-                                        <input 
-                                            type="text" 
-                                            value={newComment}
-                                            onChange={e => setNewComment(e.target.value)}
-                                            placeholder="Añadir un comentario..."
-                                            className="flex-1 bg-transparent border-b border-slate-800 focus:border-indigo-500 outline-none text-sm text-white py-2 transition-colors"
-                                        />
-                                        <button disabled={!newComment.trim() || isSubmitting} type="submit" className="bg-indigo-600 p-2.5 rounded-full text-white hover:bg-indigo-500 disabled:opacity-30 transition-all active:scale-90 shadow-lg">
-                                            {isSubmitting ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
-                                        </button>
-                                    </div>
-                                </form>
-                            )}
-
-                            <div className="space-y-6 pt-4">
-                                {comments.map(c => (
-                                    <div key={c.id} className="flex gap-4 group">
+                                {user && (
+                                    <form onSubmit={handleAddComment} className="flex gap-4">
                                         <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
-                                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{c.username[0]}</div>}
+                                            {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{user.username[0]}</div>}
                                         </div>
-                                        <div>
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <span className="text-xs font-black text-white">@{c.username}</span>
-                                                <span className="text-[9px] text-slate-600 font-bold uppercase">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
+                                        <div className="flex-1 flex gap-2">
+                                            <input 
+                                                type="text" 
+                                                value={newComment}
+                                                onChange={e => setNewComment(e.target.value)}
+                                                placeholder="Añadir un comentario..."
+                                                className="flex-1 bg-transparent border-b border-slate-800 focus:border-indigo-500 outline-none text-sm text-white py-2 transition-colors"
+                                            />
+                                            <button disabled={!newComment.trim() || isSubmitting} type="submit" className="bg-indigo-600 p-2.5 rounded-full text-white hover:bg-indigo-500 disabled:opacity-30 transition-all active:scale-90 shadow-lg">
+                                                {isSubmitting ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
+                                            </button>
+                                        </div>
+                                    </form>
+                                )}
+
+                                <div className="space-y-6 pt-4">
+                                    {comments.length === 0 ? (
+                                        <div className="text-center py-10 text-slate-600 italic text-xs uppercase font-bold tracking-widest">Aún no hay comentarios</div>
+                                    ) : comments.map(c => (
+                                        <div key={c.id} className="flex gap-4 group">
+                                            <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
+                                                {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{c.username[0]}</div>}
                                             </div>
-                                            <p className="text-sm text-slate-400 leading-snug">{c.text}</p>
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="text-xs font-black text-white">@{c.username}</span>
+                                                    <span className="text-[9px] text-slate-600 font-bold uppercase">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
+                                                </div>
+                                                <p className="text-sm text-slate-400 leading-snug">{c.text}</p>
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
 
