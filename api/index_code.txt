@@ -1,6 +1,7 @@
+
 <?php
 /**
- * StreamPay - Core Controller V11.5
+ * StreamPay - Core Controller V11.6 (Error Shield Enabled)
  */
 
 ob_start(); 
@@ -79,6 +80,7 @@ require_once 'functions_videos.php';
 require_once 'functions_interactions.php';
 require_once 'functions_market.php';
 require_once 'functions_admin.php';
+require_once 'functions_ftp.php'; // Habilitado
 
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
@@ -153,6 +155,11 @@ try {
         case 'admin_get_logs': admin_get_logs(); break;
         case 'admin_clear_logs': admin_clear_logs(); break;
         case 'get_real_stats': get_real_stats($pdo); break;
+
+        // --- FTP (NUEVAS ACCIONES ACTIVADAS) ---
+        case 'list_ftp_files': listFtpFiles($pdo, $_GET['path'] ?? '/'); break;
+        case 'import_ftp_file': importFtpFile($pdo, $input); break;
+        case 'scan_ftp_recursive': scanFtpRecursive($pdo, $input); break;
 
         // --- MOTOR DE TRANSCODIFICACIÓN ---
         case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;

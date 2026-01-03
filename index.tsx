@@ -1,12 +1,24 @@
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { db } from './services/db';
+
+// Capture Global JS Errors and report to Server Log
+window.onerror = function(message, source, lineno, colno, error) {
+    const report = `JS ERROR: ${message} at ${source}:${lineno}:${colno}`;
+    db.logRemote(report, 'ERROR');
+};
+
+window.onunhandledrejection = function(event) {
+    const report = `UNHANDLED PROMISE: ${event.reason}`;
+    db.logRemote(report, 'ERROR');
+};
 
 // Register Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    // Use relative path './sw.js' to support subfolder deployment (e.g. /streampay/)
     navigator.serviceWorker.register('./sw.js').then(registration => {
       console.log('SW registered: ', registration);
     }).catch(registrationError => {

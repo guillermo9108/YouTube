@@ -1,3 +1,4 @@
+
 <?php
 
 function video_process_rows(&$rows) {
@@ -41,17 +42,12 @@ function video_get_by_creator($pdo, $userId) {
     respond(true, $videos);
 }
 
-/**
- * Mejorado: Motor de Playlist Unidireccional
- * Evita bucles infinitos entre 2 videos y asegura el orden lógico (Capítulo siguiente o Video anterior)
- */
 function video_get_related($pdo, $videoId) {
     $stmt = $pdo->prepare("SELECT id, collection, category, parent_category, createdAt, title FROM videos WHERE id = ?");
     $stmt->execute([$videoId]);
     $curr = $stmt->fetch();
     if (!$curr) respond(true, []);
 
-    // 1. Determinar el contexto de ordenamiento
     $stmtS = $pdo->query("SELECT categories FROM system_settings LIMIT 1");
     $sets = $stmtS->fetch();
     $categories = json_decode($sets['categories'] ?? '[]', true);
@@ -67,32 +63,26 @@ function video_get_related($pdo, $videoId) {
 
     $sql = "SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')";
     
-    // Filtro de contexto: Misma colección o misma categoría
     if ($curr['collection']) {
         $sql .= " AND v.collection = " . $pdo->quote($curr['collection']);
     } else {
         $sql .= " AND v.category = " . $pdo->quote($curr['category']);
     }
 
-    // --- LÓGICA ANTI-BUCLE ---
-    // Si estamos en una COLECCIÓN o el orden es ALFABÉTICO, buscamos el "Siguiente" (A->Z o Viejo->Nuevo)
     if ($curr['collection'] || $sortMode === 'ALPHA') {
         if ($sortMode === 'ALPHA') {
             $sql .= " AND v.title > " . $pdo->quote($curr['title']);
             $sql .= " ORDER BY v.title ASC";
         } else {
-            // En colecciones/series, lo normal es ver de viejo a nuevo (Ep 1, Ep 2...)
             $sql .= " AND v.createdAt > " . $curr['createdAt'];
             $sql .= " ORDER BY v.createdAt ASC";
         }
     } 
-    // Si es LATEST (general), buscamos el "Anterior" en el tiempo para seguir consumiendo hacia abajo
     else if ($sortMode === 'LATEST') {
         $sql .= " AND v.createdAt < " . $curr['createdAt'];
         $sql .= " ORDER BY v.createdAt DESC";
     }
     else {
-        // Random: Simplemente mezclar
         $sql .= " ORDER BY RAND()";
     }
 
@@ -102,7 +92,6 @@ function video_get_related($pdo, $videoId) {
     $stmt->execute([$videoId]);
     $related = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    // Si no hay "Siguiente" en el flujo lineal, devolvemos videos populares de la misma categoría como respaldo
     if (count($related) === 0) {
         $backupSql = "SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.category = ? ORDER BY v.views DESC LIMIT 10";
         $stmtB = $pdo->prepare($backupSql);
@@ -114,19 +103,14 @@ function video_get_related($pdo, $videoId) {
     respond(true, $related);
 }
 
-/**
- * PASO 4: Mantenimiento Avanzado
- */
 function video_fix_metadata($pdo) {
     $sql = "UPDATE videos SET category = 'PENDING', processing_attempts = 0 
             WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg%') 
             AND category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')";
     $count = $pdo->exec($sql);
-    
     $sqlGen = "UPDATE videos SET category = 'PROCESSING' 
                WHERE category = 'GENERAL' AND isLocal = 1";
     $countGen = $pdo->exec($sqlGen);
-
     respond(true, ['fixedBroken' => $count, 'reCategorized' => $countGen]);
 }
 
@@ -147,23 +131,37 @@ function video_scan_local($pdo, $input) {
     set_time_limit(600);
     $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
     if (!$rawPath || !is_dir($rawPath)) respond(false, null, "Ruta de librería inválida o inaccesible");
+    
     $rootPath = realpath($rawPath);
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $addedCount = 0;
     $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'ts', 'flv'];
-    $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
-    $iterator = new RecursiveIteratorIterator($dirIterator);
-    $pdo->beginTransaction();
+
     try {
+        // Mejorado: Ignorar carpetas sin permiso (Android/System restricted)
+        $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
+        
+        $pdo->beginTransaction();
         foreach ($iterator as $file) {
-            if (!$file->isFile()) continue;
+            // Ignorar subdirectorios que lancen error al ser accedidos
+            try {
+                if (!$file->isFile()) continue;
+            } catch (UnexpectedValueException $e) {
+                write_log("Skipping restricted folder: " . $e->getMessage(), 'WARNING');
+                continue; 
+            }
+
             $ext = strtolower($file->getExtension());
             if (!in_array($ext, $allowedExts)) continue;
+            
             $fullPath = str_replace('\\', '/', $file->getPathname());
             $vidId = 'loc_' . md5($fullPath);
+            
             $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE id = ?");
             $check->execute([$vidId]);
             if ($check->fetchColumn() > 0) continue;
+            
             $title = basename($fullPath);
             $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, isLocal) VALUES (?, ?, 'Local Library', 0, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 1)");
             $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
@@ -171,7 +169,10 @@ function video_scan_local($pdo, $input) {
         }
         $pdo->commit();
         respond(true, ['newToImport' => $addedCount, 'totalFound' => $addedCount]);
-    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
+    } catch (Exception $e) { 
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        respond(false, null, "Error de acceso: " . $e->getMessage()); 
+    }
 }
 
 function video_upload($pdo, $post, $files) {
@@ -204,9 +205,6 @@ function video_upload($pdo, $post, $files) {
     respond(true, ['id' => $id]);
 }
 
-/**
- * PASO 2 & COLABORACIÓN
- */
 function video_update_metadata($pdo, $post, $files) {
     $id = $post['id'] ?? '';
     $duration = isset($post['duration']) ? floatval($post['duration']) : 0;
@@ -239,9 +237,6 @@ function video_update_metadata($pdo, $post, $files) {
     respond(true, ['status' => 'published']);
 }
 
-/**
- * PASO 3: Organización Inteligente
- */
 function video_smart_organize($pdo) {
     $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
@@ -257,9 +252,6 @@ function video_smart_organize($pdo) {
     respond(true, ['processed' => $processed, 'remaining' => $remaining]);
 }
 
-/**
- * PASO 5: Re-organización Global
- */
 function video_reorganize_all($pdo) {
     set_time_limit(600);
     $stmtS = $pdo->query("SELECT * FROM system_settings LIMIT 1");
@@ -275,9 +267,6 @@ function video_reorganize_all($pdo) {
     respond(true, ['processed' => $processed, 'total' => count($ids)]);
 }
 
-/**
- * Motor interno de organización
- */
 function internal_organize_video($pdo, $id, $settings, $hierarchy) {
     $stmt = $pdo->prepare("SELECT id, title, videoUrl, isLocal FROM videos WHERE id = ?");
     $stmt->execute([$id]);

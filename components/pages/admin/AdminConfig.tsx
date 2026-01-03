@@ -7,7 +7,7 @@ import {
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
     CreditCard, Globe, Palette, ChevronRight, 
     FolderTree, DollarSign, Settings2, Info, RefreshCw, Database,
-    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc
+    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc, FileText
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -178,7 +178,7 @@ export default function AdminConfig() {
                                             <option value="RANDOM">Aleatorio (Mezclar)</option>
                                         </select>
                                     </div>
-                                </div>
+                                </tr>
                             ))}
                         </div>
                     </div>
@@ -213,6 +213,24 @@ export default function AdminConfig() {
                 <SectionHeader id="AUTOMATION" label="Límites & Escaneo" icon={HardDrive} />
                 {activeSection === 'AUTOMATION' && (
                     <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
+                        <div className="bg-slate-950 p-4 rounded-2xl border border-indigo-500/30">
+                            <label className="flex items-center justify-between cursor-pointer">
+                                <div className="flex items-center gap-2">
+                                    <FileText size={18} className="text-indigo-400"/>
+                                    <div>
+                                        <span className="text-xs font-black text-white uppercase">Registro Log Activo</span>
+                                        <p className="text-[9px] text-slate-500 uppercase font-bold mt-0.5">Guarda errores en debug_log.txt</p>
+                                    </div>
+                                </div>
+                                <input 
+                                    type="checkbox" 
+                                    checked={!!settings?.enableDebugLog} 
+                                    onChange={e => updateValue('enableDebugLog', e.target.checked ? 1 : 0)}
+                                    className="w-5 h-5 accent-indigo-500"
+                                />
+                            </label>
+                        </div>
+
                         <div>
                             <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta Librería NAS/Local</label>
                             <input type="text" value={settings?.localLibraryPath || ''} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono" placeholder="/volume1/videos/..."/>
