@@ -208,7 +208,6 @@ function syncTable($pdo, $tableName, $def) {
             $existingCols = array_map('strtolower', array_column($existingColumnsData, 'Field'));
             foreach ($def['cols'] as $colName => $colDef) {
                 if (!in_array(strtolower($colName), $existingCols)) {
-                    // Column doesn't exist, add it
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
                     write_log("Columna añadida a $tableName: $colName", 'INFO');
@@ -219,4 +218,3 @@ function syncTable($pdo, $tableName, $def) {
         write_log("Sync Error en $tableName: " . $e->getMessage(), 'ERROR');
     }
 }
-?>

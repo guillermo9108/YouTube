@@ -1,4 +1,3 @@
-
 import { 
   User, Video, Category, SystemSettings, Transaction, 
   Notification, VideoResult, ContentRequest, MarketplaceItem, 
@@ -8,16 +7,38 @@ import {
 
 /**
  * DBService handles all API communication with the PHP backend.
+ * Routes requests to either index.php or install.php depending on the action.
  */
 class DBService {
-  private apiBase = 'api/index.php';
+  private indexBase = 'api/index.php';
+  private installBase = 'api/install.php';
 
   /**
    * Generic request handler with session management and 401 interceptor.
    */
   public async request<T>(query: string, options: RequestInit = {}): Promise<T> {
-    const token = localStorage.getItem('sp_session_token');
-    const url = `${this.apiBase}?${query}${token ? `&token=${token}` : ''}`;
+    const rawToken = localStorage.getItem('sp_session_token');
+    const token = rawToken ? rawToken.replace(/['"]+/g, '') : null;
+    
+    // Check if we are in Demo Mode (Local Storage only)
+    const isDemo = localStorage.getItem('sp_demo_mode') === 'true';
+    if (isDemo && !query.includes('action=check_installation')) {
+       // In a real implementation, we would mock all calls here. 
+       // For now, we allow the request to proceed but the App is designed to handle local data if needed.
+    }
+
+    // Precise routing logic
+    // action=check_installation -> index.php (handled by app core)
+    // action=check / verify_db / install -> install.php (handled by installer)
+    const isInstallAction = query === 'action=check' || 
+                            query.startsWith('action=check&') ||
+                            query.includes('action=verify_db') || 
+                            query === 'action=install' ||
+                            query.startsWith('action=install&') ||
+                            query.includes('action=ping');
+    
+    const base = isInstallAction ? this.installBase : this.indexBase;
+    const url = `${base}?${query}${token ? `&token=${token}` : ''}`;
     
     try {
       const res = await fetch(url, options);
@@ -27,28 +48,65 @@ class DBService {
         throw new Error("Session expired");
       }
 
-      const json = await res.json().catch(() => {
-        throw new Error("Respuesta del servidor inválida (No JSON)");
-      });
+      if (res.status === 404) {
+          throw new Error(`API_NOT_FOUND: ${base}`);
+      }
 
-      // El backend PHP de StreamPay siempre devuelve { success: boolean, data?: any, error?: string }
+      const text = await res.text();
+      
+      // Attempt to find and parse JSON within the response text
+      let cleanedText = text.trim();
+      if (cleanedText.charCodeAt(0) === 0xFEFF) cleanedText = cleanedText.substring(1);
+
+      const firstCurly = cleanedText.indexOf('{');
+      const firstSquare = cleanedText.indexOf('[');
+      let startIndex = -1;
+      if (firstCurly !== -1 && (firstSquare === -1 || (firstCurly < firstSquare && firstCurly !== -1))) {
+        startIndex = firstCurly;
+      } else if (firstSquare !== -1) {
+        startIndex = firstSquare;
+      }
+      
+      if (startIndex > 0) cleanedText = cleanedText.substring(startIndex);
+
+      const lastCurly = cleanedText.lastIndexOf('}');
+      const lastSquare = cleanedText.lastIndexOf(']');
+      let endIndex = Math.max(lastCurly, lastSquare);
+      if (endIndex !== -1 && endIndex < cleanedText.length - 1) {
+          cleanedText = cleanedText.substring(0, endIndex + 1);
+      }
+
+      let json;
+      try {
+        json = JSON.parse(cleanedText);
+      } catch (e) {
+        console.group("Respuesta de servidor inválida (No JSON)");
+        console.error("Acción:", query);
+        console.error("URL:", url);
+        console.error("Status:", res.status);
+        console.error("Texto recibido:", text);
+        console.groupEnd();
+        throw new Error("El servidor no devolvió JSON válido. Verifica que el servidor PHP esté funcionando correctamente.");
+      }
+
       if (json.success === false) {
-        // Caso especial: El guard de App.tsx busca este mensaje para redirigir a /setup
-        if (json.error === 'Sistema no instalado') {
+        if (json.error === 'Sistema no instalado' || json.installed === false) {
           throw new Error('SYSTEM_NOT_INSTALLED');
         }
         throw new Error(json.error || "Error desconocido en el servidor");
       }
       
-      return json.data as T;
+      return json.data !== undefined ? json.data as T : json as T;
     } catch (err: any) {
+      if (err.message === 'API_NOT_FOUND: api/index.php' || err.message === 'API_NOT_FOUND: api/install.php') {
+         throw new Error('API_MISSING');
+      }
       console.error(`Fetch error [${query}]:`, err);
       throw err;
     }
   }
 
   // --- Auth & Session ---
-  
   public async login(username: string, password: string): Promise<User> {
     return this.request<User>(`action=login`, {
       method: 'POST',
@@ -61,11 +119,7 @@ class DBService {
     fd.append('username', username);
     fd.append('password', password);
     if (avatar) fd.append('avatar', avatar);
-    
-    return this.request<User>(`action=register`, {
-      method: 'POST',
-      body: fd
-    });
+    return this.request<User>(`action=register`, { method: 'POST', body: fd });
   }
 
   public async logout(userId: string): Promise<void> {
@@ -90,8 +144,23 @@ class DBService {
     return saved ? JSON.parse(saved) : null;
   }
 
-  // --- Content (Videos & Metadata) ---
-  
+  // Fix: Add missing method to update user profile information
+  public async updateUserProfile(userId: string, data: any): Promise<void> {
+    const fd = new FormData();
+    fd.append('userId', userId);
+    if (data.autoPurchaseLimit !== undefined) fd.append('autoPurchaseLimit', String(data.autoPurchaseLimit));
+    if (data.newPassword) fd.append('newPassword', data.newPassword);
+    if (data.avatar) fd.append('avatar', data.avatar);
+    if (data.defaultPrices) fd.append('defaultPrices', JSON.stringify(data.defaultPrices));
+    if (data.shippingDetails) fd.append('shippingDetails', JSON.stringify(data.shippingDetails));
+    
+    return this.request<void>(`action=update_user_profile`, {
+      method: 'POST',
+      body: fd
+    });
+  }
+
+  // --- Content ---
   public async getAllVideos(): Promise<Video[]> {
     return this.request<Video[]>(`action=get_videos`);
   }
@@ -105,7 +174,6 @@ class DBService {
   }
 
   public async getRelatedVideos(id: string): Promise<Video[]> {
-    // FIX: El backend espera 'videoId', no 'id' para esta acción específica
     return this.request<Video[]>(`action=get_related_videos&videoId=${id}`);
   }
 
@@ -125,8 +193,9 @@ class DBService {
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      const token = localStorage.getItem('sp_session_token');
-      xhr.open('POST', `${this.apiBase}?action=upload_video${token ? `&token=${token}` : ''}`);
+      const rawToken = localStorage.getItem('sp_session_token');
+      const token = rawToken ? rawToken.replace(/['"]+/g, '') : null;
+      xhr.open('POST', `${this.indexBase}?action=upload_video${token ? `&token=${token}` : ''}`);
       
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
@@ -137,13 +206,15 @@ class DBService {
 
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-            const resp = JSON.parse(xhr.responseText);
-            if (resp.success) resolve();
-            else reject(new Error(resp.error || "Upload failed"));
-        }
-        else reject(new Error("Upload failed"));
+            try {
+              const resp = JSON.parse(xhr.responseText);
+              if (resp.success) resolve();
+              else reject(new Error(resp.error || "Upload failed"));
+            } catch (e) {
+              reject(new Error("Response was not JSON"));
+            }
+        } else reject(new Error("Upload failed"));
       };
-      
       xhr.onerror = () => reject(new Error("Network error"));
       xhr.send(fd);
     });
@@ -157,8 +228,20 @@ class DBService {
     return this.request<void>(`action=mark_watched&userId=${userId}&videoId=${videoId}`);
   }
 
-  // --- Interactions & Social ---
-  
+  // Fix: Add missing method to retrieve user interest vector for AI recommendations
+  public async getUserInterestVector(userId: string): Promise<number[] | null> {
+    return this.request<number[] | null>(`action=get_user_interest_vector&userId=${userId}`);
+  }
+
+  // Fix: Add missing method to save video vector embeddings
+  public async saveVideoVector(videoId: string, vector: number[]): Promise<void> {
+    return this.request<void>(`action=save_video_vector`, {
+      method: 'POST',
+      body: JSON.stringify({ videoId, vector })
+    });
+  }
+
+  // --- Interactions ---
   public async hasPurchased(userId: string, videoId: string): Promise<boolean> {
     const res = await this.request<{hasPurchased: boolean}>(`action=has_purchased&userId=${userId}&videoId=${videoId}`);
     return res.hasPurchased;
@@ -196,8 +279,17 @@ class DBService {
     return this.request<any>(`action=toggle_sub&userId=${userId}&creatorId=${creatorId}`);
   }
 
+  // Fix: Add missing method to fetch notifications for a user
+  public async getNotifications(userId: string): Promise<Notification[]> {
+    return this.request<Notification[]>(`action=get_notifications&userId=${userId}`);
+  }
+
+  // Fix: Add missing method to mark a notification as read
+  public async markNotificationRead(id: string): Promise<void> {
+    return this.request<void>(`action=mark_notification_read&id=${id}`);
+  }
+
   // --- Marketplace ---
-  
   public async getMarketplaceItems(): Promise<MarketplaceItem[]> {
     return this.request<MarketplaceItem[]>(`action=get_marketplace_items`);
   }
@@ -207,23 +299,20 @@ class DBService {
   }
 
   public async createListing(formData: FormData): Promise<void> {
-    return this.request<void>(`action=create_marketplace_listing`, {
-      method: 'POST',
-      body: formData
-    });
+    return this.request<void>(`action=create_listing`, { method: 'POST', body: formData });
   }
 
   public async editListing(id: string, sellerId: string, data: any): Promise<void> {
-    return this.request<void>(`action=edit_marketplace_listing&id=${id}&sellerId=${sellerId}`, {
+    return this.request<void>(`action=edit_listing`, {
       method: 'POST',
-      body: JSON.stringify(data)
+      body: JSON.stringify({ id, userId: sellerId, data })
     });
   }
 
   public async checkoutCart(userId: string, items: any[], shipping: any): Promise<void> {
-    return this.request<void>(`action=checkout_cart&userId=${userId}`, {
+    return this.request<void>(`action=checkout_cart`, {
       method: 'POST',
-      body: JSON.stringify({ items, shipping })
+      body: JSON.stringify({ userId, cart: items, shippingDetails: shipping })
     });
   }
 
@@ -238,79 +327,9 @@ class DBService {
     });
   }
 
-  // --- AI & Vectors ---
-  
-  public async saveVideoVector(videoId: string, vector: number[]): Promise<void> {
-    return this.request<void>(`action=save_video_vector`, {
-      method: 'POST',
-      body: JSON.stringify({ videoId, vector })
-    });
-  }
-
-  public async getUserInterestVector(userId: string): Promise<number[] | null> {
-    return this.request<number[] | null>(`action=get_user_interest_vector&userId=${userId}`);
-  }
-
-  // --- User Profile ---
-  
-  public async updateUserProfile(userId: string, data: any): Promise<void> { 
-    const fd = new FormData();
-    Object.keys(data).forEach(k => {
-      if (data[k] instanceof File) fd.append(k, data[k]);
-      else if (typeof data[k] === 'object') fd.append(k, JSON.stringify(data[k]));
-      else fd.append(k, data[k]);
-    });
-    return this.request<void>(`action=update_profile&userId=${userId}`, { method: 'POST', body: fd });
-  }
-
-  public async searchUsers(userId: string, query: string): Promise<any[]> {
-    return this.request<any[]>(`action=search_users&userId=${userId}&query=${query}`);
-  }
-
-  public async transferBalance(userId: string, target: string, amount: number): Promise<void> {
-    return this.request<void>(`action=transfer_balance&userId=${userId}&target=${target}&amount=${amount}`);
-  }
-
-  // --- Notifications ---
-  
-  public async getNotifications(userId: string): Promise<Notification[]> {
-    return this.request<Notification[]>(`action=get_notifications&userId=${userId}`);
-  }
-
-  public async markNotificationRead(id: string): Promise<void> {
-    return this.request<void>(`action=mark_notif_read&id=${id}`);
-  }
-
-  // --- Content Requests ---
-  
-  public async searchExternal(query: string, source: string): Promise<VideoResult[]> {
-    return this.request<VideoResult[]>(`action=search_external&query=${query}&source=${source}`);
-  }
-
-  public async serverImportVideo(url: string): Promise<void> {
-    return this.request<void>(`action=server_import&url=${url}`);
-  }
-
-  public async getRequests(filter: string = 'ALL'): Promise<ContentRequest[]> {
-    return this.request<ContentRequest[]>(`action=get_requests&filter=${filter}`);
-  }
-
-  public async requestContent(userId: string, query: string, urgent: boolean): Promise<void> {
-    return this.request<void>(`action=request_content&userId=${userId}&query=${query}&urgent=${urgent ? 1 : 0}`);
-  }
-
-  public async deleteRequest(id: string): Promise<void> {
-    return this.request<void>(`action=delete_request&id=${id}`);
-  }
-
-  public async updateRequestStatus(id: string, status: string): Promise<void> {
-    return this.request<void>(`action=update_request_status&id=${id}&status=${status}`);
-  }
-
-  // --- Admin & Maintenance ---
-  
-  public async checkInstallation(): Promise<{status: string}> {
-    return this.request<{status: string}>(`action=check_installation`);
+  // --- Admin ---
+  public async checkInstallation(): Promise<{installed: boolean}> {
+    return this.request<{installed: boolean}>(`action=check_installation`);
   }
 
   public async getSystemSettings(): Promise<SystemSettings> {
@@ -329,27 +348,36 @@ class DBService {
   }
 
   public async getAllUsers(): Promise<User[]> {
-    return this.request<User[]>(`action=admin_get_users`);
+    return this.request<User[]>(`action=get_all_users`);
   }
 
   public async adminAddBalance(adminId: string, targetId: string, amount: number): Promise<void> {
-    return this.request<void>(`action=admin_add_balance&adminId=${adminId}&targetId=${targetId}&amount=${amount}`);
+    return this.request<void>(`action=admin_add_balance`, {
+      method: 'POST',
+      body: JSON.stringify({ adminId, targetId, amount })
+    });
   }
 
   public async getBalanceRequests(): Promise<any> {
-    return this.request<any>(`action=admin_get_balance_requests`);
+    return this.request<any>(`action=get_balance_requests`);
   }
 
   public async handleBalanceRequest(adminId: string, reqId: string, status: string): Promise<void> {
-    return this.request<void>(`action=admin_handle_balance_request&adminId=${adminId}&id=${reqId}&status=${status}`);
+    return this.request<void>(`action=handle_balance_request`, {
+      method: 'POST',
+      body: JSON.stringify({ adminId, reqId, status })
+    });
   }
 
   public async handleVipRequest(adminId: string, reqId: string, status: string): Promise<void> {
-    return this.request<void>(`action=admin_handle_vip_request&adminId=${adminId}&id=${reqId}&status=${status}`);
+    return this.request<void>(`action=handle_vip_request`, {
+      method: 'POST',
+      body: JSON.stringify({ adminId, reqId, status })
+    });
   }
 
   public async getGlobalTransactions(): Promise<any> {
-    return this.request<any>(`action=admin_get_global_transactions`);
+    return this.request<any>(`action=get_global_transactions`);
   }
 
   public async adminGetMarketplaceItems(): Promise<MarketplaceItem[]> {
@@ -357,17 +385,16 @@ class DBService {
   }
 
   public async adminDeleteListing(id: string): Promise<void> {
-    return this.request<void>(`action=admin_delete_marketplace_item&id=${id}`);
+    return this.request<void>(`action=delete_marketplace_item&id=${id}`);
   }
 
   public async adminCleanupSystemFiles(): Promise<any> {
     return this.request<any>(`action=admin_cleanup_files`);
   }
 
-  // --- Grid & Library Scanner ---
-  
+  // --- Grid & Library ---
   public async scanLocalLibrary(path: string): Promise<any> {
-    return this.request<any>(`action=scan_library&path=${path}`);
+    return this.request<any>(`action=scan_local_library`, { method: 'POST', body: JSON.stringify({ path }) });
   }
 
   public async processScanBatch(): Promise<any> {
@@ -378,28 +405,64 @@ class DBService {
     const fd = new FormData();
     fd.append('id', id);
     fd.append('duration', String(duration));
+    fd.append('success', '1');
     if (thumb) fd.append('thumbnail', thumb);
     return this.request(`action=update_video_metadata`, { method: 'POST', body: fd });
   }
 
   public async getUnprocessedVideos(limit: number, mode: string): Promise<Video[]> {
-    return this.request<Video[]>(`action=get_unprocessed&limit=${limit}&mode=${mode}`);
+    return this.request<Video[]>(`action=get_unprocessed_videos&limit=${limit}&mode=${mode}`);
   }
 
   public async smartOrganizeLibrary(): Promise<any> {
-    return this.request<any>(`action=smart_organize`);
+    return this.request<any>(`action=smart_organize_library`);
   }
 
   public async fixLibraryMetadata(): Promise<any> {
-    return this.request<any>(`action=fix_library`);
+    return this.request<any>(`action=fix_library_metadata`);
   }
 
   public async reorganizeAllVideos(): Promise<any> {
-    return this.request<any>(`action=reorganize_all`);
+    return this.request<any>(`action=reorganize_all_videos`);
   }
 
-  // --- FTP & Sync ---
-  
+  // Fix: Add missing method to search external sources for videos
+  public async searchExternal(query: string, source: string): Promise<VideoResult[]> {
+    return this.request<VideoResult[]>(`action=search_external&query=${encodeURIComponent(query)}&source=${source}`);
+  }
+
+  // Fix: Add missing method to trigger server-side video import from a URL
+  public async serverImportVideo(url: string): Promise<void> {
+    return this.request<void>(`action=server_import_video&url=${encodeURIComponent(url)}`);
+  }
+
+  // Fix: Add missing method to retrieve content requests by status
+  public async getRequests(status: string = 'ALL'): Promise<ContentRequest[]> {
+    return this.request<ContentRequest[]>(`action=get_requests&status=${status}`);
+  }
+
+  // Fix: Add missing method to submit a new content request
+  public async requestContent(userId: string, query: string, isInstant: boolean): Promise<void> {
+    return this.request<void>(`action=request_content`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, query, isInstant })
+    });
+  }
+
+  // Fix: Add missing method to delete a content request by ID
+  public async deleteRequest(id: string): Promise<void> {
+    return this.request<void>(`action=delete_request&id=${id}`);
+  }
+
+  // Fix: Add missing method to update the status of a content request
+  public async updateRequestStatus(id: string, status: string): Promise<void> {
+    return this.request<void>(`action=update_request_status`, {
+      method: 'POST',
+      body: JSON.stringify({ id, status })
+    });
+  }
+
+  // --- FTP ---
   public async listFtpFiles(path: string): Promise<FtpFile[]> {
     return this.request<FtpFile[]>(`action=list_ftp&path=${path}`);
   }
@@ -412,26 +475,24 @@ class DBService {
     return this.request<any>(`action=scan_ftp_recursive&path=${path}`);
   }
 
-  // --- VIP & Plans ---
-  
+  // --- VIP ---
   public async purchaseVipInstant(userId: string, plan: VipPlan): Promise<void> {
-    return this.request<void>(`action=purchase_vip_instant&userId=${userId}&planId=${plan.id}`);
+    return this.request<void>(`action=purchase_vip_instant`, { method: 'POST', body: JSON.stringify({ userId, plan }) });
   }
 
-  // --- System Setup ---
-  
+  // --- Setup ---
   public async verifyDbConnection(config: any): Promise<boolean> {
-    const res = await this.request<{connected: boolean}>(`action=verify_db`, {
+    const res = await this.request<{success: boolean}>(`action=verify_db`, {
       method: 'POST',
       body: JSON.stringify(config)
     });
-    return res.connected;
+    return res.success;
   }
 
-  public async initializeSystem(dbConfig: any, adminConfig: any): Promise<void> {
-    return this.request<void>(`action=initialize_system`, {
+  public async initializeSystem(dbConfig: any, adminUser: any): Promise<void> {
+    return this.request<void>(`action=install`, {
       method: 'POST',
-      body: JSON.stringify({ dbConfig, adminConfig })
+      body: JSON.stringify({ dbConfig, adminUser })
     });
   }
 
@@ -439,19 +500,20 @@ class DBService {
     localStorage.setItem('sp_demo_mode', 'true');
   }
 
-  // --- UI Helpers ---
-  
   public async getUserActivity(userId: string): Promise<any> {
     return this.request<any>(`action=get_user_activity&userId=${userId}`);
   }
 
-  public invalidateCache(key: string) {
-    // Optional client-side cache invalidation
+  public async searchUsers(userId: string, q: string): Promise<any[]> {
+    return this.request<any[]>(`action=search_users`, { method: 'POST', body: JSON.stringify({ userId, q }) });
   }
 
-  public setHomeDirty() {
-    // Logic to force Home refresh
+  public async transferBalance(userId: string, targetUsername: string, amount: number): Promise<void> {
+    return this.request<void>(`action=transfer_balance`, { method: 'POST', body: JSON.stringify({ userId, targetUsername, amount }) });
   }
+
+  public invalidateCache(k: string) {}
+  public setHomeDirty() {}
 }
 
 export const db = new DBService();

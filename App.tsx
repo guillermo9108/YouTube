@@ -1,5 +1,4 @@
-
-import React, { Suspense, useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
+import React, { Component, Suspense, useState, useEffect, ErrorInfo, ReactNode } from 'react';
 // Page Imports
 import Login from './components/pages/Login';
 import Home from './components/pages/Home';
@@ -31,12 +30,7 @@ import { db } from './services/db';
 import { Loader2, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
 
 // --- Error Boundary ---
-/**
- * Interfaces to define the shape of props and state for GlobalErrorBoundary
- * to fix TypeScript property access errors.
- */
 interface GlobalErrorBoundaryProps {
-  // Fix: Use imported ReactNode for typed generic children support
   children?: ReactNode;
 }
 
@@ -45,7 +39,7 @@ interface GlobalErrorBoundaryState {
   error: any;
 }
 
-// Fix: Use named Component import and explicitly declare state property to resolve inheritance visibility issues in some TS environments
+// Fix: Use the imported Component class directly to ensure proper typing of this.props and this.state
 class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErrorBoundaryState> {
   public state: GlobalErrorBoundaryState = { hasError: false, error: null };
 
@@ -62,7 +56,6 @@ class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErro
   }
   
   render() {
-    // Fix: Correctly access the component state property
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
@@ -79,7 +72,7 @@ class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErro
         </div>
       );
     }
-    // Fix: Correctly access the component props property
+    // Fix: Correctly returning children from props with guaranteed typing from Component base class
     return this.props.children;
   }
 }
@@ -121,29 +114,40 @@ const AdminRoute = ({ children }: { children?: React.ReactNode }) => {
 
 const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
   const [status, setStatus] = useState<'LOADING' | 'READY' | 'SETUP' | 'ERROR'>('LOADING');
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
+    // Check using index.php which should handle check_installation
     db.checkInstallation()
-      .then(() => {
-         setStatus('READY');
+      .then((res) => {
+         if (res && res.installed) {
+            setStatus('READY');
+         } else {
+            setStatus('SETUP');
+         }
       })
       .catch((err) => {
-         if (err.message === 'SYSTEM_NOT_INSTALLED') {
+         if (err.message === 'SYSTEM_NOT_INSTALLED' || err.message === 'API_MISSING') {
+            // If the API file is completely missing (404), we treat it as "needs setup" 
+            // so the user can reach the Setup page and potentially use Demo Mode.
             setStatus('SETUP');
          } else {
-            console.error("API Connection Error:", err);
+            setErrorMessage(err.message || "Error conectando con el servidor PHP.");
             setStatus('ERROR');
          }
       });
   }, []);
 
-  if (status === 'LOADING') return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> Conectando con NAS...</div>;
+  if (status === 'LOADING') return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> Conectando con Servidor...</div>;
   if (status === 'ERROR') return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
         <AlertTriangle className="text-amber-500 mb-4" size={48} />
-        <h2 className="text-white font-bold text-xl">Error de Conexión</h2>
-        <p className="text-slate-400 text-sm mt-2">No se pudo contactar con el backend PHP.<br/>Verifica que MariaDB y Apache estén activos.</p>
-        <button onClick={() => window.location.reload()} className="mt-6 text-indigo-400 font-bold uppercase text-xs tracking-widest underline">Reintentar</button>
+        <h2 className="text-white font-bold text-xl">Fallo de Comunicación</h2>
+        <p className="text-slate-400 text-sm mt-2 max-w-sm mx-auto">{errorMessage}</p>
+        <div className="mt-8 flex flex-col gap-3">
+            <button onClick={() => window.location.reload()} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold">Reintentar Conexión</button>
+            <button onClick={() => window.location.hash = '#/setup'} className="text-indigo-400 font-bold uppercase text-[10px] tracking-widest underline">Forzar Instalador</button>
+        </div>
     </div>
   );
   if (status === 'SETUP') return <Navigate to="/setup" replace />;

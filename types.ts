@@ -210,7 +210,6 @@ export interface SystemSettings {
   maxResolution?: number;
   downloadStartTime?: string;
   downloadEndTime?: string;
-  geminiKey?: string;
   ffmpegPath?: string;
   tropipayClientId?: string;
   tropipayClientSecret?: string;
