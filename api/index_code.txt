@@ -1,7 +1,6 @@
-
 <?php
 /**
- * StreamPay - Core Controller V11.6 (Error Shield Enabled)
+ * StreamPay - Core Controller V11.7 (Error Shield & Fix FTP)
  */
 
 ob_start(); 
@@ -37,7 +36,7 @@ register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
         write_log("FATAL: " . $error['message'], 'FATAL');
-        ob_clean();
+        if (ob_get_level()) ob_clean();
         header('Content-Type: application/json');
         echo json_encode(['success' => false, 'error' => 'Critical PHP Error: ' . $error['message']]);
     }
@@ -80,7 +79,10 @@ require_once 'functions_videos.php';
 require_once 'functions_interactions.php';
 require_once 'functions_market.php';
 require_once 'functions_admin.php';
-require_once 'functions_ftp.php'; // Habilitado
+// Verificar existencia antes de requerir para evitar crash total si falla el deploy
+if (file_exists('functions_ftp.php')) {
+    require_once 'functions_ftp.php';
+}
 
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
@@ -157,9 +159,9 @@ try {
         case 'get_real_stats': get_real_stats($pdo); break;
 
         // --- FTP (NUEVAS ACCIONES ACTIVADAS) ---
-        case 'list_ftp_files': listFtpFiles($pdo, $_GET['path'] ?? '/'); break;
-        case 'import_ftp_file': importFtpFile($pdo, $input); break;
-        case 'scan_ftp_recursive': scanFtpRecursive($pdo, $input); break;
+        case 'list_ftp_files': if(function_exists('listFtpFiles')) listFtpFiles($pdo, $_GET['path'] ?? '/'); else respond(false, null, "Módulo FTP no disponible"); break;
+        case 'import_ftp_file': if(function_exists('importFtpFile')) importFtpFile($pdo, $input); else respond(false, null, "Módulo FTP no disponible"); break;
+        case 'scan_ftp_recursive': if(function_exists('scanFtpRecursive')) scanFtpRecursive($pdo, $input); else respond(false, null, "Módulo FTP no disponible"); break;
 
         // --- MOTOR DE TRANSCODIFICACIÓN ---
         case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;

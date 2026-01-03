@@ -1,4 +1,3 @@
-
 <?php
 
 function video_process_rows(&$rows) {
@@ -130,7 +129,7 @@ function video_get_unprocessed($pdo) {
 function video_scan_local($pdo, $input) {
     set_time_limit(600);
     $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
-    if (!$rawPath || !is_dir($rawPath)) respond(false, null, "Ruta de librería inválida o inaccesible");
+    if (!$rawPath || !is_dir($rawPath)) respond(false, null, "Ruta de librería inválida o inaccesible ($rawPath)");
     
     $rootPath = realpath($rawPath);
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
@@ -138,18 +137,16 @@ function video_scan_local($pdo, $input) {
     $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'ts', 'flv'];
 
     try {
-        // Mejorado: Ignorar carpetas sin permiso (Android/System restricted)
-        $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS);
-        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST);
+        // Mejorado: Usar banderas para capturar errores de acceso y saltar directorios restringidos
+        $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
+        $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
         
         $pdo->beginTransaction();
         foreach ($iterator as $file) {
-            // Ignorar subdirectorios que lancen error al ser accedidos
             try {
                 if (!$file->isFile()) continue;
-            } catch (UnexpectedValueException $e) {
-                write_log("Skipping restricted folder: " . $e->getMessage(), 'WARNING');
-                continue; 
+            } catch (Exception $e) {
+                continue; // Saltar si hay error al consultar el archivo
             }
 
             $ext = strtolower($file->getExtension());
@@ -171,7 +168,8 @@ function video_scan_local($pdo, $input) {
         respond(true, ['newToImport' => $addedCount, 'totalFound' => $addedCount]);
     } catch (Exception $e) { 
         if ($pdo->inTransaction()) $pdo->rollBack();
-        respond(false, null, "Error de acceso: " . $e->getMessage()); 
+        write_log("Scan Error: " . $e->getMessage(), 'ERROR');
+        respond(false, null, "Fallo durante el escaneo: " . $e->getMessage()); 
     }
 }
 
