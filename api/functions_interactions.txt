@@ -5,6 +5,7 @@
  */
 
 function interact_has_purchased($pdo, $userId, $videoId) {
+    // 1. Obtener datos del usuario y del video para validación VIP Admin-Only
     $stmt = $pdo->prepare("
         SELECT u.role, u.vipExpiry, v.creatorId, (SELECT role FROM users WHERE id = v.creatorId) as creatorRole 
         FROM users u 
@@ -15,14 +16,18 @@ function interact_has_purchased($pdo, $userId, $videoId) {
     $data = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if ($data) {
+        // ADMIN tiene acceso global
         if ($data['role'] === 'ADMIN') {
             respond(true, ['hasPurchased' => true]); return;
         }
         
+        // CREADOR tiene acceso a su propio video
         if ($userId === $data['creatorId']) {
             respond(true, ['hasPurchased' => true]); return;
         }
 
+        // REGLA VIP ADMIN-ONLY: 
+        // Solo da acceso gratuito si el CREADOR del video es un ADMINISTRADOR
         $isVipActive = $data['vipExpiry'] && intval($data['vipExpiry']) > time();
         $isCreatorAdmin = $data['creatorRole'] === 'ADMIN';
         
@@ -31,6 +36,7 @@ function interact_has_purchased($pdo, $userId, $videoId) {
         }
     }
 
+    // 2. Si no es VIP de contenido admin, verificar compra individual histórica
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
     $stmt->execute([$userId, $videoId]);
     respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);
@@ -45,32 +51,38 @@ function interact_transfer_balance($pdo, $input) {
 
     $pdo->beginTransaction();
     try {
+        // 1. Validar remitente y saldo
         $stmt = $pdo->prepare("SELECT balance, username FROM users WHERE id = ? FOR UPDATE");
         $stmt->execute([$senderId]);
         $sender = $stmt->fetch();
         if (!$sender || $sender['balance'] < $amount) throw new Exception("Saldo insuficiente");
 
+        // 2. Validar receptor
         $stmt = $pdo->prepare("SELECT id, username FROM users WHERE username = ?");
         $stmt->execute([$targetUsername]);
         $receiver = $stmt->fetch();
         if (!$receiver) throw new Exception("Usuario @$targetUsername no encontrado");
         if ($receiver['id'] === $senderId) throw new Exception("No puedes enviarte saldo a ti mismo");
 
+        // 3. Calcular Comisiones (Fee de Red)
         $stmtSettings = $pdo->query("SELECT transferFee FROM system_settings LIMIT 1");
         $s = $stmtSettings->fetch();
-        $feePercent = isset($s['transferFee']) ? floatval($s['transferFee']) : 5.0; 
+        $feePercent = isset($s['transferFee']) ? floatval($s['transferFee']) : 5.0; // 5% por defecto
         
         $feeAmount = $amount * ($feePercent / 100);
         $netAmount = $amount - $feeAmount;
 
+        // 4. Ejecutar Movimientos
         $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$amount, $senderId]);
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$netAmount, $receiver['id']]);
         
+        // Acreditar comisión al Admin (Caja Chica)
         $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
         if ($adminId) {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$feeAmount, $adminId]);
         }
 
+        // 5. Registrar Transacciones
         $ts = time();
         $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, recipientName, adminFee) VALUES (?, ?, ?, 'TRANSFER_SENT', ?, ?, ?)")
             ->execute([uniqid('tx_s_'), $senderId, $amount, $ts, $receiver['username'], $feeAmount]);
@@ -78,6 +90,7 @@ function interact_transfer_balance($pdo, $input) {
         $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, senderName) VALUES (?, ?, ?, 'TRANSFER_RECV', ?, ?)")
             ->execute([uniqid('tx_r_'), $receiver['id'], $netAmount, $ts, $sender['username']]);
 
+        // 6. Notificar al receptor
         $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
             ->execute([uniqid('n_'), $receiver['id'], "Has recibido $netAmount $ de @{$sender['username']}", $ts]);
 
@@ -91,7 +104,7 @@ function interact_transfer_balance($pdo, $input) {
 
 function interact_purchase_vip_instant($pdo, $input) {
     $userId = $input['userId'];
-    $plan = $input['plan']; 
+    $plan = $input['plan']; // Objeto del plan
     $planId = $plan['id'];
 
     $pdo->beginTransaction();
@@ -102,8 +115,10 @@ function interact_purchase_vip_instant($pdo, $input) {
 
         if ($user['balance'] < $plan['price']) throw new Exception("Saldo insuficiente para este plan");
 
+        // 1. Debitar saldo
         $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$plan['price'], $userId]);
 
+        // 2. Calcular nueva expiración
         $now = time();
         $currentExpiry = intval($user['vipExpiry'] ?? 0);
         $daysToAdd = intval($plan['durationDays'] ?? 0);
@@ -111,8 +126,10 @@ function interact_purchase_vip_instant($pdo, $input) {
 
         $newExpiry = ($currentExpiry > $now) ? ($currentExpiry + $secondsToAdd) : ($now + $secondsToAdd);
 
+        // 3. Actualizar Usuario
         $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
 
+        // 4. Registrar Transacción (Membresía es ingreso directo para Admin)
         $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
         $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle) VALUES (?, ?, ?, 'VIP', ?, ?)")
             ->execute([uniqid('tx_v_'), $userId, $plan['price'], $now, $plan['name']]);
@@ -272,3 +289,4 @@ function interact_get_transactions($pdo, $userId) {
     $stmt->execute([$userId, $userId]);
     respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
+?>

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, Category } from '../../../types';
@@ -249,6 +250,10 @@ export default function AdminConfig() {
                 <SectionHeader id="AI" label="Inteligencia & Media" icon={Sparkles} />
                 {activeSection === 'AI' && (
                     <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
+                        <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Google Gemini API Key</label>
+                            <input type="password" value={settings?.geminiKey || ''} onChange={e => updateValue('geminiKey', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono" placeholder="AIza..."/>
+                        </div>
                         <div>
                             <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta FFmpeg</label>
                             <input type="text" value={settings?.ffmpegPath || ''} onChange={e => updateValue('ffmpegPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>

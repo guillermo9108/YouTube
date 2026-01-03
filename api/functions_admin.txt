@@ -18,6 +18,7 @@ function admin_get_settings($pdo) {
 }
 
 function admin_update_settings($pdo, $input) {
+    // Lista blanca de campos que se permite actualizar en la tabla system_settings
     $allowed = [
         'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
         'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 
@@ -34,6 +35,7 @@ function admin_update_settings($pdo, $input) {
     foreach ($input as $key => $val) {
         if (in_array($key, $allowed)) {
             $fields[] = "`$key` = ?";
+            // Si el valor es un array u objeto (como 'categories' o 'vipPlans'), lo convertimos a JSON
             if (is_array($val) || is_object($val)) {
                 $params[] = json_encode($val, JSON_UNESCAPED_UNICODE);
             } else {
@@ -43,6 +45,7 @@ function admin_update_settings($pdo, $input) {
     }
 
     if (empty($fields)) {
+        write_log("Intento de actualización de configuración sin campos válidos.", 'WARNING');
         respond(true, null, "No hay cambios válidos que guardar");
     }
 
@@ -51,8 +54,10 @@ function admin_update_settings($pdo, $input) {
     try {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
+        write_log("Configuración del sistema actualizada correctamente.", 'INFO');
         respond(true);
     } catch (Exception $e) {
+        write_log("Error al actualizar system_settings: " . $e->getMessage(), 'ERROR');
         respond(false, null, "Error en base de datos: " . $e->getMessage());
     }
 }
@@ -92,6 +97,7 @@ function admin_handle_balance_request($pdo, $input) {
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp) VALUES (?, ?, ?, 'DEPOSIT', ?)")
                 ->execute([uniqid('dep_'), $req['userId'], $req['amount'], time()]);
             
+            // Notificación
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
                 ->execute([uniqid('n_'), $req['userId'], "Tu recarga de {$req['amount']}$ ha sido aprobada.", time()]);
         }
@@ -244,6 +250,8 @@ function get_real_stats($pdo) {
     respond(true, $stats);
 }
 
+// --- TRANSCODING HELPERS ---
+
 function admin_get_transcode_profiles($pdo) {
     $stmt = $pdo->query("SELECT * FROM transcode_profiles ORDER BY extension ASC");
     respond(true, $stmt->fetchAll());
@@ -316,6 +324,8 @@ function admin_transcode_scan_filters($pdo, $input) {
     respond(true, ['count' => $count]);
 }
 
+// --- CLEANER V8 ---
+
 function admin_smart_cleaner_preview($pdo, $input) { 
     respond(true, ['preview' => [], 'stats' => ['spaceReclaimed' => '0 GB']]); 
 }
@@ -331,3 +341,4 @@ function admin_file_cleanup_preview($pdo, $type) {
 function admin_organize_paquete($pdo, $input) { 
     respond(true, ['cleaned' => 0]); 
 }
+?>

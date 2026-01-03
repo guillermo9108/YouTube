@@ -1,11 +1,11 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Heart, MessageCircle, Share2, Volume2, VolumeX, RefreshCw, ThumbsDown, Plus, Check, Lock, Send, X, Loader2, ArrowLeft, Sparkles } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft } from 'lucide-react';
 import { db } from '../../services/db';
-import { vectorService } from '../../services/vector';
 import { Video, Comment, UserInteraction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from '../Router';
+import { vectorService } from '../../services/vectorService';
 
 interface ShortItemProps {
   video: Video;
@@ -239,61 +239,59 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
 
 export default function Shorts() {
   const { user } = useAuth();
-  const [allVideos, setAllVideos] = useState<Video[]>([]);
-  const [userVector, setUserVector] = useState<number[] | null>(null);
+  const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   
+  // 1. Carga inicial e indexación distribuida
   useEffect(() => {
-    const loadShorts = async () => {
-        setLoading(true);
-        try {
-            const [vids, uRef] = await Promise.all([
-                db.getAllVideos(),
-                user ? db.getUserInterestVector(user.id) : Promise.resolve(null)
-            ]);
+    const runIndexing = async () => {
+        const all: Video[] = await db.getAllVideos();
+        const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING');
+        
+        // Lanzamos indexación distribuida de los que no tengan vector
+        shorts.forEach(async (v) => {
+            if (!v.vector || v.vector.length === 0) {
+                console.log(`Indexando distribuido: ${v.title}`);
+                const vec = await vectorService.generateEmbedding(`${v.title} ${v.description}`);
+                if (vec.length > 0) {
+                    db.saveVector(v.id, vec).catch(() => {});
+                }
+            }
+        });
+
+        // 2. Sistema de Sugerencias Vectoriales
+        if (user) {
+            const activity = await db.getUserActivity(user.id);
+            const likedVideos = all.filter(v => activity.liked.includes(v.id) && v.vector);
             
-            const shorts = vids.filter(v => v.duration < 180 && !['PENDING', 'PROCESSING'].includes(v.category));
-            setAllVideos(shorts);
-            setUserVector(uRef);
-        } catch (e) {} finally { setLoading(false); }
+            if (likedVideos.length > 0) {
+                // Creamos un vector promedio de intereses del usuario
+                const userInterestVector = new Array(likedVideos[0].vector!.length).fill(0);
+                likedVideos.forEach(v => v.vector!.forEach((val, i) => userInterestVector[i] += val));
+                const finalInterest = userInterestVector.map(v => v / likedVideos.length);
+
+                // Ordenamos por similitud
+                const ranked = shorts.sort((a, b) => {
+                    const simA = a.vector ? vectorService.cosineSimilarity(finalInterest, a.vector) : 0;
+                    const simB = b.vector ? vectorService.cosineSimilarity(finalInterest, b.vector) : 0;
+                    return simB - simA;
+                });
+                setVideos(ranked);
+            } else {
+                setVideos(shorts.sort(() => Math.random() - 0.5));
+            }
+        } else {
+            setVideos(shorts.sort(() => Math.random() - 0.5));
+        }
     };
-    loadShorts();
-  }, [user?.id]);
-
-  // INDEXACIÓN DISTRIBUIDA (CLIENTE)
-  useEffect(() => {
-      if (allVideos.length > 0 && !loading) {
-          const target = allVideos[activeIndex];
-          if (target && !target.vector) {
-              const text = `${target.title} ${target.description}`.substring(0, 300);
-              vectorService.generateEmbedding(text).then(vec => {
-                  if (vec) {
-                      db.saveVideoVector(target.id, vec).catch(() => {});
-                      target.vector = vec;
-                  }
-              });
-          }
-      }
-  }, [activeIndex, allVideos, loading]);
-
-  const sortedShorts = useMemo(() => {
-      let list = [...allVideos];
-      if (userVector && list.length > 0) {
-          list = list.map(v => ({
-              ...v,
-              _score: v.vector ? vectorService.cosineSimilarity(userVector, v.vector) : 0
-          })).sort((a: any, b: any) => b._score - a._score);
-      } else {
-          list.sort(() => Math.random() - 0.5);
-      }
-      return list;
-  }, [allVideos, userVector]);
+    
+    runIndexing();
+  }, [user]);
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || sortedShorts.length === 0) return;
+    if (!container || videos.length === 0) return;
 
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
@@ -306,27 +304,28 @@ export default function Shorts() {
 
     Array.from(container.children).forEach((child) => observer.observe(child as Element));
     return () => observer.disconnect();
-  }, [sortedShorts]);
+  }, [videos]);
 
   const hasFullAccess = useMemo(() => {
       if (!user) return false;
-      return user.role?.trim().toUpperCase() === 'ADMIN' || (user.vipExpiry && user.vipExpiry > (Date.now() / 1000));
+      const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
+      const isVipActive = user.vipExpiry && user.vipExpiry > (Date.now() / 1000);
+      return Boolean(isAdmin || isVipActive);
   }, [user]);
 
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative" style={{ scrollBehavior: 'smooth' }}>
-      <div className="fixed top-4 left-4 z-50 flex items-center gap-3">
+      <div className="fixed top-4 left-4 z-50">
           <Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center"><ArrowLeft size={24} /></Link>
-          {userVector && <div className="bg-indigo-600/80 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-1.5 border border-white/10 shadow-lg animate-in fade-in"><Sparkles size={14} className="text-white"/><span className="text-[10px] font-black text-white uppercase tracking-widest">IA Active</span></div>}
       </div>
-      {sortedShorts.length === 0 ? (
+      {videos.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4">
               <Loader2 className="animate-spin text-indigo-500" size={32}/>
-              <p className="font-bold uppercase text-xs tracking-widest">Calibrando Feed por IA...</p>
+              <p className="font-bold uppercase text-xs tracking-widest">Personalizando tus Shorts...</p>
           </div>
-      ) : sortedShorts.map((video, idx) => (
+      ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">
-             <ShortItem video={video} isActive={idx === activeIndex} shouldLoad={Math.abs(idx - activeIndex) <= 2} preload={idx === activeIndex ? "auto" : "metadata"} hasFullAccess={Boolean(hasFullAccess)} />
+             <ShortItem video={video} isActive={idx === activeIndex} shouldLoad={Math.abs(idx - activeIndex) <= 2} preload={idx === activeIndex ? "auto" : "metadata"} hasFullAccess={hasFullAccess} />
         </div>
       ))}
     </div>

@@ -3,6 +3,45 @@
  * Global Type Definitions for StreamPay
  */
 
+export enum UserRole {
+  ADMIN = 'ADMIN',
+  USER = 'USER'
+}
+
+export enum VideoCategory {
+  GENERAL = 'GENERAL',
+  MOVIES = 'MOVIES',
+  SERIES = 'SERIES',
+  SPORTS = 'SPORTS',
+  MUSIC = 'MUSIC',
+  OTHER = 'OTHER'
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  price: number;
+  autoSub: boolean;
+  parent?: string | null;
+  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM';
+}
+
+export interface User {
+  id: string;
+  username: string;
+  role: UserRole | string;
+  balance: number;
+  sessionToken?: string;
+  avatarUrl?: string;
+  lastActive?: number;
+  lastDeviceId?: string;
+  watchLater: string[];
+  autoPurchaseLimit: number;
+  defaultPrices?: Record<string, number>;
+  shippingDetails?: any;
+  vipExpiry?: number;
+}
+
 export interface Video {
   id: string;
   title: string;
@@ -25,49 +64,7 @@ export interface Video {
   reason?: string;
   transcode_progress?: number;
   size_fmt?: string;
-  vector?: number[]; // Vector de 384 dimensiones (all-MiniLM-L6-v2)
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  price: number;
-  autoSub: boolean;
-  parent?: string | null;
-  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM' | 'AI_VECTOR'; 
-}
-
-export interface User {
-  id: string;
-  username: string;
-  role: string;
-  balance: number;
-  sessionToken?: string;
-  avatarUrl?: string;
-  lastActive?: number;
-  watchLater: string[];
-  autoPurchaseLimit: number;
-  interestVector?: number[]; // Perfil semántico del usuario
-  vipExpiry?: number;
-  lastDeviceId?: string;
-  defaultPrices?: Record<string, number>;
-  shippingDetails?: {
-    fullName: string;
-    address: string;
-    city: string;
-    zipCode: string;
-    country: string;
-    phoneNumber: string;
-  };
-}
-
-export enum VideoCategory {
-  GENERAL = 'GENERAL',
-  MOVIES = 'MOVIES',
-  SERIES = 'SERIES',
-  SPORTS = 'SPORTS',
-  MUSIC = 'MUSIC',
-  OTHER = 'OTHER'
+  vector?: number[]; // Nuevo: Embedding para búsqueda vectorial
 }
 
 export interface Comment {
@@ -83,37 +80,73 @@ export interface Comment {
 export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
-  watched: boolean;
   newLikeCount?: number;
+}
+
+export interface VipPlan {
+  id: string;
+  name: string;
+  price: number;
+  durationDays: number;
+  highlight?: boolean;
+}
+
+export interface SystemSettings {
+  downloadStartTime: string; 
+  downloadEndTime: string;   
+  isQueuePaused: boolean;
+  batchSize: number;         
+  maxDuration: number;       
+  geminiKey: string;
+  ytDlpPath: string;
+  ffmpegPath: string;
+  categories: Category[];
+  localLibraryPath: string; 
+  videoCommission: number;
+  marketCommission: number;
+  transferFee?: number;
+  vipPlans?: VipPlan[];
+  paymentInstructions?: string;
+  currencyConversion?: number;
+  enableDebugLog?: boolean;
+  autoTranscode?: boolean | number;
+  tropipayClientId?: string;
+  tropipayClientSecret?: string;
+  customCategories?: string[];
+  categoryPrices?: Record<string, number>;
+  ftpSettings?: {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    rootPath: string;
+  };
+  is_transcoder_active?: boolean;
+  maxResolution?: number;
 }
 
 export interface Transaction {
   id: string;
-  userId: string;
-  type: string;
-  amount: number;
+  type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP' | 'TRANSFER_SENT' | 'TRANSFER_RECV';
+  amount: number | string;
+  buyerId?: string;
+  videoTitle?: string;
   timestamp: number;
-  recipientId?: string;
   recipientName?: string;
-  senderId?: string;
   senderName?: string;
   creatorId?: string;
-  videoTitle?: string;
-  itemTitle?: string;
-  adminFee?: number;
-  buyerName?: string;
-  sellerName?: string;
 }
 
 export interface Notification {
-  id: string;
-  userId: string;
-  text: string;
-  type: 'SYSTEM' | 'SALE' | 'UPLOAD' | 'ALERT';
-  link: string;
-  isRead: boolean;
-  timestamp: number;
-  avatarUrl?: string;
+    id: string;
+    userId: string;
+    text: string;
+    type: 'SALE' | 'UPLOAD' | 'SYSTEM';
+    link: string;
+    isRead: boolean;
+    timestamp: number;
+    metadata?: any;
+    avatarUrl?: string;
 }
 
 export interface VideoResult {
@@ -131,118 +164,68 @@ export interface ContentRequest {
   userId: string;
   username?: string;
   query: string;
-  status: string;
+  status: 'PENDING' | 'COMPLETED' | 'FAILED' | string;
   createdAt: number;
+  isVip: boolean;
 }
 
 export interface MarketplaceItem {
-  id: string;
-  title: string;
-  description: string;
-  price: number;
-  originalPrice?: number;
-  discountPercent?: number;
-  category: string;
-  condition: string;
-  status: string;
-  stock: number;
-  sellerId: string;
-  sellerName: string;
-  sellerAvatarUrl?: string;
-  images: string[];
-  rating?: number;
-  reviewCount?: number;
-  createdAt: number;
+    id: string;
+    title: string;
+    description: string;
+    price: number;
+    originalPrice?: number;
+    stock?: number;
+    category?: string;
+    condition?: string;
+    sellerId: string;
+    sellerName: string;
+    images?: string[];
+    status?: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO';
+    createdAt: number;
+    discountPercent?: number;
+    rating?: number;
+    reviewCount?: number;
+    sellerAvatarUrl?: string;
 }
 
 export interface CartItem extends MarketplaceItem {
-  quantity: number;
+    quantity: number;
 }
 
 export interface MarketplaceReview {
-  id: string;
-  itemId: string;
-  userId: string;
-  username: string;
-  userAvatarUrl?: string;
-  rating: number;
-  comment: string;
-  timestamp: number;
+    id: string;
+    itemId: string;
+    userId: string;
+    username: string;
+    userAvatarUrl?: string;
+    rating: number;
+    comment: string;
+    timestamp: number;
 }
 
 export interface BalanceRequest {
-  id: string;
-  userId: string;
-  username: string;
-  amount: number;
-  createdAt: number;
-  status: string;
+    id: string;
+    userId: string;
+    username: string;
+    amount: number;
+    createdAt: number;
 }
 
 export interface VipRequest {
-  id: string;
-  userId: string;
-  username: string;
-  planId: string;
-  planSnapshot: any;
-  paymentRef: string;
-  status: string;
-  createdAt: number;
-}
-
-export interface VipPlan {
-  id: string;
-  name: string;
-  price: number;
-  durationDays: number;
-  highlight?: boolean;
-}
-
-export interface SystemSettings {
-  categories: Category[];
-  customCategories?: string[];
-  categoryPrices?: Record<string, number>;
-  videoCommission?: number;
-  marketCommission?: number;
-  transferFee?: number;
-  localLibraryPath?: string;
-  batchSize?: number;
-  maxResolution?: number;
-  downloadStartTime?: string;
-  downloadEndTime?: string;
-  ffmpegPath?: string;
-  tropipayClientId?: string;
-  tropipayClientSecret?: string;
-  currencyConversion?: number;
-  vipPlans?: VipPlan[];
-  is_transcoder_active?: boolean;
-  // Campos adicionales para evitar errores de TS
-  isQueuePaused?: boolean;
-  maxDuration?: number;
-  enableYoutube?: boolean;
-  autoTranscode?: boolean;
-  transcodePreset?: string;
-  proxyUrl?: string;
-  ftpSettings?: {
-    host: string;
-    port: number;
-    user: string;
-    pass: string;
-    rootPath: string;
-  };
+    id: string;
+    userId: string;
+    username: string;
+    planSnapshot: any;
+    paymentRef?: string;
+    createdAt: number;
 }
 
 export interface SmartCleanerResult {
+  preview: any[];
   stats: {
     spaceReclaimed: string;
   };
-  preview: Array<{
-    id: string;
-    title: string;
-    views: number;
-    size_fmt: string;
-    reason: string;
-  }>;
 }
 
 export interface FtpFile {

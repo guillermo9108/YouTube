@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2, Clock, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -85,8 +86,7 @@ export default function Upload() {
               // Podríamos añadir una descripción individual, pero aquí lo simplificamos
               toast.success("IA: Metadatos generados");
           } else {
-              // Fix: Updated error message since geminiKey is no longer in SystemSettings
-              toast.error("IA: Fallo al generar metadatos");
+              toast.error("IA: Configura tu Gemini API Key en Admin");
           }
       } catch (e) {
           toast.error("IA: Fallo al conectar");

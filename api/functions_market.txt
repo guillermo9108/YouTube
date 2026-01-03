@@ -1,6 +1,7 @@
 <?php
 define('MARKET_DIR', 'uploads/market/');
 
+// Auto-migrate schema helper
 function market_ensure_schema($pdo) {
     require_once 'functions_schema.php';
     $schema = getAppSchema();
@@ -174,3 +175,4 @@ function market_checkout($pdo, $input) {
         $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
+?>
