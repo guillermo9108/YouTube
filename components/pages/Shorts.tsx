@@ -1,5 +1,6 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft, Play, Pause } from 'lucide-react';
 import { db } from '../../services/db';
 import { Video, Comment, UserInteraction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -16,12 +17,12 @@ interface ShortItemProps {
 const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: ShortItemProps) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const lastTapRef = useRef<number>(0);
+  const clickTimerRef = useRef<number | null>(null);
   
   const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
-  const [isMuted, setIsMuted] = useState(false); 
   const [isBuffering, setIsBuffering] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
+  const [paused, setPaused] = useState(false);
   
   const [interaction, setInteraction] = useState<UserInteraction | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -49,15 +50,10 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
 
     if (isActive && isUnlocked) {
         el.currentTime = 0;
+        setPaused(false);
         const playPromise = el.play();
         if (playPromise !== undefined) {
-            playPromise
-            .then(() => setIsBuffering(false))
-            .catch(() => {
-                el.muted = true;
-                setIsMuted(true);
-                el.play().catch(() => {});
-            });
+            playPromise.catch(() => {});
         }
     } else {
         el.pause();
@@ -66,27 +62,40 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
-    const res = await db.rateVideo(user.id, video.id, rating);
-    setInteraction(res);
-    if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
+    try {
+        const res = await db.rateVideo(user.id, video.id, rating);
+        setInteraction(res);
+        if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
+    } catch(e) {}
   };
 
-  const handleScreenTouch = () => {
-    const now = Date.now();
-    const DOUBLE_TAP_DELAY = 300;
-    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
-        // DOUBLE TAP DETECTED
-        if (!interaction?.liked) handleRate('like');
+  const handleScreenTouch = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // Lógica para detectar doble toque sin interferir con el simple toque
+    if (clickTimerRef.current) {
+        // DOBLE TOQUE DETECTADO
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+        
+        handleRate('like');
         setShowHeart(true);
-        setTimeout(() => setShowHeart(false), 1000);
+        setTimeout(() => setShowHeart(false), 800);
     } else {
-        // SINGLE TAP -> TOGGLE MUTE
-        if (videoRef.current) {
-            videoRef.current.muted = !videoRef.current.muted;
-            setIsMuted(videoRef.current.muted);
-        }
+        // POSIBLE SIMPLE TOQUE
+        clickTimerRef.current = window.setTimeout(() => {
+            clickTimerRef.current = null;
+            if (videoRef.current) {
+                if (videoRef.current.paused) {
+                    videoRef.current.play();
+                    setPaused(false);
+                } else {
+                    videoRef.current.pause();
+                    setPaused(true);
+                }
+            }
+        }, 250);
     }
-    lastTapRef.current = now;
   };
 
   const handleSubscribe = async () => {
@@ -98,16 +107,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
           setIsSubscribed(res.isSubscribed);
       } catch (e) {
           setIsSubscribed(oldState); 
-      }
-  };
-
-  const handleShare = async () => {
-      const url = `${window.location.origin}/#/watch/${video.id}`;
-      if (navigator.share) {
-          try { await navigator.share({ title: video.title, text: video.description, url }); } catch(e) {}
-      } else {
-          navigator.clipboard.writeText(url);
-          alert("Link copiado!");
       }
   };
 
@@ -131,10 +130,15 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
                 src={video.videoUrl}
                 poster={video.thumbnailUrl}
                 className="w-full h-full object-cover"
-                loop playsInline muted={isMuted} preload={preload} crossOrigin="anonymous"
+                loop playsInline preload={preload} crossOrigin="anonymous"
             />
             {isBuffering && isActive && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none"><Loader2 className="animate-spin text-white w-8 h-8" /></div>
+            )}
+            {paused && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50">
+                    <Pause size={64} fill="currentColor" />
+                </div>
             )}
             {showHeart && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in fade-in duration-300">
@@ -155,79 +159,88 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
         )}
       </div>
       
-      <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/90 pointer-events-none z-10" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80 pointer-events-none z-10" />
 
-      <button onClick={(e) => { e.stopPropagation(); if(videoRef.current) { videoRef.current.muted = !videoRef.current.muted; setIsMuted(videoRef.current.muted); } }} className="absolute top-16 right-4 z-30 bg-black/40 backdrop-blur-md p-2 rounded-full text-white">
-        {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-      </button>
-
+      {/* Acciones en Columna (Derecha) */}
       <div className="absolute right-2 bottom-20 z-30 flex flex-col items-center gap-5 pb-safe">
-        <Link to={`/channel/${video.creatorId}`} className="relative group mb-2">
-            <div className="w-12 h-12 rounded-full border-2 border-white p-0.5 overflow-hidden bg-black shadow-lg">
-                {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full rounded-full object-cover" /> : <div className="w-full h-full rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white">{video.creatorName[0]}</div>}
-            </div>
-            {!isSubscribed && (
-                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-600 text-white rounded-full p-0.5 border border-black" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSubscribe(); }}>
-                    <Plus size={12} strokeWidth={4} />
-                </div>
-            )}
-        </Link>
-
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>
              <Heart size={26} fill={interaction?.liked ? "currentColor" : "white"} fillOpacity={interaction?.liked ? 1 : 0.2} />
           </button>
-          <span className="text-xs font-bold text-white drop-shadow-md">{likeCount}</span>
+          <span className="text-[10px] font-black text-white drop-shadow-md">{likeCount}</span>
+        </div>
+
+        <div className="flex flex-col items-center gap-1">
+          <button onClick={(e) => { e.stopPropagation(); handleRate('dislike'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.disliked ? 'text-red-400' : 'text-white'}`}>
+             <ThumbsDown size={26} fill={interaction?.disliked ? "currentColor" : "white"} fillOpacity={interaction?.disliked ? 1 : 0.2} />
+          </button>
         </div>
 
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
              <MessageCircle size={26} fill="white" fillOpacity={0.2} />
           </button>
-          <span className="text-xs font-bold text-white drop-shadow-md">{comments.length}</span>
+          <span className="text-[10px] font-black text-white drop-shadow-md">{comments.length}</span>
         </div>
 
-        <div className="flex flex-col items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); handleShare(); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+        <button onClick={(e) => { e.stopPropagation(); if(navigator.share) navigator.share({title: video.title, url: window.location.href}); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
              <Share2 size={26} fill="white" fillOpacity={0.2} />
-          </button>
-        </div>
+        </button>
       </div>
 
-      <div className="absolute bottom-4 left-3 right-16 z-20 text-white flex flex-col items-start pointer-events-none pb-safe">
-         <div className="pointer-events-auto w-full">
-             <Link to={`/channel/${video.creatorId}`} className="font-bold text-base drop-shadow-md hover:underline">@{video.creatorName}</Link>
-             <h2 className="text-sm font-semibold leading-tight mb-1 drop-shadow-md">{video.title}</h2>
-             <p className="text-xs text-slate-100 line-clamp-2 opacity-90 drop-shadow-sm font-medium">{video.description}</p>
+      {/* Perfil e Info (Esquina Inferior Izquierda - Estilo FB/TikTok) */}
+      <div className="absolute bottom-6 left-3 right-16 z-30 text-white flex flex-col gap-3 pointer-events-none pb-safe">
+         <div className="flex items-center gap-3 pointer-events-auto">
+            <Link to={`/channel/${video.creatorId}`} className="relative shrink-0">
+                <div className="w-11 h-11 rounded-full border-2 border-white overflow-hidden bg-slate-800 shadow-xl">
+                    {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{video.creatorName[0]}</div>}
+                </div>
+                {!isSubscribed && (
+                    <div className="absolute -bottom-1 -right-1 bg-red-600 text-white rounded-full p-0.5 border border-black" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSubscribe(); }}>
+                        <Plus size={10} strokeWidth={4} />
+                    </div>
+                )}
+            </Link>
+            <div className="min-w-0">
+                <Link to={`/channel/${video.creatorId}`} className="font-black text-sm drop-shadow-md hover:underline truncate block">@{video.creatorName}</Link>
+                <div className="flex items-center gap-2">
+                    <button className="bg-white/10 backdrop-blur-md border border-white/20 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest text-white">Seguir</button>
+                </div>
+            </div>
+         </div>
+
+         <div className="pointer-events-auto">
+             <h2 className="text-xs font-bold leading-tight mb-1 drop-shadow-md uppercase italic">{video.title}</h2>
+             <p className="text-[10px] text-slate-200 line-clamp-2 opacity-80 drop-shadow-sm font-medium">{video.description}</p>
          </div>
       </div>
 
       {showComments && (
         <div className="fixed inset-0 z-[100] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="w-full bg-slate-900 rounded-t-3xl h-[70%] flex flex-col border-t border-slate-700 shadow-2xl animate-in slide-in-from-bottom" onClick={(e) => e.stopPropagation()}>
-              <div className="flex justify-between items-center p-4 border-b border-slate-800">
-                 <h3 className="font-bold text-white uppercase text-xs tracking-widest">Comentarios ({comments.length})</h3>
+              <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/50">
+                 <h3 className="font-black text-white uppercase text-xs tracking-widest">Conversación ({comments.length})</h3>
                  <button onClick={() => setShowComments(false)} className="text-slate-400 bg-slate-800 p-2 rounded-full"><X size={20} /></button>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                 {comments.length === 0 ? <p className="text-center text-slate-500 py-10 italic">Sé el primero en comentar</p> : comments.map(c => (
-                      <div key={c.id} className="flex gap-3 animate-in fade-in">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                 {comments.length === 0 ? <p className="text-center text-slate-600 py-20 italic uppercase text-[10px] font-bold tracking-widest">No hay comentarios aún</p> : comments.map(c => (
+                      <div key={c.id} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2">
                          <div className="w-8 h-8 rounded-full bg-slate-800 shrink-0 border border-slate-700 overflow-hidden">
                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c.username[0]}</div>}
                          </div>
                          <div>
                             <div className="flex items-baseline gap-2">
-                               <span className="text-xs font-bold text-slate-400">{c.username}</span>
-                               <span className="text-[9px] text-slate-600 uppercase">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
+                               <span className="text-xs font-black text-slate-300">@{c.username}</span>
+                               <span className="text-[8px] text-slate-600 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
                             </div>
-                            <p className="text-sm text-slate-200 mt-0.5">{c.text}</p>
+                            <p className="text-xs text-slate-400 mt-0.5 leading-snug">{c.text}</p>
                          </div>
                       </div>
                  ))}
               </div>
               <form onSubmit={postComment} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 pb-safe">
-                 <input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2.5 text-sm text-white focus:outline-none" placeholder="Añadir comentario..." />
-                 <button type="submit" disabled={!newComment.trim()} className="bg-indigo-600 text-white w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-50"><Send size={18} /></button>
+                 <input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all" placeholder="Escribe un comentario..." />
+                 <button type="submit" disabled={!newComment.trim()} className="bg-indigo-600 text-white w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-30 shadow-lg active:scale-90 transition-all"><Send size={18} /></button>
               </form>
            </div>
            <div className="absolute inset-0 -z-10" onClick={() => setShowComments(false)}></div>
@@ -245,6 +258,7 @@ export default function Shorts() {
   
   useEffect(() => {
     db.getAllVideos().then((all: Video[]) => {
+        // Filtramos shorts (menos de 3 min) y mezclamos aleatoriamente
         const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
         setVideos(shorts);
     });
@@ -277,12 +291,12 @@ export default function Shorts() {
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative" style={{ scrollBehavior: 'smooth' }}>
       <div className="fixed top-4 left-4 z-50">
-          <Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center"><ArrowLeft size={24} /></Link>
+          <Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link>
       </div>
       {videos.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4">
               <Loader2 className="animate-spin text-indigo-500" size={32}/>
-              <p className="font-bold uppercase text-xs tracking-widest">Buscando Shorts...</p>
+              <p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando contenido...</p>
           </div>
       ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">
