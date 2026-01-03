@@ -178,7 +178,7 @@ export default function AdminConfig() {
                                             <option value="RANDOM">Aleatorio (Mezclar)</option>
                                         </select>
                                     </div>
-                                </tr>
+                                </div>
                             ))}
                         </div>
                     </div>
