@@ -122,7 +122,6 @@ export default function AdminTranscoder() {
         } catch (e: any) { toast.error(e.message); }
     };
 
-    // Added handleDeleteProfile to fix the error in the component
     const handleDeleteProfile = async (extension: string) => {
         if (!confirm(`¿Eliminar perfil para .${extension}?`)) return;
         try {
@@ -242,7 +241,7 @@ export default function AdminTranscoder() {
                                 >
                                     {isRunning ? <><Pause size={18}/> DETENER MOTOR</> : <><Play size={18} fill="currentColor"/> ARRANCAR MOTOR</>}
                                 </button>
-                                <button onClick={() => db.request('action=admin_get_transcode_log').then(setTechnicalLog)} className="w-full py-3 rounded-2xl text-[10px] font-black uppercase text-slate-400 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 flex items-center justify-center gap-2">
+                                <button onClick={() => db.request<string>('action=admin_get_transcode_log').then(res => setTechnicalLog(res))} className="w-full py-3 rounded-2xl text-[10px] font-black uppercase text-slate-400 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 flex items-center justify-center gap-2">
                                     <ScrollText size={14}/> Log FFmpeg
                                 </button>
                             </div>
@@ -337,6 +336,24 @@ export default function AdminTranscoder() {
                     </div>
                 </div>
             </div>
+
+            {/* Modal: Visor de Log Técnico */}
+            {technicalLog && (
+                <div className="fixed inset-0 z-[210] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl p-6 shadow-2xl animate-in zoom-in-95 flex flex-col h-[70vh]">
+                        <div className="flex justify-between items-center mb-6">
+                            <h4 className="font-black text-white uppercase text-sm flex items-center gap-2">
+                                <FileText size={18} className="text-indigo-400"/> Log Detallado de Transcodificación
+                            </h4>
+                            <button onClick={() => setTechnicalLog(null)} className="p-2 text-slate-500 hover:text-white"><X/></button>
+                        </div>
+                        <div className="flex-1 bg-black rounded-xl p-4 overflow-y-auto font-mono text-[10px] text-slate-300 whitespace-pre-wrap shadow-inner border border-white/5">
+                            {technicalLog}
+                        </div>
+                        <button onClick={() => setTechnicalLog(null)} className="mt-6 w-full py-4 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-2xl transition-all shadow-lg">CERRAR</button>
+                    </div>
+                </div>
+            )}
 
             {/* Modal: Perfil Editor */}
             {showProfileEditor && (
