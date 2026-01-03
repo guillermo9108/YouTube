@@ -1,5 +1,5 @@
 
-import React, { Suspense, useState, useEffect, Component, ErrorInfo } from 'react';
+import React, { Suspense, useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 // Page Imports
 import Login from './components/pages/Login';
 import Home from './components/pages/Home';
@@ -36,8 +36,8 @@ import { Loader2, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
  * to fix TypeScript property access errors.
  */
 interface GlobalErrorBoundaryProps {
-  // Fix: Make children optional to avoid 'missing property children' error when used as a wrapper in JSX
-  children?: React.ReactNode;
+  // Fix: Use imported ReactNode for typed generic children support
+  children?: ReactNode;
 }
 
 interface GlobalErrorBoundaryState {
@@ -45,12 +45,12 @@ interface GlobalErrorBoundaryState {
   error: any;
 }
 
-// Fix: Explicitly use React.Component with typed generic parameters to resolve 'Property state/props does not exist' errors
-class GlobalErrorBoundary extends React.Component<GlobalErrorBoundaryProps, GlobalErrorBoundaryState> {
+// Fix: Use named Component import and explicitly declare state property to resolve inheritance visibility issues in some TS environments
+class GlobalErrorBoundary extends Component<GlobalErrorBoundaryProps, GlobalErrorBoundaryState> {
+  public state: GlobalErrorBoundaryState = { hasError: false, error: null };
+
   constructor(props: GlobalErrorBoundaryProps) { 
     super(props); 
-    // Fix: Correctly initialize state on the instance
-    this.state = { hasError: false, error: null }; 
   }
   
   static getDerivedStateFromError(error: any): GlobalErrorBoundaryState { 
@@ -62,7 +62,7 @@ class GlobalErrorBoundary extends React.Component<GlobalErrorBoundaryProps, Glob
   }
   
   render() {
-    // Fix: Access state properties which are now correctly typed through React.Component
+    // Fix: Correctly access the component state property
     if (this.state.hasError) {
       return (
         <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
@@ -79,7 +79,7 @@ class GlobalErrorBoundary extends React.Component<GlobalErrorBoundaryProps, Glob
         </div>
       );
     }
-    // Fix: Correctly access children from props via generic context
+    // Fix: Correctly access the component props property
     return this.props.children;
   }
 }

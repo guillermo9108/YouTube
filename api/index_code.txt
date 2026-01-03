@@ -1,9 +1,9 @@
-
 <?php
 /**
- * StreamPay - Core Controller V11.5
+ * StreamPay - Core Controller V11.6
  */
 
+// Iniciar buffering para prevenir salida accidental de texto/espacios
 ob_start(); 
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -37,7 +37,8 @@ register_shutdown_function(function() {
     $error = error_get_last();
     if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
         write_log("FATAL: " . $error['message'], 'FATAL');
-        ob_clean();
+        // Si hay un error fatal, intentamos responder en JSON limpio
+        if (ob_get_level()) ob_clean();
         header('Content-Type: application/json');
         echo json_encode(['success' => false, 'error' => 'Critical PHP Error: ' . $error['message']]);
     }
@@ -45,6 +46,7 @@ register_shutdown_function(function() {
 
 $configFile = 'db_config.json';
 if (!file_exists($configFile)) {
+    if (ob_get_level()) ob_clean();
     header('Content-Type: application/json');
     echo json_encode(['success' => false, 'error' => 'Sistema no instalado']);
     exit;
@@ -53,6 +55,7 @@ if (!file_exists($configFile)) {
 $config = json_decode(file_get_contents($configFile), true);
 
 function respond($success, $data = null, $error = null) {
+    // Limpiar cualquier eco previo o advertencias para enviar JSON puro
     if (ob_get_level()) ob_clean(); 
     header('Content-Type: application/json');
     echo json_encode(['success' => $success, 'data' => $data, 'error' => $error], JSON_UNESCAPED_UNICODE);
@@ -72,7 +75,7 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
 } catch (PDOException $e) {
-    respond(false, null, "Error de conexión BD");
+    respond(false, null, "Error de conexión BD: " . $e->getMessage());
 }
 
 require_once 'functions_auth.php';
@@ -157,25 +160,6 @@ try {
         case 'admin_get_logs': admin_get_logs(); break;
         case 'admin_clear_logs': admin_clear_logs(); break;
         case 'get_real_stats': get_real_stats($pdo); break;
-
-        // --- MOTOR DE TRANSCODIFICACIÓN ---
-        case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;
-        case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
-        case 'admin_save_transcode_profile': admin_save_transcode_profile($pdo, $input); break;
-        case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $_GET['extension'] ?? ''); break;
-        case 'admin_get_transcode_log': admin_get_transcode_log(); break;
-        case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
-        case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
-        case 'admin_clear_transcode_queue': admin_clear_transcode_queue($pdo); break;
-        case 'admin_retry_failed_transcodes': admin_retry_failed_transcodes($pdo); break;
-        case 'admin_remove_from_queue': admin_remove_from_queue($pdo, $_GET['videoId'] ?? ''); break;
-        case 'admin_skip_transcode': admin_skip_transcode($pdo, $_GET['videoId'] ?? ''); break;
-
-        // --- HERRAMIENTAS DE LIMPIEZA V8 ---
-        case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
-        case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
-        case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $_GET['type'] ?? ''); break;
-        case 'admin_organize_paquete': admin_organize_paquete($pdo, $input); break;
 
         default: respond(false, null, "Acción desconocida: $action"); break;
     }

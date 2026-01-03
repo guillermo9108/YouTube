@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
@@ -24,33 +23,45 @@ export default function Home() {
     const loadData = async () => {
         setLoading(true);
         try {
-            const [vids, sets] = await Promise.all([db.getAllVideos(), db.getSystemSettings()]);
-            setAllVideos(vids.filter(v => !['PENDING', 'PROCESSING'].includes(v.category)));
+            // Intentamos cargar videos y configuración del sistema
+            const [vids, sets] = await Promise.all([
+                db.getAllVideos().catch(() => []),
+                db.getSystemSettings().catch(() => ({ categories: [] }))
+            ]);
+            
+            setAllVideos(vids.filter((v: Video) => !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category)));
             setCategories(sets.categories || []);
+            
             if (user) {
                 const [act, vRef] = await Promise.all([
-                    db.getUserActivity(user.id),
-                    db.getUserInterestVector(user.id)
+                    db.getUserActivity(user.id).catch(() => ({ watched: [] })),
+                    db.getUserInterestVector(user.id).catch(() => null)
                 ]);
                 setWatchedIds(act.watched || []);
                 setUserVector(vRef);
             }
-        } catch (e) {} finally { setLoading(false); }
+        } catch (e) {
+            console.error("Home Load Error:", e);
+        } finally { 
+            setLoading(false); 
+        }
     };
     loadData();
   }, [user?.id, location.pathname]);
 
-  // LÓGICA DE INDEXACIÓN DISTRIBUIDA
+  // LÓGICA DE INDEXACIÓN DISTRIBUIDA (EN SEGUNDO PLANO)
   useEffect(() => {
       if (allVideos.length > 0 && !loading) {
-          const videosWithoutVector = allVideos.filter(v => !v.vector).slice(0, 3); // Procesar de 3 en 3 para no saturar
+          const videosWithoutVector = allVideos.filter(v => !v.vector).slice(0, 3);
           videosWithoutVector.forEach(async (v) => {
-              const textToEncode = `${v.title} ${v.description} ${v.category}`.substring(0, 300);
-              const vec = await vectorService.generateEmbedding(textToEncode);
-              if (vec) {
-                  db.saveVideoVector(v.id, vec).catch(() => {});
-                  v.vector = vec; // Actualizar localmente para uso inmediato
-              }
+              try {
+                  const textToEncode = `${v.title} ${v.description} ${v.category}`.substring(0, 300);
+                  const vec = await vectorService.generateEmbedding(textToEncode);
+                  if (vec) {
+                      db.saveVideoVector(v.id, vec).catch(() => {});
+                      v.vector = vec; 
+                  }
+              } catch (err) {}
           });
       }
   }, [allVideos, loading]);
@@ -75,7 +86,12 @@ export default function Home() {
       return list;
   }, [allVideos, activeCategory, searchQuery, userVector]);
 
-  if (loading) return <div className="flex justify-center py-20"><RefreshCw className="animate-spin text-indigo-500" size={32} /></div>;
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center py-32 gap-4">
+        <RefreshCw className="animate-spin text-indigo-500" size={40} />
+        <p className="text-slate-500 font-bold uppercase text-[10px] tracking-[0.2em]">Sincronizando Librería...</p>
+    </div>
+  );
 
   return (
     <div className="pb-20 space-y-4 px-2 md:px-0">
@@ -126,7 +142,7 @@ export default function Home() {
               <VideoCard 
                 key={v.id} 
                 video={v} 
-                isUnlocked={user?.role === 'ADMIN' || user?.id === v.creatorId} 
+                isUnlocked={user?.role?.trim().toUpperCase() === 'ADMIN' || user?.id === v.creatorId} 
                 isWatched={watchedIds.includes(v.id)} 
               />
           ))}

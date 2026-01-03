@@ -1,4 +1,3 @@
-
 <?php
 
 /**
@@ -13,7 +12,7 @@ function getBearerToken() {
     elseif (isset($headers['authorization'])) $auth = $headers['authorization'];
     elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) $auth = $_SERVER['HTTP_AUTHORIZATION'];
     elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
-    elseif (isset($_GET['token'])) $auth = $_GET['token']; // Respaldo para aplicaciones externas (VLC/MX)
+    elseif (isset($_GET['token'])) $auth = $_GET['token']; // Respaldo crítico para Heartbeat y Apps externas
     
     if (empty($auth)) return null;
 
@@ -51,7 +50,7 @@ function auth_login($pdo, $input) {
 }
 
 function auth_logout($pdo, $input) {
-    $uid = trim($input['userId'] ?? '', '"\' ');
+    $uid = trim($_GET['userId'] ?? $input['userId'] ?? '', '"\' ');
     if ($uid) {
         $pdo->prepare("UPDATE users SET currentSessionId = NULL WHERE id = ?")->execute([$uid]);
     }
@@ -59,11 +58,12 @@ function auth_logout($pdo, $input) {
 }
 
 function auth_heartbeat($pdo, $input) {
-    $uid = trim($input['userId'] ?? '', '"\' ');
+    // FIX: Intentar obtener UID de GET primero ya que el frontend lo envía en query string
+    $uid = trim($_GET['userId'] ?? $input['userId'] ?? '', '"\' ');
     $token = getBearerToken();
 
     if (!$uid || !$token) {
-        write_log("Heartbeat Denegado: UID($uid) o Token faltante.", 'WARNING');
+        write_log("Heartbeat Denegado: UID($uid) o Token(".($token?'Presente':'Faltante').") faltante.", 'WARNING');
         http_response_code(401);
         respond(false, null, 'Sesión no proporcionada');
     }
@@ -77,7 +77,7 @@ function auth_heartbeat($pdo, $input) {
         respond(true);
     }
 
-    write_log("Heartbeat Error: Conflicto de Sesión para @{$session['username']}. Recibido: $token", 'WARNING');
+    write_log("Heartbeat Error: Conflicto de Sesión para @".($session['username']??'Desconocido').". Recibido: $token", 'WARNING');
     http_response_code(401);
     respond(false, null, 'Sesión expirada o abierta en otro dispositivo');
 }
@@ -153,7 +153,7 @@ function auth_search_users($pdo, $input) {
 
 function auth_update_user($pdo, $input) {
     $data = !empty($_POST) ? $_POST : $input;
-    $uid = trim($data['userId'] ?? '', '"\' ');
+    $uid = trim($_GET['userId'] ?? $data['userId'] ?? '', '"\' ');
     if (!$uid) respond(false, null, "ID usuario requerido");
 
     $fields = [];
@@ -202,4 +202,3 @@ function auth_update_user($pdo, $input) {
         respond(false, null, $e->getMessage());
     }
 }
-?>

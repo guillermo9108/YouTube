@@ -12,8 +12,8 @@ export const aiService = {
      * Sugiere metadatos (título, descripción, categoría) analizando el nombre del archivo.
      */
     async suggestMetadata(filename: string) {
-        // Fix: Always use a new GoogleGenAI instance right before making an API call
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        // Fix: Use process.env.API_KEY directly without casting to follow initialization guidelines
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
         try {
             const response: GenerateContentResponse = await ai.models.generateContent({
@@ -48,7 +48,7 @@ export const aiService = {
                 }
             });
 
-            // Fix: Extract string output directly from the .text property
+            // Fix: Directly access string output from .text property as per guidelines
             const text = response.text;
             if (!text) return null;
             return JSON.parse(text);
@@ -63,8 +63,8 @@ export const aiService = {
      * Mantiene el contexto de los videos actuales para ofrecer respuestas precisas.
      */
     async chatWithConcierge(userMessage: string, availableVideos: Video[]) {
-        // Fix: Always use a new GoogleGenAI instance right before making an API call
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        // Fix: Use process.env.API_KEY directly without casting to follow initialization guidelines
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
         // Inyectamos el catálogo actual como contexto para que la IA sepa qué recomendar
         const context = availableVideos
@@ -87,12 +87,12 @@ export const aiService = {
                     3. Si preguntan por precios, menciona que se paga con Saldo interno.
                     4. Mantén las respuestas breves y directas.
                     5. Responde SIEMPRE en español.`,
-                    thinkingConfig: { thinkingBudget: 0 } // Respuesta rápida para chat
+                    thinkingConfig: { thinkingBudget: 0 } // Fast response for chat tasks
                 }
             });
 
             const result = await chat.sendMessage({ message: userMessage });
-            // Fix: Extract string output directly from the .text property
+            // Fix: Directly access string output from .text property as per guidelines
             return result.text || "Lo siento, mi mente se ha quedado en blanco. ¿Podrías repetir eso?";
         } catch (e) {
             console.error("Concierge Error:", e);
