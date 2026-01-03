@@ -1,12 +1,30 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V11.3
+ * ADMINISTRACIÓN - CORE FUNCTIONS V11.4 (Optimizado Synology)
  */
 
 function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($settings) {
+        // Auto-detección de FFmpeg si no está configurado
+        if (empty($settings['ffmpegPath']) || $settings['ffmpegPath'] === 'ffmpeg') {
+            $commonPaths = [
+                '/usr/bin/ffmpeg',
+                '/bin/ffmpeg',
+                '/var/packages/VideoStation/target/bin/ffmpeg',
+                '/var/packages/CodecPack/target/bin/ffmpeg',
+                '/usr/local/bin/ffmpeg'
+            ];
+            foreach ($commonPaths as $path) {
+                if (@is_executable($path)) {
+                    $settings['ffmpegPath'] = $path;
+                    $pdo->prepare("UPDATE system_settings SET ffmpegPath = ? WHERE id = 1")->execute([$path]);
+                    break;
+                }
+            }
+        }
+
         $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}', true);
         $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]', true);
         $settings['categories'] = json_decode($settings['categories'] ?? '[]', true);
@@ -18,7 +36,6 @@ function admin_get_settings($pdo) {
 }
 
 function admin_update_settings($pdo, $input) {
-    // Lista blanca de campos que se permite actualizar en la tabla system_settings
     $allowed = [
         'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
         'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 
@@ -35,7 +52,6 @@ function admin_update_settings($pdo, $input) {
     foreach ($input as $key => $val) {
         if (in_array($key, $allowed)) {
             $fields[] = "`$key` = ?";
-            // Si el valor es un array u objeto (como 'categories' o 'vipPlans'), lo convertimos a JSON
             if (is_array($val) || is_object($val)) {
                 $params[] = json_encode($val, JSON_UNESCAPED_UNICODE);
             } else {
@@ -45,7 +61,6 @@ function admin_update_settings($pdo, $input) {
     }
 
     if (empty($fields)) {
-        write_log("Intento de actualización de configuración sin campos válidos.", 'WARNING');
         respond(true, null, "No hay cambios válidos que guardar");
     }
 
@@ -54,10 +69,8 @@ function admin_update_settings($pdo, $input) {
     try {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        write_log("Configuración del sistema actualizada correctamente.", 'INFO');
         respond(true);
     } catch (Exception $e) {
-        write_log("Error al actualizar system_settings: " . $e->getMessage(), 'ERROR');
         respond(false, null, "Error en base de datos: " . $e->getMessage());
     }
 }
@@ -97,7 +110,6 @@ function admin_handle_balance_request($pdo, $input) {
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp) VALUES (?, ?, ?, 'DEPOSIT', ?)")
                 ->execute([uniqid('dep_'), $req['userId'], $req['amount'], time()]);
             
-            // Notificación
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
                 ->execute([uniqid('n_'), $req['userId'], "Tu recarga de {$req['amount']}$ ha sido aprobada.", time()]);
         }

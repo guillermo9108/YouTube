@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { 
     Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, 
     Filter, History, AlertCircle, Activity, Box, Radio, Trash2, Settings2, 
     Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert, 
-    FileText, ScrollText, Copy, FastForward, Save, PlusCircle, Loader2
+    FileText, ScrollText, Copy, FastForward, Save, PlusCircle, Loader2, Gauge, HardDrive
 } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 import { Video } from '../../../types';
@@ -15,7 +16,6 @@ export default function AdminTranscoder() {
     const [stats, setStats] = useState({ waiting: 0, processing: 0, failed: 0, done: 0 });
     const [allVideos, setAllVideos] = useState<Video[]>([]);
     const [activeProcesses, setActiveProcesses] = useState<any[]>([]);
-    const [localStats, setLocalStats] = useState<any>(null);
     const [profiles, setProfiles] = useState<any[]>([]);
     const [log, setLog] = useState<string[]>([]);
     const [scanResult, setScanResult] = useState<number | null>(null);
@@ -24,7 +24,6 @@ export default function AdminTranscoder() {
     const [showFailedList, setShowFailedList] = useState(false);
     
     const [technicalLog, setTechnicalLog] = useState<string | null>(null);
-    const [isLoadingTechLog, setIsLoadingTechLog] = useState(false);
 
     const [editingProfile, setEditingProfile] = useState({ 
         extension: '', 
@@ -53,7 +52,6 @@ export default function AdminTranscoder() {
             });
             
             const lStats: any = await db.request('action=admin_get_local_stats');
-            setLocalStats(lStats);
             setActiveProcesses(lStats.active_processes || []);
 
             const profileData: any = await db.request('action=admin_get_transcode_profiles');
@@ -103,46 +101,57 @@ export default function AdminTranscoder() {
         } catch (e: any) { toast.error(e.message); }
     };
 
-    const handleSaveProfile = async () => {
-        if (!editingProfile.extension || !editingProfile.command_args) return;
+    const handleSaveProfile = async (customExt?: string, customArgs?: string) => {
+        const ext = customExt || editingProfile.extension;
+        const args = customArgs || editingProfile.command_args;
+        if (!ext || !args) return;
+        
         try {
             await db.request('action=admin_save_transcode_profile', {
                 method: 'POST',
-                body: JSON.stringify(editingProfile)
+                body: JSON.stringify({ 
+                    extension: ext, 
+                    command_args: args, 
+                    description: editingProfile.description || 'Optimizado para Synology'
+                })
             });
-            toast.success("Perfil guardado");
+            toast.success(`Perfil .${ext} guardado`);
             setShowProfileEditor(false);
             setEditingProfile({ extension: '', command_args: '', description: '' });
             loadData();
         } catch (e: any) { toast.error(e.message); }
     };
 
-    const handleDeleteProfile = async (ext: string) => {
-        if (!confirm("Eliminar este perfil?")) return;
+    // Added handleDeleteProfile to fix the error in the component
+    const handleDeleteProfile = async (extension: string) => {
+        if (!confirm(`¿Eliminar perfil para .${extension}?`)) return;
         try {
-            await db.request(`action=admin_delete_transcode_profile&extension=${ext}`, { method: 'POST' });
+            await db.request('action=admin_delete_transcode_profile', {
+                method: 'POST',
+                body: JSON.stringify({ extension })
+            });
+            toast.success(`Perfil .${extension} eliminado`);
             loadData();
         } catch (e: any) { toast.error(e.message); }
     };
 
-    const fetchTechnicalLog = async () => {
-        setIsLoadingTechLog(true);
-        try {
-            const res = await db.request<string>('action=admin_get_transcode_log');
-            setTechnicalLog(res);
-        } catch (e) { toast.error("No se pudo obtener el log técnico."); }
-        finally { setIsLoadingTechLog(false); }
-    };
+    const applyHardwarePreset = (level: 1 | 2 | 3) => {
+        const extensions = ['mkv', 'avi', 'ts', 'mov', 'flv'];
+        let args = '';
+        
+        switch(level) {
+            case 1: args = '-c copy'; break;
+            case 2: args = '-c:v libx264 -preset ultrafast -crf 28 -c:a aac'; break;
+            case 3: args = '-vf "scale=-1:720" -c:v libx264 -preset ultrafast -crf 30 -c:a aac'; break;
+        }
 
-    const handleRetryAll = async () => {
-        if (!confirm("¿Reintentar todos los videos fallidos?")) return;
-        await handleAction('admin_retry_failed_transcodes');
+        extensions.forEach(ext => handleSaveProfile(ext, args));
+        toast.success("Nivel de Optimización Aplicado a todos los formatos");
     };
 
     return (
         <div className="space-y-6 animate-in fade-in max-w-7xl mx-auto pb-24 px-2">
             
-            {/* Stats Panel */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg">
                     <div className="flex justify-between items-center mb-2">
@@ -174,18 +183,57 @@ export default function AdminTranscoder() {
                 </div>
             </div>
 
+            {/* PANEL DE OPTIMIZACIÓN HARDWARE ANTIGUO */}
+            <div className="bg-slate-900 border border-indigo-500/30 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+                <div className="absolute -right-10 -top-10 opacity-5 pointer-events-none rotate-12"><Gauge size={200}/></div>
+                <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center"><Gauge size={28}/></div>
+                        <div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tighter italic leading-none">Perfiles de Supervivencia</h3>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Optimización Automática para Synology DDR2 / CPU Legacy</p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <button onClick={() => applyHardwarePreset(1)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-emerald-500/50 transition-all group">
+                            <div className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-1">Nivel 1: Stream Copy</div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Cambia el contenedor sin recodificar. Carga CPU cercana a 0%.</p>
+                            <div className="flex items-center gap-2 text-[9px] font-bold text-slate-500">
+                                <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded">CPU: BAJA</span>
+                                <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded">RAM: BAJA</span>
+                            </div>
+                        </button>
+
+                        <button onClick={() => applyHardwarePreset(2)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-amber-500/50 transition-all group">
+                            <div className="text-xs font-black text-amber-400 uppercase tracking-widest mb-1">Nivel 2: Ultrafast Light</div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Conversión rápida (Preset Ultrafast + CRF 28). Recomendado.</p>
+                            <div className="flex items-center gap-2 text-[9px] font-bold text-slate-500">
+                                <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-500 rounded">CPU: MEDIA</span>
+                                <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-500 rounded">RAM: MEDIA</span>
+                            </div>
+                        </button>
+
+                        <button onClick={() => applyHardwarePreset(3)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-red-500/50 transition-all group">
+                            <div className="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Nivel 3: 720p Scaler</div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Reduce resolución para hardware muy viejo. Máxima fluidez.</p>
+                            <div className="flex items-center gap-2 text-[9px] font-bold text-slate-500">
+                                <span className="px-1.5 py-0.5 bg-red-500/10 text-red-500 rounded">CPU: ALTA</span>
+                                <span className="px-1.5 py-0.5 bg-red-500/10 text-red-500 rounded">RAM: MEDIA</span>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* Left Column: Controls & Filters */}
                 <div className="lg:col-span-4 space-y-6">
-                    
-                    {/* Main Start/Stop */}
                     <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
                         <div className={`absolute inset-0 bg-gradient-to-tr transition-opacity duration-1000 ${isRunning ? 'from-indigo-600/20 to-emerald-600/10 opacity-100' : 'opacity-0'}`}></div>
                         <div className="relative z-10">
                             <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-4 flex items-center gap-2">
                                 <Cpu size={20} className={isRunning ? 'text-indigo-400 animate-pulse' : 'text-slate-600'}/>
-                                Motor de Transcodificación
+                                Motor Activo
                             </h3>
                             <div className="flex flex-col gap-2">
                                 <button 
@@ -194,14 +242,13 @@ export default function AdminTranscoder() {
                                 >
                                     {isRunning ? <><Pause size={18}/> DETENER MOTOR</> : <><Play size={18} fill="currentColor"/> ARRANCAR MOTOR</>}
                                 </button>
-                                <button onClick={fetchTechnicalLog} className="w-full py-3 rounded-2xl text-[10px] font-black uppercase text-slate-400 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 flex items-center justify-center gap-2">
-                                    <ScrollText size={14}/> Consola FFmpeg
+                                <button onClick={() => db.request('action=admin_get_transcode_log').then(setTechnicalLog)} className="w-full py-3 rounded-2xl text-[10px] font-black uppercase text-slate-400 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 flex items-center justify-center gap-2">
+                                    <ScrollText size={14}/> Log FFmpeg
                                 </button>
                             </div>
                         </div>
                     </div>
 
-                    {/* Filters & Queue Populator */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
                         <h3 className="font-bold text-white mb-4 text-xs uppercase flex items-center gap-2">
                             <Filter size={14} className="text-indigo-400"/> Gestor de Tareas
@@ -211,25 +258,17 @@ export default function AdminTranscoder() {
                                 <input type="checkbox" checked={filters.onlyNonMp4} onChange={e => setFilters({...filters, onlyNonMp4: e.target.checked})} className="accent-indigo-500 w-4 h-4"/>
                                 <span className="text-[11px] text-slate-300 font-bold uppercase">Solo extensiones No-MP4</span>
                             </label>
-                            <label className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer">
-                                <input type="checkbox" checked={filters.onlyIncompatible} onChange={e => setFilters({...filters, onlyIncompatible: e.target.checked})} className="accent-indigo-500 w-4 h-4"/>
-                                <span className="text-[11px] text-slate-300 font-bold uppercase">Videos Incompatibles</span>
-                            </label>
                             
                             <div className="grid grid-cols-2 gap-2 mt-4">
                                 <button onClick={() => handleScanFilter('PREVIEW')} disabled={isScanning} className="bg-slate-800 text-slate-300 py-2.5 rounded-lg text-[10px] font-black uppercase">Simular</button>
-                                <button onClick={() => handleScanFilter('EXECUTE')} disabled={isScanning || scanResult === 0} className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 py-2.5 rounded-lg text-[10px] font-black uppercase">Añadir a Cola</button>
+                                <button onClick={() => handleScanFilter('EXECUTE')} disabled={isScanning || scanResult === 0} className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 py-2.5 rounded-lg text-[10px] font-black uppercase">Llenar Cola</button>
                             </div>
-                            {scanResult !== null && (
-                                <p className="text-center text-[10px] text-amber-500 font-bold mt-2 animate-pulse">Se encontraron {scanResult} videos.</p>
-                            )}
                         </div>
                     </div>
 
-                    {/* Profiles Editor */}
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
                          <div className="flex justify-between items-center mb-4">
-                            <h3 className="font-bold text-white text-xs uppercase flex items-center gap-2"><Settings2 size={14} className="text-purple-400"/> Comandos por Formato</h3>
+                            <h3 className="font-bold text-white text-xs uppercase flex items-center gap-2"><Settings2 size={14} className="text-purple-400"/> Mapeo de Comandos</h3>
                             <button onClick={() => setShowProfileEditor(true)} className="p-1 text-indigo-400 hover:text-white"><PlusCircle size={18}/></button>
                          </div>
                          <div className="space-y-2">
@@ -246,19 +285,17 @@ export default function AdminTranscoder() {
                     </div>
                 </div>
 
-                {/* Right Column: Active Progress Monitor */}
                 <div className="lg:col-span-8 space-y-6">
-                    
                     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl min-h-[400px]">
                         <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                            <Activity size={16} className="text-emerald-400"/> Monitor de Procesos Activos (PID)
+                            <Activity size={16} className="text-emerald-400"/> Procesos en curso
                         </h4>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {activeProcesses.length === 0 ? (
                                 <div className="col-span-full text-center py-20 border-2 border-dashed border-slate-800 rounded-3xl">
                                     <RefreshCw size={32} className="mx-auto mb-2 text-slate-700 opacity-20"/>
-                                    <p className="text-xs text-slate-600 font-bold uppercase tracking-widest">Esperando procesos de FFmpeg...</p>
+                                    <p className="text-xs text-slate-600 font-bold uppercase tracking-widest">Sin actividad intensiva</p>
                                 </div>
                             ) : activeProcesses.map(p => (
                                 <div key={p.id} className="bg-slate-950 border border-indigo-500/20 p-5 rounded-2xl shadow-inner relative overflow-hidden">
@@ -270,46 +307,22 @@ export default function AdminTranscoder() {
                                         <span className="text-xs font-black text-indigo-400 font-mono">{p.progress}%</span>
                                     </div>
                                     
-                                    {/* Progress Bar */}
                                     <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-white/5">
                                         <div 
                                             className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400 transition-all duration-1000 ease-out shadow-[0_0_10px_rgba(79,70,229,0.5)]" 
                                             style={{ width: `${p.progress}%` }}
                                         ></div>
                                     </div>
-                                    
-                                    <div className="mt-4 flex justify-between items-center">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                                            <span className="text-[9px] font-black text-emerald-500 uppercase">Procesando</span>
-                                        </div>
-                                        <div className="text-[8px] text-slate-600 font-bold uppercase">NAS Hardware Accel</div>
-                                    </div>
                                 </div>
                             ))}
                         </div>
-
-                        {/* Total Queue Indicator */}
-                        {stats.waiting > 0 && (
-                            <div className="mt-8 p-4 bg-slate-950/50 border border-slate-800 rounded-2xl flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <Layers size={20} className="text-slate-600"/>
-                                    <div>
-                                        <span className="text-[10px] font-black text-slate-500 uppercase block">Total en cola</span>
-                                        <span className="text-sm font-bold text-white">{stats.waiting} videos esperando turno</span>
-                                    </div>
-                                </div>
-                                <button onClick={() => handleAction('admin_clear_transcode_queue')} className="text-[10px] font-black text-red-500/50 hover:text-red-500 uppercase tracking-widest">Vaciar Cola</button>
-                            </div>
-                        )}
                     </div>
 
-                    {/* terminal de logs */}
                     <div className="bg-black rounded-2xl p-5 border border-slate-800 shadow-2xl h-64 flex flex-col">
                          <div className="flex justify-between items-center mb-3">
                              <div className="flex items-center gap-2 text-slate-500">
                                  <Terminal size={14}/>
-                                 <span className="text-[10px] font-black uppercase tracking-widest">Sincronización de Eventos</span>
+                                 <span className="text-[10px] font-black uppercase tracking-widest">Evento de Sistema</span>
                              </div>
                              <button onClick={() => handleAction('admin_clear_logs')} className="text-[9px] text-slate-600 hover:text-white uppercase font-bold">Limpiar</button>
                          </div>
@@ -330,7 +343,7 @@ export default function AdminTranscoder() {
                 <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
                     <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-6">
-                            <h4 className="font-black text-white uppercase text-sm">Nuevo Perfil de Comando</h4>
+                            <h4 className="font-black text-white uppercase text-sm">Comando por Extensión</h4>
                             <button onClick={() => setShowProfileEditor(false)} className="p-2 text-slate-500 hover:text-white"><X/></button>
                         </div>
                         <div className="space-y-4">
@@ -342,61 +355,7 @@ export default function AdminTranscoder() {
                                 <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">Argumentos FFmpeg</label>
                                 <textarea rows={4} value={editingProfile.command_args} onChange={e => setEditingProfile({...editingProfile, command_args: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono text-xs outline-none focus:border-indigo-500" placeholder="-c:v libx264 ..." />
                             </div>
-                            <button onClick={handleSaveProfile} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl transition-all">GUARDAR PERFIL</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Modal: Tech Log Viewer */}
-            {technicalLog && (
-                <div className="fixed inset-0 z-[250] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[80vh]">
-                        <div className="p-4 bg-slate-950 border-b border-slate-700 flex justify-between items-center">
-                            <h4 className="font-black text-white text-sm uppercase">Logs de Salida FFmpeg</h4>
-                            <button onClick={() => setTechnicalLog(null)} className="p-2 text-slate-400 hover:text-white"><X/></button>
-                        </div>
-                        <div className="flex-1 overflow-auto p-6 font-mono text-[10px] leading-relaxed text-indigo-300 bg-black/50">
-                            <pre className="whitespace-pre-wrap">{technicalLog}</pre>
-                        </div>
-                    </div>
-                </div>
-            )}
-            
-            {/* Modal: Fallidos */}
-            {showFailedList && (
-                <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
-                        <div className="p-5 border-b border-white/5 flex justify-between items-center bg-slate-950">
-                            <div>
-                                <h4 className="font-black text-white uppercase text-sm">Archivos Fallidos ({failedVideos.length})</h4>
-                                <p className="text-[10px] text-slate-500 uppercase mt-0.5 tracking-widest">Incompatibilidad de codec o error de disco</p>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={handleRetryAll} className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-1.5"><RotateCcw size={12}/> Reintentar Todo</button>
-                                <button onClick={() => setShowFailedList(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-500 transition-colors"><X/></button>
-                            </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-900/50 custom-scrollbar">
-                            {failedVideos.length === 0 ? (
-                                <div className="text-center py-20 text-slate-600 italic">No hay videos con estado fallido.</div>
-                            ) : failedVideos.map(v => (
-                                <div key={v.id} className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-white/5 group hover:border-red-500/30 transition-colors">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                        <div className="w-10 h-10 bg-black rounded-lg flex items-center justify-center border border-red-900/20 shrink-0">
-                                            <FileVideo size={20} className="text-red-500 opacity-40" />
-                                        </div>
-                                        <div className="min-w-0">
-                                            <div className="text-xs font-bold text-white truncate">{v.title}</div>
-                                            <div className="text-[9px] text-red-400 font-mono italic">Error: {v.reason || 'Sin detalles técnicos'}</div>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button onClick={() => db.request(`action=admin_remove_from_queue&videoId=${v.id}`, {method:'POST'}).then(loadData)} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white" title="Quitar de cola"><Trash2 size={14}/></button>
-                                        <button onClick={() => db.request(`action=admin_skip_transcode&videoId=${v.id}`, {method:'POST'}).then(loadData)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500" title="Marcar como LISTO (Saltar)"><FastForward size={14}/></button>
-                                    </div>
-                                </div>
-                            ))}
+                            <button onClick={() => handleSaveProfile()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl transition-all">GUARDAR</button>
                         </div>
                     </div>
                 </div>

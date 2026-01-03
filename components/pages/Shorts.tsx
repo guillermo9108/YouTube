@@ -1,11 +1,9 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft } from 'lucide-react';
 import { db } from '../../services/db';
 import { Video, Comment, UserInteraction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from '../Router';
-import { vectorService } from '../../services/vectorService';
 
 interface ShortItemProps {
   video: Video;
@@ -77,10 +75,12 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
     const now = Date.now();
     const DOUBLE_TAP_DELAY = 300;
     if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+        // DOUBLE TAP DETECTED
         if (!interaction?.liked) handleRate('like');
         setShowHeart(true);
         setTimeout(() => setShowHeart(false), 1000);
     } else {
+        // SINGLE TAP -> TOGGLE MUTE
         if (videoRef.current) {
             videoRef.current.muted = !videoRef.current.muted;
             setIsMuted(videoRef.current.muted);
@@ -243,51 +243,12 @@ export default function Shorts() {
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // 1. Carga inicial e indexación distribuida
   useEffect(() => {
-    const runIndexing = async () => {
-        const all: Video[] = await db.getAllVideos();
-        const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING');
-        
-        // Lanzamos indexación distribuida de los que no tengan vector
-        shorts.forEach(async (v) => {
-            if (!v.vector || v.vector.length === 0) {
-                console.log(`Indexando distribuido: ${v.title}`);
-                const vec = await vectorService.generateEmbedding(`${v.title} ${v.description}`);
-                if (vec.length > 0) {
-                    db.saveVector(v.id, vec).catch(() => {});
-                }
-            }
-        });
-
-        // 2. Sistema de Sugerencias Vectoriales
-        if (user) {
-            const activity = await db.getUserActivity(user.id);
-            const likedVideos = all.filter(v => activity.liked.includes(v.id) && v.vector);
-            
-            if (likedVideos.length > 0) {
-                // Creamos un vector promedio de intereses del usuario
-                const userInterestVector = new Array(likedVideos[0].vector!.length).fill(0);
-                likedVideos.forEach(v => v.vector!.forEach((val, i) => userInterestVector[i] += val));
-                const finalInterest = userInterestVector.map(v => v / likedVideos.length);
-
-                // Ordenamos por similitud
-                const ranked = shorts.sort((a, b) => {
-                    const simA = a.vector ? vectorService.cosineSimilarity(finalInterest, a.vector) : 0;
-                    const simB = b.vector ? vectorService.cosineSimilarity(finalInterest, b.vector) : 0;
-                    return simB - simA;
-                });
-                setVideos(ranked);
-            } else {
-                setVideos(shorts.sort(() => Math.random() - 0.5));
-            }
-        } else {
-            setVideos(shorts.sort(() => Math.random() - 0.5));
-        }
-    };
-    
-    runIndexing();
-  }, [user]);
+    db.getAllVideos().then((all: Video[]) => {
+        const shorts = all.filter(v => v.duration < 180 && v.category !== 'PENDING' && v.category !== 'PROCESSING').sort(() => Math.random() - 0.5);
+        setVideos(shorts);
+    });
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -321,7 +282,7 @@ export default function Shorts() {
       {videos.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4">
               <Loader2 className="animate-spin text-indigo-500" size={32}/>
-              <p className="font-bold uppercase text-xs tracking-widest">Personalizando tus Shorts...</p>
+              <p className="font-bold uppercase text-xs tracking-widest">Buscando Shorts...</p>
           </div>
       ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">

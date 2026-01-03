@@ -8,6 +8,7 @@ export enum UserRole {
   USER = 'USER'
 }
 
+/* Added VideoCategory enum as required by Upload.tsx and others */
 export enum VideoCategory {
   GENERAL = 'GENERAL',
   MOVIES = 'MOVIES',
@@ -21,9 +22,9 @@ export interface Category {
   id: string;
   name: string;
   price: number;
-  autoSub: boolean;
+  autoSub: boolean; // Activar subcategorías automáticas por carpeta
   parent?: string | null;
-  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM';
+  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM'; // Nuevo: Ordenamiento personalizado
 }
 
 export interface User {
@@ -63,10 +64,10 @@ export interface Video {
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
   transcode_progress?: number;
-  size_fmt?: string;
-  vector?: number[]; // Nuevo: Embedding para búsqueda vectorial
+  size_fmt?: string; // Formatted size for admin panels (e.g. "1.2 GB")
 }
 
+/* Added Comment interface as required by Watch.tsx and Shorts.tsx */
 export interface Comment {
   id: string;
   videoId: string;
@@ -77,6 +78,7 @@ export interface Comment {
   timestamp: number;
 }
 
+/* Added UserInteraction interface as required by Watch.tsx and Shorts.tsx */
 export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
@@ -100,7 +102,7 @@ export interface SystemSettings {
   geminiKey: string;
   ytDlpPath: string;
   ffmpegPath: string;
-  categories: Category[];
+  categories: Category[]; // Cambio crítico: Ahora es una lista de objetos
   localLibraryPath: string; 
   videoCommission: number;
   marketCommission: number;
@@ -112,6 +114,7 @@ export interface SystemSettings {
   autoTranscode?: boolean | number;
   tropipayClientId?: string;
   tropipayClientSecret?: string;
+  /* Added missing properties used in Admin panels and Upload */
   customCategories?: string[];
   categoryPrices?: Record<string, number>;
   ftpSettings?: {
@@ -122,6 +125,7 @@ export interface SystemSettings {
     rootPath: string;
   };
   is_transcoder_active?: boolean;
+  // Added missing maxResolution property used in AdminConfig.tsx
   maxResolution?: number;
 }
 
@@ -134,7 +138,7 @@ export interface Transaction {
   timestamp: number;
   recipientName?: string;
   senderName?: string;
-  creatorId?: string;
+  creatorId?: string; // Used in Profile logic
 }
 
 export interface Notification {
@@ -146,9 +150,11 @@ export interface Notification {
     isRead: boolean;
     timestamp: number;
     metadata?: any;
+    /* Added avatarUrl property as required by Layout.tsx */
     avatarUrl?: string;
 }
 
+/* Added VideoResult interface as required by Requests.tsx */
 export interface VideoResult {
   id: string;
   title: string;
@@ -159,6 +165,7 @@ export interface VideoResult {
   duration?: number;
 }
 
+/* Added ContentRequest interface as required by Requests.tsx and AdminRequests.tsx */
 export interface ContentRequest {
   id: string;
   userId: string;
@@ -182,6 +189,7 @@ export interface MarketplaceItem {
     sellerName: string;
     images?: string[];
     status?: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO';
+    /* Added missing properties used in Marketplace and Edit pages */
     createdAt: number;
     discountPercent?: number;
     rating?: number;
@@ -221,6 +229,7 @@ export interface VipRequest {
     createdAt: number;
 }
 
+/* Added SmartCleanerResult interface as required by AdminMaintenance.tsx */
 export interface SmartCleanerResult {
   preview: any[];
   stats: {
@@ -228,6 +237,7 @@ export interface SmartCleanerResult {
   };
 }
 
+/* Added FtpFile interface as required by AdminFtp.tsx */
 export interface FtpFile {
   name: string;
   path: string;
