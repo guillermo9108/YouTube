@@ -1,356 +1,108 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V11.4 (Optimizado Synology)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V13.0 (FFmpeg & Smart Purge)
  */
 
 function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($settings) {
-        // Auto-detección de FFmpeg si no está configurado
-        if (empty($settings['ffmpegPath']) || $settings['ffmpegPath'] === 'ffmpeg') {
-            $commonPaths = [
-                '/usr/bin/ffmpeg',
-                '/bin/ffmpeg',
-                '/var/packages/VideoStation/target/bin/ffmpeg',
-                '/var/packages/CodecPack/target/bin/ffmpeg',
-                '/usr/local/bin/ffmpeg'
-            ];
-            foreach ($commonPaths as $path) {
-                if (@is_executable($path)) {
-                    $settings['ffmpegPath'] = $path;
-                    $pdo->prepare("UPDATE system_settings SET ffmpegPath = ? WHERE id = 1")->execute([$path]);
-                    break;
-                }
-            }
-        }
-
-        $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}', true);
-        $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]', true);
         $settings['categories'] = json_decode($settings['categories'] ?? '[]', true);
         $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true);
-        $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? '{}', true);
         respond(true, $settings);
     }
-    respond(false, null, "No se pudo cargar la configuración");
+    respond(false, null, "Error configuración");
 }
 
 function admin_update_settings($pdo, $input) {
-    $allowed = [
-        'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
-        'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 
-        'ytDlpPath', 'ffmpegPath', 'enableYoutube', 'categoryPrices', 
-        'customCategories', 'localLibraryPath', 'videoCommission', 
-        'marketCommission', 'transferFee', 'vipPlans', 'paymentInstructions',
-        'currencyConversion', 'enableDebugLog', 'autoTranscode', 'transcodePreset',
-        'proxyUrl', 'ftpSettings', 'categories', 'tropipayClientId', 'tropipayClientSecret'
-    ];
-
-    $fields = [];
-    $params = [];
-    
+    $allowed = ['localLibraryPath', 'categories', 'vipPlans', 'videoCommission', 'marketCommission', 'transferFee', 'enableDebugLog', 'autoTranscode', 'ffmpegPath'];
+    $fields = []; $params = [];
     foreach ($input as $key => $val) {
         if (in_array($key, $allowed)) {
             $fields[] = "`$key` = ?";
-            if (is_array($val) || is_object($val)) {
-                $params[] = json_encode($val, JSON_UNESCAPED_UNICODE);
-            } else {
-                $params[] = $val;
-            }
+            $params[] = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
         }
     }
-
-    if (empty($fields)) {
-        respond(true, null, "No hay cambios válidos que guardar");
-    }
-
+    if (empty($fields)) respond(true);
     $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
-    
-    try {
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        respond(true);
-    } catch (Exception $e) {
-        respond(false, null, "Error en base de datos: " . $e->getMessage());
-    }
-}
-
-function admin_add_balance($pdo, $input) {
-    $targetId = $input['userId'] ?? $input['targetId'] ?? null;
-    $amount = floatval($input['amount'] ?? 0);
-    if (!$targetId || $amount <= 0) respond(false, null, 'Datos inválidos');
-
-    $pdo->beginTransaction();
-    try {
-        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
-        $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp) VALUES (?, ?, ?, 'DEPOSIT', ?)")
-            ->execute([uniqid('dep_'), $targetId, $amount, time()]);
-        $pdo->commit();
-        respond(true);
-    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
-}
-
-function admin_handle_balance_request($pdo, $input) {
-    $reqId = $input['reqId'] ?? '';
-    $status = $input['status'] ?? ''; 
-    
-    if (!$reqId || !in_array($status, ['APPROVED', 'REJECTED'])) respond(false, null, 'Datos inválidos');
-
-    $pdo->beginTransaction();
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM balance_requests WHERE id = ? FOR UPDATE");
-        $stmt->execute([$reqId]);
-        $req = $stmt->fetch();
-
-        if (!$req) throw new Exception("Solicitud no encontrada");
-        if ($req['status'] !== 'PENDING') throw new Exception("Solicitud ya procesada");
-
-        if ($status === 'APPROVED') {
-            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
-            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp) VALUES (?, ?, ?, 'DEPOSIT', ?)")
-                ->execute([uniqid('dep_'), $req['userId'], $req['amount'], time()]);
-            
-            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
-                ->execute([uniqid('n_'), $req['userId'], "Tu recarga de {$req['amount']}$ ha sido aprobada.", time()]);
-        }
-
-        $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
-        $pdo->commit();
-        respond(true);
-    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
-}
-
-function admin_handle_vip_request($pdo, $input) {
-    $reqId = $input['reqId'] ?? '';
-    $status = $input['status'] ?? '';
-
-    if (!$reqId || !in_array($status, ['APPROVED', 'REJECTED'])) respond(false, null, 'Datos inválidos');
-
-    $pdo->beginTransaction();
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM vip_requests WHERE id = ? FOR UPDATE");
-        $stmt->execute([$reqId]);
-        $req = $stmt->fetch();
-
-        if (!$req) throw new Exception("Solicitud no encontrada");
-        if ($req['status'] !== 'PENDING') throw new Exception("Solicitud ya procesada");
-
-        if ($status === 'APPROVED') {
-            $plan = json_decode($req['planSnapshot'], true);
-            $userId = $req['userId'];
-            
-            if ($plan['type'] === 'BALANCE') {
-                $bonus = floatval($plan['bonusPercent'] ?? 0);
-                $total = $plan['price'] + ($plan['price'] * ($bonus / 100));
-                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $userId]);
-            } else {
-                $days = intval($plan['durationDays'] ?? 30);
-                $now = time();
-                $stmtU = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
-                $stmtU->execute([$userId]);
-                $current = intval($stmtU->fetchColumn());
-                $start = ($current > $now) ? $current : $now;
-                $newExpiry = $start + ($days * 86400);
-                $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
-            }
-            
-            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
-                ->execute([uniqid('n_'), $userId, "Tu membresía/recarga ha sido activada.", time()]);
-        }
-
-        $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
-        $pdo->commit();
-        respond(true);
-    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
-}
-
-function admin_get_finance_requests($pdo) {
-    $balance = $pdo->query("SELECT r.*, u.username FROM balance_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC")->fetchAll();
-    $vip = $pdo->query("SELECT r.*, u.username FROM vip_requests r JOIN users u ON r.userId = u.id WHERE r.status = 'PENDING' ORDER BY r.createdAt DESC")->fetchAll();
-    $activeVip = $pdo->query("SELECT id, username, avatarUrl, vipExpiry FROM users WHERE vipExpiry > " . time())->fetchAll();
-    foreach($activeVip as &$v) { $v['avatarUrl'] = fix_url($v['avatarUrl']); }
-    respond(true, ['balance' => $balance, 'vip' => $vip, 'activeVip' => $activeVip]);
-}
-
-function admin_get_global_transactions($pdo) {
-    $stmt = $pdo->query("SELECT t.*, u.username as buyerName FROM transactions t LEFT JOIN users u ON t.buyerId = u.id ORDER BY t.timestamp DESC LIMIT 100");
-    $history = $stmt->fetchAll();
-    $revenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
-    respond(true, ['history' => $history, 'systemRevenue' => floatval($revenue)]);
-}
-
-function admin_repair_db($pdo) {
-    require_once 'functions_schema.php';
-    $schema = getAppSchema();
-    foreach ($schema as $table => $def) { syncTable($pdo, $table, $def); }
-    respond(true, "Esquema sincronizado");
+    $pdo->prepare($sql)->execute($params);
+    respond(true);
 }
 
 function admin_cleanup_files($pdo) {
     $stmt = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos");
     $dbFiles = [];
     while($r = $stmt->fetch()) {
-        if(strpos($r['videoUrl'], 'uploads/') !== false) $dbFiles[] = basename($r['videoUrl']);
-        if(strpos($r['thumbnailUrl'], 'uploads/') !== false) $dbFiles[] = basename($r['thumbnailUrl']);
+        $dbFiles[] = basename($r['videoUrl']);
+        $dbFiles[] = basename($r['thumbnailUrl']);
     }
-    $dirs = ['uploads/videos/', 'uploads/thumbnails/', 'uploads/avatars/'];
+    
+    // Limpieza de Logs también
+    $logFile = 'debug_log.txt';
+    if (file_exists($logFile)) @file_put_contents($logFile, '');
+
+    $dirs = ['uploads/videos/', 'uploads/thumbnails/', 'uploads/avatars/', 'uploads/market/'];
     $deleted = 0;
     foreach($dirs as $dir) {
         if(!is_dir($dir)) continue;
         foreach(glob($dir . "*") as $file) {
-            if(!in_array(basename($file), $dbFiles) && is_file($file)) {
-                @unlink($file); $deleted++;
+            if(is_file($file) && !in_array(basename($file), $dbFiles) && basename($file) !== 'default.jpg') {
+                if (@unlink($file)) $deleted++;
             }
         }
     }
-    respond(true, ['videos' => $deleted]);
+    respond(true, ['files' => $deleted]);
 }
 
-function admin_get_local_stats($pdo) {
-    $df = @disk_free_space("/") / (1024*1024*1024);
-    $dt = @disk_total_space("/") / (1024*1024*1024);
-    $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal=1")->fetchColumn();
+function admin_transcode_batch($pdo) {
+    set_time_limit(0);
+    $settings = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1")->fetch();
+    $ffmpeg = $settings['ffmpegPath'] ?: 'ffmpeg';
+
+    $stmt = $pdo->query("SELECT * FROM videos WHERE transcode_status = 'WAITING' LIMIT 1");
+    $v = $stmt->fetch();
     
-    $folderUsage = [];
-    foreach(['uploads/videos', 'uploads/thumbnails', 'uploads/market'] as $d) {
-        $size = 0;
-        if(is_dir($d)) { 
-            foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($d)) as $f) { 
-                if($f->isFile()) $size += $f->getSize(); 
-            } 
-        }
-        $folderUsage[basename($d)] = round($size / (1024*1024), 2);
+    if (!$v) {
+        $pdo->query("UPDATE system_settings SET is_transcoder_active = 0 WHERE id = 1");
+        respond(true, "No hay tareas pendientes");
     }
 
-    $catStats = $pdo->query("SELECT category, COUNT(*) as count, SUM(views) as totalViews FROM videos GROUP BY category")->fetchAll();
+    $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$v['id']]);
+    $pdo->query("UPDATE system_settings SET is_transcoder_active = 1 WHERE id = 1");
+
+    $inputPath = resolve_video_path($v['videoUrl']);
+    $outputPath = "uploads/videos/compatible_" . $v['id'] . ".mp4";
     
-    respond(true, [
-        'disk_free' => round($df, 2),
-        'disk_total' => round($dt, 2),
-        'db_videos' => $dbVideos,
-        'folder_usage' => $folderUsage,
-        'category_stats' => $catStats,
-        'active_processes' => [] 
-    ]);
-}
+    if (!$inputPath) {
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'No se encontró archivo original' WHERE id = ?")->execute([$v['id']]);
+        respond(false, null, "Archivo no encontrado");
+    }
 
-function admin_get_requests($pdo, $status) {
-    $sql = "SELECT r.*, u.username FROM requests r LEFT JOIN users u ON r.userId = u.id";
-    if ($status !== 'ALL') { $sql .= " WHERE r.status = '$status'"; }
-    $sql .= " ORDER BY r.createdAt DESC";
-    respond(true, $pdo->query($sql)->fetchAll());
-}
+    // Comando FFmpeg: Transcodificar a MP4 H.264 / AAC (Compatibilidad Universal)
+    $cmd = "\"$ffmpeg\" -i \"$inputPath\" -c:v libx264 -preset ultrafast -crf 28 -c:a aac -b:a 128k -y \"$outputPath\" 2>&1";
+    exec($cmd, $output, $returnCode);
 
-function admin_get_logs() {
-    $logFile = 'debug_log.txt';
-    $lines = file_exists($logFile) ? array_reverse(file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES)) : [];
-    respond(true, array_slice($lines, 0, 100));
-}
-
-function admin_clear_logs() {
-    @file_put_contents('debug_log.txt', '');
-    respond(true);
+    if ($returnCode === 0 && file_exists($outputPath)) {
+        $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE' WHERE id = ?")
+            ->execute(["api/$outputPath", $v['id']]);
+        
+        // Si era un archivo local subido, borrar el original para ahorrar espacio
+        if (strpos($v['videoUrl'], 'uploads/videos/') !== false) @unlink($inputPath);
+        
+        respond(true, "Video compatible generado con éxito");
+    } else {
+        $errorMsg = implode("\n", $output);
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = ? WHERE id = ?")
+            ->execute([substr($errorMsg, 0, 500), $v['id']]);
+        respond(false, null, "FFmpeg falló: " . $errorMsg);
+    }
 }
 
 function get_real_stats($pdo) {
-    $stats = [
+    respond(true, [
         'userCount' => $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn(),
         'systemRevenue' => $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0,
-        'totalBalance' => $pdo->query("SELECT SUM(balance) FROM users")->fetchColumn() ?: 0,
-        'history' => ['daily' => [], 'monthly' => []]
-    ];
-    respond(true, $stats);
-}
-
-// --- TRANSCODING HELPERS ---
-
-function admin_get_transcode_profiles($pdo) {
-    $stmt = $pdo->query("SELECT * FROM transcode_profiles ORDER BY extension ASC");
-    respond(true, $stmt->fetchAll());
-}
-
-function admin_save_transcode_profile($pdo, $input) {
-    $ext = strtolower($input['extension'] ?? '');
-    $args = $input['command_args'] ?? '';
-    $desc = $input['description'] ?? '';
-    if (!$ext || !$args) respond(false, null, "Datos incompletos");
-
-    $stmt = $pdo->prepare("INSERT INTO transcode_profiles (extension, command_args, description) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE command_args = VALUES(command_args), description = VALUES(description)");
-    $stmt->execute([$ext, $args, $desc]);
-    respond(true);
-}
-
-function admin_delete_transcode_profile($pdo, $ext) {
-    $pdo->prepare("DELETE FROM transcode_profiles WHERE extension = ?")->execute([$ext]);
-    respond(true);
-}
-
-function admin_retry_failed_transcodes($pdo) {
-    $pdo->query("UPDATE videos SET transcode_status = 'WAITING' WHERE transcode_status = 'FAILED'");
-    respond(true);
-}
-
-function admin_clear_transcode_queue($pdo) {
-    $pdo->query("UPDATE videos SET transcode_status = 'NONE' WHERE transcode_status = 'WAITING'");
-    respond(true);
-}
-
-function admin_remove_from_queue($pdo, $id) {
-    $pdo->prepare("UPDATE videos SET transcode_status = 'NONE' WHERE id = ?")->execute([$id]);
-    respond(true);
-}
-
-function admin_skip_transcode($pdo, $id) {
-    $pdo->prepare("UPDATE videos SET transcode_status = 'DONE' WHERE id = ?")->execute([$id]);
-    respond(true);
-}
-
-function admin_get_transcode_log() {
-    respond(true, "FFmpeg Log: No disponible en modo CGI/FastCGI.");
-}
-
-function admin_transcode_batch($pdo) { 
-    $pdo->query("UPDATE system_settings SET is_transcoder_active = 1 WHERE id = 1");
-    respond(true); 
-}
-
-function admin_stop_transcoder($pdo) { 
-    $pdo->query("UPDATE system_settings SET is_transcoder_active = 0 WHERE id = 1");
-    respond(true); 
-}
-
-function admin_transcode_scan_filters($pdo, $input) {
-    $onlyNonMp4 = !empty($input['onlyNonMp4']);
-    $sql = "SELECT id FROM videos WHERE category != 'FAILED_METADATA' AND transcode_status = 'NONE'";
-    if ($onlyNonMp4) {
-        $sql .= " AND (videoUrl NOT LIKE '%.mp4' AND videoUrl NOT LIKE '%action=stream%')";
-    }
-    
-    $ids = $pdo->query($sql)->fetchAll(PDO::FETCH_COLUMN);
-    $count = count($ids);
-
-    if (($input['mode'] ?? '') === 'EXECUTE' && $count > 0) {
-        $pdo->query("UPDATE videos SET transcode_status = 'WAITING' WHERE id IN ('" . implode("','", $ids) . "')");
-    }
-    
-    respond(true, ['count' => $count]);
-}
-
-// --- CLEANER V8 ---
-
-function admin_smart_cleaner_preview($pdo, $input) { 
-    respond(true, ['preview' => [], 'stats' => ['spaceReclaimed' => '0 GB']]); 
-}
-
-function admin_smart_cleaner_execute($pdo, $input) { 
-    respond(true, ['deleted' => 0]); 
-}
-
-function admin_file_cleanup_preview($pdo, $type) { 
-    respond(true, []); 
-}
-
-function admin_organize_paquete($pdo, $input) { 
-    respond(true, ['cleaned' => 0]); 
+        'totalBalance' => $pdo->query("SELECT SUM(balance) FROM users")->fetchColumn() ?: 0
+    ]);
 }
 ?>
