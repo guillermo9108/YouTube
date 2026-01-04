@@ -37,7 +37,11 @@ export default function Watch() {
     const videoRef = useRef<HTMLVideoElement>(null);
     const timerRef = useRef<number | null>(null);
 
-    useEffect(() => { window.scrollTo(0, 0); }, [id]);
+    useEffect(() => { 
+        window.scrollTo(0, 0);
+        // Forzar actualización de saldo al entrar para evitar fallos de compra por saldo desactualizado
+        refreshUser();
+    }, [id]);
 
     useEffect(() => {
         if (!id) return;
@@ -90,7 +94,14 @@ export default function Watch() {
 
     const handlePurchase = async (skipConfirm = false) => {
         if (!user || !video || isPurchasingRef.current) return;
-        if (Number(user.balance) < video.price) { navigate('/vip'); return; }
+        
+        // Re-verificar balance real justo antes de permitir el flujo
+        if (Number(user.balance) < video.price) { 
+            toast.error("Saldo insuficiente para desbloquear este video.");
+            navigate('/vip'); 
+            return; 
+        }
+
         if (skipConfirm || confirm(`¿Desbloquear contenido por ${video.price} $?`)) {
             isPurchasingRef.current = true;
             try {

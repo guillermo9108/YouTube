@@ -24,11 +24,15 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const heartbeatRef = useRef<number | null>(null);
+  const userRef = useRef<User | null>(null); // Ref para evitar cierres obsoletos en el intervalo
   const toast = useToast();
   
+  // Sincronizar Ref con State
+  useEffect(() => { userRef.current = user; }, [user]);
+
   const logout = () => {
-    if (user) {
-        try { db.logout(user.id).catch(() => {}); } catch(e){}
+    if (userRef.current) {
+        try { db.logout(userRef.current.id).catch(() => {}); } catch(e){}
     }
     setUser(null);
     localStorage.removeItem('sp_current_user_id');
@@ -39,7 +43,6 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   };
 
   useEffect(() => {
-    // ESCUCHADOR GLOBAL DE EXPIRACIÓN (Opción B)
     const handleExpired = () => {
         toast.warning("Sesión cerrada: Has iniciado sesión en otro dispositivo.");
         logout();
@@ -84,29 +87,36 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
 
         if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
         
-        // HEARTBEAT (Netflix-Style Check)
-        // Cada 30 segundos verificamos si este dispositivo sigue siendo el activo.
+        // HEARTBEAT SYNC (Actualiza saldo cada 30s)
         heartbeatRef.current = window.setInterval(async () => {
-            // CRITICAL GUARD: Only execute heartbeat if user exists and window is active
-            if (user && user.id && !document.hidden) {
-                await db.heartbeat(user.id);
-                // Si falla (401), el interceptor de db.ts disparará 'sp_session_expired'
+            if (userRef.current && !document.hidden) {
+                try {
+                    const updatedUser = await db.heartbeat(userRef.current.id);
+                    if (updatedUser) {
+                        // Actualizamos solo si hay cambios en balance o VIP
+                        if (Number(updatedUser.balance) !== Number(userRef.current.balance) || updatedUser.vipExpiry !== userRef.current.vipExpiry) {
+                            setUser(prev => prev ? ({ ...prev, ...updatedUser, balance: Number(updatedUser.balance) }) : null);
+                        }
+                    }
+                } catch (e) {
+                    // El interceptor de db.ts manejará el 401 si ocurre
+                }
             }
         }, 30000);
-    } else {
-        if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
     }
 
     return () => {
         if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
     };
-  }, [user]);
+  }, [!!user]); // Solo re-ejecutar cuando cambia el estado de logueado
 
-  const refreshUser = () => {
+  const refreshUser = async () => {
      const currentToken = localStorage.getItem('sp_session_token');
-     if (user && currentToken) {
-        db.getUser(user.id).then(u => { 
-            if(u && u.id === user.id) {
+     const currentId = localStorage.getItem('sp_current_user_id');
+     if (currentId && currentToken) {
+        try {
+            const u = await db.getUser(currentId);
+            if(u) {
                 const refreshed = {
                     ...u, 
                     sessionToken: currentToken,
@@ -115,7 +125,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
                 setUser(refreshed);
                 db.saveOfflineUser(refreshed);
             }
-        }).catch(() => {});
+        } catch(e) {}
      }
   };
 

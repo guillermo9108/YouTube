@@ -89,7 +89,9 @@ export interface VipPlan {
   id: string;
   name: string;
   price: number;
-  durationDays: number;
+  type: 'ACCESS' | 'BALANCE'; // Nuevo: Diferencia entre días o recarga
+  durationDays?: number; // Opcional si es tipo BALANCE
+  bonusPercent?: number; // Nuevo: Porcentaje extra para tipo BALANCE
   highlight?: boolean;
 }
 

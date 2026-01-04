@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../../../services/db';
 import { User } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Search, Users, Wallet, Shield, ChevronLeft, ChevronRight, RefreshCw, Smartphone, TrendingUp } from 'lucide-react';
+import { Search, Users, Wallet, Shield, ChevronLeft, ChevronRight, RefreshCw, Smartphone, TrendingUp, UserCheck, X } from 'lucide-react';
 
 const StatCard = ({ label, value, icon: Icon, color }: any) => (
     <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex items-center gap-4">
@@ -30,6 +30,9 @@ export default function AdminUsers() {
     // Manual Balance State
     const [addBalanceAmount, setAddBalanceAmount] = useState('');
     const [addBalanceTarget, setAddBalanceTarget] = useState('');
+    const [rechargeSearch, setRechargeSearch] = useState('');
+    const [rechargeSuggestions, setRechargeSuggestions] = useState<User[]>([]);
+    const rechargeSearchTimeout = useRef<any>(null);
 
     const loadUsers = async () => {
         setIsLoading(true);
@@ -45,7 +48,41 @@ export default function AdminUsers() {
 
     useEffect(() => { loadUsers(); }, []);
 
-    // Derived State
+    // Búsqueda predictiva para el formulario de recarga
+    const handleRechargeSearch = (val: string) => {
+        setRechargeSearch(val);
+        if (rechargeSearchTimeout.current) clearTimeout(rechargeSearchTimeout.current);
+        
+        if (val.length < 2) {
+            setRechargeSuggestions([]);
+            return;
+        }
+
+        rechargeSearchTimeout.current = setTimeout(async () => {
+            if (!currentUser) return;
+            try {
+                // Buscamos directamente en la lista cargada para velocidad instantánea
+                const hits = users.filter(u => 
+                    u.username.toLowerCase().includes(val.toLowerCase())
+                ).slice(0, 5);
+                setRechargeSuggestions(hits);
+            } catch (e) {}
+        }, 300);
+    };
+
+    const selectUserForRecharge = (u: User) => {
+        setAddBalanceTarget(u.id);
+        setRechargeSearch(`@${u.username}`);
+        setRechargeSuggestions([]);
+    };
+
+    const clearRechargeForm = () => {
+        setAddBalanceTarget('');
+        setRechargeSearch('');
+        setRechargeSuggestions([]);
+    };
+
+    // Derived State para la tabla principal
     const filteredUsers = useMemo(() => {
         return users.filter(u => 
             u.username.toLowerCase().includes(search.toLowerCase()) || 
@@ -64,12 +101,15 @@ export default function AdminUsers() {
     const paginatedUsers = filteredUsers.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
     const handleAddBalance = async () => {
-        if (!currentUser || !addBalanceTarget || !addBalanceAmount) return;
+        if (!currentUser || !addBalanceTarget || !addBalanceAmount) {
+            toast.warning("Selecciona un usuario y define un monto");
+            return;
+        }
         try {
             await db.adminAddBalance(currentUser.id, addBalanceTarget, parseFloat(addBalanceAmount));
             toast.success("Saldo inyectado correctamente");
             setAddBalanceAmount('');
-            setAddBalanceTarget('');
+            clearRechargeForm();
             loadUsers();
         } catch (e: any) {
             toast.error("Error: " + e.message);
@@ -149,7 +189,7 @@ export default function AdminUsers() {
                                             </div>
                                         </td>
                                         <td className="px-4 py-4 text-right">
-                                            <button onClick={() => setAddBalanceTarget(u.id)} className="p-1.5 bg-indigo-500/10 text-indigo-400 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"><TrendingUp size={16}/></button>
+                                            <button onClick={() => selectUserForRecharge(u)} className="p-1.5 bg-indigo-500/10 text-indigo-400 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity" title="Recargar este usuario"><TrendingUp size={16}/></button>
                                         </td>
                                     </tr>
                                 ))}
@@ -167,21 +207,71 @@ export default function AdminUsers() {
                 </div>
 
                 <div className="space-y-4">
-                    <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl h-fit">
+                    <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl h-fit relative">
                         <h3 className="font-black text-white mb-4 flex items-center gap-2 uppercase tracking-tighter"><TrendingUp size={18} className="text-emerald-400"/> Recarga Directa</h3>
                         <div className="space-y-4">
-                            <div>
-                                <label className="block text-[10px] font-black text-slate-500 mb-1 uppercase tracking-widest">Destinatario</label>
-                                <select className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500" value={addBalanceTarget} onChange={e => setAddBalanceTarget(e.target.value)}>
-                                    <option value="">Selecciona usuario...</option>
-                                    {users.map(u => <option key={u.id} value={u.id}>{u.username} ({Number(u.balance).toFixed(0)} $)</option>)}
-                                </select>
+                            <div className="relative">
+                                <label className="block text-[10px] font-black text-slate-500 mb-1 uppercase tracking-widest ml-1">Buscar Destinatario</label>
+                                <div className="relative">
+                                    <input 
+                                        type="text" 
+                                        value={rechargeSearch}
+                                        onChange={e => handleRechargeSearch(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-indigo-500 transition-all shadow-inner" 
+                                        placeholder="Nombre de usuario..."
+                                    />
+                                    {rechargeSearch && (
+                                        <button onClick={clearRechargeForm} className="absolute right-3 top-3 text-slate-500 hover:text-white transition-colors">
+                                            <X size={16}/>
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Sugerencias Predictivas */}
+                                {rechargeSuggestions.length > 0 && (
+                                    <div className="absolute top-full left-0 right-0 mt-2 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 origin-top">
+                                        {rechargeSuggestions.map(s => (
+                                            <button 
+                                                key={s.id} type="button"
+                                                onClick={() => selectUserForRecharge(s)}
+                                                className="w-full p-3 flex items-center gap-3 hover:bg-indigo-600 transition-colors border-b border-white/5 last:border-0"
+                                            >
+                                                <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-900 shrink-0">
+                                                    {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-white/20">{s.username[0]}</div>}
+                                                </div>
+                                                <div className="text-left flex-1">
+                                                    <div className="text-sm font-bold text-white">@{s.username}</div>
+                                                    <div className="text-[9px] text-slate-400 font-mono uppercase">Saldo: {Number(s.balance).toFixed(2)} $</div>
+                                                </div>
+                                                <UserCheck size={14} className="opacity-30"/>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
+
                             <div>
-                                <label className="block text-[10px] font-black text-slate-500 mb-1 uppercase tracking-widest">Monto a inyectar ($)</label>
-                                <input type="number" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white font-mono font-bold" value={addBalanceAmount} onChange={e => setAddBalanceAmount(e.target.value)} placeholder="0.00" />
+                                <label className="block text-[10px] font-black text-slate-500 mb-1 uppercase tracking-widest ml-1">Monto a inyectar ($)</label>
+                                <input 
+                                    type="number" 
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white font-mono font-bold focus:border-indigo-500 outline-none" 
+                                    value={addBalanceAmount} 
+                                    onChange={e => setAddBalanceAmount(e.target.value)} 
+                                    placeholder="0.00" 
+                                />
                             </div>
-                            <button onClick={handleAddBalance} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-3 rounded-xl shadow-lg active:scale-95 transition-all text-xs uppercase tracking-widest">Confirmar Transacción</button>
+
+                            <button 
+                                onClick={handleAddBalance} 
+                                disabled={!addBalanceTarget || !addBalanceAmount}
+                                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-black py-4 rounded-xl shadow-lg active:scale-95 transition-all text-xs uppercase tracking-widest mt-2"
+                            >
+                                Confirmar Transacción
+                            </button>
+                            
+                            {!addBalanceTarget && rechargeSearch.length > 0 && rechargeSuggestions.length === 0 && (
+                                <p className="text-[9px] text-red-400 font-bold text-center uppercase tracking-wider">No se encontraron coincidencias</p>
+                            )}
                         </div>
                     </div>
                 </div>

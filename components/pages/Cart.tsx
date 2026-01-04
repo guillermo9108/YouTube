@@ -1,5 +1,4 @@
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -25,6 +24,11 @@ export default function Cart() {
         phoneNumber: ''
     });
 
+    // Sincronizar saldo al entrar al carrito
+    useEffect(() => {
+        refreshUser();
+    }, []);
+
     // Advanced Calculations
     const totals = useMemo(() => {
         return cart.reduce((acc: { subtotal: number, total: number, itemCount: number }, item: CartItem) => {
@@ -47,9 +51,15 @@ export default function Cart() {
         if (!user) return;
         if (cart.length === 0) return;
         
+        // Re-verificación de saldo antes de procesar
+        if (Number(user.balance) < totals.total) {
+            toast.error("Tu saldo ha cambiado. Fondos insuficientes.");
+            refreshUser();
+            return;
+        }
+
         if (!shipping.address || !shipping.fullName || !shipping.phoneNumber) {
              toast.error("Por favor completa los datos de envío obligatorios");
-             // Smooth scroll to shipping form on mobile
              document.getElementById('shipping-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
              return;
         }

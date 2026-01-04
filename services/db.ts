@@ -145,8 +145,8 @@ class DBService {
         return this.request<User | null>(`action=get_user&userId=${userId}`);
     }
 
-    public async heartbeat(userId: string): Promise<void> {
-        return this.request<void>(`action=heartbeat`, {
+    public async heartbeat(userId: string): Promise<User> {
+        return this.request<User>(`action=heartbeat`, {
             method: 'POST',
             body: JSON.stringify({ userId })
         });

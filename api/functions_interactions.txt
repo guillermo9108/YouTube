@@ -105,8 +105,7 @@ function interact_transfer_balance($pdo, $input) {
 function interact_purchase_vip_instant($pdo, $input) {
     $userId = $input['userId'];
     $plan = $input['plan']; // Objeto del plan
-    $planId = $plan['id'];
-
+    
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare("SELECT balance, vipExpiry FROM users WHERE id = ? FOR UPDATE");
@@ -115,31 +114,42 @@ function interact_purchase_vip_instant($pdo, $input) {
 
         if ($user['balance'] < $plan['price']) throw new Exception("Saldo insuficiente para este plan");
 
-        // 1. Debitar saldo
+        // 1. Debitar precio base del saldo
         $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$plan['price'], $userId]);
 
-        // 2. Calcular nueva expiración
         $now = time();
-        $currentExpiry = intval($user['vipExpiry'] ?? 0);
-        $daysToAdd = intval($plan['durationDays'] ?? 0);
-        $secondsToAdd = $daysToAdd * 86400;
+        $type = $plan['type'] ?? 'ACCESS';
 
-        $newExpiry = ($currentExpiry > $now) ? ($currentExpiry + $secondsToAdd) : ($now + $secondsToAdd);
-
-        // 3. Actualizar Usuario
-        $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
-
-        // 4. Registrar Transacción (Membresía es ingreso directo para Admin)
-        $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
-        $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle) VALUES (?, ?, ?, 'VIP', ?, ?)")
-            ->execute([uniqid('tx_v_'), $userId, $plan['price'], $now, $plan['name']]);
+        if ($type === 'BALANCE') {
+            // PLAN DE RECARGA CON BONIFICACIÓN
+            $bonusPercent = floatval($plan['bonusPercent'] ?? 0);
+            $rechargeAmount = $plan['price'] * (1 + ($bonusPercent / 100));
             
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$rechargeAmount, $userId]);
+            
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle) VALUES (?, ?, ?, 'DEPOSIT', ?, ?)")
+                ->execute([uniqid('tx_r_'), $userId, $rechargeAmount, $now, "Canje de Plan: " . $plan['name']]);
+        } else {
+            // PLAN DE ACCESO VIP (DÍAS)
+            $currentExpiry = intval($user['vipExpiry'] ?? 0);
+            $daysToAdd = intval($plan['durationDays'] ?? 0);
+            $secondsToAdd = $daysToAdd * 86400;
+
+            $newExpiry = ($currentExpiry > $now) ? ($currentExpiry + $secondsToAdd) : ($now + $secondsToAdd);
+            $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
+            
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle) VALUES (?, ?, ?, 'VIP', ?, ?)")
+                ->execute([uniqid('tx_v_'), $userId, $plan['price'], $now, "Acceso VIP: " . $plan['name']]);
+        }
+
+        // 2. Acreditar el pago (Ingreso directo para Admin/Caja Chica)
+        $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
         if ($adminId) {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$plan['price'], $adminId]);
         }
 
         $pdo->commit();
-        respond(true, ['newExpiry' => $newExpiry]);
+        respond(true);
     } catch (Exception $e) {
         $pdo->rollBack();
         respond(false, null, $e->getMessage());

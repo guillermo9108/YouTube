@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, Category, VipPlan } from '../../../types';
@@ -6,7 +7,7 @@ import {
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
     CreditCard, Globe, Palette, ChevronRight, 
     FolderTree, DollarSign, Settings2, Info, RefreshCw, Database,
-    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc, FileText, Crown, Edit3
+    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc, FileText, Crown, Edit3, Coins
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -84,9 +85,11 @@ export default function AdminConfig() {
     const addVipPlan = () => {
         const newPlan: VipPlan = {
             id: 'plan_' + Date.now(),
-            name: 'NUEVO PLAN VIP',
+            name: 'NUEVO PLAN',
             price: 10,
+            type: 'ACCESS',
             durationDays: 30,
+            bonusPercent: 0,
             highlight: false
         };
         updateValue('vipPlans', [...(settings?.vipPlans || []), newPlan]);
@@ -209,11 +212,11 @@ export default function AdminConfig() {
 
             {/* 2. PLANES VIP */}
             <div className="space-y-3">
-                <SectionHeader id="VIP" label="Membresías VIP" icon={Crown} />
+                <SectionHeader id="VIP" label="Membresías & Recargas" icon={Crown} />
                 {activeSection === 'VIP' && (
                     <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
                         <div className="flex justify-between items-center px-2">
-                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Zap size={12}/> Define tus pases de acceso</span>
+                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Zap size={12}/> Define tus pases de acceso y recargas</span>
                             <button onClick={addVipPlan} className="bg-amber-600 hover:bg-amber-500 text-white p-2 rounded-xl flex items-center gap-1 text-[10px] font-black uppercase shadow-lg active:scale-90 transition-all">
                                 <Plus size={16}/> Nuevo Plan
                             </button>
@@ -224,7 +227,7 @@ export default function AdminConfig() {
                                 <div key={plan.id} className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 relative overflow-hidden group">
                                     {plan.highlight && <div className="absolute -right-10 top-2 rotate-45 bg-amber-500 text-black text-[8px] font-black px-10 py-1 uppercase shadow-xl">Popular</div>}
                                     
-                                    <div className="flex justify-between gap-2">
+                                    <div className="flex justify-between gap-4">
                                         <div className="flex-1">
                                             <label className="text-[9px] font-black text-slate-600 uppercase block mb-1">Nombre del Plan</label>
                                             <input 
@@ -233,6 +236,17 @@ export default function AdminConfig() {
                                                 onChange={e => updateVipPlan(plan.id, 'name', e.target.value)}
                                                 className="bg-transparent border-b border-slate-800 focus:border-amber-500 text-white font-black text-sm outline-none w-full py-1"
                                             />
+                                        </div>
+                                        <div className="w-32">
+                                            <label className="text-[9px] font-black text-slate-600 uppercase block mb-1">Tipo de Plan</label>
+                                            <select 
+                                                value={plan.type || 'ACCESS'}
+                                                onChange={e => updateVipPlan(plan.id, 'type', e.target.value)}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-1.5 text-[10px] font-black text-white outline-none"
+                                            >
+                                                <option value="ACCESS">Días Acceso</option>
+                                                <option value="BALANCE">Recarga Saldo</option>
+                                            </select>
                                         </div>
                                         <button onClick={() => removeVipPlan(plan.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors self-start mt-4">
                                             <Trash2 size={16}/>
@@ -249,15 +263,29 @@ export default function AdminConfig() {
                                                 className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 outline-none"
                                             />
                                         </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><Clock size={10}/> Días</label>
-                                            <input 
-                                                type="number" 
-                                                value={plan.durationDays} 
-                                                onChange={e => updateVipPlan(plan.id, 'durationDays', parseInt(e.target.value))}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-blue-400 outline-none"
-                                            />
-                                        </div>
+                                        
+                                        {plan.type === 'BALANCE' ? (
+                                            <div className="space-y-1">
+                                                <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><Percent size={10}/> Bono extra</label>
+                                                <input 
+                                                    type="number" 
+                                                    value={plan.bonusPercent || 0} 
+                                                    onChange={e => updateVipPlan(plan.id, 'bonusPercent', parseInt(e.target.value))}
+                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-emerald-400 outline-none"
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-1">
+                                                <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><Clock size={10}/> Días</label>
+                                                <input 
+                                                    type="number" 
+                                                    value={plan.durationDays || 0} 
+                                                    onChange={e => updateVipPlan(plan.id, 'durationDays', parseInt(e.target.value))}
+                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-blue-400 outline-none"
+                                                />
+                                            </div>
+                                        )}
+
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-slate-600 uppercase block mb-1 text-center">Destacar</label>
                                             <button 
@@ -268,6 +296,15 @@ export default function AdminConfig() {
                                             </button>
                                         </div>
                                     </div>
+
+                                    {plan.type === 'BALANCE' && (
+                                        <div className="mt-2 flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 p-2 rounded-xl">
+                                            <Coins size={14} className="text-emerald-500"/>
+                                            <span className="text-[10px] font-bold text-emerald-400 uppercase">
+                                                Total a recibir: <span className="text-sm font-black">{(plan.price * (1 + (plan.bonusPercent || 0) / 100)).toFixed(2)} $</span>
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>

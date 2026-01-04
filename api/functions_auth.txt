@@ -1,4 +1,3 @@
-
 <?php
 
 /**
@@ -63,21 +62,27 @@ function auth_heartbeat($pdo, $input) {
     $token = getBearerToken();
 
     if (!$uid || !$token) {
-        write_log("Heartbeat Denegado: UID($uid) o Token faltante.", 'WARNING');
         http_response_code(401);
         respond(false, null, 'Sesión no proporcionada');
     }
 
-    $stmt = $pdo->prepare("SELECT currentSessionId, username FROM users WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
     $stmt->execute([$uid]);
-    $session = $stmt->fetch(PDO::FETCH_ASSOC);
+    $u = $stmt->fetch(PDO::FETCH_ASSOC);
     
-    if ($session && $session['currentSessionId'] === $token) {
+    if ($u && $u['currentSessionId'] === $token) {
         $pdo->prepare("UPDATE users SET lastActive = ? WHERE id = ?")->execute([time(), $uid]);
-        respond(true);
+        
+        // Devolver usuario actualizado para sincronizar saldo/VIP en el frontend
+        unset($u['password_hash']);
+        $u['watchLater'] = json_decode($u['watchLater'] ?? '[]', true);
+        $u['defaultPrices'] = json_decode($u['defaultPrices'] ?? '{}', true);
+        $u['shippingDetails'] = json_decode($u['shippingDetails'] ?? '{}', true);
+        $u['avatarUrl'] = fix_url($u['avatarUrl']);
+        $u['sessionToken'] = $token;
+        respond(true, $u);
     }
 
-    write_log("Heartbeat Error: Conflicto de Sesión para @{$session['username']}. Recibido: $token", 'WARNING');
     http_response_code(401);
     respond(false, null, 'Sesión expirada o abierta en otro dispositivo');
 }

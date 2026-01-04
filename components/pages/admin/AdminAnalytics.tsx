@@ -1,16 +1,17 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
+import { VipPlan, SystemSettings } from '../../../types';
 import { 
     Calculator, TrendingUp, Users, DollarSign, 
     RefreshCw, BarChart3, ShieldAlert, Activity, 
-    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap
+    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap, Loader2
 } from 'lucide-react';
 
 type Granularity = 'DAYS' | 'MONTHS';
 
 export default function AdminAnalytics() {
     const [realStats, setRealStats] = useState<any>(null);
+    const [vipPlans, setVipPlans] = useState<VipPlan[]>([]);
     const [loading, setLoading] = useState(true);
     const [timeframe, setTimeframe] = useState<Granularity>('DAYS');
     const [activeView, setActiveView] = useState<'REAL' | 'SIMULATOR'>('REAL');
@@ -20,7 +21,7 @@ export default function AdminAnalytics() {
         users: 100,
         growth: 12,            // % Crecimiento neto mensual
         churn: 5,              // % Abandono
-        conversion: 20,        // % Usuarios que pagan membresía
+        conversion: 20,        // % Usuarios que realizan compras (Planes/Recargas)
         
         // Variables de Costos (Fijos Mensuales)
         contentInflow: 1400,   // Inversión en contenido
@@ -31,21 +32,37 @@ export default function AdminAnalytics() {
         p2pCommission: 5,      // % Fee de red (Credita a Admin)
         reinvestmentRate: 70,  // % de saldo que vuelve a circular
         
-        // Mix de Membresías (%)
-        mix7d: 50,  // Precio: 5$
-        mix14d: 30, // Precio: 9$
-        mix31d: 20  // Precio: 18$
+        // Mix de Planes (Se llena dinámicamente)
+        planMix: {} as Record<string, number>
     });
-
-    const PRICES = { d7: 5, d14: 9, d31: 18 };
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const rs = await db.request<any>('action=get_real_stats');
+            const [rs, settings] = await Promise.all([
+                db.request<any>('action=get_real_stats'),
+                db.getSystemSettings()
+            ]);
+
             setRealStats(rs);
+            const plans = settings.vipPlans || [];
+            setVipPlans(plans);
+
+            // Inicializar el Mix de planes si no existe o ha cambiado
+            const initialMix: Record<string, number> = {};
+            if (plans.length > 0) {
+                const equalShare = Math.floor(100 / plans.length);
+                plans.forEach((p, idx) => {
+                    initialMix[p.id] = idx === plans.length - 1 ? 100 - (equalShare * (plans.length - 1)) : equalShare;
+                });
+            }
+
             if (rs && rs.userCount) {
-                setSim(prev => ({ ...prev, users: Number(rs.userCount) }));
+                setSim(prev => ({ 
+                    ...prev, 
+                    users: Number(rs.userCount),
+                    planMix: Object.keys(prev.planMix).length > 0 ? prev.planMix : initialMix
+                }));
             }
         } catch(e) { 
             console.error("Analytics Load Error:", e); 
@@ -68,11 +85,14 @@ export default function AdminAnalytics() {
             const netMonthlyGrowth = (sim.growth - sim.churn) / 100;
             currentUsers = Math.max(0, currentUsers * (1 + netMonthlyGrowth));
 
-            const payingUsers = currentUsers * (sim.conversion / 100);
-            const rev7d = (payingUsers * (sim.mix7d / 100)) * PRICES.d7;
-            const rev14d = (payingUsers * (sim.mix14d / 100)) * PRICES.d14;
-            const rev31d = (payingUsers * (sim.mix31d / 100)) * PRICES.d31;
-            const totalMembershipRev = rev7d + rev14d + rev31d;
+            const activeBuyers = currentUsers * (sim.conversion / 100);
+            
+            // Cálculo dinámico basado en los planes REALES
+            let totalMembershipRev = 0;
+            vipPlans.forEach(plan => {
+                const share = (sim.planMix[plan.id] || 0) / 100;
+                totalMembershipRev += (activeBuyers * share) * Number(plan.price);
+            });
 
             const circulatingVolume = currentUsers * sim.p2pVolume;
             const p2pProfit = circulatingVolume * (sim.p2pCommission / 100) * (sim.reinvestmentRate / 100);
@@ -80,7 +100,6 @@ export default function AdminAnalytics() {
             const grossRevenue = totalMembershipRev + p2pProfit;
             const netMonthlyProfit = grossRevenue - totalFixedCosts;
             
-            // FÓRMULA DE RENTABILIDAD: ((Ingresos - Costos) / Ingresos) * 100
             const profitability = grossRevenue > 0 ? ((grossRevenue - totalFixedCosts) / grossRevenue) * 100 : -100;
 
             cumulativeNetProfit += netMonthlyProfit;
@@ -96,12 +115,26 @@ export default function AdminAnalytics() {
         }
 
         const avgProfitability = data.reduce((acc, curr) => acc + curr.profitability, 0) / steps;
-        const arpuMem = ((sim.mix7d/100)*PRICES.d7 + (sim.mix14d/100)*PRICES.d14 + (sim.mix31d/100)*PRICES.d31) * (sim.conversion/100);
-        const arpuP2P = sim.p2pVolume * (sim.p2pCommission/100) * (sim.reinvestmentRate/100);
+        
+        // ARPU Promedio basado en el mix actual
+        let avgPlanPrice = 0;
+        vipPlans.forEach(p => {
+            avgPlanPrice += (Number(p.price) * ((sim.planMix[p.id] || 0) / 100));
+        });
+
+        const arpuMem = avgPlanPrice * (sim.conversion / 100);
+        const arpuP2P = sim.p2pVolume * (sim.p2pCommission / 100) * (sim.reinvestmentRate / 100);
         const breakEvenUsers = Math.ceil(totalFixedCosts / (arpuMem + arpuP2P || 1));
 
         return { data, totalProfit: cumulativeNetProfit, breakEvenUsers, totalFixedCosts, avgProfitability };
-    }, [sim]);
+    }, [sim, vipPlans]);
+
+    const handleMixChange = (planId: string, value: number) => {
+        setSim(prev => ({
+            ...prev,
+            planMix: { ...prev.planMix, [planId]: value }
+        }));
+    };
 
     const renderChart = (points: any[], dataKey: string, color: string) => {
         if (!points || !Array.isArray(points) || points.length < 2) return (
@@ -125,7 +158,7 @@ export default function AdminAnalytics() {
         );
     };
 
-    if (loading) return <div className="flex justify-center p-20"><RefreshCw className="animate-spin text-indigo-500" /></div>;
+    if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" /></div>;
 
     return (
         <div className="space-y-6 animate-in fade-in pb-24 px-2 max-w-7xl mx-auto">
@@ -215,19 +248,22 @@ export default function AdminAnalytics() {
                                     <input type="range" min="0" max="100" step="5" value={sim.p2pVolume} onChange={e => setSim({...sim, p2pVolume: parseInt(e.target.value)})} className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                                 </div>
 
-                                <div className="p-5 bg-slate-950 rounded-3xl border border-slate-800 space-y-4">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest"><PieChart size={14}/> Mix de Membresías</label>
-                                    {[
-                                        { label: '7 Días ($5)', key: 'mix7d', color: 'accent-emerald-500' },
-                                        { label: '14 Días ($9)', key: 'mix14d', color: 'accent-blue-500' },
-                                        { label: '31 Días ($18)', key: 'mix31d', color: 'accent-purple-500' }
-                                    ].map(m => (
-                                        <div key={m.key}>
+                                <div className="p-5 bg-slate-950 rounded-3xl border border-slate-800 space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest sticky top-0 bg-slate-950 py-1 z-10"><PieChart size={14}/> Mix de Planes Reales</label>
+                                    {vipPlans.length === 0 ? (
+                                        <p className="text-[9px] text-slate-600 italic uppercase text-center py-4">No hay planes configurados en Admin</p>
+                                    ) : vipPlans.map(plan => (
+                                        <div key={plan.id}>
                                             <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
-                                                <span>{m.label}</span>
-                                                <span className="text-white">{(sim as any)[m.key]}%</span>
+                                                <span className="truncate max-w-[120px]">{plan.name} (${plan.price})</span>
+                                                <span className="text-white">{sim.planMix[plan.id] || 0}%</span>
                                             </div>
-                                            <input type="range" min="0" max="100" value={(sim as any)[m.key]} onChange={e => setSim({...sim, [m.key]: parseInt(e.target.value)})} className={`w-full ${m.color} h-1 bg-slate-800 rounded-full appearance-none cursor-pointer`} />
+                                            <input 
+                                                type="range" min="0" max="100" 
+                                                value={sim.planMix[plan.id] || 0} 
+                                                onChange={e => handleMixChange(plan.id, parseInt(e.target.value))} 
+                                                className={`w-full ${plan.type === 'BALANCE' ? 'accent-emerald-500' : 'accent-indigo-500'} h-1 bg-slate-800 rounded-full appearance-none cursor-pointer`} 
+                                            />
                                         </div>
                                     ))}
                                 </div>
@@ -241,7 +277,7 @@ export default function AdminAnalytics() {
                             <div className="relative z-10 flex flex-col md:flex-row justify-between items-start gap-8 mb-12">
                                 <div>
                                     <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Proyección de Rentabilidad</h3>
-                                    <p className="text-sm text-slate-500">Relación porcentual entre utilidad neta e ingresos totales.</p>
+                                    <p className="text-sm text-slate-500">Basado en tus planes de acceso y recargas actuales.</p>
                                     <div className="mt-4 flex items-center gap-4">
                                         <div className="bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl">
                                             <span className="text-[8px] font-black text-slate-500 uppercase block">Costos Totales</span>
