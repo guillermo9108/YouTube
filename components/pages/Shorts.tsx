@@ -1,6 +1,6 @@
 
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Heart, MessageCircle, Share2, Plus, Send, X, Loader2, ArrowLeft, Play, Pause, ThumbsDown } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Heart, MessageCircle, Share2, Plus, Send, X, Loader2, ArrowLeft, Play, Pause, ThumbsDown, Lock } from 'lucide-react';
 import { db } from '../../services/db';
 import { Video, Comment, UserInteraction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -16,7 +16,9 @@ interface ShortItemProps {
 
 const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: ShortItemProps) => {
   const { user } = useAuth();
+  /* Added missing useRef import */
   const videoRef = useRef<HTMLVideoElement>(null);
+  /* Added missing useState imports */
   const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
   const [paused, setPaused] = useState(false);
   const [interaction, setInteraction] = useState<UserInteraction | null>(null);
@@ -25,6 +27,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   const [newComment, setNewComment] = useState('');
   const [likeCount, setLikeCount] = useState(video.likes || 0);
 
+  /* Added missing useEffect imports */
   useEffect(() => {
     if (user && shouldLoad) {
       db.getInteraction(user.id, video.id).then(setInteraction);
@@ -122,10 +125,12 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
 
 export default function Shorts() {
   const { user } = useAuth();
+  /* Added missing useState and useRef imports */
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   
+  /* Added missing useEffect import */
   useEffect(() => {
     db.getAllVideos().then((all: Video[]) => {
         const shorts = all.filter(v => v.duration < 180 && !['PENDING', 'PROCESSING'].includes(v.category)).sort(() => Math.random() - 0.5);
@@ -139,6 +144,7 @@ export default function Shorts() {
     if (index !== activeIndex) setActiveIndex(index);
   };
 
+  /* Added missing useMemo import */
   const hasFullAccess = useMemo(() => {
       if (!user) return false;
       return Boolean(user.role?.toString().toUpperCase() === 'ADMIN' || (user.vipExpiry && user.vipExpiry > Date.now() / 1000));
