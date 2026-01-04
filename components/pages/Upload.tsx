@@ -77,8 +77,6 @@ export default function Upload() {
                   updateCategory(index, suggestions.category);
               }
               toast.success("IA: Metadatos generados");
-          } else {
-              toast.error("IA: Configura tu Gemini API Key en Admin");
           }
       } catch (e) { toast.error("IA: Fallo"); } 
       finally { setIsAiLoading(false); }

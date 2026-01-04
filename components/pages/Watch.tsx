@@ -43,7 +43,6 @@ export default function Watch() {
     const viewCountedRef = useRef(false);
     const watchedThresholdRef = useRef(false);
 
-    // 1. Cargar metadatos y verificar acceso
     useEffect(() => {
         if (!id) return;
         setLoading(true);
@@ -63,18 +62,16 @@ export default function Watch() {
                     db.getComments(v.id).then(setComments);
                     
                     if (user) {
-                        const isVipActive = user.vipExpiry && user.vipExpiry > (Date.now() / 1000);
-                        const isAdmin = user.role?.toUpperCase() === 'ADMIN';
+                        const isVipActive = user.vipExpiry && Number(user.vipExpiry) > (Date.now() / 1000);
+                        const isAdmin = user.role?.toString().toUpperCase() === 'ADMIN';
                         const isOwner = user.id === v.creatorId;
 
-                        // Verificación local inmediata de privilegios
                         if (isAdmin || isOwner || isVipActive) {
                             setIsUnlocked(true);
                             setIsWatchLater(user.watchLater?.includes(id) || false);
-                            // Sincronizar con el reproductor global
+                            // Sincronizar sin interrumpir si ya estaba en el global
                             playVideo(v, activeVideo?.id === v.id ? currentTime : 0);
                         } else {
-                            // Si no tiene privilegios, consultar si lo compró
                             const hasPurchased = await db.hasPurchased(user.id, v.id);
                             setIsUnlocked(hasPurchased);
                             setIsWatchLater(user.watchLater?.includes(id) || false);
@@ -89,31 +86,20 @@ export default function Watch() {
         fetchMeta();
     }, [id, user?.id]);
 
-    // 2. Control manual de reproducción (Forzar Play al cargar fuente)
     useEffect(() => {
         const vid = videoRef.current;
         if (!vid || !isUnlocked || !video) return;
 
         if (isPlaying) {
-            const playPromise = vid.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(() => {
-                    // Autoplay prevenido por el navegador
-                    setPlaying(false);
-                });
-            }
+            vid.play().catch(() => setPlaying(false));
         } else {
             vid.pause();
         }
     }, [isPlaying, isUnlocked, video?.id]);
 
-    // 3. Manejo de transición (Siguiente Video)
     const handleSkipNext = () => {
-        if (relatedVideos.length > 0) {
-            navigate(`/watch/${relatedVideos[0].id}`);
-        } else {
-            navigate('/');
-        }
+        if (relatedVideos.length > 0) navigate(`/watch/${relatedVideos[0].id}`);
+        else navigate('/');
     };
 
     const handlePurchase = async (skipConfirm = false) => {
@@ -133,6 +119,16 @@ export default function Watch() {
         }
     };
 
+    const handleToggleWatchLater = async () => {
+        if (!user || !id) return;
+        try {
+            // Fix: Property 'toggleWatch_later' does not exist on type 'DBService'. Did you mean 'toggleWatchLater'?
+            const newList = await db.toggleWatchLater(user.id, id);
+            setIsWatchLater(newList.includes(id));
+            toast.success(newList.includes(id) ? "Añadido a Ver más tarde" : "Quitado de Ver más tarde");
+        } catch (e) {}
+    };
+
     const handleOnPlay = () => {
         if (!viewCountedRef.current && video) {
             db.incrementViewCount(video.id).catch(() => {});
@@ -141,23 +137,38 @@ export default function Watch() {
         setPlaying(true);
     };
 
-    const handleOnPause = () => {
-        setPlaying(false);
-    };
-
     const handleTimeUpdate = () => {
         const vid = videoRef.current;
         if (vid && user && video) {
             updateTime(vid.currentTime);
-            
             if (!watchedThresholdRef.current) {
-                // Registro de "visto" al superar 80% o 1 min
                 if (vid.currentTime > 60 || (vid.duration > 0 && vid.currentTime / vid.duration > 0.8)) {
                     db.markWatched(user.id, video.id).catch(() => {});
                     watchedThresholdRef.current = true;
                 }
             }
         }
+    };
+
+    const handleRate = async (type: 'like' | 'dislike') => {
+        if (!user || !video) return;
+        try {
+            const res = await db.rateVideo(user.id, video.id, type);
+            setInteraction(res);
+            if (res.newLikeCount !== undefined) setLikes(res.newLikeCount);
+        } catch (e) {}
+    };
+
+    const handleAddComment = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!user || !video || !newComment.trim() || isSubmitting) return;
+        setIsSubmitting(true);
+        try {
+            const comment = await db.addComment(user.id, video.id, newComment);
+            setComments(prev => [comment, ...prev]);
+            setNewComment('');
+        } catch (e) { toast.error("Error al comentar"); }
+        finally { setIsSubmitting(false); }
     };
 
     const handleVideoError = () => {
@@ -186,26 +197,25 @@ export default function Watch() {
                     {isUnlocked ? (
                         <>
                             {playbackError ? (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-900 animate-in fade-in duration-500">
+                                <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-900">
                                     <AlertTriangle size={48} className="text-amber-500 mb-4" />
                                     <h3 className="text-xl font-black text-white uppercase italic">{playbackError}</h3>
-                                    <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2">
+                                    <p className="text-slate-500 text-[10px] font-bold uppercase mt-2">
                                         Saltando en <span className="text-white text-lg font-black">{countdown}s</span>
                                     </p>
-                                    
                                     <div className="flex flex-wrap justify-center gap-3 mt-8">
                                         <div className="relative">
-                                            <button onClick={() => setShowOpenWith(!showOpenWith)} className="px-6 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-500 shadow-xl">
+                                            <button onClick={() => setShowOpenWith(!showOpenWith)} className="px-6 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase flex items-center gap-2 shadow-xl">
                                                 <ExternalLink size={16}/> Abrir con...
                                             </button>
                                             {showOpenWith && (
-                                                <div className="absolute bottom-full mb-2 left-0 w-48 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-2xl z-50 animate-in slide-in-from-bottom-2">
-                                                    <button onClick={() => window.open(streamUrl, '_blank')} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 flex items-center gap-2 border-b border-white/5"><Play size={12}/> Navegador</button>
-                                                    <button onClick={copyStreamLink} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 flex items-center gap-2"><Copy size={12}/> Copiar Enlace</button>
+                                                <div className="absolute bottom-full mb-2 left-0 w-48 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-2xl z-50">
+                                                    <button onClick={() => window.open(streamUrl, '_blank')} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 border-b border-white/5">Navegador</button>
+                                                    <button onClick={copyStreamLink} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600">Copiar Enlace</button>
                                                 </div>
                                             )}
                                         </div>
-                                        <button onClick={handleSkipNext} className="px-6 py-3 bg-slate-800 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2">
+                                        <button onClick={handleSkipNext} className="px-6 py-3 bg-slate-800 text-white font-black rounded-xl text-[10px] uppercase flex items-center gap-2">
                                             <SkipForward size={16}/> Siguiente
                                         </button>
                                     </div>
@@ -217,7 +227,7 @@ export default function Watch() {
                                     controls playsInline 
                                     className="w-full h-full object-contain" 
                                     onPlay={handleOnPlay}
-                                    onPause={handleOnPause}
+                                    onPause={() => setPlaying(false)}
                                     onTimeUpdate={handleTimeUpdate}
                                     onEnded={handleSkipNext}
                                     onError={handleVideoError}
@@ -226,13 +236,13 @@ export default function Watch() {
                             )}
                         </>
                     ) : (
-                        <div onClick={() => handlePurchase(false)} className="absolute inset-0 cursor-pointer group overflow-hidden">
-                            {video && <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-md opacity-40 scale-110 group-hover:scale-105 transition-transform duration-700"/>}
+                        <div onClick={() => handlePurchase(false)} className="absolute inset-0 cursor-pointer group">
+                            {video && <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-md opacity-40 scale-110"/>}
                             <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-center p-6">
-                                <div className="p-5 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full mb-4 group-hover:scale-110 transition-transform shadow-2xl">
+                                <div className="p-5 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full mb-4">
                                     <Lock size={40} className="text-white"/>
                                 </div>
-                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Contenido Premium</h2>
+                                <h2 className="text-2xl font-black text-white uppercase mb-2">Contenido Premium</h2>
                                 <div className="px-6 py-2 bg-amber-500 text-black font-black rounded-full text-lg shadow-xl active:scale-95 transition-all">
                                     DESBLOQUEAR POR {video?.price} $
                                 </div>
@@ -256,18 +266,33 @@ export default function Watch() {
                                     <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                                 </div>
                             </div>
+                            <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-2xl border border-white/5">
+                                <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.liked ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
+                                    <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"} />
+                                    <span className="text-xs font-black">{likes}</span>
+                                </button>
+                                <button onClick={() => handleRate('dislike')} className={`p-2 rounded-xl transition-all ${interaction?.disliked ? 'text-red-400 bg-red-400/10' : 'text-slate-400 hover:bg-slate-800'}`}>
+                                    <ThumbsDown size={18} />
+                                </button>
+                                <div className="w-px h-6 bg-white/10 mx-1"></div>
+                                <button onClick={handleToggleWatchLater} className={`p-3 rounded-xl transition-all ${isWatchLater ? 'text-amber-400 bg-amber-400/10' : 'text-slate-400 hover:bg-slate-800'}`}>
+                                    {isWatchLater ? <Bookmark size={18} fill="currentColor"/> : <BookmarkPlus size={18}/>}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="mt-6 text-slate-300 text-sm leading-relaxed bg-slate-900/30 p-6 rounded-3xl border border-white/5">
+                            {video?.description || "Sin descripción."}
                         </div>
                     </div>
                 </div>
-
                 <div className="lg:w-80 space-y-6">
                     {relatedVideos.slice(0, 10).map(v => (
-                        <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all border border-transparent hover:border-white/5">
-                            <div className="w-28 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0 shadow-lg">
+                        <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
+                            <div className="w-28 aspect-video bg-slate-900 rounded-xl overflow-hidden shrink-0 border border-white/5 shadow-lg">
                                 <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"/>
                             </div>
                             <div className="flex-1 min-w-0 py-1">
-                                <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase tracking-tighter leading-tight group-hover:text-indigo-400 transition-colors">{v.title}</h4>
+                                <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase tracking-tighter leading-tight group-hover:text-indigo-400">{v.title}</h4>
                                 <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
                             </div>
                         </Link>
