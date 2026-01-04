@@ -1,7 +1,6 @@
 <?php
 define('MARKET_DIR', 'uploads/market/');
 
-// Auto-migrate schema helper
 function market_ensure_schema($pdo) {
     require_once 'functions_schema.php';
     $schema = getAppSchema();
@@ -87,7 +86,9 @@ function market_create_listing($pdo, $post, $files) {
     $cat = $post['category'];
     $cond = $post['condition'];
     $seller = $post['sellerId'];
-    $originalPrice = $price;
+    $originalPrice = isset($post['originalPrice']) ? floatval($post['originalPrice']) : $price;
+    $discount = isset($post['discountPercent']) ? intval($post['discountPercent']) : 0;
+
     $images = [];
     if (isset($files['images'])) {
         $fileAry = $files['images'];
@@ -103,8 +104,8 @@ function market_create_listing($pdo, $post, $files) {
             }
         }
     }
-    $stmt = $pdo->prepare("INSERT INTO marketplace_items (id, title, description, price, originalPrice, stock, images, sellerId, category, itemCondition, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?)");
-    $stmt->execute([$id, $title, $desc, $price, $originalPrice, $stock, json_encode($images), $seller, $cat, $cond, time()]);
+    $stmt = $pdo->prepare("INSERT INTO marketplace_items (id, title, description, price, originalPrice, discountPercent, stock, images, sellerId, category, itemCondition, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?)");
+    $stmt->execute([$id, $title, $desc, $price, $originalPrice, $discount, $stock, json_encode($images), $seller, $cat, $cond, time()]);
     respond(true);
 }
 
@@ -116,11 +117,26 @@ function market_edit_listing($pdo, $input) {
     $stmt = $pdo->prepare("SELECT sellerId FROM marketplace_items WHERE id = ?");
     $stmt->execute([$id]);
     if ($stmt->fetchColumn() !== $userId) respond(false, null, 'No autorizado');
+    
     $fields = []; $params = [];
-    if (isset($data['price'])) { $fields[] = "price = ?"; $params[] = floatval($data['price']); }
-    if (isset($data['stock'])) { $fields[] = "stock = ?"; $params[] = intval($data['stock']); }
-    if (isset($data['title'])) { $fields[] = "title = ?"; $params[] = $data['title']; }
-    if (isset($data['description'])) { $fields[] = "description = ?"; $params[] = $data['description']; }
+    $updatable = [
+        'price' => 'float', 
+        'originalPrice' => 'float', 
+        'discountPercent' => 'int', 
+        'stock' => 'int', 
+        'title' => 'string', 
+        'description' => 'string'
+    ];
+
+    foreach ($updatable as $key => $type) {
+        if (isset($data[$key])) {
+            $fields[] = "$key = ?";
+            if ($type === 'float') $params[] = floatval($data[$key]);
+            elseif ($type === 'int') $params[] = intval($data[$key]);
+            else $params[] = $data[$key];
+        }
+    }
+
     if (empty($fields)) respond(true);
     $params[] = $id;
     $sql = "UPDATE marketplace_items SET " . implode(', ', $fields) . " WHERE id = ?";

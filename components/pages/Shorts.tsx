@@ -71,15 +71,12 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
     e.stopPropagation();
     
     if (clickTimerRef.current) {
-        // DOBLE TOQUE: LIKE
         clearTimeout(clickTimerRef.current);
         clickTimerRef.current = null;
-        
         handleRate('like');
         setShowHeart(true);
         setTimeout(() => setShowHeart(false), 800);
     } else {
-        // POSIBLE SIMPLE TOQUE: PLAY/PAUSE
         clickTimerRef.current = window.setTimeout(() => {
             clickTimerRef.current = null;
             if (videoRef.current) {
@@ -143,7 +140,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
       
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80 pointer-events-none z-10" />
 
-      {/* Acciones Derecha */}
       <div className="absolute right-2 bottom-20 z-30 flex flex-col items-center gap-5 pb-safe">
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>
@@ -151,46 +147,33 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
           </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{likeCount}</span>
         </div>
-
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); handleRate('dislike'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.disliked ? 'text-red-400' : 'text-white'}`}>
              <ThumbsDown size={26} fill={interaction?.disliked ? "currentColor" : "white"} fillOpacity={interaction?.disliked ? 1 : 0.2} />
           </button>
         </div>
-
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
              <MessageCircle size={26} fill="white" fillOpacity={0.2} />
           </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{comments.length}</span>
         </div>
-
         <button onClick={(e) => { e.stopPropagation(); if(navigator.share) navigator.share({title: video.title, url: window.location.href}); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
              <Share2 size={26} fill="white" fillOpacity={0.2} />
         </button>
       </div>
 
-      {/* Info Perfil (Esquina Inferior Izquierda) */}
       <div className="absolute bottom-6 left-3 right-16 z-30 text-white flex flex-col gap-3 pointer-events-none pb-safe">
          <div className="flex items-center gap-3 pointer-events-auto">
             <Link to={`/channel/${video.creatorId}`} className="relative shrink-0">
                 <div className="w-11 h-11 rounded-full border-2 border-white overflow-hidden bg-slate-800 shadow-xl">
                     {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{video.creatorName[0]}</div>}
                 </div>
-                {!isSubscribed && (
-                    <div className="absolute -bottom-1 -right-1 bg-red-600 text-white rounded-full p-0.5 border border-black">
-                        <Plus size={10} strokeWidth={4} />
-                    </div>
-                )}
             </Link>
             <div className="min-w-0">
                 <Link to={`/channel/${video.creatorId}`} className="font-black text-sm drop-shadow-md hover:underline truncate block">@{video.creatorName}</Link>
-                <div className="flex items-center gap-2">
-                    <button className="bg-white/10 backdrop-blur-md border border-white/20 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest text-white">Seguir</button>
-                </div>
             </div>
          </div>
-
          <div className="pointer-events-auto">
              <h2 className="text-xs font-bold leading-tight mb-1 drop-shadow-md uppercase italic">{video.title}</h2>
              <p className="text-[10px] text-slate-200 line-clamp-2 opacity-80 font-medium">{video.description}</p>
@@ -240,7 +223,11 @@ export default function Shorts() {
   
   useEffect(() => {
     db.getAllVideos().then((all: Video[]) => {
-        const shorts = all.filter(v => v.duration < 180 && !['PENDING', 'PROCESSING'].includes(v.category)).sort(() => Math.random() - 0.5);
+        const shorts = all.filter(v => 
+            v.duration < 180 && 
+            !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category) &&
+            v.transcode_status !== 'FAILED'
+        ).sort(() => Math.random() - 0.5);
         setVideos(shorts);
     });
   }, []);
