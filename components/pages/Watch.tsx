@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction } from '../../types';
 import { db } from '../../services/db';
@@ -5,14 +6,18 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    SkipForward, ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2
+    SkipForward, ChevronRight, Home, Play, Info, ExternalLink, 
+    AlertTriangle, Send, CheckCircle2, Bookmark, BookmarkPlus, 
+    Share2, MoreHorizontal, Copy
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
+import { useVideoPlayer } from '../../context/VideoPlayerContext';
 
 export default function Watch() {
     const { id } = useParams();
     const { user, refreshUser } = useAuth();
+    const { activeVideo, isPlaying, currentTime, playVideo, togglePlay, updateTime } = useVideoPlayer();
     const navigate = useNavigate();
     const toast = useToast();
     
@@ -22,24 +27,24 @@ export default function Watch() {
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     
-    // Estados de Interacción
     const [likes, setLikes] = useState(0);
     const [comments, setComments] = useState<Comment[]>([]);
     const [showComments, setShowComments] = useState(false);
     const [newComment, setNewComment] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isWatchLater, setIsWatchLater] = useState(false);
 
-    // Estados de Error de Reproducción
     const [playbackError, setPlaybackError] = useState<string | null>(null);
     const [countdown, setCountdown] = useState<number | null>(null);
+    const [showOpenWith, setShowOpenWith] = useState(false);
 
     const isPurchasingRef = useRef(false);
     const videoRef = useRef<HTMLVideoElement>(null);
-    const timerRef = useRef<number | null>(null);
+    const viewCountedRef = useRef(false);
+    const watchedThresholdRef = useRef(false);
 
     useEffect(() => { 
         window.scrollTo(0, 0);
-        // Forzar actualización de saldo al entrar para evitar fallos de compra por saldo desactualizado
         refreshUser();
     }, [id]);
 
@@ -49,7 +54,8 @@ export default function Watch() {
         setPlaybackError(null);
         setCountdown(null);
         setShowComments(false);
-        if (timerRef.current) clearInterval(timerRef.current);
+        viewCountedRef.current = false;
+        watchedThresholdRef.current = false;
 
         const fetchMeta = async () => {
             try {
@@ -65,8 +71,21 @@ export default function Watch() {
                             db.hasPurchased(user.id, v.id),
                             db.getInteraction(user.id, v.id)
                         ]);
-                        setIsUnlocked(access || user.role === 'ADMIN' || user.id === v.creatorId);
+                        const unlocked = access || user.role === 'ADMIN' || user.id === v.creatorId;
+                        setIsUnlocked(unlocked);
                         setInteraction(interact);
+                        setIsWatchLater(user.watchLater?.includes(id) || false);
+
+                        // Si el video ya está en el global player, sincronizamos
+                        if (unlocked && activeVideo?.id === v.id) {
+                            if (videoRef.current) {
+                                videoRef.current.currentTime = currentTime;
+                                if (isPlaying) videoRef.current.play().catch(() => {});
+                            }
+                        } else if (unlocked) {
+                            // Si es un video nuevo, lo cargamos en el global
+                            playVideo(v, 0);
+                        }
                     }
                 }
             } catch (e) {} finally { setLoading(false); }
@@ -74,7 +93,6 @@ export default function Watch() {
         fetchMeta();
     }, [id, user?.id]);
 
-    // Lógica del Conteo Regresivo para Error
     useEffect(() => {
         if (countdown !== null && countdown > 0) {
             const t = setTimeout(() => setCountdown(countdown - 1), 1000);
@@ -84,32 +102,74 @@ export default function Watch() {
         }
     }, [countdown]);
 
-    const handleSkipNext = () => {
-        if (relatedVideos.length > 0) {
-            navigate(`/watch/${relatedVideos[0].id}`);
+    // Sincronizar estado externo (MiniPlayer) -> Local
+    useEffect(() => {
+        const vid = videoRef.current;
+        if (!vid || !video || activeVideo?.id !== video.id) return;
+
+        if (isPlaying) {
+            vid.play().catch(() => {});
         } else {
-            navigate('/');
+            vid.pause();
         }
+    }, [isPlaying, video?.id]);
+
+    const handleSkipNext = () => {
+        if (relatedVideos.length > 0) navigate(`/watch/${relatedVideos[0].id}`);
+        else navigate('/');
     };
 
     const handlePurchase = async (skipConfirm = false) => {
         if (!user || !video || isPurchasingRef.current) return;
-        
-        // Re-verificar balance real justo antes de permitir el flujo
         if (Number(user.balance) < video.price) { 
-            toast.error("Saldo insuficiente para desbloquear este video.");
-            navigate('/vip'); 
-            return; 
+            toast.error("Saldo insuficiente.");
+            navigate('/vip'); return; 
         }
-
-        if (skipConfirm || confirm(`¿Desbloquear contenido por ${video.price} $?`)) {
+        if (skipConfirm || confirm(`¿Desbloquear por ${video.price} $?`)) {
             isPurchasingRef.current = true;
             try {
                 await db.purchaseVideo(user.id, video.id);
-                setIsUnlocked(true);
-                refreshUser();
+                setIsUnlocked(true); refreshUser();
                 toast.success("Contenido desbloqueado");
+                // Al desbloquear, cargamos en el global player
+                playVideo(video, 0);
             } catch (e: any) { toast.error(e.message); isPurchasingRef.current = false; }
+        }
+    };
+
+    const handleToggleWatchLater = async () => {
+        if (!user || !id) return;
+        try {
+            const newList = await db.toggleWatchLater(user.id, id);
+            setIsWatchLater(newList.includes(id));
+            toast.success(newList.includes(id) ? "Añadido a Ver más tarde" : "Quitado de Ver más tarde");
+        } catch (e) {}
+    };
+
+    const handleOnPlay = () => {
+        if (!viewCountedRef.current && video) {
+            db.incrementViewCount(video.id).catch(() => {});
+            viewCountedRef.current = true;
+        }
+        if (!isPlaying) togglePlay();
+    };
+
+    const handleOnPause = () => {
+        if (isPlaying) togglePlay();
+    };
+
+    const handleTimeUpdate = () => {
+        const vid = videoRef.current;
+        if (vid && user && video) {
+            updateTime(vid.currentTime);
+            
+            if (!watchedThresholdRef.current) {
+                // Se marca como visto al llegar al 80% o tras 1 minuto
+                if (vid.currentTime > 60 || (vid.duration > 0 && vid.currentTime / vid.duration > 0.8)) {
+                    db.markWatched(user.id, video.id).catch(() => {});
+                    watchedThresholdRef.current = true;
+                }
+            }
         }
     };
 
@@ -136,19 +196,8 @@ export default function Watch() {
     };
 
     const handleVideoError = () => {
-        const error = videoRef.current?.error;
-        if (error) {
-            setPlaybackError("Formato no compatible");
-            setCountdown(10);
-        }
-    };
-
-    const handleLoadedMetadata = () => {
-        const vid = videoRef.current;
-        if (vid && vid.videoWidth === 0 && vid.duration > 0) {
-            setPlaybackError("Codec HEVC/MKV detectado");
-            setCountdown(10);
-        }
+        setPlaybackError("Formato no compatible");
+        setCountdown(10);
     };
 
     const streamUrl = useMemo(() => {
@@ -157,10 +206,10 @@ export default function Watch() {
         return `${base}&token=${user?.sessionToken || ''}`;
     }, [video, user?.sessionToken]);
 
-    const openExternalPlayer = () => {
-        if (!streamUrl) return;
-        window.open(streamUrl, '_blank');
-        toast.info("Abriendo en reproductor externo...");
+    const copyStreamLink = () => {
+        const fullUrl = window.location.origin + '/' + streamUrl;
+        navigator.clipboard.writeText(fullUrl);
+        toast.info("Enlace copiado. Pégalo en VLC o MX Player.");
     };
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
@@ -176,18 +225,26 @@ export default function Watch() {
                                     <AlertTriangle size={48} className="text-amber-500 mb-4" />
                                     <h3 className="text-xl font-black text-white uppercase italic">{playbackError}</h3>
                                     <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2">
-                                        Saltando al siguiente video en <span className="text-white text-lg font-black">{countdown}s</span>
+                                        Saltando automáticamente en <span className="text-white text-lg font-black">{countdown}s</span>
                                     </p>
                                     
-                                    <div className="flex gap-3 mt-8">
-                                        <button onClick={openExternalPlayer} className="px-6 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-500">
-                                            <ExternalLink size={16}/> Abrir Externo
-                                        </button>
+                                    <div className="flex flex-wrap justify-center gap-3 mt-8">
+                                        <div className="relative">
+                                            <button onClick={() => setShowOpenWith(!showOpenWith)} className="px-6 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-500 shadow-xl">
+                                                <ExternalLink size={16}/> Abrir con...
+                                            </button>
+                                            {showOpenWith && (
+                                                <div className="absolute bottom-full mb-2 left-0 w-48 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-2xl z-50 animate-in slide-in-from-bottom-2">
+                                                    <button onClick={() => window.open(streamUrl, '_blank')} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 flex items-center gap-2 border-b border-white/5"><Play size={12}/> Reproductor Navegador</button>
+                                                    <button onClick={copyStreamLink} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 flex items-center gap-2"><Copy size={12}/> Copiar Enlace Directo</button>
+                                                </div>
+                                            )}
+                                        </div>
                                         <button onClick={handleSkipNext} className="px-6 py-3 bg-slate-800 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2">
-                                            <SkipForward size={16}/> Saltar Ya
+                                            <SkipForward size={16}/> Siguiente
                                         </button>
                                     </div>
-                                    <button onClick={() => setCountdown(null)} className="mt-4 text-[9px] text-slate-600 uppercase font-black hover:text-slate-400">Cancelar Salto</button>
+                                    <button onClick={() => setCountdown(null)} className="mt-4 text-[9px] text-slate-600 uppercase font-black hover:text-slate-400">Detener conteo</button>
                                 </div>
                             ) : (
                                 <video 
@@ -195,9 +252,11 @@ export default function Watch() {
                                     src={streamUrl} 
                                     controls autoPlay playsInline 
                                     className="w-full h-full object-contain" 
+                                    onPlay={handleOnPlay}
+                                    onPause={handleOnPause}
+                                    onTimeUpdate={handleTimeUpdate}
                                     onEnded={handleSkipNext}
                                     onError={handleVideoError}
-                                    onLoadedMetadata={handleLoadedMetadata}
                                     crossOrigin="anonymous"
                                 />
                             )}
@@ -210,7 +269,7 @@ export default function Watch() {
                                     <Lock size={40} className="text-white"/>
                                 </div>
                                 <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Contenido Premium</h2>
-                                <div className="px-6 py-2 bg-amber-500 text-black font-black rounded-full text-lg shadow-xl shadow-amber-900/20 active:scale-95 transition-all">
+                                <div className="px-6 py-2 bg-amber-500 text-black font-black rounded-full text-lg shadow-xl active:scale-95 transition-all">
                                     DESBLOQUEAR POR {video?.price} $
                                 </div>
                             </div>
@@ -243,14 +302,20 @@ export default function Watch() {
                                     <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"} />
                                     <span className="text-xs font-black">{likes}</span>
                                 </button>
-                                <div className="w-px h-6 bg-white/10"></div>
                                 <button 
                                     onClick={() => handleRate('dislike')}
                                     className={`p-2 rounded-xl transition-all ${interaction?.disliked ? 'text-red-400 bg-red-400/10' : 'text-slate-400 hover:bg-slate-800'}`}
                                 >
                                     <ThumbsDown size={18} />
                                 </button>
-                                <div className="w-px h-6 bg-white/10"></div>
+                                <div className="w-px h-6 bg-white/10 mx-1"></div>
+                                <button 
+                                    onClick={handleToggleWatchLater}
+                                    className={`p-3 rounded-xl transition-all ${isWatchLater ? 'text-amber-400 bg-amber-400/10' : 'text-slate-400 hover:bg-slate-800'}`}
+                                    title="Ver más tarde"
+                                >
+                                    {isWatchLater ? <Bookmark size={18} fill="currentColor"/> : <BookmarkPlus size={18}/>}
+                                </button>
                                 <button 
                                     onClick={() => setShowComments(!showComments)}
                                     className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${showComments ? 'bg-white text-black' : 'text-slate-400 hover:bg-slate-800'}`}
@@ -265,11 +330,10 @@ export default function Watch() {
                             {video?.description || "Sin descripción."}
                         </div>
 
-                        {/* Sección de Comentarios */}
                         {showComments && (
                             <div className="mt-10 space-y-6 animate-in slide-in-from-top-4">
                                 <h3 className="font-black text-white text-sm uppercase tracking-widest flex items-center gap-2">
-                                    <MessageSquare size={18} className="text-indigo-400"/> Comentarios ({comments.length})
+                                    <MessageCircle size={18} className="text-indigo-400"/> Comentarios ({comments.length})
                                 </h3>
 
                                 {user && (
@@ -285,7 +349,7 @@ export default function Watch() {
                                                 placeholder="Añadir un comentario..."
                                                 className="flex-1 bg-transparent border-b border-slate-800 focus:border-indigo-500 outline-none text-sm text-white py-2 transition-colors"
                                             />
-                                            <button disabled={!newComment.trim() || isSubmitting} type="submit" className="bg-indigo-600 p-2.5 rounded-full text-white hover:bg-indigo-500 disabled:opacity-30 transition-all active:scale-90 shadow-lg">
+                                            <button disabled={!newComment.trim() || isSubmitting} type="submit" className="bg-indigo-600 p-2.5 rounded-full text-white hover:bg-indigo-500 disabled:opacity-30 transition-all active:scale-90">
                                                 {isSubmitting ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
                                             </button>
                                         </div>
@@ -332,7 +396,3 @@ export default function Watch() {
         </div>
     );
 }
-
-const MessageSquare = ({ size, className }: any) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-);

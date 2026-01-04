@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft, Play, Pause } from 'lucide-react';
 import { db } from '../../services/db';
@@ -19,7 +20,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   const clickTimerRef = useRef<number | null>(null);
   
   const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
-  const [isBuffering, setIsBuffering] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   const [paused, setPaused] = useState(false);
   
@@ -29,19 +29,21 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   const [newComment, setNewComment] = useState('');
   const [likeCount, setLikeCount] = useState(video.likes || 0);
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [viewLogged, setViewLogged] = useState(false);
 
+  // Carga instantánea de metadatos cuando el vídeo debe estar listo
   useEffect(() => {
     if (user && shouldLoad) {
+      // Cargamos todo en paralelo inmediatamente
       db.getInteraction(user.id, video.id).then(setInteraction);
+      db.getComments(video.id).then(setComments);
+      db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed);
+      
       if (!hasFullAccess) {
           db.hasPurchased(user.id, video.id).then(setIsUnlocked);
       }
-      if (isActive) {
-          db.getComments(video.id).then(setComments);
-          db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed).catch(() => setIsSubscribed(false));
-      }
     }
-  }, [user, video.id, video.creatorId, shouldLoad, isActive, hasFullAccess]);
+  }, [user, video.id, video.creatorId, shouldLoad, hasFullAccess]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -54,10 +56,15 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
         if (playPromise !== undefined) {
             playPromise.catch(() => {});
         }
+        // Registrar visualización al activar el vídeo
+        if (!viewLogged) {
+            db.incrementViewCount(video.id).catch(() => {});
+            setViewLogged(true);
+        }
     } else {
         el.pause();
     }
-  }, [isActive, isUnlocked]);
+  }, [isActive, isUnlocked, video.id]);
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
@@ -70,17 +77,13 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
 
   const handleScreenTouch = (e: React.MouseEvent) => {
     e.stopPropagation();
-    
     if (clickTimerRef.current) {
-        // DOBLE TOQUE DETECTADO
         clearTimeout(clickTimerRef.current);
         clickTimerRef.current = null;
-        
         handleRate('like');
         setShowHeart(true);
         setTimeout(() => setShowHeart(false), 800);
     } else {
-        // POSIBLE SIMPLE TOQUE
         clickTimerRef.current = window.setTimeout(() => {
             clickTimerRef.current = null;
             if (videoRef.current) {
@@ -103,9 +106,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
       try {
           const res = await db.toggleSubscribe(user.id, video.creatorId);
           setIsSubscribed(res.isSubscribed);
-      } catch (e) {
-          setIsSubscribed(oldState); 
-      }
+      } catch (e) { setIsSubscribed(oldState); }
   };
 
   const postComment = async (e: React.FormEvent) => {
@@ -156,7 +157,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
       
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80 pointer-events-none z-10" />
 
-      {/* Acciones en Columna (Derecha) */}
+      {/* Acciones */}
       <div className="absolute right-2 bottom-20 z-30 flex flex-col items-center gap-5 pb-safe">
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>
@@ -183,7 +184,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
         </button>
       </div>
 
-      {/* Perfil e Info (Esquina Inferior Izquierda - Estilo FB/TikTok) */}
       <div className="absolute bottom-6 left-3 right-16 z-30 text-white flex flex-col gap-3 pointer-events-none pb-safe">
          <div className="flex items-center gap-3 pointer-events-auto">
             <Link to={`/channel/${video.creatorId}`} className="relative shrink-0">
@@ -203,7 +203,6 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
                 </div>
             </div>
          </div>
-
          <div className="pointer-events-auto">
              <h2 className="text-xs font-bold leading-tight mb-1 drop-shadow-md uppercase italic">{video.title}</h2>
              <p className="text-[10px] text-slate-200 line-clamp-2 opacity-80 drop-shadow-sm font-medium">{video.description}</p>
@@ -258,22 +257,21 @@ export default function Shorts() {
     });
   }, []);
 
+  // Manejo de scroll instantáneo
   useEffect(() => {
     const container = containerRef.current;
     if (!container || videos.length === 0) return;
 
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const index = Number((entry.target as HTMLElement).dataset.index);
-                if (!isNaN(index)) setActiveIndex(index);
-            }
-        });
-    }, { root: container, threshold: 0.5 });
+    const onScroll = () => {
+        const index = Math.round(container.scrollTop / container.clientHeight);
+        if (index !== activeIndex && index >= 0 && index < videos.length) {
+            setActiveIndex(index);
+        }
+    };
 
-    Array.from(container.children).forEach((child) => observer.observe(child as Element));
-    return () => observer.disconnect();
-  }, [videos]);
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, [videos, activeIndex]);
 
   const hasFullAccess = useMemo(() => {
       if (!user) return false;
@@ -283,18 +281,24 @@ export default function Shorts() {
   }, [user]);
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative" style={{ scrollBehavior: 'smooth' }}>
+    <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative" style={{ scrollBehavior: 'auto' }}>
       <div className="fixed top-4 left-4 z-50">
           <Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link>
       </div>
       {videos.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4">
               <Loader2 className="animate-spin text-indigo-500" size={32}/>
-              <p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando contenido...</p>
+              <p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p>
           </div>
       ) : videos.map((video, idx) => (
-        <div key={video.id} data-index={idx} className="w-full h-full snap-start">
-             <ShortItem video={video} isActive={idx === activeIndex} shouldLoad={Math.abs(idx - activeIndex) <= 2} preload={idx === activeIndex ? "auto" : "metadata"} hasFullAccess={hasFullAccess} />
+        <div key={video.id} className="w-full h-full snap-start">
+             <ShortItem 
+                video={video} 
+                isActive={idx === activeIndex} 
+                shouldLoad={Math.abs(idx - activeIndex) <= 1} 
+                preload={Math.abs(idx - activeIndex) <= 1 ? "auto" : "none"} 
+                hasFullAccess={hasFullAccess} 
+             />
         </div>
       ))}
     </div>
