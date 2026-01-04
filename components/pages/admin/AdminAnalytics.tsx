@@ -5,7 +5,7 @@ import { VipPlan, SystemSettings } from '../../../types';
 import { 
     Calculator, TrendingUp, Users, DollarSign, 
     RefreshCw, BarChart3, ShieldAlert, Activity, 
-    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap, Loader2, Repeat, Target
+    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap, Loader2, Repeat, Target, UserPlus
 } from 'lucide-react';
 
 type Granularity = 'DAYS' | 'MONTHS';
@@ -20,7 +20,8 @@ export default function AdminAnalytics() {
     // --- ANALISTA FINANCIERO: MODELO ECONOMÍA CERRADA RECURRENTE ---
     const [sim, setSim] = useState({
         users: 100,
-        growth: 12,            // % Crecimiento neto mensual
+        newUsersPerMonth: 20,  // Cantidad manual de usuarios nuevos al mes
+        growth: 0,             // % Crecimiento (Desactivado por defecto si se usa manual)
         churn: 5,              // % Abandono
         conversion: 20,        // % Usuarios que realizan compras (Planes/Recargas)
         
@@ -88,8 +89,11 @@ export default function AdminAnalytics() {
         const TARGET_ARPU = 425;
 
         for (let i = 1; i <= steps; i++) {
-            const netMonthlyGrowth = (sim.growth - sim.churn) / 100;
-            currentUsers = Math.max(0, currentUsers * (1 + netMonthlyGrowth));
+            // Crecimiento: Usuarios Nuevos fijos + Crecimiento % - Churn %
+            const organicGrowth = currentUsers * (sim.growth / 100);
+            const losses = currentUsers * (sim.churn / 100);
+            
+            currentUsers = Math.max(0, currentUsers + sim.newUsersPerMonth + organicGrowth - losses);
 
             const activeBuyers = currentUsers * (sim.conversion / 100);
             
@@ -148,7 +152,7 @@ export default function AdminAnalytics() {
         const max = Math.max(...values.map(Math.abs), 10) * 1.2;
         const path = points.map((p, i) => {
             const x = (i / (points.length - 1)) * 100;
-            const y = 50 - ((Number(p[dataKey]) / max) * 50);
+            const y = 100 - ((Number(p[dataKey]) / max) * 100); // Scale 0-100 properly
             return `${x},${y}`;
         }).join(' ');
 
@@ -220,40 +224,71 @@ export default function AdminAnalytics() {
                     {/* Control Panel (Simulador Recurrente) */}
                     <div className="lg:col-span-4 space-y-4">
                         <div className="bg-slate-900 p-8 rounded-[40px] border border-slate-800 shadow-xl space-y-8">
-                            <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-                                <Calculator size={22} className="text-indigo-400"/>
-                                <h3 className="font-black text-white uppercase text-xs tracking-widest">Modelo de Frecuencia</h3>
-                            </div>
-
+                            
                             <div className="space-y-6">
-                                <div>
-                                    <div className="flex justify-between mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <Repeat size={14} className="text-indigo-400" />
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Renovaciones / Mes</label>
+                                {/* ADQUISICIÓN DE USUARIOS */}
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
+                                        <UserPlus size={18} className="text-emerald-400"/>
+                                        <h3 className="font-black text-white uppercase text-[10px] tracking-widest">Adquisición de Usuarios</h3>
+                                    </div>
+                                    
+                                    <div>
+                                        <div className="flex justify-between mb-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nuevos Usuarios / Mes</label>
+                                            <span className="text-sm font-black text-white">+{sim.newUsersPerMonth}</span>
                                         </div>
-                                        <span className="text-sm font-black text-white">{sim.avgFrequency}x</span>
+                                        <input type="range" min="0" max="500" step="5" value={sim.newUsersPerMonth} onChange={e => setSim({...sim, newUsersPerMonth: parseInt(e.target.value)})} className="w-full accent-emerald-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                                     </div>
-                                    <input type="range" min="1" max="4" step="0.1" value={sim.avgFrequency} onChange={e => setSim({...sim, avgFrequency: parseFloat(e.target.value)})} className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
-                                    <p className="text-[9px] text-slate-600 font-bold uppercase mt-2 italic text-center">Basado en comportamiento semanal real</p>
+
+                                    <div>
+                                        <div className="flex justify-between mb-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Churn (Abandono %)</label>
+                                            <span className="text-sm font-black text-red-400">{sim.churn}%</span>
+                                        </div>
+                                        <input type="range" min="0" max="50" step="1" value={sim.churn} onChange={e => setSim({...sim, churn: parseInt(e.target.value)})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                                    </div>
                                 </div>
 
-                                <div className="h-px bg-slate-800"></div>
-
-                                <div>
-                                    <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Inversión Contenido</label>
-                                        <span className="text-sm font-black text-red-400">${sim.contentInflow}</span>
+                                {/* MODELO DE FRECUENCIA */}
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
+                                        <Repeat size={18} className="text-indigo-400"/>
+                                        <h3 className="font-black text-white uppercase text-[10px] tracking-widest">Modelo de Frecuencia</h3>
                                     </div>
-                                    <input type="range" min="0" max="5000" step="100" value={sim.contentInflow} onChange={e => setSim({...sim, contentInflow: parseInt(e.target.value)})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                                    
+                                    <div>
+                                        <div className="flex justify-between mb-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Renovaciones / Mes</label>
+                                            <span className="text-sm font-black text-white">{sim.avgFrequency}x</span>
+                                        </div>
+                                        <input type="range" min="1" max="4" step="0.1" value={sim.avgFrequency} onChange={e => setSim({...sim, avgFrequency: parseFloat(e.target.value)})} className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                                        <p className="text-[9px] text-slate-600 font-bold uppercase mt-2 italic text-center">Factor de re-compra semanal</p>
+                                    </div>
                                 </div>
 
-                                <div>
-                                    <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gastos Operativos</label>
-                                        <span className="text-sm font-black text-orange-400">${sim.opCosts}</span>
+                                {/* COSTOS */}
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
+                                        <Landmark size={18} className="text-red-400"/>
+                                        <h3 className="font-black text-white uppercase text-[10px] tracking-widest">Costos Operativos</h3>
                                     </div>
-                                    <input type="range" min="0" max="1000" step="50" value={sim.opCosts} onChange={e => setSim({...sim, opCosts: parseInt(e.target.value)})} className="w-full accent-orange-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+
+                                    <div>
+                                        <div className="flex justify-between mb-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Inversión Contenido</label>
+                                            <span className="text-sm font-black text-red-400">${sim.contentInflow}</span>
+                                        </div>
+                                        <input type="range" min="0" max="5000" step="100" value={sim.contentInflow} onChange={e => setSim({...sim, contentInflow: parseInt(e.target.value)})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                                    </div>
+
+                                    <div>
+                                        <div className="flex justify-between mb-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gastos Infraestructura</label>
+                                            <span className="text-sm font-black text-orange-400">${sim.opCosts}</span>
+                                        </div>
+                                        <input type="range" min="0" max="1000" step="50" value={sim.opCosts} onChange={e => setSim({...sim, opCosts: parseInt(e.target.value)})} className="w-full accent-orange-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                                    </div>
                                 </div>
 
                                 <div className="p-5 bg-slate-950 rounded-3xl border border-slate-800 space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar">
@@ -323,8 +358,8 @@ export default function AdminAnalytics() {
                                     <div className="text-xl font-black text-white">${Math.round(projection.data[11]?.revenue).toLocaleString()}</div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Crecimiento Neto</div>
-                                    <div className="text-xl font-black text-indigo-400">+{sim.growth - sim.churn}%</div>
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Base Final</div>
+                                    <div className="text-xl font-black text-indigo-400">{projection.data[11]?.users} <span className="text-xs opacity-40">Users</span></div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
                                     <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Utilidad M12</div>
