@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { VipPlan, SystemSettings } from '../../../types';
 import { 
     Calculator, TrendingUp, Users, DollarSign, 
     RefreshCw, BarChart3, ShieldAlert, Activity, 
-    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap, Loader2
+    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap, Loader2, Repeat, Target
 } from 'lucide-react';
 
 type Granularity = 'DAYS' | 'MONTHS';
@@ -16,12 +17,15 @@ export default function AdminAnalytics() {
     const [timeframe, setTimeframe] = useState<Granularity>('DAYS');
     const [activeView, setActiveView] = useState<'REAL' | 'SIMULATOR'>('REAL');
 
-    // --- ANALISTA FINANCIERO: MODELO ECONOMÍA CERRADA ---
+    // --- ANALISTA FINANCIERO: MODELO ECONOMÍA CERRADA RECURRENTE ---
     const [sim, setSim] = useState({
         users: 100,
         growth: 12,            // % Crecimiento neto mensual
         churn: 5,              // % Abandono
         conversion: 20,        // % Usuarios que realizan compras (Planes/Recargas)
+        
+        // Frecuencia de renovación semanal (Basado en patrón 4,4,3,2,1 / 5 = 2.8)
+        avgFrequency: 2.8,     
         
         // Variables de Costos (Fijos Mensuales)
         contentInflow: 1400,   // Inversión en contenido
@@ -32,7 +36,7 @@ export default function AdminAnalytics() {
         p2pCommission: 5,      // % Fee de red (Credita a Admin)
         reinvestmentRate: 70,  // % de saldo que vuelve a circular
         
-        // Mix de Planes (Se llena dinámicamente)
+        // Mix de Planes
         planMix: {} as Record<string, number>
     });
 
@@ -48,7 +52,6 @@ export default function AdminAnalytics() {
             const plans = settings.vipPlans || [];
             setVipPlans(plans);
 
-            // Inicializar el Mix de planes si no existe o ha cambiado
             const initialMix: Record<string, number> = {};
             if (plans.length > 0) {
                 const equalShare = Math.floor(100 / plans.length);
@@ -73,7 +76,7 @@ export default function AdminAnalytics() {
 
     useEffect(() => { loadData(); }, []);
 
-    // --- CÁLCULO DE RENTABILIDAD Y PUNTO DE EQUILIBRIO ---
+    // --- CÁLCULO DE RENTABILIDAD RECURRENTE ---
     const projection = useMemo(() => {
         const steps = 12;
         const data = [];
@@ -81,18 +84,23 @@ export default function AdminAnalytics() {
         let cumulativeNetProfit = 0;
         const totalFixedCosts = sim.contentInflow + sim.opCosts;
 
+        // ARPU Objetivo definido por la realidad del flujo: $425
+        const TARGET_ARPU = 425;
+
         for (let i = 1; i <= steps; i++) {
             const netMonthlyGrowth = (sim.growth - sim.churn) / 100;
             currentUsers = Math.max(0, currentUsers * (1 + netMonthlyGrowth));
 
             const activeBuyers = currentUsers * (sim.conversion / 100);
             
-            // Cálculo dinámico basado en los planes REALES
-            let totalMembershipRev = 0;
-            vipPlans.forEach(plan => {
-                const share = (sim.planMix[plan.id] || 0) / 100;
-                totalMembershipRev += (activeBuyers * share) * Number(plan.price);
+            // Ingresos por Volumen de Renovaciones (No por usuarios únicos)
+            let avgPlanPrice = 0;
+            vipPlans.forEach(p => {
+                avgPlanPrice += (Number(p.price) * ((sim.planMix[p.id] || 0) / 100));
             });
+
+            // Fórmula: Ingreso_Mensual = (Precio_Plan * Frecuencia) * Compradores + P2P
+            const totalMembershipRev = activeBuyers * (avgPlanPrice * sim.avgFrequency);
 
             const circulatingVolume = currentUsers * sim.p2pVolume;
             const p2pProfit = circulatingVolume * (sim.p2pCommission / 100) * (sim.reinvestmentRate / 100);
@@ -107,6 +115,7 @@ export default function AdminAnalytics() {
             data.push({
                 label: `Mes ${i}`,
                 users: Math.round(currentUsers),
+                renewals: Math.round(activeBuyers * sim.avgFrequency),
                 revenue: Math.round(grossRevenue),
                 profit: Math.round(netMonthlyProfit),
                 profitability: parseFloat(profitability.toFixed(2)),
@@ -116,17 +125,10 @@ export default function AdminAnalytics() {
 
         const avgProfitability = data.reduce((acc, curr) => acc + curr.profitability, 0) / steps;
         
-        // ARPU Promedio basado en el mix actual
-        let avgPlanPrice = 0;
-        vipPlans.forEach(p => {
-            avgPlanPrice += (Number(p.price) * ((sim.planMix[p.id] || 0) / 100));
-        });
+        // El punto de equilibrio se recalcula basado en el ARPU objetivo de $425
+        const breakEvenUsers = Math.ceil(totalFixedCosts / (TARGET_ARPU * (sim.conversion / 100) || 1));
 
-        const arpuMem = avgPlanPrice * (sim.conversion / 100);
-        const arpuP2P = sim.p2pVolume * (sim.p2pCommission / 100) * (sim.reinvestmentRate / 100);
-        const breakEvenUsers = Math.ceil(totalFixedCosts / (arpuMem + arpuP2P || 1));
-
-        return { data, totalProfit: cumulativeNetProfit, breakEvenUsers, totalFixedCosts, avgProfitability };
+        return { data, totalProfit: cumulativeNetProfit, breakEvenUsers, totalFixedCosts, avgProfitability, targetArpu: TARGET_ARPU };
     }, [sim, vipPlans]);
 
     const handleMixChange = (planId: string, value: number) => {
@@ -169,7 +171,7 @@ export default function AdminAnalytics() {
                         Métricas Reales
                     </button>
                     <button onClick={() => setActiveView('SIMULATOR')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeView === 'SIMULATOR' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
-                        Simulador Pro
+                        Simulador Pro V2 (Recurrente)
                     </button>
                 </div>
                 <button onClick={loadData} className="p-2 text-slate-500 hover:text-white"><RefreshCw size={16}/></button>
@@ -215,15 +217,29 @@ export default function AdminAnalytics() {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {/* Control Panel (Simulador) */}
+                    {/* Control Panel (Simulador Recurrente) */}
                     <div className="lg:col-span-4 space-y-4">
                         <div className="bg-slate-900 p-8 rounded-[40px] border border-slate-800 shadow-xl space-y-8">
                             <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
                                 <Calculator size={22} className="text-indigo-400"/>
-                                <h3 className="font-black text-white uppercase text-xs tracking-widest">Parámetros de Red</h3>
+                                <h3 className="font-black text-white uppercase text-xs tracking-widest">Modelo de Frecuencia</h3>
                             </div>
 
                             <div className="space-y-6">
+                                <div>
+                                    <div className="flex justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <Repeat size={14} className="text-indigo-400" />
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Renovaciones / Mes</label>
+                                        </div>
+                                        <span className="text-sm font-black text-white">{sim.avgFrequency}x</span>
+                                    </div>
+                                    <input type="range" min="1" max="4" step="0.1" value={sim.avgFrequency} onChange={e => setSim({...sim, avgFrequency: parseFloat(e.target.value)})} className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                                    <p className="text-[9px] text-slate-600 font-bold uppercase mt-2 italic text-center">Basado en comportamiento semanal real</p>
+                                </div>
+
+                                <div className="h-px bg-slate-800"></div>
+
                                 <div>
                                     <div className="flex justify-between mb-2">
                                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Inversión Contenido</label>
@@ -240,18 +256,10 @@ export default function AdminAnalytics() {
                                     <input type="range" min="0" max="1000" step="50" value={sim.opCosts} onChange={e => setSim({...sim, opCosts: parseInt(e.target.value)})} className="w-full accent-orange-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                                 </div>
 
-                                <div>
-                                    <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Volumen P2P / Usuario</label>
-                                        <span className="text-sm font-black text-indigo-400">${sim.p2pVolume}</span>
-                                    </div>
-                                    <input type="range" min="0" max="100" step="5" value={sim.p2pVolume} onChange={e => setSim({...sim, p2pVolume: parseInt(e.target.value)})} className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
-                                </div>
-
                                 <div className="p-5 bg-slate-950 rounded-3xl border border-slate-800 space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest sticky top-0 bg-slate-950 py-1 z-10"><PieChart size={14}/> Mix de Planes Reales</label>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest sticky top-0 bg-slate-950 py-1 z-10"><PieChart size={14}/> Mix de Renovaciones</label>
                                     {vipPlans.length === 0 ? (
-                                        <p className="text-[9px] text-slate-600 italic uppercase text-center py-4">No hay planes configurados en Admin</p>
+                                        <p className="text-[9px] text-slate-600 italic uppercase text-center py-4">No hay planes configurados</p>
                                     ) : vipPlans.map(plan => (
                                         <div key={plan.id}>
                                             <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1">
@@ -271,21 +279,25 @@ export default function AdminAnalytics() {
                         </div>
                     </div>
 
-                    {/* Simulation Result Display */}
+                    {/* Simulation Result Display V2 */}
                     <div className="lg:col-span-8 space-y-6">
                         <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 md:p-12 shadow-2xl relative overflow-hidden flex flex-col justify-between h-full">
                             <div className="relative z-10 flex flex-col md:flex-row justify-between items-start gap-8 mb-12">
                                 <div>
-                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Proyección de Rentabilidad</h3>
-                                    <p className="text-sm text-slate-500">Basado en tus planes de acceso y recargas actuales.</p>
-                                    <div className="mt-4 flex items-center gap-4">
+                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Rentabilidad por Volumen Mensual</h3>
+                                    <p className="text-sm text-slate-500">Proyección basada en renovaciones de saldo recurrentes.</p>
+                                    <div className="mt-4 flex flex-wrap items-center gap-4">
                                         <div className="bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl">
-                                            <span className="text-[8px] font-black text-slate-500 uppercase block">Costos Totales</span>
+                                            <span className="text-[8px] font-black text-slate-500 uppercase block">Costos Fijos</span>
                                             <span className="text-sm font-bold text-red-400">${projection.totalFixedCosts}</span>
                                         </div>
-                                        <div className="bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl">
-                                            <span className="text-[8px] font-black text-slate-500 uppercase block">Punto de Equilibrio</span>
-                                            <span className="text-sm font-bold text-indigo-400">{projection.breakEvenUsers} <span className="text-[10px]">Usuarios</span></span>
+                                        <div className="bg-slate-950 border border-indigo-500/30 px-4 py-2 rounded-xl">
+                                            <span className="text-[8px] font-black text-indigo-400 uppercase block">ARPU Objetivo</span>
+                                            <span className="text-sm font-bold text-white">${projection.targetArpu}</span>
+                                        </div>
+                                        <div className="bg-slate-950 border border-emerald-500/30 px-4 py-2 rounded-xl">
+                                            <span className="text-[8px] font-black text-emerald-400 uppercase block flex items-center gap-1"><Target size={10}/> Punto Crítico</span>
+                                            <span className="text-sm font-bold text-white">{projection.breakEvenUsers} <span className="text-[10px] text-slate-500">Usuarios</span></span>
                                         </div>
                                     </div>
                                 </div>
@@ -293,34 +305,32 @@ export default function AdminAnalytics() {
                                     <div className={`text-4xl font-black ${projection.avgProfitability >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                         {projection.avgProfitability.toFixed(1)}%
                                     </div>
-                                    <div className="text-[10px] font-black opacity-60 uppercase tracking-widest mt-1">RENTABILIDAD PROMEDIO</div>
+                                    <div className="text-[10px] font-black opacity-60 uppercase tracking-widest mt-1">MARGEN OPERATIVO</div>
                                 </div>
                             </div>
 
                             <div className="h-64 w-full bg-slate-950/30 rounded-3xl p-6 border border-slate-800/50">
-                                {renderChart(projection.data, 'profitability', '#6366f1')}
+                                {renderChart(projection.data, 'revenue', '#6366f1')}
                             </div>
 
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-12 pt-8 border-t border-slate-800 text-center">
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Volumen Renovaciones</div>
+                                    <div className="text-xl font-black text-white">{projection.data[0]?.renewals} <span className="text-xs opacity-40">M1</span></div>
+                                </div>
+                                <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
                                     <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Ingresos M12</div>
                                     <div className="text-xl font-black text-white">${Math.round(projection.data[11]?.revenue).toLocaleString()}</div>
+                                </div>
+                                <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Crecimiento Neto</div>
+                                    <div className="text-xl font-black text-indigo-400">+{sim.growth - sim.churn}%</div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
                                     <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Utilidad M12</div>
                                     <div className={`text-xl font-black ${projection.data[11]?.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                         ${Math.round(projection.data[11]?.profit).toLocaleString()}
                                     </div>
-                                </div>
-                                <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Margen Operativo</div>
-                                    <div className={`text-xl font-black ${projection.avgProfitability >= 0 ? 'text-indigo-400' : 'text-orange-400'}`}>
-                                        {projection.avgProfitability.toFixed(0)}%
-                                    </div>
-                                </div>
-                                <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">ROI Proyectado</div>
-                                    <div className="text-xl font-black text-white">x{(projection.totalProfit / (projection.totalFixedCosts * 12) + 1).toFixed(1)}</div>
                                 </div>
                             </div>
                         </div>
