@@ -225,13 +225,19 @@ export default function Layout() {
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
   const isShortsMode = location.pathname === '/shorts';
 
-  const Avatar = ({ size=24, className='' }: {size?: number, className?: string}) => (
-      user?.avatarUrl ? (
-          <img src={user.avatarUrl} alt={user.username} className={`rounded-full object-cover ${className}`} style={{width: size, height: size}} />
-      ) : (
-          <div className={`rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold ${className}`} style={{width: size, height: size, fontSize: size*0.4}}>{user?.username?.[0]}</div>
-      )
-  );
+  const Avatar = ({ size=24, className='' }: {size?: number, className?: string}) => {
+      const initials = user?.username?.[0] || '?';
+      return (
+        <div className={`rounded-full overflow-hidden flex items-center justify-center shrink-0 ${className}`} style={{width: size, height: size}}>
+            {user?.avatarUrl ? (
+                <img src={user.avatarUrl} alt={user.username} className="w-full h-full object-cover" onError={(e) => (e.currentTarget.style.display = 'none')} />
+            ) : null}
+            <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-white font-bold" style={{fontSize: size*0.4}}>
+                {initials}
+            </div>
+        </div>
+      );
+  };
 
   const isAdmin = user && user.role && user.role.trim().toUpperCase() === 'ADMIN';
 
@@ -297,7 +303,7 @@ export default function Layout() {
                   <MonitorDown size={14}/> Instalar App
               </button>
           )}
-          <Link to="/vip" className="text-sm font-bold text-amber-400 hover:text-amber-300 bg-amber-900/20 px-3 py-1 rounded-full border border-amber-500/30">VIP</Link>
+          <Link to="/vip" className="text-sm font-bold text-amber-400 hover:text-amber-300 bg-amber-900/20 px-3 py-1 rounded-full border border-emerald-500/30">VIP</Link>
           <span className="text-sm font-medium bg-slate-800 px-3 py-1 rounded-full text-indigo-300">{Number(user?.balance || 0).toFixed(2)} Saldo</span>
           <Link to="/" className={isActive('/')}>Inicio</Link>
           <Link to="/shorts" className={isActive('/shorts')}>Shorts</Link>

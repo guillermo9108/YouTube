@@ -4,7 +4,7 @@ import { db } from '../../../services/db';
 import { 
     Calculator, TrendingUp, Users, DollarSign, 
     RefreshCw, BarChart3, ShieldAlert, Activity, 
-    ArrowRightLeft, Scale, PieChart, Landmark
+    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap
 } from 'lucide-react';
 
 type Granularity = 'DAYS' | 'MONTHS';
@@ -19,17 +19,17 @@ export default function AdminAnalytics() {
     const [sim, setSim] = useState({
         users: 100,
         growth: 12,            // % Crecimiento neto mensual
-        churn: 5,              // % Abandono (Estricto)
+        churn: 5,              // % Abandono
         conversion: 20,        // % Usuarios que pagan membresía
         
-        // Variables Prompt Experto (Fijos Mensuales)
-        contentInflow: 1400,   // $300*4 semanas + margen
-        opCosts: 200,          // Luz/Servidor Local
+        // Variables de Costos (Fijos Mensuales)
+        contentInflow: 1400,   // Inversión en contenido
+        opCosts: 200,          // Luz/Servidor/Mantenimiento
         
         // Circularidad P2P
         p2pVolume: 15,         // $ promedio circulado entre usuarios/mes
         p2pCommission: 5,      // % Fee de red (Credita a Admin)
-        reinvestmentRate: 70,  // % de saldo que vuelve a circular (Money Velocity)
+        reinvestmentRate: 70,  // % de saldo que vuelve a circular
         
         // Mix de Membresías (%)
         mix7d: 50,  // Precio: 5$
@@ -56,7 +56,7 @@ export default function AdminAnalytics() {
 
     useEffect(() => { loadData(); }, []);
 
-    // --- CÁLCULO DE PUNTO DE EQUILIBRIO (BREAK-EVEN) ---
+    // --- CÁLCULO DE RENTABILIDAD Y PUNTO DE EQUILIBRIO ---
     const projection = useMemo(() => {
         const steps = 12;
         const data = [];
@@ -79,6 +79,10 @@ export default function AdminAnalytics() {
 
             const grossRevenue = totalMembershipRev + p2pProfit;
             const netMonthlyProfit = grossRevenue - totalFixedCosts;
+            
+            // FÓRMULA DE RENTABILIDAD: ((Ingresos - Costos) / Ingresos) * 100
+            const profitability = grossRevenue > 0 ? ((grossRevenue - totalFixedCosts) / grossRevenue) * 100 : -100;
+
             cumulativeNetProfit += netMonthlyProfit;
 
             data.push({
@@ -86,15 +90,17 @@ export default function AdminAnalytics() {
                 users: Math.round(currentUsers),
                 revenue: Math.round(grossRevenue),
                 profit: Math.round(netMonthlyProfit),
+                profitability: parseFloat(profitability.toFixed(2)),
                 isBurn: netMonthlyProfit < 0
             });
         }
 
+        const avgProfitability = data.reduce((acc, curr) => acc + curr.profitability, 0) / steps;
         const arpuMem = ((sim.mix7d/100)*PRICES.d7 + (sim.mix14d/100)*PRICES.d14 + (sim.mix31d/100)*PRICES.d31) * (sim.conversion/100);
         const arpuP2P = sim.p2pVolume * (sim.p2pCommission/100) * (sim.reinvestmentRate/100);
         const breakEvenUsers = Math.ceil(totalFixedCosts / (arpuMem + arpuP2P || 1));
 
-        return { data, totalProfit: cumulativeNetProfit, breakEvenUsers, totalFixedCosts };
+        return { data, totalProfit: cumulativeNetProfit, breakEvenUsers, totalFixedCosts, avgProfitability };
     }, [sim]);
 
     const renderChart = (points: any[], dataKey: string, color: string) => {
@@ -187,10 +193,18 @@ export default function AdminAnalytics() {
                             <div className="space-y-6">
                                 <div>
                                     <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gastos Operativos</label>
-                                        <span className="text-sm font-black text-red-400">${sim.contentInflow + sim.opCosts}</span>
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Inversión Contenido</label>
+                                        <span className="text-sm font-black text-red-400">${sim.contentInflow}</span>
                                     </div>
-                                    <input type="range" min="200" max="5000" step="100" value={sim.contentInflow + sim.opCosts} onChange={e => setSim({...sim, contentInflow: parseInt(e.target.value) - 200})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                                    <input type="range" min="0" max="5000" step="100" value={sim.contentInflow} onChange={e => setSim({...sim, contentInflow: parseInt(e.target.value)})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
+                                </div>
+
+                                <div>
+                                    <div className="flex justify-between mb-2">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gastos Operativos</label>
+                                        <span className="text-sm font-black text-orange-400">${sim.opCosts}</span>
+                                    </div>
+                                    <input type="range" min="0" max="1000" step="50" value={sim.opCosts} onChange={e => setSim({...sim, opCosts: parseInt(e.target.value)})} className="w-full accent-orange-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                                 </div>
 
                                 <div>
@@ -226,37 +240,51 @@ export default function AdminAnalytics() {
                         <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 md:p-12 shadow-2xl relative overflow-hidden flex flex-col justify-between h-full">
                             <div className="relative z-10 flex flex-col md:flex-row justify-between items-start gap-8 mb-12">
                                 <div>
-                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Proyección de Economía</h3>
-                                    <p className="text-sm text-slate-500">Beneficio neto tras absorber gastos fijos de ${sim.contentInflow + sim.opCosts}.</p>
-                                </div>
-                                <div className={`text-right px-8 py-5 rounded-[24px] border backdrop-blur-md shadow-2xl ${projection.totalProfit >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
-                                    <div className={`text-4xl font-black ${projection.totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                        {projection.totalProfit >= 0 ? '+' : ''}{Math.round(projection.totalProfit).toLocaleString()}$
+                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Proyección de Rentabilidad</h3>
+                                    <p className="text-sm text-slate-500">Relación porcentual entre utilidad neta e ingresos totales.</p>
+                                    <div className="mt-4 flex items-center gap-4">
+                                        <div className="bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl">
+                                            <span className="text-[8px] font-black text-slate-500 uppercase block">Costos Totales</span>
+                                            <span className="text-sm font-bold text-red-400">${projection.totalFixedCosts}</span>
+                                        </div>
+                                        <div className="bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl">
+                                            <span className="text-[8px] font-black text-slate-500 uppercase block">Punto de Equilibrio</span>
+                                            <span className="text-sm font-bold text-indigo-400">{projection.breakEvenUsers} <span className="text-[10px]">Usuarios</span></span>
+                                        </div>
                                     </div>
-                                    <div className="text-[10px] font-black opacity-60 uppercase tracking-widest mt-1">EBITDA ANUAL PROYECTADO</div>
+                                </div>
+                                <div className={`text-right px-8 py-5 rounded-[24px] border backdrop-blur-md shadow-2xl ${projection.avgProfitability >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+                                    <div className={`text-4xl font-black ${projection.avgProfitability >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {projection.avgProfitability.toFixed(1)}%
+                                    </div>
+                                    <div className="text-[10px] font-black opacity-60 uppercase tracking-widest mt-1">RENTABILIDAD PROMEDIO</div>
                                 </div>
                             </div>
 
                             <div className="h-64 w-full bg-slate-950/30 rounded-3xl p-6 border border-slate-800/50">
-                                {renderChart(projection.data, 'profit', '#6366f1')}
+                                {renderChart(projection.data, 'profitability', '#6366f1')}
                             </div>
 
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-12 pt-8 border-t border-slate-800 text-center">
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Break-Even</div>
-                                    <div className="text-xl font-black text-white">{projection.breakEvenUsers} <span className="text-[10px] text-indigo-400">Usu</span></div>
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Ingresos M12</div>
+                                    <div className="text-xl font-black text-white">${Math.round(projection.data[11]?.revenue).toLocaleString()}</div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Revenue M12</div>
-                                    <div className="text-xl font-black text-emerald-400">${Math.round(projection.data[11]?.revenue || 0)}</div>
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Utilidad M12</div>
+                                    <div className={`text-xl font-black ${projection.data[11]?.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        ${Math.round(projection.data[11]?.profit).toLocaleString()}
+                                    </div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Pérdida/Leakage</div>
-                                    <div className="text-xl font-black text-red-400">{100 - sim.reinvestmentRate}%</div>
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Margen Operativo</div>
+                                    <div className={`text-xl font-black ${projection.avgProfitability >= 0 ? 'text-indigo-400' : 'text-orange-400'}`}>
+                                        {projection.avgProfitability.toFixed(0)}%
+                                    </div>
                                 </div>
                                 <div className="bg-slate-950/50 p-4 rounded-3xl border border-slate-800/50">
-                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Población M12</div>
-                                    <div className="text-xl font-black text-white">{projection.data[11]?.users.toLocaleString() || 0}</div>
+                                    <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">ROI Proyectado</div>
+                                    <div className="text-xl font-black text-white">x{(projection.totalProfit / (projection.totalFixedCosts * 12) + 1).toFixed(1)}</div>
                                 </div>
                             </div>
                         </div>

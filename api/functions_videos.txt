@@ -10,6 +10,7 @@ function video_process_rows(&$rows) {
             $v['isLocal'] = true;
         }
         if (isset($v['thumbnailUrl'])) { $v['thumbnailUrl'] = fix_url($v['thumbnailUrl']); }
+        if (isset($v['creatorAvatarUrl'])) { $v['creatorAvatarUrl'] = fix_url($v['creatorAvatarUrl']); }
         if (!isset($v['transcode_status'])) $v['transcode_status'] = 'NONE';
     }
 }
@@ -60,7 +61,7 @@ function video_get_related($pdo, $videoId) {
         }
     }
 
-    $sql = "SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')";
+    $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')";
     
     if ($curr['collection']) {
         $sql .= " AND v.collection = " . $pdo->quote($curr['collection']);
@@ -92,7 +93,7 @@ function video_get_related($pdo, $videoId) {
     $related = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     if (count($related) === 0) {
-        $backupSql = "SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.category = ? ORDER BY v.views DESC LIMIT 10";
+        $backupSql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.category = ? ORDER BY v.views DESC LIMIT 10";
         $stmtB = $pdo->prepare($backupSql);
         $stmtB->execute([$videoId, $curr['category']]);
         $related = $stmtB->fetchAll(PDO::FETCH_ASSOC);

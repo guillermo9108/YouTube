@@ -91,6 +91,7 @@ export default function Home() {
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [visibleCount, setVisibleCount] = useState(12);
+  const [isAiConfigured, setIsAiConfigured] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -99,6 +100,8 @@ export default function Home() {
             const [vids, sets] = await Promise.all([db.getAllVideos(), db.getSystemSettings()]);
             setAllVideos(vids.filter(v => !['PENDING', 'PROCESSING'].includes(v.category)));
             setCategories(sets.categories || []);
+            setIsAiConfigured(!!sets.geminiKey && sets.geminiKey.trim().length > 5);
+            
             if (user) {
                 const act = await db.getUserActivity(user.id);
                 setWatchedIds(act.watched || []);
@@ -232,7 +235,7 @@ export default function Home() {
           </div>
       )}
 
-      <AIConcierge videos={allVideos} />
+      <AIConcierge videos={allVideos} isVisible={isAiConfigured} />
     </div>
   );
 }

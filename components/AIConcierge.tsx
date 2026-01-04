@@ -10,7 +10,9 @@ interface Message {
     timestamp: number;
 }
 
-export default function AIConcierge({ videos }: { videos: Video[] }) {
+export default function AIConcierge({ videos, isVisible }: { videos: Video[], isVisible: boolean }) {
+    if (!isVisible) return null;
+
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
         { 

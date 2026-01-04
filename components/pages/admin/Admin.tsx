@@ -1,33 +1,35 @@
 import React, { useState } from 'react';
-import { User as UserIcon, Wallet, Store, Settings, Database, TrendingUp, Network, DownloadCloud, Cpu, Brush } from 'lucide-react';
+import { User as UserIcon, Wallet, Store, Settings, Database, Wrench, TrendingUp, Network, DownloadCloud, HardDrive, Cpu } from 'lucide-react';
 
 import AdminUsers from './AdminUsers';
 import AdminFinance from './AdminFinance';
 import AdminMarket from './AdminMarket';
 import AdminConfig from './AdminConfig';
 import AdminLibrary from './AdminLibrary';
+import AdminMaintenance from './AdminMaintenance';
 import AdminAnalytics from './AdminAnalytics';
 import AdminFtp from './AdminFtp';
 import AdminRequests from './AdminRequests';
 import AdminLocalFiles from './AdminLocalFiles';
 import AdminTranscoder from './AdminTranscoder';
 
-type TabID = 'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'CLEANCENTER' | 'FTP' | 'ANALYTICS' | 'REQUESTS' | 'TRANSCODER';
+type TabID = 'USERS' | 'FINANCE' | 'MARKET' | 'CONFIG' | 'LIBRARY' | 'FILES' | 'FTP' | 'MAINTENANCE' | 'ANALYTICS' | 'REQUESTS' | 'TRANSCODER';
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<TabID>('USERS');
 
   const tabs: { id: TabID; icon: any; label: string }[] = [
-       { id: 'USERS', icon: UserIcon, label: 'Usuarios' },
-       { id: 'FINANCE', icon: Wallet, label: 'Finanzas' },
-       { id: 'MARKET', icon: Store, label: 'Mercado' },
-       { id: 'REQUESTS', icon: DownloadCloud, label: 'Peticiones' },
-       { id: 'LIBRARY', icon: Database, label: 'Librería' },
-       { id: 'TRANSCODER', icon: Cpu, label: 'Transcoder' },
-       { id: 'CLEANCENTER', icon: Brush, label: 'Mantenimiento' },
+       { id: 'USERS', icon: UserIcon, label: 'Users' },
+       { id: 'FINANCE', icon: Wallet, label: 'Finance' },
+       { id: 'MARKET', icon: Store, label: 'Market' },
+       { id: 'REQUESTS', icon: DownloadCloud, label: 'Requests' },
+       { id: 'LIBRARY', icon: Database, label: 'Library' },
+       { id: 'TRANSCODER', icon: Cpu, label: 'Conversión' },
+       { id: 'FILES', icon: HardDrive, label: 'Storage' },
        { id: 'FTP', icon: Network, label: 'FTP' },
-       { id: 'ANALYTICS', icon: TrendingUp, label: 'Análisis' },
-       { id: 'CONFIG', icon: Settings, label: 'Ajustes' },
+       { id: 'ANALYTICS', icon: TrendingUp, label: 'Stats' },
+       { id: 'CONFIG', icon: Settings, label: 'Config' },
+       { id: 'MAINTENANCE', icon: Wrench, label: 'Tools' },
   ];
 
   return (
@@ -37,14 +39,14 @@ export default function Admin() {
                <button 
                   key={t.id} 
                   onClick={() => setActiveTab(t.id)} 
-                  className={`px-4 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest whitespace-nowrap flex items-center gap-2 transition-all ${activeTab === t.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 transition-colors ${activeTab === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
                 >
-                   <t.icon size={14}/> {t.label}
+                   <t.icon size={16}/> {t.label}
                </button>
            ))}
       </div>
 
-      <div className="min-h-[500px] animate-in fade-in slide-in-from-top-2 duration-500">
+      <div className="min-h-[500px]">
           {activeTab === 'USERS' && <AdminUsers />}
           {activeTab === 'FINANCE' && <AdminFinance />}
           {activeTab === 'MARKET' && <AdminMarket />}
@@ -52,8 +54,9 @@ export default function Admin() {
           {activeTab === 'CONFIG' && <AdminConfig />}
           {activeTab === 'LIBRARY' && <AdminLibrary />}
           {activeTab === 'TRANSCODER' && <AdminTranscoder />}
-          {activeTab === 'CLEANCENTER' && <AdminLocalFiles />}
+          {activeTab === 'FILES' && <AdminLocalFiles />}
           {activeTab === 'FTP' && <AdminFtp />}
+          {activeTab === 'MAINTENANCE' && <AdminMaintenance />}
           {activeTab === 'ANALYTICS' && <AdminAnalytics />}
       </div>
     </div>

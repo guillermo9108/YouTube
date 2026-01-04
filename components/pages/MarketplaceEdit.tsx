@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -28,7 +27,7 @@ export default function MarketplaceEdit() {
                 if (data) {
                     setItem(data);
                     // Use originalPrice if set (showing discount logic was used), else price
-                    const initialPrice = (data.originalPrice && data.originalPrice > 0) ? data.originalPrice : data.price;
+                    const initialPrice = (data.originalPrice && Number(data.originalPrice) > 0) ? Number(data.originalPrice) : Number(data.price);
                     setBasePrice(initialPrice);
                     setStock(data.stock ?? 1);
                     setDiscount(data.discountPercent ?? 0);
@@ -43,12 +42,18 @@ export default function MarketplaceEdit() {
     const handleSave = async () => {
         if (!user || !item || !id) return;
         
+        // Calculamos el precio final que el servidor debe cobrar
+        const numBase = Number(basePrice) || 0;
+        const numDisc = Number(discount) || 0;
+        const finalCalculatedPrice = numBase - (numBase * (numDisc / 100));
+
         try {
             await db.editListing(id, user.id, {
                 title: title,
                 description: desc,
-                originalPrice: Number(basePrice),
-                discountPercent: Number(discount),
+                price: finalCalculatedPrice, // IMPORTANTE: Este es el precio de cobro real
+                originalPrice: numBase,
+                discountPercent: numDisc,
                 stock: Number(stock),
             });
             toast.success("Artículo actualizado correctamente");
@@ -61,10 +66,10 @@ export default function MarketplaceEdit() {
     if (loading) return <div className="p-10 text-center text-slate-500">Cargando...</div>;
     if (!item || (user && item.sellerId !== user.id)) return <div className="p-10 text-center text-red-500">No autorizado</div>;
 
-    // Calculate preview of final price
+    // Calculate preview of final price for UI only
     const numBase = Number(basePrice) || 0;
     const numDisc = Number(discount) || 0;
-    const finalPrice = numBase - (numBase * (numDisc / 100));
+    const finalPricePreview = numBase - (numBase * (numDisc / 100));
 
     return (
         <div className="max-w-md mx-auto px-4 pt-6 pb-24 md:pb-10">
@@ -129,8 +134,8 @@ export default function MarketplaceEdit() {
                     </div>
 
                     <div className="flex flex-col items-center bg-indigo-600/10 p-4 rounded-xl border border-indigo-500/20 mt-2">
-                        <span className="text-xs text-indigo-300 font-bold uppercase tracking-widest mb-1">Precio Final</span>
-                        <span className="text-3xl font-black text-white tracking-tight">{finalPrice.toFixed(2)} $</span>
+                        <span className="text-xs text-indigo-300 font-bold uppercase tracking-widest mb-1">Precio Final de Venta</span>
+                        <span className="text-3xl font-black text-white tracking-tight">{finalPricePreview.toFixed(2)} $</span>
                         {numDisc > 0 && <span className="text-xs text-slate-400 line-through mt-1">{Number(basePrice).toFixed(2)} $</span>}
                     </div>
                 </div>
