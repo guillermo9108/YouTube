@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User as UserIcon, Wallet, Store, Settings, Database, Wrench, TrendingUp, Network, DownloadCloud, HardDrive, Cpu, Brush } from 'lucide-react';
+import { User as UserIcon, Wallet, Store, Settings, Database, TrendingUp, Network, DownloadCloud, Cpu, Brush } from 'lucide-react';
 
 import AdminUsers from './AdminUsers';
 import AdminFinance from './AdminFinance';
@@ -37,14 +37,14 @@ export default function Admin() {
                <button 
                   key={t.id} 
                   onClick={() => setActiveTab(t.id)} 
-                  className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 transition-colors ${activeTab === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                  className={`px-4 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest whitespace-nowrap flex items-center gap-2 transition-all ${activeTab === t.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
                 >
-                   <t.icon size={16}/> {t.label}
+                   <t.icon size={14}/> {t.label}
                </button>
            ))}
       </div>
 
-      <div className="min-h-[500px]">
+      <div className="min-h-[500px] animate-in fade-in slide-in-from-top-2 duration-500">
           {activeTab === 'USERS' && <AdminUsers />}
           {activeTab === 'FINANCE' && <AdminFinance />}
           {activeTab === 'MARKET' && <AdminMarket />}

@@ -1,19 +1,11 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft, Play, Pause } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Plus, Send, X, Loader2, ArrowLeft, Pause } from 'lucide-react';
 import { db } from '../../services/db';
 import { Video, Comment, UserInteraction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from '../Router';
 
-interface ShortItemProps {
-  video: Video;
-  isActive: boolean;
-  shouldLoad: boolean;
-  preload: "auto" | "none" | "metadata";
-  hasFullAccess: boolean; 
-}
-
-const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: ShortItemProps) => {
+const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: any) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const clickTimerRef = useRef<number | null>(null);
@@ -21,55 +13,39 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
   const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
   const [paused, setPaused] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
-  
   const [interaction, setInteraction] = useState<UserInteraction | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [likeCount, setLikeCount] = useState(video.likes || 0);
-  const [isSubscribed, setIsSubscribed] = useState(false);
 
   useEffect(() => {
     if (user && shouldLoad) {
       db.getInteraction(user.id, video.id).then(setInteraction);
-      if (!hasFullAccess) {
-          db.hasPurchased(user.id, video.id).then(setIsUnlocked);
-      }
-      if (isActive) {
-          db.getComments(video.id).then(setComments);
-          db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed).catch(() => setIsSubscribed(false));
-      }
+      if (!hasFullAccess) db.hasPurchased(user.id, video.id).then(setIsUnlocked);
+      if (isActive) db.getComments(video.id).then(setComments);
     }
-  }, [user, video.id, video.creatorId, shouldLoad, isActive, hasFullAccess]);
+  }, [user, video.id, shouldLoad, isActive, hasFullAccess]);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
-
     if (isActive && isUnlocked) {
         el.currentTime = 0;
         setPaused(false);
-        const playPromise = el.play();
-        if (playPromise !== undefined) {
-            playPromise.catch(() => {});
-        }
-    } else {
-        el.pause();
-    }
+        el.play().catch(() => {});
+    } else el.pause();
   }, [isActive, isUnlocked]);
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
-    try {
-        const res = await db.rateVideo(user.id, video.id, rating);
-        setInteraction(res);
-        if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
-    } catch(e) {}
+    const res = await db.rateVideo(user.id, video.id, rating);
+    setInteraction(res);
+    if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
   };
 
   const handleScreenTouch = (e: React.MouseEvent) => {
     e.stopPropagation();
-    
     if (clickTimerRef.current) {
         clearTimeout(clickTimerRef.current);
         clickTimerRef.current = null;
@@ -80,24 +56,11 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
         clickTimerRef.current = window.setTimeout(() => {
             clickTimerRef.current = null;
             if (videoRef.current) {
-                if (videoRef.current.paused) {
-                    videoRef.current.play();
-                    setPaused(false);
-                } else {
-                    videoRef.current.pause();
-                    setPaused(true);
-                }
+                if (videoRef.current.paused) { videoRef.current.play(); setPaused(false); }
+                else { videoRef.current.pause(); setPaused(true); }
             }
         }, 250);
     }
-  };
-
-  const postComment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !newComment.trim()) return;
-    const c = await db.addComment(user.id, video.id, newComment);
-    setComments(prev => [c, ...prev]);
-    setNewComment('');
   };
 
   if (!shouldLoad) return <div className="w-full h-full snap-start shrink-0 bg-black flex items-center justify-center"><Loader2 className="animate-spin text-slate-500" /></div>;
@@ -107,31 +70,17 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
       <div className="absolute inset-0 z-0 bg-black" onClick={handleScreenTouch}>
         {isUnlocked ? (
           <>
-            <video
-                ref={videoRef}
-                src={video.videoUrl}
-                poster={video.thumbnailUrl}
-                className="w-full h-full object-cover"
-                loop playsInline preload={preload} crossOrigin="anonymous"
-            />
-            {paused && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50">
-                    <Pause size={64} fill="currentColor" />
-                </div>
-            )}
-            {showHeart && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in fade-in duration-300">
-                    <Heart size={120} className="text-red-500 fill-red-500 drop-shadow-2xl" />
-                </div>
-            )}
+            <video ref={videoRef} src={video.videoUrl} poster={video.thumbnailUrl} className="w-full h-full object-cover" loop playsInline preload={preload} crossOrigin="anonymous" />
+            {paused && <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50"><Pause size={64} fill="currentColor" /></div>}
+            {showHeart && <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in fade-in duration-300"><Heart size={120} className="text-red-500 fill-red-500 drop-shadow-2xl" /></div>}
           </>
         ) : (
            <div className="w-full h-full relative">
               <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-sm brightness-50" />
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                 <div className="bg-black/40 backdrop-blur-xl p-8 rounded-2xl border border-white/10 text-center mx-4 max-w-sm w-full">
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
+                 <div className="bg-black/40 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl">
                     <div className="text-4xl font-black text-amber-400 mb-2">{video.price} $</div>
-                    <button onClick={() => db.purchaseVideo(user!.id, video.id).then(()=>setIsUnlocked(true))} className="w-full bg-white text-black font-bold py-3 rounded-full shadow-xl">Desbloquear</button>
+                    <button onClick={() => db.purchaseVideo(user!.id, video.id).then(()=>setIsUnlocked(true))} className="w-full bg-white text-black font-black py-4 px-8 rounded-2xl shadow-xl transition-all active:scale-95">Desbloquear</button>
                  </div>
               </div>
            </div>
@@ -140,6 +89,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
       
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80 pointer-events-none z-10" />
 
+      {/* Acciones Derecha */}
       <div className="absolute right-2 bottom-20 z-30 flex flex-col items-center gap-5 pb-safe">
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>
@@ -147,27 +97,18 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
           </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{likeCount}</span>
         </div>
-        <div className="flex flex-col items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); handleRate('dislike'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.disliked ? 'text-red-400' : 'text-white'}`}>
-             <ThumbsDown size={26} fill={interaction?.disliked ? "currentColor" : "white"} fillOpacity={interaction?.disliked ? 1 : 0.2} />
-          </button>
-        </div>
-        <div className="flex flex-col items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
-             <MessageCircle size={26} fill="white" fillOpacity={0.2} />
-          </button>
-          <span className="text-[10px] font-black text-white drop-shadow-md">{comments.length}</span>
-        </div>
-        <button onClick={(e) => { e.stopPropagation(); if(navigator.share) navigator.share({title: video.title, url: window.location.href}); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
-             <Share2 size={26} fill="white" fillOpacity={0.2} />
+        <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+           <MessageCircle size={26} fill="white" fillOpacity={0.2} />
         </button>
+        <button onClick={(e) => { e.stopPropagation(); if(navigator.share) navigator.share({title: video.title, url: window.location.href}); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white"><Share2 size={26} fill="white" fillOpacity={0.2} /></button>
       </div>
 
+      {/* Info Perfil Esquina Inferior Izquierda */}
       <div className="absolute bottom-6 left-3 right-16 z-30 text-white flex flex-col gap-3 pointer-events-none pb-safe">
          <div className="flex items-center gap-3 pointer-events-auto">
             <Link to={`/channel/${video.creatorId}`} className="relative shrink-0">
                 <div className="w-11 h-11 rounded-full border-2 border-white overflow-hidden bg-slate-800 shadow-xl">
-                    {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{video.creatorName[0]}</div>}
+                    {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{video.creatorName?.[0]}</div>}
                 </div>
             </Link>
             <div className="min-w-0">
@@ -189,7 +130,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
                  {comments.length === 0 ? <p className="text-center text-slate-600 py-20 italic uppercase text-[10px] font-bold tracking-widest">No hay comentarios aún</p> : comments.map(c => (
-                      <div key={c.id} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2">
+                      <div key={c.id} className="flex gap-3">
                          <div className="w-8 h-8 rounded-full bg-slate-800 shrink-0 border border-slate-700 overflow-hidden">
                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c.username[0]}</div>}
                          </div>
@@ -203,7 +144,7 @@ const ShortItem = ({ video, isActive, shouldLoad, preload, hasFullAccess }: Shor
                       </div>
                  ))}
               </div>
-              <form onSubmit={postComment} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 pb-safe">
+              <form onSubmit={async (e) => { e.preventDefault(); if(!user || !newComment.trim()) return; const c = await db.addComment(user.id, video.id, newComment); setComments(prev => [c, ...prev]); setNewComment(''); }} className="p-4 bg-slate-950 border-t border-slate-800 flex gap-2 pb-safe">
                  <input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2.5 text-sm text-white focus:outline-none" placeholder="Comentar..." />
                  <button type="submit" disabled={!newComment.trim()} className="bg-indigo-600 text-white w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-30 shadow-lg transition-all"><Send size={18} /></button>
               </form>
@@ -235,36 +176,24 @@ export default function Shorts() {
   useEffect(() => {
     const container = containerRef.current;
     if (!container || videos.length === 0) return;
-
     const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const index = Number((entry.target as HTMLElement).dataset.index);
-                if (!isNaN(index)) setActiveIndex(index);
-            }
-        });
+        entries.forEach(entry => { if (entry.isIntersecting) { const index = Number((entry.target as HTMLElement).dataset.index); if (!isNaN(index)) setActiveIndex(index); } });
     }, { root: container, threshold: 0.5 });
-
     Array.from(container.children).forEach((child) => observer.observe(child as Element));
     return () => observer.disconnect();
   }, [videos]);
 
   const hasFullAccess = useMemo(() => {
       if (!user) return false;
-      const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-      const isVipActive = user.vipExpiry && user.vipExpiry > (Date.now() / 1000);
-      return Boolean(isAdmin || isVipActive);
+      return Boolean(user.role?.trim().toUpperCase() === 'ADMIN' || (user.vipExpiry && user.vipExpiry > (Date.now() / 1000)));
   }, [user]);
 
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative" style={{ scrollBehavior: 'smooth' }}>
-      <div className="fixed top-4 left-4 z-50">
-          <Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link>
-      </div>
+      <div className="fixed top-4 left-4 z-50"><Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link></div>
       {videos.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4">
-              <Loader2 className="animate-spin text-indigo-500" size={32}/>
-              <p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p>
+              <Loader2 className="animate-spin text-indigo-500" size={32}/><p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p>
           </div>
       ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">
