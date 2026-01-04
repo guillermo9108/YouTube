@@ -84,7 +84,7 @@ export default function AdminConfig() {
     const addVipPlan = () => {
         const newPlan: VipPlan = {
             id: 'plan_' + Date.now(),
-            name: 'NUEVO PLAN VIP',
+            name: 'Pase Premium',
             price: 10,
             durationDays: 30,
             highlight: false
@@ -124,7 +124,7 @@ export default function AdminConfig() {
             <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-2xl flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="text-center md:text-left">
                     <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic">Ajustes Globales</h2>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Configuración del Servidor & Ecosistema</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Configuración del Servidor</p>
                 </div>
                 <div className="flex gap-2 w-full md:w-auto">
                     <button onClick={handleRepairDb} disabled={syncing} className="flex-1 md:flex-none p-4 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-2xl transition-all active:scale-95" title="Sincronizar DB">
@@ -136,13 +136,84 @@ export default function AdminConfig() {
                 </div>
             </div>
 
-            {/* 1. GESTOR DE CATEGORÍAS */}
+            {/* 1. VIP PLANS */}
+            <div className="space-y-3">
+                <SectionHeader id="VIP" label="Membresías VIP" icon={Crown} />
+                {activeSection === 'VIP' && (
+                    <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
+                        <div className="flex justify-between items-center px-2">
+                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Zap size={12}/> Gestiona tus pases VIP</span>
+                            <button onClick={addVipPlan} className="bg-amber-600 hover:bg-amber-500 text-white p-2 rounded-xl flex items-center gap-1 text-[10px] font-black uppercase shadow-lg active:scale-90 transition-all">
+                                <Plus size={16}/> Añadir Plan
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            {settings?.vipPlans?.map((plan) => (
+                                <div key={plan.id} className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 relative overflow-hidden group">
+                                    <div className="flex justify-between items-start gap-2">
+                                        <div className="flex-1 space-y-4">
+                                            <div>
+                                                <label className="text-[9px] font-black text-slate-600 uppercase block mb-1">Nombre</label>
+                                                <input 
+                                                    type="text" 
+                                                    value={plan.name} 
+                                                    onChange={e => updateVipPlan(plan.id, 'name', e.target.value)}
+                                                    className="bg-transparent border-b border-slate-800 focus:border-amber-500 text-white font-black text-sm outline-none w-full py-1"
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><DollarSign size={10}/> Precio ($)</label>
+                                                    <input 
+                                                        type="number" 
+                                                        value={plan.price} 
+                                                        onChange={e => updateVipPlan(plan.id, 'price', parseFloat(e.target.value))}
+                                                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 outline-none"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><Clock size={10}/> Días de Acceso</label>
+                                                    <input 
+                                                        type="number" 
+                                                        value={plan.durationDays} 
+                                                        onChange={e => updateVipPlan(plan.id, 'durationDays', parseInt(e.target.value))}
+                                                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-blue-400 outline-none"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <button 
+                                                    onClick={() => updateVipPlan(plan.id, 'highlight', !plan.highlight)}
+                                                    className={`px-3 py-1 rounded-full text-[9px] font-black uppercase transition-all ${plan.highlight ? 'bg-amber-500 text-black' : 'bg-slate-800 text-slate-500'}`}
+                                                >
+                                                    {plan.highlight ? 'Destacado' : 'Normal'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => removeVipPlan(plan.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors">
+                                            <Trash2 size={18}/>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            {(!settings?.vipPlans || settings.vipPlans.length === 0) && (
+                                <div className="text-center py-10 text-slate-600 italic text-xs uppercase font-bold tracking-widest border border-dashed border-slate-800 rounded-2xl">
+                                    No hay planes definidos
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* 2. GESTOR DE CATEGORÍAS */}
             <div className="space-y-3">
                 <SectionHeader id="CATEGORIES" label="Categorías & Precios" icon={Tag} />
                 {activeSection === 'CATEGORIES' && (
                     <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
                         <div className="flex justify-between items-center px-2">
-                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Info size={12}/> Gestiona tu catálogo</span>
+                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Info size={12}/> Gestión de catálogo</span>
                             <button onClick={addCategory} className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-xl flex items-center gap-1 text-[10px] font-black uppercase shadow-lg active:scale-90 transition-all">
                                 <Plus size={16}/> Nueva
                             </button>
@@ -207,77 +278,9 @@ export default function AdminConfig() {
                 )}
             </div>
 
-            {/* 2. PLANES VIP */}
+            {/* 3. ECONOMÍA */}
             <div className="space-y-3">
-                <SectionHeader id="VIP" label="Membresías VIP" icon={Crown} />
-                {activeSection === 'VIP' && (
-                    <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
-                        <div className="flex justify-between items-center px-2">
-                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Zap size={12}/> Define tus pases de acceso</span>
-                            <button onClick={addVipPlan} className="bg-amber-600 hover:bg-amber-500 text-white p-2 rounded-xl flex items-center gap-1 text-[10px] font-black uppercase shadow-lg active:scale-90 transition-all">
-                                <Plus size={16}/> Nuevo Plan
-                            </button>
-                        </div>
-
-                        <div className="space-y-4">
-                            {settings?.vipPlans?.map((plan) => (
-                                <div key={plan.id} className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 relative overflow-hidden group">
-                                    {plan.highlight && <div className="absolute -right-10 top-2 rotate-45 bg-amber-500 text-black text-[8px] font-black px-10 py-1 uppercase shadow-xl">Popular</div>}
-                                    
-                                    <div className="flex justify-between gap-2">
-                                        <div className="flex-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase block mb-1">Nombre del Plan</label>
-                                            <input 
-                                                type="text" 
-                                                value={plan.name} 
-                                                onChange={e => updateVipPlan(plan.id, 'name', e.target.value)}
-                                                className="bg-transparent border-b border-slate-800 focus:border-amber-500 text-white font-black text-sm outline-none w-full py-1"
-                                            />
-                                        </div>
-                                        <button onClick={() => removeVipPlan(plan.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors self-start mt-4">
-                                            <Trash2 size={16}/>
-                                        </button>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-3 gap-4">
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><DollarSign size={10}/> Precio ($)</label>
-                                            <input 
-                                                type="number" 
-                                                value={plan.price} 
-                                                onChange={e => updateVipPlan(plan.id, 'price', parseFloat(e.target.value))}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 outline-none"
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><Clock size={10}/> Días</label>
-                                            <input 
-                                                type="number" 
-                                                value={plan.durationDays} 
-                                                onChange={e => updateVipPlan(plan.id, 'durationDays', parseInt(e.target.value))}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-blue-400 outline-none"
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase block mb-1 text-center">Destacar</label>
-                                            <button 
-                                                onClick={() => updateVipPlan(plan.id, 'highlight', !plan.highlight)}
-                                                className={`w-full py-2 rounded-xl border font-black text-[10px] uppercase transition-all ${plan.highlight ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-slate-900 border-slate-800 text-slate-600'}`}
-                                            >
-                                                {plan.highlight ? 'SÍ' : 'NO'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 3. ECONOMÍA & COMISIONES */}
-            <div className="space-y-3">
-                <SectionHeader id="FINANCE" label="Economía del Sistema" icon={Percent} />
+                <SectionHeader id="FINANCE" label="Economía & Comisiones" icon={Percent} />
                 {activeSection === 'FINANCE' && (
                     <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
                         <div className="grid grid-cols-2 gap-4">
@@ -298,7 +301,7 @@ export default function AdminConfig() {
                 )}
             </div>
 
-            {/* 4. LÍMITES & AUTOMATIZACIÓN */}
+            {/* 4. AUTOMATIZACIÓN */}
             <div className="space-y-3">
                 <SectionHeader id="AUTOMATION" label="Límites & Escaneo" icon={HardDrive} />
                 {activeSection === 'AUTOMATION' && (
@@ -309,7 +312,7 @@ export default function AdminConfig() {
                                     <FileText size={18} className="text-indigo-400"/>
                                     <div>
                                         <span className="text-xs font-black text-white uppercase">Registro Log Activo</span>
-                                        <p className="text-[9px] text-slate-500 uppercase font-bold mt-0.5">Guarda errores en debug_log.txt</p>
+                                        <p className="text-[9px] text-slate-500 uppercase font-bold mt-0.5">debug_log.txt</p>
                                     </div>
                                 </div>
                                 <input 
@@ -320,64 +323,9 @@ export default function AdminConfig() {
                                 />
                             </label>
                         </div>
-
                         <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta Librería NAS/Local</label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta NAS Local</label>
                             <input type="text" value={settings?.localLibraryPath || ''} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono" placeholder="/volume1/videos/..."/>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Lote Escaneo (Paso 2)</label>
-                                <input type="number" value={settings?.batchSize || 2} onChange={e => updateValue('batchSize', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Resolución Máx</label>
-                                <select value={settings?.maxResolution || 1080} onChange={e => updateValue('maxResolution', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold">
-                                    <option value={720}>720p</option>
-                                    <option value={1080}>1080p</option>
-                                    <option value={2160}>4K</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 5. INTELIGENCIA IA */}
-            <div className="space-y-3">
-                <SectionHeader id="AI" label="Inteligencia & Media" icon={Sparkles} />
-                {activeSection === 'AI' && (
-                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Google Gemini API Key</label>
-                            <input type="password" value={settings?.geminiKey || ''} onChange={e => updateValue('geminiKey', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono" placeholder="AIza..."/>
-                        </div>
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta FFmpeg</label>
-                            <input type="text" value={settings?.ffmpegPath || ''} onChange={e => updateValue('ffmpegPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 6. PAGOS & PASARELA */}
-            <div className="space-y-3">
-                <SectionHeader id="PAYMENTS" label="Pagos (Tropipay)" icon={CreditCard} />
-                {activeSection === 'PAYMENTS' && (
-                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                        <div className="grid grid-cols-1 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Tropipay Client ID</label>
-                                <input type="text" value={settings?.tropipayClientId || ''} onChange={e => updateValue('tropipayClientId', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Tropipay Secret</label>
-                                <input type="password" value={settings?.tropipayClientSecret || ''} onChange={e => updateValue('tropipayClientSecret', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Conversión Saldo / 1 EUR</label>
-                                <input type="number" value={settings?.currencyConversion || 300} onChange={e => updateValue('currencyConversion', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-black text-lg"/>
-                            </div>
                         </div>
                     </div>
                 )}

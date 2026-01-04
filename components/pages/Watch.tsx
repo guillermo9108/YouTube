@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    SkipForward, ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2
+    SkipForward, ChevronRight, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, MessageSquare, X
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -22,14 +22,12 @@ export default function Watch() {
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     
-    // Estados de Interacción
     const [likes, setLikes] = useState(0);
     const [comments, setComments] = useState<Comment[]>([]);
     const [showComments, setShowComments] = useState(false);
     const [newComment, setNewComment] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Estados de Error de Reproducción
     const [playbackError, setPlaybackError] = useState<string | null>(null);
     const [countdown, setCountdown] = useState<number | null>(null);
 
@@ -70,7 +68,6 @@ export default function Watch() {
         fetchMeta();
     }, [id, user?.id]);
 
-    // Lógica del Conteo Regresivo para Error
     useEffect(() => {
         if (countdown !== null && countdown > 0) {
             const t = setTimeout(() => setCountdown(countdown - 1), 1000);
@@ -125,17 +122,14 @@ export default function Watch() {
     };
 
     const handleVideoError = () => {
-        const error = videoRef.current?.error;
-        if (error) {
-            setPlaybackError("Formato no compatible");
-            setCountdown(10);
-        }
+        setPlaybackError("Codec no compatible");
+        setCountdown(10);
     };
 
     const handleLoadedMetadata = () => {
         const vid = videoRef.current;
         if (vid && vid.videoWidth === 0 && vid.duration > 0) {
-            setPlaybackError("Codec HEVC/MKV detectado");
+            setPlaybackError("Formato interpretado como audio");
             setCountdown(10);
         }
     };
@@ -148,8 +142,13 @@ export default function Watch() {
 
     const openExternalPlayer = () => {
         if (!streamUrl) return;
-        window.open(streamUrl, '_blank');
-        toast.info("Abriendo en reproductor externo...");
+        // Intentos para apps móviles comunes
+        const intentUrl = `intent:${streamUrl}#Intent;package=com.mxtech.videoplayer.ad;end`;
+        window.location.href = intentUrl;
+        setTimeout(() => {
+            window.open(streamUrl, '_blank');
+        }, 500);
+        toast.info("Lanzando reproductor externo...");
     };
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
@@ -161,22 +160,21 @@ export default function Watch() {
                     {isUnlocked ? (
                         <>
                             {playbackError ? (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-900 animate-in fade-in duration-500">
+                                <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-slate-900 animate-in fade-in">
                                     <AlertTriangle size={48} className="text-amber-500 mb-4" />
                                     <h3 className="text-xl font-black text-white uppercase italic">{playbackError}</h3>
                                     <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2">
-                                        Saltando al siguiente video en <span className="text-white text-lg font-black">{countdown}s</span>
+                                        Saltando en <span className="text-white text-lg font-black">{countdown}s</span>
                                     </p>
-                                    
                                     <div className="flex gap-3 mt-8">
                                         <button onClick={openExternalPlayer} className="px-6 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-500">
                                             <ExternalLink size={16}/> Abrir Externo
                                         </button>
                                         <button onClick={handleSkipNext} className="px-6 py-3 bg-slate-800 text-white font-black rounded-xl text-[10px] uppercase tracking-widest flex items-center gap-2">
-                                            <SkipForward size={16}/> Saltar Ya
+                                            <SkipForward size={16}/> Saltar ya
                                         </button>
                                     </div>
-                                    <button onClick={() => setCountdown(null)} className="mt-4 text-[9px] text-slate-600 uppercase font-black hover:text-slate-400">Cancelar Salto</button>
+                                    <button onClick={() => setCountdown(null)} className="mt-4 text-[9px] text-slate-600 uppercase font-black">Cancelar</button>
                                 </div>
                             ) : (
                                 <video 
@@ -198,9 +196,9 @@ export default function Watch() {
                                 <div className="p-5 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full mb-4 group-hover:scale-110 transition-transform shadow-2xl">
                                     <Lock size={40} className="text-white"/>
                                 </div>
-                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Contenido Premium</h2>
-                                <div className="px-6 py-2 bg-amber-500 text-black font-black rounded-full text-lg shadow-xl shadow-amber-900/20 active:scale-95 transition-all">
-                                    DESBLOQUEAR POR {video?.price} $
+                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Premium</h2>
+                                <div className="px-6 py-2 bg-amber-500 text-black font-black rounded-full text-lg shadow-xl active:scale-95 transition-all">
+                                    DESBLOQUEAR {video?.price} $
                                 </div>
                             </div>
                         </div>
@@ -215,12 +213,12 @@ export default function Watch() {
                         
                         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-6">
                             <div className="flex items-center gap-4">
-                                <Link to={`/channel/${video?.creatorId}`} className="w-12 h-12 rounded-full bg-slate-800 border border-white/10 overflow-hidden shadow-lg shrink-0">
+                                <Link to={`/channel/${video?.creatorId}`} className="w-12 h-12 rounded-full bg-slate-800 border border-white/10 overflow-hidden shrink-0">
                                     {video?.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-slate-500">{video?.creatorName[0]}</div>}
                                 </Link>
                                 <div>
-                                    <Link to={`/channel/${video?.creatorId}`} className="font-black text-white hover:text-indigo-400 transition-colors">@{video?.creatorName}</Link>
-                                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
+                                    <Link to={`/channel/${video?.creatorId}`} className="font-black text-white hover:text-indigo-400">@{video?.creatorName}</Link>
+                                    <div className="text-[10px] text-slate-500 font-bold uppercase">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                                 </div>
                             </div>
 
@@ -244,7 +242,7 @@ export default function Watch() {
                                     onClick={() => setShowComments(!showComments)}
                                     className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${showComments ? 'bg-white text-black' : 'text-slate-400 hover:bg-slate-800'}`}
                                 >
-                                    <MessageCircle size={18} />
+                                    <MessageSquare size={18} />
                                     <span className="text-xs font-black">{comments.length}</span>
                                 </button>
                             </div>
@@ -254,12 +252,14 @@ export default function Watch() {
                             {video?.description || "Sin descripción."}
                         </div>
 
-                        {/* Sección de Comentarios */}
                         {showComments && (
-                            <div className="mt-10 space-y-6 animate-in slide-in-from-top-4">
-                                <h3 className="font-black text-white text-sm uppercase tracking-widest flex items-center gap-2">
-                                    <MessageSquare size={18} className="text-indigo-400"/> Comentarios ({comments.length})
-                                </h3>
+                            <div className="mt-10 space-y-6 animate-in slide-in-from-top-4 duration-300">
+                                <div className="flex justify-between items-center">
+                                    <h3 className="font-black text-white text-sm uppercase tracking-widest flex items-center gap-2">
+                                        <MessageSquare size={18} className="text-indigo-400"/> Conversación ({comments.length})
+                                    </h3>
+                                    <button onClick={() => setShowComments(false)} className="p-1.5 hover:bg-slate-800 rounded-full text-slate-500"><X size={18}/></button>
+                                </div>
 
                                 {user && (
                                     <form onSubmit={handleAddComment} className="flex gap-4">
@@ -271,10 +271,10 @@ export default function Watch() {
                                                 type="text" 
                                                 value={newComment}
                                                 onChange={e => setNewComment(e.target.value)}
-                                                placeholder="Añadir un comentario..."
+                                                placeholder="Añadir opinión..."
                                                 className="flex-1 bg-transparent border-b border-slate-800 focus:border-indigo-500 outline-none text-sm text-white py-2 transition-colors"
                                             />
-                                            <button disabled={!newComment.trim() || isSubmitting} type="submit" className="bg-indigo-600 p-2.5 rounded-full text-white hover:bg-indigo-500 disabled:opacity-30 transition-all active:scale-90 shadow-lg">
+                                            <button disabled={!newComment.trim() || isSubmitting} type="submit" className="bg-indigo-600 p-2.5 rounded-full text-white hover:bg-indigo-500 disabled:opacity-30 transition-all active:scale-90">
                                                 {isSubmitting ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
                                             </button>
                                         </div>
@@ -283,7 +283,7 @@ export default function Watch() {
 
                                 <div className="space-y-6 pt-4">
                                     {comments.length === 0 ? (
-                                        <div className="text-center py-10 text-slate-600 italic text-xs uppercase font-bold tracking-widest">Aún no hay comentarios</div>
+                                        <div className="text-center py-10 text-slate-600 italic text-[10px] font-black uppercase tracking-widest">Sé el primero en comentar</div>
                                     ) : comments.map(c => (
                                         <div key={c.id} className="flex gap-4 group">
                                             <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
@@ -307,11 +307,11 @@ export default function Watch() {
                 <div className="lg:w-80 space-y-6">
                     {relatedVideos.slice(0, 10).map(v => (
                         <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all border border-transparent hover:border-white/5">
-                            <div className="w-28 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0 shadow-lg">
+                            <div className="w-28 aspect-video bg-slate-900 rounded-xl overflow-hidden relative shrink-0">
                                 <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"/>
                             </div>
                             <div className="flex-1 min-w-0 py-1">
-                                <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase tracking-tighter leading-tight group-hover:text-indigo-400 transition-colors">{v.title}</h4>
+                                <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight group-hover:text-indigo-400">{v.title}</h4>
                                 <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
                             </div>
                         </Link>
@@ -321,7 +321,3 @@ export default function Watch() {
         </div>
     );
 }
-
-const MessageSquare = ({ size, className }: any) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-);
