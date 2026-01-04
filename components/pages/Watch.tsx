@@ -17,7 +17,7 @@ import { useVideoPlayer } from '../../context/VideoPlayerContext';
 export default function Watch() {
     const { id } = useParams();
     const { user, refreshUser } = useAuth();
-    const { activeVideo, isPlaying, currentTime, playVideo, togglePlay, updateTime } = useVideoPlayer();
+    const { activeVideo, isPlaying, currentTime, playVideo, setPlaying, updateTime } = useVideoPlayer();
     const navigate = useNavigate();
     const toast = useToast();
     
@@ -43,11 +43,7 @@ export default function Watch() {
     const viewCountedRef = useRef(false);
     const watchedThresholdRef = useRef(false);
 
-    useEffect(() => { 
-        window.scrollTo(0, 0);
-        refreshUser();
-    }, [id]);
-
+    // 1. Cargar metadatos y verificar acceso
     useEffect(() => {
         if (!id) return;
         setLoading(true);
@@ -67,24 +63,24 @@ export default function Watch() {
                     db.getComments(v.id).then(setComments);
                     
                     if (user) {
-                        const [access, interact] = await Promise.all([
-                            db.hasPurchased(user.id, v.id),
-                            db.getInteraction(user.id, v.id)
-                        ]);
-                        const unlocked = access || user.role === 'ADMIN' || user.id === v.creatorId;
-                        setIsUnlocked(unlocked);
-                        setInteraction(interact);
-                        setIsWatchLater(user.watchLater?.includes(id) || false);
+                        const isVipActive = user.vipExpiry && user.vipExpiry > (Date.now() / 1000);
+                        const isAdmin = user.role?.toUpperCase() === 'ADMIN';
+                        const isOwner = user.id === v.creatorId;
 
-                        // Si el video ya está en el global player, sincronizamos
-                        if (unlocked && activeVideo?.id === v.id) {
-                            if (videoRef.current) {
-                                videoRef.current.currentTime = currentTime;
-                                if (isPlaying) videoRef.current.play().catch(() => {});
+                        // Verificación local inmediata de privilegios
+                        if (isAdmin || isOwner || isVipActive) {
+                            setIsUnlocked(true);
+                            setIsWatchLater(user.watchLater?.includes(id) || false);
+                            // Sincronizar con el reproductor global
+                            playVideo(v, activeVideo?.id === v.id ? currentTime : 0);
+                        } else {
+                            // Si no tiene privilegios, consultar si lo compró
+                            const hasPurchased = await db.hasPurchased(user.id, v.id);
+                            setIsUnlocked(hasPurchased);
+                            setIsWatchLater(user.watchLater?.includes(id) || false);
+                            if (hasPurchased) {
+                                playVideo(v, activeVideo?.id === v.id ? currentTime : 0);
                             }
-                        } else if (unlocked) {
-                            // Si es un video nuevo, lo cargamos en el global
-                            playVideo(v, 0);
                         }
                     }
                 }
@@ -93,30 +89,31 @@ export default function Watch() {
         fetchMeta();
     }, [id, user?.id]);
 
-    useEffect(() => {
-        if (countdown !== null && countdown > 0) {
-            const t = setTimeout(() => setCountdown(countdown - 1), 1000);
-            return () => clearTimeout(t);
-        } else if (countdown === 0) {
-            handleSkipNext();
-        }
-    }, [countdown]);
-
-    // Sincronizar estado externo (MiniPlayer) -> Local
+    // 2. Control manual de reproducción (Forzar Play al cargar fuente)
     useEffect(() => {
         const vid = videoRef.current;
-        if (!vid || !video || activeVideo?.id !== video.id) return;
+        if (!vid || !isUnlocked || !video) return;
 
         if (isPlaying) {
-            vid.play().catch(() => {});
+            const playPromise = vid.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(() => {
+                    // Autoplay prevenido por el navegador
+                    setPlaying(false);
+                });
+            }
         } else {
             vid.pause();
         }
-    }, [isPlaying, video?.id]);
+    }, [isPlaying, isUnlocked, video?.id]);
 
+    // 3. Manejo de transición (Siguiente Video)
     const handleSkipNext = () => {
-        if (relatedVideos.length > 0) navigate(`/watch/${relatedVideos[0].id}`);
-        else navigate('/');
+        if (relatedVideos.length > 0) {
+            navigate(`/watch/${relatedVideos[0].id}`);
+        } else {
+            navigate('/');
+        }
     };
 
     const handlePurchase = async (skipConfirm = false) => {
@@ -131,19 +128,9 @@ export default function Watch() {
                 await db.purchaseVideo(user.id, video.id);
                 setIsUnlocked(true); refreshUser();
                 toast.success("Contenido desbloqueado");
-                // Al desbloquear, cargamos en el global player
                 playVideo(video, 0);
             } catch (e: any) { toast.error(e.message); isPurchasingRef.current = false; }
         }
-    };
-
-    const handleToggleWatchLater = async () => {
-        if (!user || !id) return;
-        try {
-            const newList = await db.toggleWatchLater(user.id, id);
-            setIsWatchLater(newList.includes(id));
-            toast.success(newList.includes(id) ? "Añadido a Ver más tarde" : "Quitado de Ver más tarde");
-        } catch (e) {}
     };
 
     const handleOnPlay = () => {
@@ -151,11 +138,11 @@ export default function Watch() {
             db.incrementViewCount(video.id).catch(() => {});
             viewCountedRef.current = true;
         }
-        if (!isPlaying) togglePlay();
+        setPlaying(true);
     };
 
     const handleOnPause = () => {
-        if (isPlaying) togglePlay();
+        setPlaying(false);
     };
 
     const handleTimeUpdate = () => {
@@ -164,35 +151,13 @@ export default function Watch() {
             updateTime(vid.currentTime);
             
             if (!watchedThresholdRef.current) {
-                // Se marca como visto al llegar al 80% o tras 1 minuto
+                // Registro de "visto" al superar 80% o 1 min
                 if (vid.currentTime > 60 || (vid.duration > 0 && vid.currentTime / vid.duration > 0.8)) {
                     db.markWatched(user.id, video.id).catch(() => {});
                     watchedThresholdRef.current = true;
                 }
             }
         }
-    };
-
-    const handleRate = async (type: 'like' | 'dislike') => {
-        if (!user || !video) return;
-        try {
-            const res = await db.rateVideo(user.id, video.id, type);
-            setInteraction(res);
-            if (res.newLikeCount !== undefined) setLikes(res.newLikeCount);
-        } catch (e) {}
-    };
-
-    const handleAddComment = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!user || !video || !newComment.trim() || isSubmitting) return;
-        setIsSubmitting(true);
-        try {
-            const comment = await db.addComment(user.id, video.id, newComment);
-            setComments(prev => [comment, ...prev]);
-            setNewComment('');
-            toast.success("Comentario publicado");
-        } catch (e) { toast.error("Error al comentar"); }
-        finally { setIsSubmitting(false); }
     };
 
     const handleVideoError = () => {
@@ -209,7 +174,7 @@ export default function Watch() {
     const copyStreamLink = () => {
         const fullUrl = window.location.origin + '/' + streamUrl;
         navigator.clipboard.writeText(fullUrl);
-        toast.info("Enlace copiado. Pégalo en VLC o MX Player.");
+        toast.info("Enlace copiado.");
     };
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
@@ -225,7 +190,7 @@ export default function Watch() {
                                     <AlertTriangle size={48} className="text-amber-500 mb-4" />
                                     <h3 className="text-xl font-black text-white uppercase italic">{playbackError}</h3>
                                     <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2">
-                                        Saltando automáticamente en <span className="text-white text-lg font-black">{countdown}s</span>
+                                        Saltando en <span className="text-white text-lg font-black">{countdown}s</span>
                                     </p>
                                     
                                     <div className="flex flex-wrap justify-center gap-3 mt-8">
@@ -235,8 +200,8 @@ export default function Watch() {
                                             </button>
                                             {showOpenWith && (
                                                 <div className="absolute bottom-full mb-2 left-0 w-48 bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-2xl z-50 animate-in slide-in-from-bottom-2">
-                                                    <button onClick={() => window.open(streamUrl, '_blank')} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 flex items-center gap-2 border-b border-white/5"><Play size={12}/> Reproductor Navegador</button>
-                                                    <button onClick={copyStreamLink} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 flex items-center gap-2"><Copy size={12}/> Copiar Enlace Directo</button>
+                                                    <button onClick={() => window.open(streamUrl, '_blank')} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 flex items-center gap-2 border-b border-white/5"><Play size={12}/> Navegador</button>
+                                                    <button onClick={copyStreamLink} className="w-full p-3 text-left text-[10px] font-bold uppercase text-white hover:bg-indigo-600 flex items-center gap-2"><Copy size={12}/> Copiar Enlace</button>
                                                 </div>
                                             )}
                                         </div>
@@ -244,13 +209,12 @@ export default function Watch() {
                                             <SkipForward size={16}/> Siguiente
                                         </button>
                                     </div>
-                                    <button onClick={() => setCountdown(null)} className="mt-4 text-[9px] text-slate-600 uppercase font-black hover:text-slate-400">Detener conteo</button>
                                 </div>
                             ) : (
                                 <video 
                                     ref={videoRef}
                                     src={streamUrl} 
-                                    controls autoPlay playsInline 
+                                    controls playsInline 
                                     className="w-full h-full object-contain" 
                                     onPlay={handleOnPlay}
                                     onPause={handleOnPause}
@@ -282,7 +246,6 @@ export default function Watch() {
                 <div className="flex-1 space-y-6">
                     <div>
                         <h1 className="text-2xl md:text-3xl font-black text-white leading-tight uppercase italic mb-4">{video?.title}</h1>
-                        
                         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-6">
                             <div className="flex items-center gap-4">
                                 <Link to={`/channel/${video?.creatorId}`} className="w-12 h-12 rounded-full bg-slate-800 border border-white/10 overflow-hidden shadow-lg shrink-0">
@@ -293,89 +256,7 @@ export default function Watch() {
                                     <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                                 </div>
                             </div>
-
-                            <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-2xl border border-white/5">
-                                <button 
-                                    onClick={() => handleRate('like')}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.liked ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}
-                                >
-                                    <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"} />
-                                    <span className="text-xs font-black">{likes}</span>
-                                </button>
-                                <button 
-                                    onClick={() => handleRate('dislike')}
-                                    className={`p-2 rounded-xl transition-all ${interaction?.disliked ? 'text-red-400 bg-red-400/10' : 'text-slate-400 hover:bg-slate-800'}`}
-                                >
-                                    <ThumbsDown size={18} />
-                                </button>
-                                <div className="w-px h-6 bg-white/10 mx-1"></div>
-                                <button 
-                                    onClick={handleToggleWatchLater}
-                                    className={`p-3 rounded-xl transition-all ${isWatchLater ? 'text-amber-400 bg-amber-400/10' : 'text-slate-400 hover:bg-slate-800'}`}
-                                    title="Ver más tarde"
-                                >
-                                    {isWatchLater ? <Bookmark size={18} fill="currentColor"/> : <BookmarkPlus size={18}/>}
-                                </button>
-                                <button 
-                                    onClick={() => setShowComments(!showComments)}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${showComments ? 'bg-white text-black' : 'text-slate-400 hover:bg-slate-800'}`}
-                                >
-                                    <MessageCircle size={18} />
-                                    <span className="text-xs font-black">{comments.length}</span>
-                                </button>
-                            </div>
                         </div>
-
-                        <div className="mt-6 text-slate-300 text-sm leading-relaxed bg-slate-900/30 p-6 rounded-3xl border border-white/5">
-                            {video?.description || "Sin descripción."}
-                        </div>
-
-                        {showComments && (
-                            <div className="mt-10 space-y-6 animate-in slide-in-from-top-4">
-                                <h3 className="font-black text-white text-sm uppercase tracking-widest flex items-center gap-2">
-                                    <MessageCircle size={18} className="text-indigo-400"/> Comentarios ({comments.length})
-                                </h3>
-
-                                {user && (
-                                    <form onSubmit={handleAddComment} className="flex gap-4">
-                                        <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
-                                            {user.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{user.username[0]}</div>}
-                                        </div>
-                                        <div className="flex-1 flex gap-2">
-                                            <input 
-                                                type="text" 
-                                                value={newComment}
-                                                onChange={e => setNewComment(e.target.value)}
-                                                placeholder="Añadir un comentario..."
-                                                className="flex-1 bg-transparent border-b border-slate-800 focus:border-indigo-500 outline-none text-sm text-white py-2 transition-colors"
-                                            />
-                                            <button disabled={!newComment.trim() || isSubmitting} type="submit" className="bg-indigo-600 p-2.5 rounded-full text-white hover:bg-indigo-500 disabled:opacity-30 transition-all active:scale-90">
-                                                {isSubmitting ? <Loader2 size={18} className="animate-spin"/> : <Send size={18}/>}
-                                            </button>
-                                        </div>
-                                    </form>
-                                )}
-
-                                <div className="space-y-6 pt-4">
-                                    {comments.length === 0 ? (
-                                        <div className="text-center py-10 text-slate-600 italic text-xs uppercase font-bold tracking-widest">Aún no hay comentarios</div>
-                                    ) : comments.map(c => (
-                                        <div key={c.id} className="flex gap-4 group">
-                                            <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
-                                                {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{c.username[0]}</div>}
-                                            </div>
-                                            <div>
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <span className="text-xs font-black text-white">@{c.username}</span>
-                                                    <span className="text-[9px] text-slate-600 font-bold uppercase">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
-                                                </div>
-                                                <p className="text-sm text-slate-400 leading-snug">{c.text}</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
 

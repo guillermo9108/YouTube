@@ -12,7 +12,7 @@ interface VideoPlayerContextType {
     togglePlay: () => void;
     closePlayer: () => void;
     updateTime: (time: number) => void;
-    setMinimized: (min: boolean) => void;
+    setPlaying: (playing: boolean) => void;
 }
 
 const VideoPlayerContext = createContext<VideoPlayerContextType | null>(null);
@@ -30,20 +30,25 @@ export const VideoPlayerProvider = ({ children }: { children?: React.ReactNode }
     const [isMinimized, setIsMinimized] = useState(false);
     const location = useLocation();
 
-    // Auto-gestión de visibilidad del mini-reproductor basada en la ruta
+    // Gestión estricta de la visibilidad del mini-reproductor
     useEffect(() => {
         const isWatchPage = location.pathname.startsWith('/watch/');
         const isShortsPage = location.pathname === '/shorts';
         
+        // Si estamos en Watch, NUNCA minimizamos (el video está en su lugar normal)
         if (isWatchPage) {
             setIsMinimized(false);
-        } else if (activeVideo && !isShortsPage) {
+        } 
+        // Si tenemos un video activo y salimos de Watch, minimizamos (excepto si entramos a Shorts)
+        else if (activeVideo && !isShortsPage) {
             setIsMinimized(true);
-        } else {
+        } 
+        // En cualquier otro caso (como entrar a Shorts o no tener video), ocultamos el mini
+        else {
             setIsMinimized(false);
         }
         
-        // Si entramos a shorts, pausamos el video global
+        // Pausar video global si entramos a Shorts para evitar conflictos de audio
         if (isShortsPage && isPlaying) {
             setIsPlaying(false);
         }
@@ -53,10 +58,11 @@ export const VideoPlayerProvider = ({ children }: { children?: React.ReactNode }
         setActiveVideo(video);
         setCurrentTime(startTime);
         setIsPlaying(true);
-        setIsMinimized(false);
+        // Al llamar a playVideo, asumimos que estamos cargando un video nuevo
     };
 
-    const togglePlay = () => setIsPlaying(!isPlaying);
+    const togglePlay = () => setIsPlaying(prev => !prev);
+    const setPlaying = (val: boolean) => setIsPlaying(val);
     
     const closePlayer = () => {
         setActiveVideo(null);
@@ -70,7 +76,7 @@ export const VideoPlayerProvider = ({ children }: { children?: React.ReactNode }
     return (
         <VideoPlayerContext.Provider value={{ 
             activeVideo, currentTime, isPlaying, isMinimized, 
-            playVideo, togglePlay, closePlayer, updateTime, setMinimized: setIsMinimized 
+            playVideo, togglePlay, closePlayer, updateTime, setPlaying
         }}>
             {children}
         </VideoPlayerContext.Provider>
