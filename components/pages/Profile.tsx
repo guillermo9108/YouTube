@@ -2,16 +2,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
-import { Transaction } from '../../types';
-import { Wallet, Send, ArrowDownLeft, ArrowUpRight, History, Shield, LogOut, ChevronRight, User as UserIcon, RefreshCw, Smartphone, Loader2, Settings, Save, Zap, Heart, Truck, Camera, Lock, Eye, EyeOff, UserCheck } from 'lucide-react';
+import { Transaction, Notification as AppNotification } from '../../types';
+import { Wallet, Send, ArrowDownLeft, ArrowUpRight, History, Shield, LogOut, ChevronRight, User as UserIcon, RefreshCw, Smartphone, Loader2, Settings, Save, Zap, Heart, Truck, Camera, Lock, Eye, EyeOff, UserCheck, Bell, MessageSquare, Trash2, CheckCircle2 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+import { useNavigate } from '../Router';
 
 export default function Profile() {
   const { user, logout, refreshUser } = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   
-  const [activeSubTab, setActiveSubTab] = useState<'WALLET' | 'SETTINGS' | 'HISTORY'>('WALLET');
+  const [activeSubTab, setActiveSubTab] = useState<'WALLET' | 'NOTIFS' | 'HISTORY' | 'SETTINGS'>('WALLET');
   const [txHistory, setTxHistory] = useState<Transaction[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [transferData, setTransferData] = useState({ target: '', amount: '' });
   const [userSuggestions, setUserSuggestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -29,6 +32,7 @@ export default function Profile() {
   useEffect(() => {
     if (user) {
         db.request<Transaction[]>(`action=get_user_transactions&userId=${user.id}`).then(setTxHistory);
+        db.getNotifications(user.id).then(setNotifications);
         setSettings(prev => ({
             ...prev,
             autoPurchaseLimit: user.autoPurchaseLimit
@@ -101,6 +105,16 @@ export default function Profile() {
       }
   };
 
+  const markNotifRead = async (n: AppNotification) => {
+      if (!n.isRead) {
+          try {
+              await db.markNotificationRead(n.id);
+              setNotifications(prev => prev.map(p => p.id === n.id ? {...p, isRead: true} : p));
+          } catch(e) {}
+      }
+      navigate(n.link);
+  };
+
   if (!user) return null;
 
   return (
@@ -143,10 +157,14 @@ export default function Profile() {
       </div>
 
       {/* Sub Navigation */}
-      <div className="flex gap-2 p-1 bg-slate-900 border border-slate-800 rounded-2xl">
-          <button onClick={() => setActiveSubTab('WALLET')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'WALLET' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Transferir</button>
-          <button onClick={() => setActiveSubTab('HISTORY')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'HISTORY' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Historial</button>
-          <button onClick={() => setActiveSubTab('SETTINGS')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'SETTINGS' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Ajustes</button>
+      <div className="flex gap-1 p-1 bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto scrollbar-hide">
+          <button onClick={() => setActiveSubTab('WALLET')} className={`flex-1 min-w-[80px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'WALLET' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Cartera</button>
+          <button onClick={() => setActiveSubTab('NOTIFS')} className={`flex-1 min-w-[80px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative ${activeSubTab === 'NOTIFS' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>
+            Alertas
+            {notifications.some(n => !n.isRead) && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>}
+          </button>
+          <button onClick={() => setActiveSubTab('HISTORY')} className={`flex-1 min-w-[80px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'HISTORY' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Historial</button>
+          <button onClick={() => setActiveSubTab('SETTINGS')} className={`flex-1 min-w-[80px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'SETTINGS' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Ajustes</button>
       </div>
 
       <div className="animate-in fade-in zoom-in-95 duration-300">
@@ -204,6 +222,40 @@ export default function Profile() {
                         Confirmar Envío
                     </button>
                 </form>
+              </div>
+          )}
+
+          {activeSubTab === 'NOTIFS' && (
+              <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 shadow-xl flex flex-col min-h-[500px]">
+                <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                    <Bell size={20} className="text-indigo-400"/> Bandeja de Entrada
+                </h3>
+                <div className="flex-1 space-y-3">
+                    {notifications.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-slate-600 opacity-50">
+                            <MessageSquare size={48} className="mb-4" />
+                            <p className="text-sm font-black uppercase">Sin mensajes nuevos</p>
+                        </div>
+                    ) : notifications.map(n => (
+                        <div 
+                            key={n.id} 
+                            onClick={() => markNotifRead(n)}
+                            className={`p-4 rounded-2xl border transition-all cursor-pointer flex gap-4 items-start ${!n.isRead ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-950/40 border-white/5 grayscale opacity-60 hover:grayscale-0 hover:opacity-100'}`}
+                        >
+                            <div className="w-12 h-12 rounded-xl bg-slate-800 shrink-0 overflow-hidden border border-white/10">
+                                {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Bell size={18} className="text-slate-500"/></div>}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-start mb-1">
+                                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{n.type}</span>
+                                    <span className="text-[9px] text-slate-600 font-bold">{new Date(n.timestamp * 1000).toLocaleDateString()}</span>
+                                </div>
+                                <p className={`text-sm leading-snug ${!n.isRead ? 'text-white font-bold' : 'text-slate-400'}`}>{n.text}</p>
+                            </div>
+                            {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 animate-pulse"></div>}
+                        </div>
+                    ))}
+                </div>
               </div>
           )}
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Menu, DownloadCloud, LogOut, ShoppingBag, Server, ChevronRight, Crown, Smartphone as MobileIcon, MonitorDown, AlertTriangle, CheckCircle2, Clock, ShoppingCart as SaleIcon, Zap } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -145,7 +146,7 @@ export default function Layout() {
   // LIFTED NOTIFICATION LOGIC
   const [notifs, setNotifs] = useState<AppNotification[]>([]);
   const lastNotifIdRef = useRef<string | null>(null);
-  const hasUnread = notifs.some(n => !n.isRead);
+  const unreadCount = notifs.filter(n => !n.isRead).length;
 
   useEffect(() => { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }, []);
 
@@ -275,6 +276,7 @@ export default function Layout() {
                     <p className="px-3 text-[10px] uppercase font-bold text-slate-500 mt-2 mb-1">Navegación</p>
                     <Link to="/" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><Home size={20} className="text-indigo-400"/> Inicio</Link>
                     <Link to="/shorts" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><Smartphone size={20} className="text-pink-400"/> Shorts</Link>
+                    <Link to="/watch-later" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><Clock size={20} className="text-amber-400"/> Ver más tarde</Link>
                     <Link to="/marketplace" onClick={() => setShowSidebar(false)} className="flex items-center gap-3 px-4 py-3 text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"><ShoppingBag size={20} className="text-emerald-400"/> Tienda</Link>
                     <div className="h-px bg-slate-800 my-2 mx-2"></div>
                     <p className="px-3 text-[10px] uppercase font-bold text-slate-500 mt-2 mb-1">Tu Cuenta</p>
@@ -292,7 +294,14 @@ export default function Layout() {
       )}
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
-            <Link to="/profile" className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800"><Avatar size={32} /></Link>
+            <Link to="/profile" className="relative text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">
+                <Avatar size={32} />
+                {unreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-red-600 rounded-full border-2 border-slate-900 text-[10px] font-black text-white flex items-center justify-center animate-bounce shadow-lg shadow-red-900/40">
+                        {unreadCount}
+                    </span>
+                )}
+            </Link>
             <Link to="/" className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</Link>
         </div>
         <div className="flex items-center gap-6">
@@ -346,11 +355,21 @@ export default function Layout() {
              <Link to="/upload" className="flex items-center justify-center w-14 h-14 rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-500/40 border-4 border-black active:scale-95 transition-transform"><Upload size={24} /></Link>
           </div>
           <div className="relative flex flex-col items-center gap-1 cursor-pointer" onClick={() => setShowSidebar(true)}>
-            {hasUnread && <span className="absolute -top-1 right-2 w-2 h-2 bg-indigo-500 rounded-full"></span>}
+            {unreadCount > 0 && (
+                <span className="absolute -top-1 right-2 w-5 h-5 bg-red-600 rounded-full text-[10px] font-black text-white flex items-center justify-center shadow-lg border-2 border-slate-900 animate-pulse">
+                    {unreadCount}
+                </span>
+            )}
             <Menu size={22} className="text-slate-400"/>
             <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Menú</span>
           </div>
-          <Link to="/profile" className={`flex flex-col items-center gap-1 ${isActive('/profile')}`}><Avatar size={22} /><span className="text-[10px] font-bold uppercase tracking-widest">Perfil</span></Link>
+          <Link to="/profile" className={`relative flex flex-col items-center gap-1 ${isActive('/profile')}`}>
+            <Avatar size={22} />
+            {unreadCount > 0 && !showSidebar && (
+                <span className="absolute -top-1 right-0 w-3 h-3 bg-red-600 rounded-full border-2 border-slate-900 animate-ping"></span>
+            )}
+            <span className="text-[10px] font-bold uppercase tracking-widest">Perfil</span>
+          </Link>
         </nav>
       )}
     </div>

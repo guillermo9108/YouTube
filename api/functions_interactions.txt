@@ -1,4 +1,3 @@
-
 <?php
 
 function interact_has_purchased($pdo, $userId, $videoId) {
@@ -21,9 +20,10 @@ function interact_share_video($pdo, $input) {
     $pdo->beginTransaction();
     try {
         // Buscar remitente
-        $stmtS = $pdo->prepare("SELECT username FROM users WHERE id = ?");
+        $stmtS = $pdo->prepare("SELECT username, avatarUrl FROM users WHERE id = ?");
         $stmtS->execute([$senderId]);
-        $senderName = $stmtS->fetchColumn();
+        $sender = $stmtS->fetch();
+        $senderName = $sender['username'] ?? 'Usuario';
 
         // Buscar destino
         $stmtT = $pdo->prepare("SELECT id FROM users WHERE username = ?");
@@ -41,8 +41,8 @@ function interact_share_video($pdo, $input) {
         $link = "/watch/$videoId";
         $meta = json_encode(['thumb' => fix_url($v['thumbnailUrl'])]);
 
-        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp, metadata) VALUES (?, ?, 'SYSTEM', ?, ?, 0, ?, ?)")
-            ->execute([uniqid('n_sh_'), $targetId, $text, $link, time(), $meta]);
+        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp, avatarUrl, metadata) VALUES (?, ?, 'SYSTEM', ?, ?, 0, ?, ?, ?)")
+            ->execute([uniqid('n_sh_'), $targetId, $text, $link, time(), fix_url($sender['avatarUrl']), $meta]);
 
         $pdo->commit();
         respond(true);
@@ -152,9 +152,20 @@ function interact_get_comments($pdo, $videoId) {
 }
 
 function interact_add_comment($pdo, $input) {
-    $cid = uniqid('c_'); $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")->execute([cid, $input['videoId'], $input['userId'], $input['text'], time()]);
-    $res = $pdo->query("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.id = '$cid'")->fetch(); $res['userAvatarUrl'] = fix_url($res['userAvatarUrl']);
-    respond(true, $res);
+    $cid = uniqid('c_'); 
+    $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")
+        ->execute([$cid, $input['videoId'], $input['userId'], $input['text'], time()]);
+    
+    $stmt = $pdo->prepare("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.id = ?");
+    $stmt->execute([$cid]);
+    $res = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($res) {
+        $res['userAvatarUrl'] = fix_url($res['userAvatarUrl']);
+        respond(true, $res);
+    } else {
+        respond(false, null, "Error al recuperar comentario insertado");
+    }
 }
 
 function interact_toggle_subscribe($pdo, $input) {

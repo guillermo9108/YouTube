@@ -1,18 +1,21 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Heart, MessageCircle, Share2, ThumbsDown, Send, X, Loader2, ArrowLeft, Pause } from 'lucide-react';
+import { Heart, MessageCircle, Share2, ThumbsDown, Send, X, Loader2, ArrowLeft, Pause, Search, UserCheck } from 'lucide-react';
 import { db } from '../../services/db';
 import { Video, Comment, UserInteraction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from '../Router';
+import { useToast } from '../../context/ToastContext';
 
 interface ShortItemProps {
   video: Video;
   isActive: boolean;
   isNear: boolean;
   hasFullAccess: boolean; 
+  onOpenShare: (v: Video) => void;
 }
 
-const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) => {
+const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: ShortItemProps) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const clickTimerRef = useRef<number | null>(null);
@@ -42,8 +45,8 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
     if (isActive && isUnlocked) {
         el.currentTime = 0; 
         setPaused(false);
-        el.muted = true; // Forzar mute para autoplay
-        const p = el.play(); if (p) p.catch(() => {});
+        el.muted = false; // Intentar con audio si está activo
+        const p = el.play(); if (p) p.catch(() => { el.muted = true; el.play(); });
         db.incrementView(video.id);
     } else { el.pause(); }
   }, [isActive, isUnlocked]);
@@ -87,7 +90,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
           <>
             <video
                 ref={videoRef} src={videoSrc} poster={video.thumbnailUrl}
-                className="w-full h-full object-cover" loop playsInline autoPlay muted preload="auto" crossOrigin="anonymous"
+                className="w-full h-full object-cover" loop playsInline preload="auto" crossOrigin="anonymous"
             />
             {paused && <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50"><Pause size={64} fill="currentColor" /></div>}
             {showHeart && <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in fade-in duration-300"><Heart size={120} className="text-red-500 fill-red-500 drop-shadow-2xl" /></div>}
@@ -128,7 +131,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
           <span className="text-[10px] font-black text-white drop-shadow-md">{comments.length}</span>
         </div>
 
-        <button onClick={(e) => { e.stopPropagation(); navigator.share?.({title: video.title, url: window.location.href}); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+        <button onClick={(e) => { e.stopPropagation(); onOpenShare(video); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
             <Share2 size={26} fill="white" fillOpacity={0.2} />
         </button>
       </div>
@@ -153,12 +156,22 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
               <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
                  {comments.length === 0 ? <p className="text-center text-slate-600 py-20 italic uppercase text-[10px] font-bold tracking-widest">No hay comentarios</p> : comments.map(c => (
                       <div key={c.id} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2">
-                         <div className="w-8 h-8 rounded-full bg-slate-800 shrink-0 border border-white/5 overflow-hidden">{c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c.username[0]}</div>}</div>
+                         <div className="w-8 h-8 rounded-full bg-slate-800 shrink-0 border border-white/5 overflow-hidden">
+                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c?.username?.[0] || '?'}</div>}
+                         </div>
                          <div><div className="flex items-baseline gap-2"><span className="text-xs font-black text-slate-300">@{c.username}</span><span className="text-[8px] text-slate-600 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span></div><p className="text-xs text-slate-400 mt-0.5 leading-snug">{c.text}</p></div>
                       </div>
                  ))}
               </div>
-              <form onSubmit={async (e) => { e.preventDefault(); if(!newComment.trim()) return; const c = await db.addComment(user!.id, video.id, newComment); setComments(p => [c, ...p]); setNewComment(''); }} className="p-4 bg-slate-950 border-t border-white/5 flex gap-2 pb-safe"><input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-white/10 rounded-full px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all" placeholder="Escribe un comentario..." /><button type="submit" disabled={!newComment.trim()} className="bg-indigo-600 text-white w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-30 shadow-lg active:scale-90 transition-all"><Send size={18} /></button></form>
+              <form onSubmit={async (e) => { 
+                  e.preventDefault(); 
+                  if(!newComment.trim()) return; 
+                  try {
+                    const c = await db.addComment(user!.id, video.id, newComment); 
+                    if (c) setComments(p => [c, ...p]); 
+                    setNewComment(''); 
+                  } catch(err) {}
+              }} className="p-4 bg-slate-950 border-t border-white/5 flex gap-2 pb-safe"><input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-white/10 rounded-full px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all" placeholder="Escribe un comentario..." /><button type="submit" disabled={!newComment.trim()} className="bg-indigo-600 text-white w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-30 shadow-lg active:scale-90 transition-all"><Send size={18} /></button></form>
            </div>
            <div className="absolute inset-0 -z-10" onClick={() => setShowComments(false)}></div>
         </div>
@@ -169,9 +182,16 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
 
 export default function Shorts() {
   const { user } = useAuth();
+  const toast = useToast();
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Share Interno
+  const [videoToShare, setVideoToShare] = useState<Video | null>(null);
+  const [shareSearch, setShareSearch] = useState('');
+  const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
+  const shareTimeout = useRef<any>(null);
   
   useEffect(() => {
     db.getAllVideos().then((all: Video[]) => {
@@ -194,6 +214,31 @@ export default function Shorts() {
     return () => observer.disconnect();
   }, [videos]);
 
+  const handleShareSearch = (val: string) => {
+    setShareSearch(val);
+    if (shareTimeout.current) clearTimeout(shareTimeout.current);
+    if (val.length < 2) { setShareSuggestions([]); return; }
+    shareTimeout.current = setTimeout(async () => {
+        if (!user) return;
+        const hits = await db.searchUsers(user.id, val);
+        setShareSuggestions(hits);
+    }, 300);
+  };
+
+  const sendVideoToUser = async (targetUsername: string) => {
+      if (!user || !videoToShare) return;
+      try {
+          await db.request(`action=share_video`, {
+              method: 'POST',
+              body: JSON.stringify({ videoId: videoToShare.id, senderId: user.id, targetUsername })
+          });
+          toast.success(`Short enviado a @${targetUsername}`);
+          setVideoToShare(null);
+          setShareSearch('');
+          setShareSuggestions([]);
+      } catch (e: any) { toast.error(e.message); }
+  };
+
   const hasFullAccess = useMemo(() => {
       if (!user) return false;
       const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
@@ -213,9 +258,51 @@ export default function Shorts() {
                 isActive={idx === activeIndex} 
                 isNear={Math.abs(idx - activeIndex) <= 2}
                 hasFullAccess={hasFullAccess} 
+                onOpenShare={(v) => setVideoToShare(v)}
              />
         </div>
       ))}
+
+      {/* MODAL DE COMPARTIR INTERNO */}
+      {videoToShare && (
+          <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-slate-900 border border-slate-800 rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
+                  <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                      <h3 className="font-black text-white uppercase tracking-widest text-sm flex items-center gap-2"><Share2 size={18} className="text-indigo-400"/> Compartir Short</h3>
+                      <button onClick={() => setVideoToShare(null)} className="text-slate-500 hover:text-white"><X/></button>
+                  </div>
+                  <div className="p-6 space-y-4">
+                      <div className="relative">
+                          <Search className="absolute left-4 top-3.5 text-slate-500" size={18}/>
+                          <input 
+                              type="text" value={shareSearch} onChange={e => handleShareSearch(e.target.value)}
+                              placeholder="Buscar usuario..."
+                              className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-12 pr-4 py-3.5 text-white focus:border-indigo-500 outline-none transition-all"
+                          />
+                      </div>
+                      
+                      <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
+                          {shareSuggestions.map(s => (
+                              <button 
+                                  key={s.username} 
+                                  onClick={() => sendVideoToUser(s.username)}
+                                  className="w-full p-3 flex items-center gap-4 hover:bg-indigo-600 rounded-2xl transition-colors group"
+                              >
+                                  <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-800 shrink-0">
+                                      {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-white/20">{s.username[0]}</div>}
+                                  </div>
+                                  <span className="text-sm font-bold text-white group-hover:text-white">@{s.username}</span>
+                                  <UserCheck size={16} className="ml-auto opacity-0 group-hover:opacity-100 text-white"/>
+                              </button>
+                          ))}
+                          {shareSearch.length >= 2 && shareSuggestions.length === 0 && (
+                              <p className="text-center text-slate-600 py-4 text-xs font-bold uppercase italic">No se encontraron usuarios</p>
+                          )}
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 }
