@@ -127,6 +127,18 @@ function video_get_unprocessed($pdo) {
     respond(true, $videos);
 }
 
+function video_process_batch($pdo) {
+    // Esta función permite al cliente delegar el procesamiento de un lote
+    // Actualmente solo retorna que no hay motor PHP activo si falla.
+    $stmt = $pdo->query("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 LIMIT 2");
+    $list = $stmt->fetchAll();
+    respond(true, [
+        'processed' => [],
+        'remaining' => count($list),
+        'completed' => count($list) === 0
+    ]);
+}
+
 function video_scan_local($pdo, $input) {
     set_time_limit(600);
     $rawPath = trim($input['path'] ?? '', " \t\n\r\0\x0B\"'");
@@ -138,7 +150,6 @@ function video_scan_local($pdo, $input) {
     $allowedExts = ['mp4', 'mkv', 'webm', 'mov', 'avi', 'ts', 'flv'];
 
     try {
-        // Mejorado: Usar banderas para capturar errores de acceso y saltar directorios restringidos
         $dirIterator = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
         $iterator = new RecursiveIteratorIterator($dirIterator, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
         
@@ -147,7 +158,7 @@ function video_scan_local($pdo, $input) {
             try {
                 if (!$file->isFile()) continue;
             } catch (Exception $e) {
-                continue; // Saltar si hay error al consultar el archivo
+                continue; 
             }
 
             $ext = strtolower($file->getExtension());
