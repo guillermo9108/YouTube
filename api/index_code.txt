@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V11.11 (Internal Sharing & Commments)
+ * StreamPay - Core Controller V11.12 (Mass Notifications)
  */
 ob_start(); 
 ini_set('display_errors', 0); 
@@ -133,6 +133,7 @@ try {
         case 'add_comment': interact_add_comment($pdo, $input); break;
         case 'get_notifications': interact_get_notifications($pdo, $_GET['userId'] ?? ''); break;
         case 'mark_notification_read': interact_mark_notification_read($pdo, $input); break;
+        case 'mark_all_notifications_read': interact_mark_all_notifications_read($pdo, $input); break;
         case 'get_user_transactions': interact_get_transactions($pdo, $_GET['userId'] ?? ''); break;
         case 'toggle_subscribe': interact_toggle_subscribe($pdo, $input); break;
         case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'] ?? '', $_GET['creatorId'] ?? ''); break;
@@ -156,7 +157,7 @@ try {
         case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;
         case 'handle_vip_request': admin_handle_vip_request($pdo, $input); break;
         case 'get_global_transactions': admin_get_global_transactions($pdo); break;
-        case 'admin_repair_db': admin_repair_db($pdo); break;
+        case 'admin_repair_db': admin_repair_db($pdo, $input); break;
         case 'admin_cleanup_files': admin_cleanup_files($pdo); break;
         case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
         case 'admin_get_logs': admin_get_logs(); break;

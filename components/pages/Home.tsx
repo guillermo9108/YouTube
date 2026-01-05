@@ -1,13 +1,13 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
-import { Video, Category } from '../../types';
+import { Video, Category, Notification as AppNotification } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder 
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, CheckCheck, Zap
 } from 'lucide-react';
-import { useLocation } from '../Router';
+import { useLocation, useNavigate } from '../Router';
 import AIConcierge from '../AIConcierge';
 
 const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: string | null) => void }) => (
@@ -59,16 +59,13 @@ const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick
                 </div>
             )}
             
-            {/* Overlay oscuro profundo para contraste de texto */}
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent"></div>
             
-            {/* Badge de Colección Minimal */}
             <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-indigo-600/90 backdrop-blur-md px-2 py-1 rounded-md shadow-lg border border-white/10">
                 <Layers size={10} className="text-white"/>
                 <span className="text-[8px] font-black text-white uppercase tracking-widest">COLECCIÓN</span>
             </div>
 
-            {/* Info Centralizada */}
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
                 <h3 className="text-lg md:text-xl font-black text-white uppercase tracking-tighter leading-none drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors">
                     {name}
@@ -84,6 +81,8 @@ const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick
 export default function Home() {
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+  
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -92,6 +91,33 @@ export default function Home() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [visibleCount, setVisibleCount] = useState(12);
   const [isAiConfigured, setIsAiConfigured] = useState(false);
+
+  // Notificaciones locales en Home
+  const [notifs, setNotifs] = useState<AppNotification[]>([]);
+  const [showNotifMenu, setShowNotifMenu] = useState(false);
+  const unreadNotifs = useMemo(() => notifs.filter(n => !n.isRead), [notifs]);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const fetchNotifs = async () => {
+    if (user) {
+        try { const res = await db.getNotifications(user.id); setNotifs(res); } catch(e) {}
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifs();
+    const interval = setInterval(fetchNotifs, 30000);
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  // Click outside to close notif menu
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+        if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowNotifMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
@@ -110,6 +136,22 @@ export default function Home() {
     };
     loadData();
   }, [user?.id, location.pathname]);
+
+  const handleMarkRead = async (id: string, e?: React.MouseEvent) => {
+      if (e) { e.stopPropagation(); e.preventDefault(); }
+      try {
+          await db.markNotificationRead(id);
+          setNotifs(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+      } catch(e) {}
+  };
+
+  const handleMarkAllRead = async () => {
+      if (!user) return;
+      try {
+          await db.markAllNotificationsRead(user.id);
+          setNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
+      } catch(e) {}
+  };
 
   const breadcrumbPath = useMemo(() => {
       if (!activeCategory) return [];
@@ -183,20 +225,70 @@ export default function Home() {
     <div className="pb-20 space-y-8 px-2 md:px-0">
       
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
-          <div className="flex gap-2 mb-4">
+          <div className="flex gap-2 mb-4 items-center">
               <div className="relative flex-1">
                   <Search className="absolute left-4 top-3 text-slate-500" size={18} />
                   <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar..." className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-4 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" />
               </div>
+
+              {/* CAMPANA DE NOTIFICACIONES (Solo si hay unread) */}
+              {unreadNotifs.length > 0 && (
+                <div className="relative" ref={menuRef}>
+                    <button 
+                        onClick={() => setShowNotifMenu(!showNotifMenu)}
+                        className={`p-2.5 rounded-xl border transition-all ${showNotifMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
+                    >
+                        <Bell size={20} className={unreadNotifs.length > 0 ? "animate-[ring_2s_infinite]" : ""} />
+                        <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black shadow-lg">
+                            {unreadNotifs.length}
+                        </span>
+                    </button>
+
+                    {showNotifMenu && (
+                        <div className="absolute top-full right-0 mt-3 w-80 max-h-[450px] bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 origin-top-right z-[100]">
+                            <div className="p-4 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                                <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2"><Zap size={14} className="text-amber-400"/> Alertas</h3>
+                                <button onClick={handleMarkAllRead} className="text-[10px] font-black text-indigo-400 hover:text-white uppercase flex items-center gap-1 transition-colors">
+                                    <CheckCheck size={12}/> Todo leído
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
+                                {unreadNotifs.map(n => (
+                                    <div 
+                                        key={n.id}
+                                        onClick={() => { handleMarkRead(n.id); navigate(n.link); setShowNotifMenu(false); }}
+                                        className="p-4 border-b border-white/5 bg-indigo-500/5 hover:bg-white/5 transition-all cursor-pointer group flex gap-3 items-start"
+                                    >
+                                        <div className="w-10 h-10 rounded-lg bg-slate-800 shrink-0 overflow-hidden border border-white/10 shadow-sm">
+                                            {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-600"><Bell size={16}/></div>}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[11px] text-slate-300 leading-snug line-clamp-2">{n.text}</p>
+                                            <span className="text-[9px] text-slate-500 font-bold uppercase mt-1 block">{new Date(n.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                        </div>
+                                        <button 
+                                            onClick={(e) => handleMarkRead(n.id, e)}
+                                            className="p-1 text-slate-600 hover:text-emerald-400 opacity-0 group-hover:opacity-100 transition-all"
+                                            title="Marcar leída"
+                                        >
+                                            <Check size={16}/>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="p-3 bg-slate-950/50 text-center border-t border-white/5">
+                                <button onClick={() => { navigate('/profile'); setShowNotifMenu(false); }} className="text-[9px] font-black text-slate-500 hover:text-white uppercase tracking-widest">Ver Historial Completo</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+              )}
           </div>
           
           <Breadcrumbs path={breadcrumbPath} onNavigate={setActiveCategory} />
       </div>
 
-      {/* Grid unificado: Colecciones y Videos */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 animate-in fade-in duration-500">
-          
-          {/* Renderizar Subcategorías/Carpetas primero en el mismo grid */}
           {currentSubCategories.map(sub => (
               <SubCategoryCard 
                   key={sub.id} 
@@ -206,7 +298,6 @@ export default function Home() {
               />
           ))}
 
-          {/* Renderizar Videos después */}
           {filteredList.slice(0, visibleCount).map((v: Video) => (
               <VideoCard 
                 key={v.id} 
@@ -236,6 +327,31 @@ export default function Home() {
       )}
 
       <AIConcierge videos={allVideos} isVisible={isAiConfigured} />
+      
+      <style>{`
+        @keyframes ring {
+            0% { transform: rotate(0); }
+            5% { transform: rotate(30deg); }
+            10% { transform: rotate(-28deg); }
+            15% { transform: rotate(26deg); }
+            20% { transform: rotate(-24deg); }
+            25% { transform: rotate(22deg); }
+            30% { transform: rotate(-20deg); }
+            35% { transform: rotate(18deg); }
+            40% { transform: rotate(-16deg); }
+            45% { transform: rotate(14deg); }
+            50% { transform: rotate(-12deg); }
+            55% { transform: rotate(10deg); }
+            60% { transform: rotate(-8deg); }
+            65% { transform: rotate(6deg); }
+            70% { transform: rotate(-4deg); }
+            75% { transform: rotate(2deg); }
+            80% { transform: rotate(-1deg); }
+            85% { transform: rotate(1deg); }
+            90% { transform: rotate(0); }
+            100% { transform: rotate(0); }
+        }
+      `}</style>
     </div>
   );
 }

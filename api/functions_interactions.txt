@@ -19,20 +19,17 @@ function interact_share_video($pdo, $input) {
 
     $pdo->beginTransaction();
     try {
-        // Buscar remitente
         $stmtS = $pdo->prepare("SELECT username, avatarUrl FROM users WHERE id = ?");
         $stmtS->execute([$senderId]);
         $sender = $stmtS->fetch();
         $senderName = $sender['username'] ?? 'Usuario';
 
-        // Buscar destino
         $stmtT = $pdo->prepare("SELECT id FROM users WHERE username = ?");
         $stmtT->execute([$targetUsername]);
         $targetId = $stmtT->fetchColumn();
 
         if (!$targetId) throw new Exception("Usuario no encontrado");
 
-        // Buscar info del video
         $stmtV = $pdo->prepare("SELECT title, thumbnailUrl FROM videos WHERE id = ?");
         $stmtV->execute([$videoId]);
         $v = $stmtV->fetch();
@@ -178,5 +175,12 @@ function interact_check_subscription($pdo, $uid, $cid) { respond(true, ['isSubsc
 function interact_get_subscriptions($pdo, $uid) { $stmt = $pdo->prepare("SELECT creatorId FROM subscriptions WHERE subscriberId = ?"); $stmt->execute([$uid]); respond(true, $stmt->fetchAll(PDO::FETCH_COLUMN)); }
 function interact_get_notifications($pdo, $uid) { $stmt = $pdo->prepare("SELECT * FROM notifications WHERE userId = ? ORDER BY timestamp DESC LIMIT 30"); $stmt->execute([$uid]); $list = $stmt->fetchAll(PDO::FETCH_ASSOC); foreach($list as &$n) $n['avatarUrl'] = fix_url($n['avatarUrl'] ?? null); respond(true, $list); }
 function interact_mark_notification_read($pdo, $input) { $pdo->prepare("UPDATE notifications SET isRead = 1 WHERE id = ?")->execute([$input['id']]); respond(true); }
+
+function interact_mark_all_notifications_read($pdo, $input) {
+    $uid = $input['userId'];
+    $pdo->prepare("UPDATE notifications SET isRead = 1 WHERE userId = ?")->execute([$uid]);
+    respond(true);
+}
+
 function interact_get_transactions($pdo, $userId) { $stmt = $pdo->prepare("SELECT * FROM transactions WHERE buyerId = ? OR creatorId = ? ORDER BY timestamp DESC"); $stmt->execute([$userId, $userId]); respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC)); }
 ?>

@@ -228,6 +228,7 @@ class DBService {
     public setHomeDirty() { this.homeDirty = true; }
     public async getNotifications(userId: string): Promise<AppNotification[]> { return this.request<AppNotification[]>(`action=get_notifications&userId=${userId}`); }
     public async markNotificationRead(id: string): Promise<void> { return this.request<void>(`action=mark_notification_read`, { method: 'POST', body: JSON.stringify({ id }) }); }
+    public async markAllNotificationsRead(userId: string): Promise<void> { return this.request<void>(`action=mark_all_notifications_read`, { method: 'POST', body: JSON.stringify({ userId }) }); }
     public async listFtpFiles(path: string): Promise<FtpFile[]> { return this.request<FtpFile[]>(`action=list_ftp_files&path=${encodeURIComponent(path)}`); }
     public async importFtpFile(path: string): Promise<void> { return this.request<void>(`action=import_ftp_file&path=${encodeURIComponent(path)}`, { method: 'POST' }); }
     public async scanFtpRecursive(path: string): Promise<{scanned: number, added: number}> { return this.request<{scanned: number, added: number}>(`action=scan_ftp_recursive&path=${encodeURIComponent(path)}`, { method: 'POST' }); }
