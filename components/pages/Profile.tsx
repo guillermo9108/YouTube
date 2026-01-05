@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Transaction, Notification as AppNotification } from '../../types';
@@ -18,6 +18,9 @@ export default function Profile() {
   const [transferData, setTransferData] = useState({ target: '', amount: '' });
   const [userSuggestions, setUserSuggestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // FIX: Comparación numérica estricta porque el servidor devuelve strings de la BD
+  const hasUnread = useMemo(() => notifications.some(n => Number(n.isRead) === 0), [notifications]);
 
   // User Settings State
   const [settings, setSettings] = useState({
@@ -88,7 +91,7 @@ export default function Profile() {
               autoPurchaseLimit: settings.autoPurchaseLimit,
               newPassword: settings.newPassword,
               avatar: settings.avatar,
-              shippingDetails: user.shippingDetails // Mantener los actuales
+              shippingDetails: user.shippingDetails 
           });
           toast.success("Perfil actualizado correctamente");
           setSettings(p => ({...p, newPassword: '', confirmPassword: '', avatar: null}));
@@ -106,7 +109,7 @@ export default function Profile() {
   };
 
   const markNotifRead = async (n: AppNotification) => {
-      if (!n.isRead) {
+      if (Number(n.isRead) === 0) {
           try {
               await db.markNotificationRead(n.id);
               setNotifications(prev => prev.map(p => p.id === n.id ? {...p, isRead: true} : p));
@@ -161,7 +164,7 @@ export default function Profile() {
           <button onClick={() => setActiveSubTab('WALLET')} className={`flex-1 min-w-[80px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'WALLET' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Cartera</button>
           <button onClick={() => setActiveSubTab('NOTIFS')} className={`flex-1 min-w-[80px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative ${activeSubTab === 'NOTIFS' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>
             Alertas
-            {notifications.some(n => !n.isRead) && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>}
+            {hasUnread && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>}
           </button>
           <button onClick={() => setActiveSubTab('HISTORY')} className={`flex-1 min-w-[80px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'HISTORY' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Historial</button>
           <button onClick={() => setActiveSubTab('SETTINGS')} className={`flex-1 min-w-[80px] py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeSubTab === 'SETTINGS' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500'}`}>Ajustes</button>
@@ -188,7 +191,6 @@ export default function Profile() {
                                 />
                             </div>
                             
-                            {/* Sugerencias de Usuarios */}
                             {userSuggestions.length > 0 && (
                                 <div className="absolute top-full left-0 right-0 mt-2 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 origin-top">
                                     {userSuggestions.map(s => (
@@ -236,25 +238,28 @@ export default function Profile() {
                             <MessageSquare size={48} className="mb-4" />
                             <p className="text-sm font-black uppercase">Sin mensajes nuevos</p>
                         </div>
-                    ) : notifications.map(n => (
-                        <div 
-                            key={n.id} 
-                            onClick={() => markNotifRead(n)}
-                            className={`p-4 rounded-2xl border transition-all cursor-pointer flex gap-4 items-start ${!n.isRead ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-slate-950/40 border-white/5 grayscale opacity-60 hover:grayscale-0 hover:opacity-100'}`}
-                        >
-                            <div className="w-12 h-12 rounded-xl bg-slate-800 shrink-0 overflow-hidden border border-white/10">
-                                {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Bell size={18} className="text-slate-500"/></div>}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-start mb-1">
-                                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{n.type}</span>
-                                    <span className="text-[9px] text-slate-600 font-bold">{new Date(n.timestamp * 1000).toLocaleDateString()}</span>
+                    ) : notifications.map(n => {
+                        const isRead = Number(n.isRead) === 1;
+                        return (
+                            <div 
+                                key={n.id} 
+                                onClick={() => markNotifRead(n)}
+                                className={`p-4 rounded-2xl border transition-all cursor-pointer flex gap-4 items-start ${!isRead ? 'bg-indigo-500/10 border-indigo-500/30 shadow-lg shadow-indigo-500/5' : 'bg-slate-950/40 border-white/5 grayscale opacity-60 hover:grayscale-0 hover:opacity-100'}`}
+                            >
+                                <div className="w-12 h-12 rounded-xl bg-slate-800 shrink-0 overflow-hidden border border-white/10">
+                                    {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Bell size={18} className="text-slate-500"/></div>}
                                 </div>
-                                <p className={`text-sm leading-snug ${!n.isRead ? 'text-white font-bold' : 'text-slate-400'}`}>{n.text}</p>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{n.type}</span>
+                                        <span className="text-[9px] text-slate-600 font-bold">{new Date(n.timestamp * 1000).toLocaleDateString()}</span>
+                                    </div>
+                                    <p className={`text-sm leading-snug ${!isRead ? 'text-white font-bold' : 'text-slate-400'}`}>{n.text}</p>
+                                </div>
+                                {!isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 animate-pulse"></div>}
                             </div>
-                            {!n.isRead && <div className="w-2 h-2 bg-indigo-500 rounded-full mt-2 animate-pulse"></div>}
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
               </div>
           )}
@@ -315,7 +320,6 @@ export default function Profile() {
                       </div>
                   </div>
 
-                  {/* Seguridad */}
                   <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 shadow-xl">
                       <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><Lock size={20} className="text-red-400"/> Seguridad de la Cuenta</h3>
                       <div className="space-y-4">
@@ -340,7 +344,6 @@ export default function Profile() {
                       </div>
                   </div>
                   
-                  {/* Auto-Purchase Config */}
                   <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 shadow-xl space-y-8">
                       <div className="flex justify-between items-center">
                           <div>

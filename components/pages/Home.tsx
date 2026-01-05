@@ -95,14 +95,15 @@ export default function Home() {
   // Notificaciones locales en Home
   const [notifs, setNotifs] = useState<AppNotification[]>([]);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
-  const unreadNotifs = useMemo(() => notifs.filter(n => !n.isRead), [notifs]);
+  
+  // FIX: Comparación numérica estricta porque PHP devuelve "0" o "1"
+  const unreadNotifs = useMemo(() => notifs.filter(n => Number(n.isRead) === 0), [notifs]);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifs = async () => {
     if (user) {
         try { 
             const res = await db.getNotifications(user.id); 
-            // IMPORTANTE: Solo actualizar si hay cambios reales para evitar re-renderizados innecesarios
             setNotifs(res); 
         } catch(e) {}
     }
@@ -110,11 +111,10 @@ export default function Home() {
 
   useEffect(() => {
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 15000); // Frecuencia aumentada
+    const interval = setInterval(fetchNotifs, 15000);
     return () => clearInterval(interval);
   }, [user?.id]);
 
-  // Click outside to close notif menu
   useEffect(() => {
     const handler = (e: MouseEvent) => {
         if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowNotifMenu(false);
@@ -145,7 +145,7 @@ export default function Home() {
       if (e) { e.stopPropagation(); e.preventDefault(); }
       try {
           await db.markNotificationRead(id);
-          // Actualización optimista local
+          // Actualización optimista: marcar como 1 (leído)
           setNotifs(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
       } catch(e) {}
   };
@@ -155,6 +155,7 @@ export default function Home() {
       try {
           await db.markAllNotificationsRead(user.id);
           setNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
+          setShowNotifMenu(false);
       } catch(e) {}
   };
 
@@ -230,7 +231,8 @@ export default function Home() {
     <div className="pb-20 space-y-8 px-2 md:px-0">
       
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
-          <div className="flex gap-2 mb-4 items-center overflow-visible">
+          {/* Contenedor Flex: Asegura que el buscador ocupe el resto pero la campana tenga espacio fijo */}
+          <div className="flex gap-3 mb-4 items-center w-full">
               <div className="relative flex-1 min-w-0">
                   <Search className="absolute left-4 top-3 text-slate-500" size={18} />
                   <input 
@@ -240,21 +242,21 @@ export default function Home() {
                   />
               </div>
 
-              {/* CAMPANA DE NOTIFICACIONES (Solo si hay no leídas) */}
+              {/* CAMPANA DE NOTIFICACIONES: Visible solo si hay unread real */}
               {unreadNotifs.length > 0 && (
                 <div className="relative shrink-0" ref={menuRef}>
                     <button 
                         onClick={() => setShowNotifMenu(!showNotifMenu)}
-                        className={`p-2.5 rounded-xl border transition-all flex items-center justify-center min-w-[44px] min-h-[44px] ${showNotifMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
+                        className={`p-2.5 rounded-xl border transition-all flex items-center justify-center min-w-[46px] h-[46px] ${showNotifMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
                     >
-                        <Bell size={20} className="animate-[ring_2s_infinite]" />
+                        <Bell size={22} className="animate-[ring_2s_infinite]" />
                         <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black shadow-lg">
                             {unreadNotifs.length}
                         </span>
                     </button>
 
                     {showNotifMenu && (
-                        <div className="fixed sm:absolute top-20 sm:top-full right-4 sm:right-0 w-[calc(100vw-32px)] sm:w-80 max-h-[70vh] sm:max-h-[450px] bg-slate-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 origin-top-right z-[200]">
+                        <div className="fixed sm:absolute top-[75px] sm:top-full right-4 sm:right-0 w-[calc(100vw-32px)] sm:w-80 max-h-[75vh] sm:max-h-[480px] bg-slate-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 origin-top-right z-[200]">
                             <div className="p-4 bg-slate-950 border-b border-white/5 flex justify-between items-center sticky top-0 z-10">
                                 <div className="flex items-center gap-2">
                                     <Zap size={14} className="text-amber-400 fill-amber-400"/>
@@ -265,16 +267,11 @@ export default function Home() {
                                 </button>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
-                                {unreadNotifs.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center py-12 text-slate-600 opacity-40">
-                                        <MessageSquare size={32} className="mb-2" />
-                                        <p className="text-[10px] font-black uppercase tracking-widest">Sin notificaciones</p>
-                                    </div>
-                                ) : unreadNotifs.map(n => (
+                            <div className="flex-1 overflow-y-auto overscroll-contain custom-scrollbar bg-slate-900">
+                                {unreadNotifs.map(n => (
                                     <div 
                                         key={n.id}
-                                        className="p-4 border-b border-white/5 bg-indigo-500/[0.03] hover:bg-white/5 transition-all cursor-pointer group flex gap-3 items-start relative"
+                                        className="p-4 border-b border-white/5 bg-indigo-500/[0.04] hover:bg-white/5 transition-all cursor-pointer group flex gap-3 items-start relative"
                                     >
                                         <div 
                                             onClick={() => { handleMarkRead(n.id); navigate(n.link); setShowNotifMenu(false); }}
@@ -282,17 +279,16 @@ export default function Home() {
                                         >
                                             <div className="w-10 h-10 rounded-lg bg-slate-800 shrink-0 overflow-hidden border border-white/10 shadow-sm relative">
                                                 {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-600"><Bell size={16}/></div>}
-                                                <div className="absolute inset-0 bg-indigo-500/10 group-hover:bg-transparent transition-colors"></div>
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <p className="text-[11px] text-slate-300 leading-snug line-clamp-2 pr-6 font-medium">{n.text}</p>
+                                                <p className="text-[11px] text-slate-200 leading-snug line-clamp-2 pr-6 font-bold">{n.text}</p>
                                                 <span className="text-[9px] text-slate-500 font-bold uppercase mt-1 block">{new Date(n.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                                             </div>
                                         </div>
                                         
                                         <button 
                                             onClick={(e) => handleMarkRead(n.id, e)}
-                                            className="p-2 text-slate-600 hover:text-emerald-400 transition-all shrink-0 bg-slate-800/50 rounded-lg hover:bg-emerald-500/10"
+                                            className="p-2 text-slate-500 hover:text-emerald-400 transition-all shrink-0 bg-slate-800/50 rounded-lg hover:bg-emerald-500/10"
                                             title="Marcar como leída"
                                         >
                                             <Check size={16}/>
@@ -306,7 +302,7 @@ export default function Home() {
                                     onClick={() => { navigate('/profile'); setShowNotifMenu(false); }} 
                                     className="text-[9px] font-black text-slate-500 hover:text-white uppercase tracking-[0.2em] transition-colors"
                                 >
-                                    Ir al historial completo
+                                    Ver Historial Completo
                                 </button>
                             </div>
                         </div>
@@ -381,16 +377,9 @@ export default function Home() {
             90% { transform: rotate(0); }
             100% { transform: rotate(0); }
         }
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #334155;
-            border-radius: 10px;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
       `}</style>
     </div>
   );
