@@ -20,6 +20,7 @@ import VipStore from './components/pages/VipStore';
 
 // Components & Context
 import { HashRouter, Routes, Route, Navigate } from './components/Router';
+// Fix: Import missing Layout component
 import Layout from './components/Layout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { UploadProvider } from './context/UploadContext';
@@ -27,7 +28,6 @@ import { CartProvider } from './context/CartContext';
 import { ServerTaskProvider } from './context/ServerTaskContext';
 import { ToastProvider } from './context/ToastContext';
 import { GridProvider } from './context/GridContext';
-import { VideoPlayerProvider } from './context/VideoPlayerContext';
 import { db } from './services/db';
 import { Loader2, WifiOff } from 'lucide-react';
 
@@ -78,14 +78,17 @@ const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
   const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
+    // Verificación robusta del estado de instalación
     db.checkInstallation()
       .then((res) => {
+         // Con el db.ts arreglado, res es solo { status: 'installed'|'not_installed' }
          if (res && res.status === 'not_installed') {
              setNeedsSetup(true);
          }
          setCheckDone(true);
       })
       .catch((err) => {
+         // Si hay un error de conexión, no forzamos setup a menos que sea explícito
          console.warn("Verificación de instalación ignorada por error de red", err);
          setCheckDone(true);
       });
@@ -109,41 +112,39 @@ export default function App() {
             <ServerTaskProvider>
                 <CartProvider>
                     <GridProvider>
-                        <VideoPlayerProvider>
-                            <HashRouter>
-                            <OfflineBanner />
-                            <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>}>
-                                <Routes>
-                                <Route path="/setup" element={<Setup />} />
-                                
-                                <Route path="/login" element={
-                                    <SetupGuard>
-                                    <Login />
-                                    </SetupGuard>
-                                } />
-                                
-                                <Route element={<Layout />}>
-                                    <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
-                                    <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
-                                </Route>
+                        <HashRouter>
+                        <OfflineBanner />
+                        <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Cargando...</div>}>
+                            <Routes>
+                            <Route path="/setup" element={<Setup />} />
+                            
+                            <Route path="/login" element={
+                                <SetupGuard>
+                                <Login />
+                                </SetupGuard>
+                            } />
+                            
+                            <Route element={<Layout />}>
+                                <Route path="/" element={<SetupGuard><ProtectedRoute><Home /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/shorts" element={<SetupGuard><ProtectedRoute><Shorts /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/watch/:id" element={<SetupGuard><ProtectedRoute><Watch /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/channel/:userId" element={<SetupGuard><ProtectedRoute><Channel /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/upload" element={<SetupGuard><ProtectedRoute><Upload /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/profile" element={<SetupGuard><ProtectedRoute><Profile /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/requests" element={<SetupGuard><ProtectedRoute><Requests /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/marketplace" element={<SetupGuard><ProtectedRoute><Marketplace /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/sell" element={<SetupGuard><ProtectedRoute><MarketplaceCreate /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/cart" element={<SetupGuard><ProtectedRoute><Cart /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
+                                <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                            </Route>
 
-                                <Route path="*" element={<Navigate to="/" />} />
-                                </Routes>
-                            </Suspense>
-                            </HashRouter>
-                        </VideoPlayerProvider>
+                            <Route path="*" element={<Navigate to="/" />} />
+                            </Routes>
+                        </Suspense>
+                        </HashRouter>
                     </GridProvider>
                 </CartProvider>
             </ServerTaskProvider>

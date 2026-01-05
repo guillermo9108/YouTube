@@ -35,7 +35,8 @@ class DBService {
             }
             let json: any;
             try { json = JSON.parse(rawText); } catch (e) {
-                throw new Error(`Error del servidor (No-JSON).`);
+                this.logRemote(`Malformed JSON from ${endpoint}: ${rawText.substring(0, 500)}`, 'ERROR');
+                throw new Error(`Error del servidor.`);
             }
             if (json.success === false) throw new Error(json.error || 'Error desconocido');
             return json.data as T;
@@ -65,8 +66,7 @@ class DBService {
 
     public async register(username: string, password: string, avatar?: File | null): Promise<User> {
         const fd = new FormData();
-        fd.append('username', username); fd.append('password', password);
-        fd.append('deviceId', navigator.userAgent.substring(0, 50));
+        fd.append('username', username); fd.append('password', password); fd.append('deviceId', navigator.userAgent.substring(0, 50));
         if (avatar) fd.append('avatar', avatar);
         return this.request<User>(`action=register`, { method: 'POST', body: fd });
     }
@@ -84,27 +84,44 @@ class DBService {
     }
 
     public saveOfflineUser(user: User): void { localStorage.setItem('sp_offline_user', JSON.stringify(user)); }
+
     public getOfflineUser(): User | null {
         const data = localStorage.getItem('sp_offline_user');
         return data ? JSON.parse(data) : null;
     }
 
     public async getAllVideos(): Promise<Video[]> { return this.request<Video[]>('action=get_videos'); }
+
     public async getVideo(id: string): Promise<Video | null> { return this.request<Video | null>(`action=get_video&id=${id}`); }
+
     public async getVideosByCreator(userId: string): Promise<Video[]> { return this.request<Video[]>(`action=get_videos_by_creator&userId=${userId}`); }
+
     public async getRelatedVideos(videoId: string): Promise<Video[]> { return this.request<Video[]>(`action=get_related_videos&videoId=${videoId}`); }
+
     public async getUnprocessedVideos(limit: number = 50, mode: string = 'normal'): Promise<Video[]> { return this.request<Video[]>(`action=get_unprocessed_videos&limit=${limit}&mode=${mode}`); }
+
     public async getUserActivity(userId: string): Promise<{watched: string[], liked: string[]}> { return this.request<{watched: string[], liked: string[]}>(`action=get_user_activity&userId=${userId}`); }
+
+    public async toggleWatchLater(userId: string, videoId: string): Promise<string[]> {
+        return this.request<string[]>(`action=update_user_profile`, { 
+            method: 'POST', 
+            body: JSON.stringify({ userId, toggleWatchLater: videoId }) 
+        });
+    }
+
     public async getSubscriptions(userId: string): Promise<string[]> { return this.request<string[]>(`action=get_subscriptions&userId=${userId}`); }
+
     public async checkSubscription(userId: string, creatorId: string): Promise<boolean> {
         const res = await this.request<{isSubscribed: boolean}>(`action=check_subscription&userId=${userId}&creatorId=${creatorId}`);
         return res.isSubscribed;
     }
+
     public async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
         return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe`, { method: 'POST', body: JSON.stringify({ userId, creatorId }) });
     }
 
     public async getSystemSettings(): Promise<SystemSettings> { return this.request<SystemSettings>('action=get_system_settings'); }
+
     public async updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> {
         return this.request<void>('action=update_system_settings', { method: 'POST', body: JSON.stringify(settings) });
     }
@@ -113,20 +130,13 @@ class DBService {
         const res = await this.request<{hasPurchased: boolean}>(`action=has_purchased&userId=${userId}&videoId=${videoId}`);
         return res.hasPurchased;
     }
+
     public async purchaseVideo(userId: string, videoId: string): Promise<void> {
         return this.request<void>(`action=purchase_video`, { method: 'POST', body: JSON.stringify({ userId, videoId }) });
     }
 
-    public async incrementViewCount(videoId: string): Promise<void> {
-        return this.request<void>(`action=increment_view&videoId=${videoId}`, { method: 'POST' });
-    }
-
-    public async toggleWatchLater(userId: string, videoId: string): Promise<string[]> {
-        return this.request<string[]>(`action=toggle_watch_later`, { method: 'POST', body: JSON.stringify({ userId, videoId }) });
-    }
-
-    public async markWatched(userId: string, videoId: string): Promise<void> {
-        return this.request<void>(`action=mark_watched`, { method: 'POST', body: JSON.stringify({ userId, videoId }) });
+    public async incrementView(videoId: string): Promise<void> {
+        return this.request<void>(`action=rate_video`, { method: 'POST', body: JSON.stringify({ videoId, type: 'view' }) });
     }
 
     public async rateVideo(userId: string, videoId: string, type: 'like' | 'dislike'): Promise<UserInteraction> {
@@ -137,7 +147,12 @@ class DBService {
         return this.request<UserInteraction | null>(`action=get_interaction&userId=${userId}&videoId=${videoId}`);
     }
 
+    public async markWatched(userId: string, videoId: string): Promise<void> {
+        return this.request<void>(`action=mark_watched`, { method: 'POST', body: JSON.stringify({ userId, videoId }) });
+    }
+
     public async getComments(videoId: string): Promise<Comment[]> { return this.request<Comment[]>(`action=get_comments&id=${videoId}`); }
+
     public async addComment(userId: string, videoId: string, text: string): Promise<Comment> {
         return this.request<Comment>(`action=add_comment`, { method: 'POST', body: JSON.stringify({ userId, videoId, text }) });
     }
@@ -146,27 +161,22 @@ class DBService {
         return this.request<void>(`action=delete_video`, { method: 'POST', body: JSON.stringify({ id: videoId, userId }) });
     }
 
-    public async uploadVideo(title: string, description: string, price: number, category: string, duration: number, user: User, file: File, thumbnail: File | null, onProgress: (percent: number, loaded: number, total: number) => void): Promise<void> {
+    public async uploadVideo(title: string, desc: string, price: number, cat: string, dur: number, user: User, file: File, thumb: File | null, onProgress: (p: number, l: number, t: number) => void): Promise<void> {
         return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest(); const formData = new FormData();
-            formData.append('action', 'upload_video'); formData.append('title', title);
-            formData.append('description', description); formData.append('price', String(price));
-            formData.append('category', category); formData.append('duration', String(duration));
-            formData.append('userId', user.id); formData.append('video', file);
-            if (thumbnail) formData.append('thumbnail', thumbnail);
-            xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100), event.loaded, event.total); };
-            xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) resolve(); else reject(new Error(`Status ${xhr.status}`)); };
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.open('POST', 'api/index.php?action=upload_video'); xhr.send(formData);
+            const xhr = new XMLHttpRequest(); const fd = new FormData();
+            fd.append('action', 'upload_video'); fd.append('title', title); fd.append('description', desc); fd.append('price', String(price));
+            fd.append('category', cat); fd.append('duration', String(dur)); fd.append('userId', user.id); fd.append('video', file);
+            if (thumb) fd.append('thumbnail', thumb);
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total); };
+            xhr.onload = () => { if (xhr.status >= 200 && xhr.status < 300) resolve(); else reject(); };
+            xhr.onerror = () => reject(); xhr.open('POST', 'api/index.php?action=upload_video'); xhr.send(fd);
         });
     }
 
     public async searchExternal(query: string, source: 'STOCK' | 'YOUTUBE'): Promise<VideoResult[]> { return this.request<VideoResult[]>(`action=search_external&q=${encodeURIComponent(query)}&source=${source}`); }
     public async serverImportVideo(url: string): Promise<void> { return this.request<void>(`action=server_import&url=${encodeURIComponent(url)}`, { method: 'POST' }); }
     public async getRequests(status: string = 'ALL'): Promise<ContentRequest[]> { return this.request<ContentRequest[]>(`action=get_requests&status=${status}`); }
-    public async requestContent(userId: string, query: string, isVip: boolean): Promise<void> {
-        return this.request<void>(`action=request_content`, { method: 'POST', body: JSON.stringify({ userId, query, isVip }) });
-    }
+    public async requestContent(userId: string, query: string, isVip: boolean): Promise<void> { return this.request<void>(`action=request_content`, { method: 'POST', body: JSON.stringify({ userId, query, isVip }) }); }
     public async updateRequestStatus(id: string, status: string): Promise<void> { return this.request<void>(`action=update_request_status`, { method: 'POST', body: JSON.stringify({ id, status }) }); }
     public async deleteRequest(id: string): Promise<void> { return this.request<void>(`action=delete_request`, { method: 'POST', body: JSON.stringify({ id }) }); }
 
@@ -193,17 +203,20 @@ class DBService {
     public async updateUserProfile(userId: string, data: any): Promise<void> {
         if (data.avatar instanceof File || data.newPassword) {
             const fd = new FormData(); fd.append('userId', userId);
-            Object.entries(data).forEach(([key, val]) => { if (val instanceof File) fd.append(key, val); else if (typeof val === 'object') fd.append(key, JSON.stringify(val)); else if (val !== undefined && val !== null) fd.append(key, String(val)); });
+            Object.entries(data).forEach(([k, v]) => { if (v instanceof File) fd.append(k, v); else fd.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v)); });
             return this.request<void>(`action=update_user_profile`, { method: 'POST', body: fd });
         }
         return this.request<void>(`action=update_user_profile`, { method: 'POST', body: JSON.stringify({ userId, ...data }) });
     }
 
     public async scanLocalLibrary(path: string): Promise<any> { return this.request<any>(`action=scan_local_library`, { method: 'POST', body: JSON.stringify({ path }) }); }
+
+    // Fix: Added missing processScanBatch method used by ServerTaskContext for background scanning
     public async processScanBatch(): Promise<any> { return this.request<any>(`action=process_scan_batch`, { method: 'POST' }); }
-    public async updateVideoMetadata(id: string, duration: number, thumbnail: File | null, success: boolean = true): Promise<void> {
+
+    public async updateVideoMetadata(id: string, duration: number, thumb: File | null, success: boolean = true): Promise<void> {
         const fd = new FormData(); fd.append('id', id); fd.append('duration', String(duration)); fd.append('success', success ? '1' : '0');
-        if (thumbnail) fd.append('thumbnail', thumbnail);
+        if (thumb) fd.append('thumbnail', thumb);
         return this.request<void>(`action=update_video_metadata`, { method: 'POST', body: fd });
     }
     public async smartOrganizeLibrary(): Promise<any> { return this.request<any>(`action=smart_organize_library`, { method: 'POST' }); }

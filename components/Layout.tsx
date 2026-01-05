@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Menu, DownloadCloud, LogOut, ShoppingBag, Server, ChevronRight, Crown, Smartphone as MobileIcon, MonitorDown, AlertTriangle, CheckCircle2, Clock, ShoppingCart as SaleIcon, Zap } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -9,7 +8,6 @@ import { Link, useLocation, Outlet, useNavigate } from './Router';
 import { db } from '../services/db';
 import { Notification as AppNotification } from '../types';
 import GridProcessor from './GridProcessor';
-import MiniPlayer from './MiniPlayer';
 
 const UploadIndicator = () => {
   const { isUploading, progress, currentFileIndex, totalFiles, uploadSpeed } = useUpload();
@@ -40,6 +38,7 @@ const ServerTaskIndicator = () => {
     );
 };
 
+// Fixed NotificationBell: Logic lifted to Layout component
 const NotificationBell = ({ 
     notifs, 
     setNotifs, 
@@ -318,7 +317,6 @@ export default function Layout() {
       <UploadIndicator />
       <ServerTaskIndicator />
       <GridProcessor />
-      <MiniPlayer />
       {!isStandalone && !bannerDismissed && (showInstallBanner || !isSecure) && (
           <div className="fixed bottom-0 left-0 right-0 z-[100] bg-slate-900 border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom duration-500 pb-safe-area-bottom">
               <div className="p-4 flex items-center gap-4 max-w-lg mx-auto">

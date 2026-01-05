@@ -8,8 +8,8 @@ export enum UserRole {
   USER = 'USER'
 }
 
-/* Added VideoCategory enum as required by Upload.tsx and others */
 export enum VideoCategory {
+  PERSONAL = 'PERSONAL',
   GENERAL = 'GENERAL',
   MOVIES = 'MOVIES',
   SERIES = 'SERIES',
@@ -22,9 +22,9 @@ export interface Category {
   id: string;
   name: string;
   price: number;
-  autoSub: boolean; // Activar subcategorías automáticas por carpeta
+  autoSub: boolean;
   parent?: string | null;
-  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM'; // Nuevo: Ordenamiento personalizado
+  sortOrder?: 'LATEST' | 'ALPHA' | 'RANDOM';
 }
 
 export interface User {
@@ -64,10 +64,9 @@ export interface Video {
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
   transcode_progress?: number;
-  size_fmt?: string; // Formatted size for admin panels (e.g. "1.2 GB")
+  size_fmt?: string;
 }
 
-/* Added Comment interface as required by Watch.tsx and Shorts.tsx */
 export interface Comment {
   id: string;
   videoId: string;
@@ -78,7 +77,6 @@ export interface Comment {
   timestamp: number;
 }
 
-/* Added UserInteraction interface as required by Watch.tsx and Shorts.tsx */
 export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
@@ -89,9 +87,9 @@ export interface VipPlan {
   id: string;
   name: string;
   price: number;
-  type: 'ACCESS' | 'BALANCE'; // Nuevo: Diferencia entre días o recarga
-  durationDays?: number; // Opcional si es tipo BALANCE
-  bonusPercent?: number; // Nuevo: Porcentaje extra para tipo BALANCE
+  type: 'ACCESS' | 'BALANCE';
+  durationDays?: number;
+  bonusPercent?: number;
   highlight?: boolean;
 }
 
@@ -104,7 +102,7 @@ export interface SystemSettings {
   geminiKey: string;
   ytDlpPath: string;
   ffmpegPath: string;
-  categories: Category[]; // Cambio crítico: Ahora es una lista de objetos
+  categories: Category[];
   localLibraryPath: string; 
   videoCommission: number;
   marketCommission: number;
@@ -116,7 +114,6 @@ export interface SystemSettings {
   autoTranscode?: boolean | number;
   tropipayClientId?: string;
   tropipayClientSecret?: string;
-  /* Added missing properties used in Admin panels and Upload */
   customCategories?: string[];
   categoryPrices?: Record<string, number>;
   ftpSettings?: {
@@ -127,7 +124,6 @@ export interface SystemSettings {
     rootPath: string;
   };
   is_transcoder_active?: boolean;
-  // Added missing maxResolution property used in AdminConfig.tsx
   maxResolution?: number;
 }
 
@@ -140,7 +136,7 @@ export interface Transaction {
   timestamp: number;
   recipientName?: string;
   senderName?: string;
-  creatorId?: string; // Used in Profile logic
+  creatorId?: string;
 }
 
 export interface Notification {
@@ -152,11 +148,9 @@ export interface Notification {
     isRead: boolean;
     timestamp: number;
     metadata?: any;
-    /* Added avatarUrl property as required by Layout.tsx */
     avatarUrl?: string;
 }
 
-/* Added VideoResult interface as required by Requests.tsx */
 export interface VideoResult {
   id: string;
   title: string;
@@ -167,7 +161,6 @@ export interface VideoResult {
   duration?: number;
 }
 
-/* Added ContentRequest interface as required by Requests.tsx and AdminRequests.tsx */
 export interface ContentRequest {
   id: string;
   userId: string;
@@ -191,7 +184,6 @@ export interface MarketplaceItem {
     sellerName: string;
     images?: string[];
     status?: 'ACTIVO' | 'AGOTADO' | 'ELIMINADO';
-    /* Added missing properties used in Marketplace and Edit pages */
     createdAt: number;
     discountPercent?: number;
     rating?: number;
@@ -231,7 +223,6 @@ export interface VipRequest {
     createdAt: number;
 }
 
-/* Added SmartCleanerResult interface as required by AdminMaintenance.tsx */
 export interface SmartCleanerResult {
   preview: any[];
   stats: {
@@ -239,7 +230,6 @@ export interface SmartCleanerResult {
   };
 }
 
-/* Added FtpFile interface as required by AdminFtp.tsx */
 export interface FtpFile {
   name: string;
   path: string;

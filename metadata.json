@@ -1,5 +1,5 @@
 {
-  "name": "StreamPay OFICIAL 0.0.7.1",
+  "name": "StreamPay OFICIAL 0.0.7.2",
   "description": "Una plataforma móvil de video Pay-Per-View con moneda interna y Marketplace.",
   "requestFramePermissions": [
     "camera",

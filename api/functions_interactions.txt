@@ -1,83 +1,101 @@
+
 <?php
-/**
- * StreamPay - Interactions Module V12.0
- */
 
 function interact_has_purchased($pdo, $userId, $videoId) {
-    $stmt = $pdo->prepare("
-        SELECT u.role, u.vipExpiry, v.creatorId, (SELECT role FROM users WHERE id = v.creatorId) as creatorRole 
-        FROM users u 
-        CROSS JOIN videos v 
-        WHERE u.id = ? AND v.id = ?
-    ");
-    $stmt->execute([$userId, $videoId]);
-    $data = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare("SELECT u.role, u.vipExpiry, v.creatorId, (SELECT role FROM users WHERE id = v.creatorId) as creatorRole FROM users u CROSS JOIN videos v WHERE u.id = ? AND v.id = ?");
+    $stmt->execute([$userId, $videoId]); $data = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($data) {
-        if ($data['role'] === 'ADMIN' || $userId === $data['creatorId']) {
-            respond(true, ['hasPurchased' => true]); return;
-        }
+        if ($data['role'] === 'ADMIN' || $userId === $data['creatorId']) { respond(true, ['hasPurchased' => true]); return; }
         $isVipActive = $data['vipExpiry'] && intval($data['vipExpiry']) > time();
-        $isCreatorAdmin = $data['creatorRole'] === 'ADMIN';
-        if ($isVipActive && $isCreatorAdmin) {
-            respond(true, ['hasPurchased' => true]); return;
-        }
+        if ($isVipActive && $data['creatorRole'] === 'ADMIN') { respond(true, ['hasPurchased' => true]); return; }
     }
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
-    $stmt->execute([$userId, $videoId]);
-    respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);
+    $stmt->execute([$userId, $videoId]); respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);
 }
 
-function interact_increment_view($pdo, $videoId) {
-    $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$videoId]);
-    respond(true);
+function interact_transfer_balance($pdo, $input) {
+    $senderId = $input['userId']; $targetUsername = trim($input['targetUsername'], '@ '); $amount = floatval($input['amount']);
+    if ($amount <= 0) respond(false, null, 'Monto inválido');
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT balance, username FROM users WHERE id = ? FOR UPDATE"); $stmt->execute([$senderId]); $sender = $stmt->fetch();
+        if (!$sender || $sender['balance'] < $amount) throw new Exception("Saldo insuficiente");
+        $stmt = $pdo->prepare("SELECT id, username FROM users WHERE username = ?"); $stmt->execute([$targetUsername]); $receiver = $stmt->fetch();
+        if (!$receiver) throw new Exception("Usuario @$targetUsername no encontrado");
+        $stmtS = $pdo->query("SELECT transferFee FROM system_settings LIMIT 1"); $feePercent = ($s = $stmtS->fetch()) ? floatval($s['transferFee']) : 5.0;
+        $feeAmount = $amount * ($feePercent / 100); $netAmount = $amount - $feeAmount;
+        $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$amount, $senderId]);
+        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$netAmount, $receiver['id']]);
+        $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
+        if ($adminId) $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$feeAmount, $adminId]);
+        $ts = time();
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, recipientName, adminFee) VALUES (?, ?, ?, 'TRANSFER_SENT', ?, ?, ?)")->execute([uniqid('tx_s_'), $senderId, $amount, $ts, $receiver['username'], $feeAmount]);
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, senderName) VALUES (?, ?, ?, 'TRANSFER_RECV', ?, ?)")->execute([uniqid('tx_r_'), $receiver['id'], $netAmount, $ts, $sender['username']]);
+        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")->execute([uniqid('n_'), $receiver['id'], "Recibiste $netAmount $ de @{$sender['username']}", $ts]);
+        $pdo->commit(); respond(true, ['newBalance' => $sender['balance'] - $amount]);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
 
-function interact_get($pdo, $userId, $videoId) {
-    $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?");
-    $stmt->execute([$userId, $videoId]);
-    $res = $stmt->fetch(PDO::FETCH_ASSOC);
-    respond(true, $res ? [
-        'liked' => (bool)$res['liked'],
-        'disliked' => (bool)$res['disliked'],
-        'isWatched' => (bool)$res['isWatched']
-    ] : null);
+function interact_purchase_vip_instant($pdo, $input) {
+    $userId = $input['userId']; $plan = $input['plan'];
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT balance, vipExpiry FROM users WHERE id = ? FOR UPDATE"); $stmt->execute([$userId]); $user = $stmt->fetch();
+        if ($user['balance'] < $plan['price']) throw new Exception("Saldo insuficiente");
+        $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$plan['price'], $userId]);
+        $now = time(); $type = $plan['type'] ?? 'ACCESS';
+        if ($type === 'BALANCE') {
+            $bonus = floatval($plan['bonusPercent'] ?? 0); $recharge = $plan['price'] * (1 + ($bonus / 100));
+            $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$recharge, $userId]);
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle) VALUES (?, ?, ?, 'DEPOSIT', ?, ?)")->execute([uniqid('tx_r_'), $userId, $recharge, $now, "Canje: " . $plan['name']]);
+        } else {
+            $seconds = intval($plan['durationDays'] ?? 30) * 86400; $newExpiry = (intval($user['vipExpiry'] ?? 0) > $now) ? ($user['vipExpiry'] + $seconds) : ($now + $seconds);
+            $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle) VALUES (?, ?, ?, 'VIP', ?, ?)")->execute([uniqid('tx_v_'), $userId, $plan['price'], $now, "Acceso: " . $plan['name']]);
+        }
+        $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
+        if ($adminId) $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$plan['price'], $adminId]);
+        $pdo->commit(); respond(true);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
 
-function interact_toggle_watch_later($pdo, $input) {
-    $uid = $input['userId'];
-    $vid = $input['videoId'];
-    $stmt = $pdo->prepare("SELECT watchLater FROM users WHERE id = ?");
-    $stmt->execute([$uid]);
-    $raw = $stmt->fetchColumn();
-    $list = json_decode($raw ?: '[]', true);
-    if (!is_array($list)) $list = [];
-
-    if (in_array($vid, $list)) {
-        $list = array_values(array_diff($list, [$vid]));
-    } else {
-        $list[] = $vid;
-    }
-    $pdo->prepare("UPDATE users SET watchLater = ? WHERE id = ?")->execute([json_encode($list), $uid]);
-    respond(true, $list);
+function interact_purchase($pdo, $input) {
+    $buyerId = $input['userId']; $videoId = $input['videoId'];
+    $pdo->beginTransaction();
+    try {
+        $rate = ($s = $pdo->query("SELECT videoCommission FROM system_settings LIMIT 1")->fetch()) ? (floatval($s['videoCommission']) / 100) : 0.20;
+        $stmt = $pdo->prepare("SELECT price, creatorId FROM videos WHERE id = ?"); $stmt->execute([$videoId]); $video = $stmt->fetch();
+        if (!$video) throw new Exception("Video no encontrado");
+        $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE"); $stmt->execute([$buyerId]); $balance = $stmt->fetchColumn();
+        if ($balance < $video['price']) throw new Exception("Fondos insuficientes");
+        $price = floatval($video['price']); $fee = $price * $rate; $creatorShare = $price - $fee;
+        $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
+        $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$price, $buyerId]);
+        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$creatorShare, $video['creatorId']]);
+        if ($adminId) $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$fee, $adminId]);
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, adminFee, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, ?, 'PURCHASE')")->execute([uniqid('tx_'), $buyerId, $video['creatorId'], $videoId, $price, $fee, time()]);
+        $pdo->commit(); respond(true);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
 
 function interact_rate($pdo, $input) {
-    $userId = $input['userId']; $videoId = $input['videoId']; $rating = $input['type'] ?? 'like';
-    $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?");
-    $stmt->execute([$userId, $videoId]); $curr = $stmt->fetch();
-    $liked = $curr ? $curr['liked'] : 0; $disliked = $curr ? $curr['disliked'] : 0;
-    if ($rating === 'like') { $liked = !$liked; if($liked) $disliked = 0; }
-    else { $disliked = !$disliked; if($disliked) $liked = 0; }
-    $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE liked=VALUES(liked), disliked=VALUES(disliked)")
-        ->execute([$userId, $videoId, $liked, $disliked]);
-    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM interactions WHERE videoId = ? AND liked = 1");
-    $countStmt->execute([$videoId]);
-    respond(true, ['liked' => (bool)$liked, 'disliked' => (bool)$disliked, 'newLikeCount' => (int)$countStmt->fetchColumn()]);
+    $userId = $input['userId'] ?? null; $videoId = $input['videoId']; $rating = $input['type'] ?? 'view';
+    if ($userId) {
+        $stmt = $pdo->prepare("SELECT liked, disliked FROM interactions WHERE userId = ? AND videoId = ?"); $stmt->execute([$userId, $videoId]); $curr = $stmt->fetch();
+        $liked = $curr ? $curr['liked'] : 0; $disliked = $curr ? $curr['disliked'] : 0;
+        if ($rating === 'like') { $liked = !$liked; if($liked) $disliked = 0; }
+        else { $disliked = !$disliked; if($disliked) $liked = 0; }
+        $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE liked=VALUES(liked), disliked=VALUES(disliked)")->execute([$userId, $videoId, $liked, $disliked]);
+        $newLikeCount = (int)$pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId = '$videoId' AND liked = 1")->fetchColumn();
+        respond(true, ['liked' => (bool)$liked, 'disliked' => (bool)$disliked, 'newLikeCount' => $newLikeCount]);
+    } else {
+        $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$videoId]);
+        respond(true);
+    }
 }
 
 function interact_mark_watched($pdo, $input) {
-    $pdo->prepare("INSERT INTO interactions (userId, videoId, isWatched) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE isWatched = 1")
-        ->execute([$input['userId'], $input['videoId']]);
+    $pdo->prepare("INSERT INTO interactions (userId, videoId, isWatched) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE isWatched = 1")->execute([$input['userId'], $input['videoId']]);
     respond(true);
 }
 
@@ -87,45 +105,31 @@ function interact_get_activity($pdo, $userId) {
     respond(true, ['liked' => $liked->fetchAll(PDO::FETCH_COLUMN), 'watched' => $watched->fetchAll(PDO::FETCH_COLUMN)]);
 }
 
+function interact_get($pdo, $userId, $videoId) {
+    $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?"); $stmt->execute([$userId, $videoId]); $res = $stmt->fetch(PDO::FETCH_ASSOC);
+    respond(true, $res ?: ['liked'=>false, 'disliked'=>false, 'isWatched'=>false]);
+}
+
 function interact_get_comments($pdo, $videoId) {
-    $stmt = $pdo->prepare("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.videoId = ? ORDER BY c.timestamp DESC");
-    $stmt->execute([$videoId]); $comments = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($comments as &$c) { $c['userAvatarUrl'] = fix_url($c['userAvatarUrl']); }
-    respond(true, $comments);
+    $stmt = $pdo->prepare("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.videoId = ? ORDER BY c.timestamp DESC"); $stmt->execute([$videoId]); $comments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($comments as &$c) $c['userAvatarUrl'] = fix_url($c['userAvatarUrl']); respond(true, $comments);
 }
 
 function interact_add_comment($pdo, $input) {
-    $cid = uniqid('c_');
-    $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")->execute([$cid, $input['videoId'], $input['userId'], $input['text'], time()]);
-    $stmt = $pdo->prepare("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.id = ?");
-    $stmt->execute([$cid]); $res = $stmt->fetch(); $res['userAvatarUrl'] = fix_url($res['userAvatarUrl']);
+    $cid = uniqid('c_'); $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")->execute([$cid, $input['videoId'], $input['userId'], $input['text'], time()]);
+    $res = $pdo->query("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.id = '$cid'")->fetch(); $res['userAvatarUrl'] = fix_url($res['userAvatarUrl']);
     respond(true, $res);
 }
 
 function interact_toggle_subscribe($pdo, $input) {
     $sub = $input['userId']; $creator = $input['creatorId'];
-    $check = $pdo->prepare("SELECT COUNT(*) FROM subscriptions WHERE subscriberId = ? AND creatorId = ?"); $check->execute([$sub, $creator]);
-    if ($check->fetchColumn() > 0) { $pdo->prepare("DELETE FROM subscriptions WHERE subscriberId = ? AND creatorId = ?")->execute([$sub, $creator]); respond(true, ['isSubscribed' => false]); }
+    if ($pdo->query("SELECT COUNT(*) FROM subscriptions WHERE subscriberId = '$sub' AND creatorId = '$creator'")->fetchColumn() > 0) { $pdo->prepare("DELETE FROM subscriptions WHERE subscriberId = ? AND creatorId = ?")->execute([$sub, $creator]); respond(true, ['isSubscribed' => false]); }
     else { $pdo->prepare("INSERT INTO subscriptions (subscriberId, creatorId, createdAt) VALUES (?, ?, ?)")->execute([$sub, $creator, time()]); respond(true, ['isSubscribed' => true]); }
 }
 
-function interact_check_subscription($pdo, $uid, $cid) { $stmt = $pdo->prepare("SELECT COUNT(*) FROM subscriptions WHERE subscriberId = ? AND creatorId = ?"); $stmt->execute([$uid, $cid]); respond(true, ['isSubscribed' => $stmt->fetchColumn() > 0]); }
-function interact_get_notifications($pdo, $uid) { $stmt = $pdo->prepare("SELECT * FROM notifications WHERE userId = ? ORDER BY timestamp DESC LIMIT 30"); $stmt->execute([$uid]); respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC)); }
+function interact_check_subscription($pdo, $uid, $cid) { respond(true, ['isSubscribed' => $pdo->query("SELECT COUNT(*) FROM subscriptions WHERE subscriberId = '$uid' AND creatorId = '$cid'")->fetchColumn() > 0]); }
+function interact_get_subscriptions($pdo, $uid) { $stmt = $pdo->prepare("SELECT creatorId FROM subscriptions WHERE subscriberId = ?"); $stmt->execute([$uid]); respond(true, $stmt->fetchAll(PDO::FETCH_COLUMN)); }
+function interact_get_notifications($pdo, $uid) { $stmt = $pdo->prepare("SELECT * FROM notifications WHERE userId = ? ORDER BY timestamp DESC LIMIT 30"); $stmt->execute([$uid]); $list = $stmt->fetchAll(PDO::FETCH_ASSOC); foreach($list as &$n) $n['avatarUrl'] = fix_url($n['avatarUrl'] ?? null); respond(true, $list); }
+function interact_mark_notification_read($pdo, $input) { $pdo->prepare("UPDATE notifications SET isRead = 1 WHERE id = ?")->execute([$input['id']]); respond(true); }
 function interact_get_transactions($pdo, $userId) { $stmt = $pdo->prepare("SELECT * FROM transactions WHERE buyerId = ? OR creatorId = ? ORDER BY timestamp DESC"); $stmt->execute([$userId, $userId]); respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC)); }
-function interact_purchase($pdo, $input) {
-    $buyerId = $input['userId']; $videoId = $input['videoId'];
-    $pdo->beginTransaction();
-    try {
-        $stmt = $pdo->prepare("SELECT price, creatorId FROM videos WHERE id = ?");
-        $stmt->execute([$videoId]); $video = $stmt->fetch();
-        $stmt = $pdo->prepare("SELECT balance FROM users WHERE id = ? FOR UPDATE");
-        $stmt->execute([$buyerId]); $balance = $stmt->fetchColumn();
-        if ($balance < $video['price']) throw new Exception("Fondos insuficientes");
-        $price = floatval($video['price']);
-        $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$price, $buyerId]);
-        $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$price, $video['creatorId']]);
-        $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, ?, ?, ?, ?, 'PURCHASE')")->execute([uniqid('tx_'), $buyerId, $video['creatorId'], $videoId, $price, time()]);
-        $pdo->commit(); respond(true);
-    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
-}
 ?>
