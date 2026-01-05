@@ -4,16 +4,47 @@ import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { VipPlan, SystemSettings } from '../../types';
-import { Crown, Check, Zap, Loader2, ArrowLeft, Wallet, CreditCard, Coins, TrendingUp } from 'lucide-react';
-import { useNavigate } from '../Router';
+import { Crown, Check, Zap, Loader2, ArrowLeft, Wallet, CreditCard, Coins, TrendingUp, ShieldCheck } from 'lucide-react';
+import { useNavigate, useLocation } from '../Router';
 
 export default function VipStore() {
     const { user, refreshUser } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
     const toast = useToast();
     const [plans, setPlans] = useState<VipPlan[]>([]);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
+    const [verifying, setVerifying] = useState(false);
+
+    // Detección automática de retorno de pasarela
+    useEffect(() => {
+        const checkReturn = async () => {
+            const params = new URLSearchParams(window.location.hash.split('?')[1]);
+            const status = params.get('status');
+            const reference = params.get('ref');
+
+            if (status === 'success' && reference && user) {
+                setVerifying(true);
+                try {
+                    const res = await db.verifyPayment(user.id, reference);
+                    toast.success(res.message);
+                    refreshUser();
+                    // Limpiar URL para evitar re-verificaciones
+                    navigate('/vip', { replace: true });
+                } catch (e: any) {
+                    toast.error(e.message || "Fallo en verificación de pago");
+                } finally {
+                    setVerifying(false);
+                }
+            } else if (status === 'cancel') {
+                toast.warning("Pago cancelado por el usuario");
+                navigate('/vip', { replace: true });
+            }
+        };
+
+        if (user) checkReturn();
+    }, [user, location.pathname]);
 
     useEffect(() => {
         db.getSystemSettings().then((s: SystemSettings) => {
@@ -48,7 +79,38 @@ export default function VipStore() {
         }
     };
 
+    const handleExternalPurchase = async (plan: VipPlan) => {
+        if (!user) return;
+        setSubmitting(true);
+        try {
+            const res = await db.createPayLink(user.id, plan);
+            if (res.paymentUrl) {
+                toast.info("Redirigiendo a pasarela segura...");
+                // Pequeño retardo para que el usuario lea el toast
+                setTimeout(() => {
+                    window.location.href = res.paymentUrl;
+                }, 1500);
+            }
+        } catch (e: any) {
+            toast.error("Error al conectar con Tropipay: " + e.message);
+            setSubmitting(false);
+        }
+    };
+
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-amber-500" /></div>;
+
+    if (verifying) {
+        return (
+            <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8 animate-in fade-in">
+                <div className="relative mb-8">
+                    <Loader2 size={80} className="animate-spin text-indigo-500 opacity-20" />
+                    <ShieldCheck size={40} className="absolute inset-0 m-auto text-indigo-400 animate-pulse" />
+                </div>
+                <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter mb-2">Verificando Pago</h2>
+                <p className="text-slate-400 text-sm max-w-xs mx-auto">Estamos confirmando la transacción con Tropipay. Por favor, no cierres esta ventana.</p>
+            </div>
+        );
+    }
 
     return (
         <div className="pb-24 pt-6 px-4 max-w-5xl mx-auto animate-in fade-in">
@@ -116,8 +178,12 @@ export default function VipStore() {
                                     {submitting ? <Loader2 className="animate-spin"/> : <Wallet size={18}/>}
                                     Canjear Saldo
                                 </button>
-                                <button className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-2xl text-xs uppercase tracking-widest transition-all">
-                                    <CreditCard size={14} className="inline mr-2"/> Pago Externo
+                                <button 
+                                    onClick={() => handleExternalPurchase(plan)}
+                                    disabled={submitting}
+                                    className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-2xl text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                >
+                                    <CreditCard size={14}/> Pago Externo (CUP/EUR)
                                 </button>
                             </div>
                         </div>
@@ -127,7 +193,7 @@ export default function VipStore() {
             
             <div className="mt-12 p-6 bg-slate-900/50 rounded-3xl border border-slate-800 text-center">
                 <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">
-                    ¿Necesitas saldo? Contacta con un administrador para recargas directas o usa la pasarela de pago externa.
+                    ¿Necesitas saldo? Usa la pasarela de pago externa para recargas automáticas o contacta con soporte.
                 </p>
             </div>
         </div>

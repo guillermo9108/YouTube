@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V11.12 (Mass Notifications)
+ * StreamPay - Core Controller V11.13 (Payments Enabled)
  */
 ob_start(); 
 ini_set('display_errors', 0); 
@@ -77,9 +77,9 @@ require_once 'functions_videos.php';
 require_once 'functions_interactions.php';
 require_once 'functions_market.php';
 require_once 'functions_admin.php';
-if (file_exists('functions_ftp.php')) {
-    require_once 'functions_ftp.php';
-}
+
+if (file_exists('functions_ftp.php')) require_once 'functions_ftp.php';
+if (file_exists('functions_payment.php')) require_once 'functions_payment.php';
 
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
@@ -139,6 +139,10 @@ try {
         case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'] ?? '', $_GET['creatorId'] ?? ''); break;
         case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId'] ?? ''); break;
 
+        // PAYMENTS (TROPIPAY)
+        case 'create_pay_link': if(function_exists('payment_create_link')) payment_create_link($pdo, $input); else respond(false, null, "Módulo de pago no disponible"); break;
+        case 'verify_payment': if(function_exists('payment_verify')) payment_verify($pdo, $input); else respond(false, null, "Módulo de pago no disponible"); break;
+
         // MARKETPLACE
         case 'get_marketplace_items': market_get_items($pdo); break;
         case 'get_marketplace_item': market_get_item($pdo, $_GET['id'] ?? ''); break;
@@ -165,7 +169,7 @@ try {
         case 'get_real_stats': get_real_stats($pdo); break;
         case 'get_requests': admin_get_requests($pdo, $_GET['status'] ?? 'ALL'); break;
 
-        // ADMIN TRANSCODING & CLEANUP (JANITOR)
+        // ADMIN TRANSCODING
         case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;
         case 'admin_save_transcode_profile': admin_save_transcode_profile($pdo, $input); break;
         case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $_GET['extension'] ?? ''); break;

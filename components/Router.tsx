@@ -13,15 +13,17 @@ export function useNavigate() {
     if (typeof to === 'number') {
       window.history.go(to);
     } else {
-      window.location.hash = to;
+      if (options?.replace) {
+        window.location.replace(`#${to}`);
+      } else {
+        window.location.hash = to;
+      }
     }
   };
 }
 
 export function useParams(): Record<string, string | undefined> {
   const { pathname } = useLocation();
-  
-  // Regex robusto para capturar IDs
   
   const watchMatch = pathname.match(/\/watch\/([^/?&]+)/);
   if (watchMatch) {
@@ -33,13 +35,11 @@ export function useParams(): Record<string, string | undefined> {
     return { userId: channelMatch[1] };
   }
 
-  // AGREGADO: Soporte específico para Editar antes que Ver
   const marketEditMatch = pathname.match(/\/marketplace\/edit\/([^/?&]+)/);
   if (marketEditMatch) {
     return { id: marketEditMatch[1] };
   }
 
-  // AGREGADO: Soporte para rutas de Marketplace Item
   const marketMatch = pathname.match(/\/marketplace\/([^/?&]+)/);
   if (marketMatch && !pathname.includes('/marketplace/create') && !pathname.includes('/marketplace/edit') && !pathname.endsWith('/marketplace')) {
     return { id: marketMatch[1] };
@@ -68,13 +68,15 @@ export function Navigate({ to }: { to: string; replace?: boolean }) {
 }
 
 export function HashRouter({ children }: { children?: React.ReactNode }) {
-  const [pathname, setPathname] = useState(window.location.hash.slice(1) || '/');
+  const [pathname, setPathname] = useState(() => {
+      const h = window.location.hash.slice(1) || '/';
+      return h.split('?')[0];
+  });
 
   useEffect(() => {
     const handler = () => {
-      let p = window.location.hash.slice(1);
-      if (!p) p = '/';
-      setPathname(p);
+      let h = window.location.hash.slice(1) || '/';
+      setPathname(h.split('?')[0]);
     };
     window.addEventListener('hashchange', handler);
     return () => window.removeEventListener('hashchange', handler);

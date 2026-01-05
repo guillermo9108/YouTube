@@ -194,6 +194,15 @@ class DBService {
     public async handleBalanceRequest(adminId: string, reqId: string, status: string): Promise<void> { return this.request<void>(`action=handle_balance_request`, { method: 'POST', body: JSON.stringify({ adminId, reqId, status }) }); }
     public async handleVipRequest(adminId: string, reqId: string, status: string): Promise<void> { return this.request<void>(`action=handle_vip_request`, { method: 'POST', body: JSON.stringify({ adminId, reqId, status }) }); }
     public async purchaseVipInstant(userId: string, plan: VipPlan): Promise<void> { return this.request<void>(`action=purchase_vip_instant`, { method: 'POST', body: JSON.stringify({ userId, plan }) }); }
+    
+    // TROPPIPAY INTEGRATION
+    public async createPayLink(userId: string, plan: VipPlan): Promise<{paymentUrl: string}> {
+        return this.request<{paymentUrl: string}>(`action=create_pay_link`, { method: 'POST', body: JSON.stringify({ userId, plan }) });
+    }
+    public async verifyPayment(userId: string, reference: string): Promise<{message: string}> {
+        return this.request<{message: string}>(`action=verify_payment`, { method: 'POST', body: JSON.stringify({ userId, reference }) });
+    }
+
     public async transferBalance(userId: string, targetUsername: string, amount: number): Promise<void> { return this.request<void>(`action=transfer_balance`, { method: 'POST', body: JSON.stringify({ userId, targetUsername, amount }) }); }
     public async adminAddBalance(adminId: string, targetId: string, amount: number): Promise<void> { return this.request<void>(`action=admin_add_balance`, { method: 'POST', body: JSON.stringify({ adminId, userId: targetId, amount }) }); }
     public async getGlobalTransactions(): Promise<any> { return this.request<any>('action=get_global_transactions'); }
@@ -210,10 +219,7 @@ class DBService {
     }
 
     public async scanLocalLibrary(path: string): Promise<any> { return this.request<any>(`action=scan_local_library`, { method: 'POST', body: JSON.stringify({ path }) }); }
-
-    // Fix: Added missing processScanBatch method used by ServerTaskContext for background scanning
     public async processScanBatch(): Promise<any> { return this.request<any>(`action=process_scan_batch`, { method: 'POST' }); }
-
     public async updateVideoMetadata(id: string, duration: number, thumb: File | null, success: boolean = true): Promise<void> {
         const fd = new FormData(); fd.append('id', id); fd.append('duration', String(duration)); fd.append('success', success ? '1' : '0');
         if (thumb) fd.append('thumbnail', thumb);
