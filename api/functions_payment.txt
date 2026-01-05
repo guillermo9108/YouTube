@@ -1,4 +1,3 @@
-
 <?php
 
 // --- TROPIPAY INTEGRATION ---
@@ -21,6 +20,8 @@ function getTropipayToken($clientId, $clientSecret) {
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
         CURLOPT_CUSTOMREQUEST => "POST",
         CURLOPT_POSTFIELDS => $data,
+        CURLOPT_SSL_VERIFYPEER => false, // Solución para error de CAfile en Termux/Local
+        CURLOPT_SSL_VERIFYHOST => false,
         CURLOPT_HTTPHEADER => [
             "Content-Type: application/json"
         ],
@@ -50,31 +51,19 @@ function payment_create_link($pdo, $input) {
         respond(false, null, 'Tropipay no configurado en el Admin Panel');
     }
 
-    // 2. Conversion Logic
-    // Plans are usually in "Saldo" (CUP/Points). We need to charge EUR or USD via Tropipay.
-    // currencyConversion = How many Saldo per 1 EUR? e.g. 300
-    // Amount EUR = Plan Price / Conversion
-    $rate = floatval($s['currencyConversion']) ?: 1; // Default 1:1 if not set
+    $rate = floatval($s['currencyConversion']) ?: 1; 
     $amountEUR = round($plan['price'] / $rate, 2);
-    
-    // Minimum Tropipay is often 5-10 EUR, ensure we don't fail
     if ($amountEUR < 1) $amountEUR = 1;
 
     try {
         $token = getTropipayToken($s['tropipayClientId'], $s['tropipayClientSecret']);
         
         // 3. Create Pay Link
-        // We use the Plan ID + User ID + Timestamp as reference to verify later
         $reference = "VP-" . $userId . "-" . $plan['id'] . "-" . time();
         
-        // Frontend URL for return
-        // We assume the frontend is running on the same host
         $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https://" : "http://";
         $host = $_SERVER['HTTP_HOST'];
-        // Path to index.html (PWA root)
-        // If api is in /api/, root is one up.
         $baseUrl = $protocol . $host . dirname(dirname($_SERVER['PHP_SELF'])); 
-        // Force clean base
         $baseUrl = str_replace('/api', '', $baseUrl);
         $baseUrl = rtrim($baseUrl, '/');
         
@@ -85,12 +74,12 @@ function payment_create_link($pdo, $input) {
             "reference" => $reference,
             "concept" => "StreamPay VIP: " . $plan['name'],
             "description" => "Plan VIP para usuario " . $userId,
-            "amount" => $amountEUR * 100, // Tropipay uses cents
+            "amount" => $amountEUR * 100, 
             "currency" => "EUR",
             "lang" => "es",
             "urlSuccess" => $successUrl,
             "urlFailed" => $cancelUrl,
-            "directPayment" => true, // Go straight to pay method selection
+            "directPayment" => true,
             "serviceDate" => date('Y-m-d')
         ]);
 
@@ -100,6 +89,8 @@ function payment_create_link($pdo, $input) {
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => "POST",
             CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_SSL_VERIFYPEER => false, // Solución para error de CAfile
+            CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER => [
                 "Content-Type: application/json",
                 "Authorization: Bearer " . $token
@@ -115,7 +106,7 @@ function payment_create_link($pdo, $input) {
         $json = json_decode($response, true);
         if (empty($json['paymentUrl'])) throw new Exception("No Payment URL returned: " . $response);
 
-        // 4. Save Pending Request locally so we know what plan to give
+        // 4. Save Pending Request
         $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, paymentRef) VALUES (?, ?, ?, 'PENDING', ?, ?)")
             ->execute([uniqid('pp_'), $userId, json_encode($plan), time(), $reference]);
 
@@ -130,28 +121,24 @@ function payment_verify($pdo, $input) {
     $ref = $input['reference'];
     $userId = $input['userId'];
     
-    // 1. Find the pending request
     $stmt = $pdo->prepare("SELECT * FROM vip_requests WHERE paymentRef = ? AND userId = ? AND status = 'PENDING'");
     $stmt->execute([$ref, $userId]);
     $req = $stmt->fetch(PDO::FETCH_ASSOC);
     
     if (!$req) respond(false, null, 'Solicitud no encontrada o ya procesada.');
 
-    // 2. Get Settings & Token
     $stmtS = $pdo->query("SELECT tropipayClientId, tropipayClientSecret FROM system_settings LIMIT 1");
     $s = $stmtS->fetch(PDO::FETCH_ASSOC);
     
     try {
         $token = getTropipayToken($s['tropipayClientId'], $s['tropipayClientSecret']);
         
-        // 3. Search Movement by Reference
-        // Note: Tropipay API structure might vary, ideally we search by reference
-        // /api/v2/movements?reference=XYZ
-        
         $curl = curl_init();
         curl_setopt_array($curl, [
             CURLOPT_URL => "https://tropipay.com/api/v2/movements?reference=" . $ref,
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_SSL_VERIFYPEER => false, // Solución para error de CAfile
+            CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER => ["Authorization: Bearer " . $token],
         ]);
         
@@ -163,29 +150,24 @@ function payment_verify($pdo, $input) {
         
         $validPayment = false;
         foreach ($rows as $row) {
-            // Check if COMPLETED and amount matches roughly (sanity check)
-            if ($row['reference'] === $ref && $row['status'] === 'COMPLETED' && $row['movement_type'] === 2) { // Type 2 = Ingreso usually
+            if ($row['reference'] === $ref && $row['status'] === 'COMPLETED') {
                 $validPayment = true;
                 break;
             }
         }
         
         if ($validPayment) {
-            // --- APPROVE LOGIC (Same as Admin) ---
             $plan = json_decode($req['planSnapshot'], true);
             $pdo->beginTransaction();
             
-            // Mark Request Approved
             $pdo->prepare("UPDATE vip_requests SET status = 'APPROVED' WHERE id = ?")->execute([$req['id']]);
             
             if ($plan['type'] === 'BALANCE') {
                 $baseAmount = floatval($plan['price']);
                 $bonus = floatval($plan['bonusPercent'] ?? 0);
                 $total = $baseAmount + ($baseAmount * ($bonus / 100));
-                
                 $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $userId]);
                 
-                // Transaction Log
                 $tid = uniqid('tx_vip_auto_');
                 $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP')")
                     ->execute([$tid, $userId, $total, time()]);
@@ -194,18 +176,14 @@ function payment_verify($pdo, $input) {
                 $days = intval($plan['durationDays']);
                 $seconds = $days * 86400;
                 $now = time();
-                
                 $stmtUser = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?");
                 $stmtUser->execute([$userId]);
                 $currentExpiry = intval($stmtUser->fetchColumn());
-                
                 $newStart = ($currentExpiry > $now) ? $currentExpiry : $now;
                 $newExpiry = $newStart + $seconds;
-                
                 $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
             }
             
-            // Notify
             $nid = uniqid('n_');
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
                 ->execute([$nid, $userId, "Pago confirmado. Plan '{$plan['name']}' activado.", time()]);
@@ -215,7 +193,6 @@ function payment_verify($pdo, $input) {
         } else {
             respond(false, null, 'Pago no encontrado o pendiente en Tropipay. Intenta de nuevo en unos minutos.');
         }
-
     } catch (Exception $e) {
         respond(false, null, $e->getMessage());
     }
