@@ -13,6 +13,42 @@ function interact_has_purchased($pdo, $userId, $videoId) {
     $stmt->execute([$userId, $videoId]); respond(true, ['hasPurchased' => $stmt->fetchColumn() > 0]);
 }
 
+function interact_share_video($pdo, $input) {
+    $senderId = $input['senderId'];
+    $targetUsername = trim($input['targetUsername'], '@ ');
+    $videoId = $input['videoId'];
+
+    $pdo->beginTransaction();
+    try {
+        // Buscar remitente
+        $stmtS = $pdo->prepare("SELECT username FROM users WHERE id = ?");
+        $stmtS->execute([$senderId]);
+        $senderName = $stmtS->fetchColumn();
+
+        // Buscar destino
+        $stmtT = $pdo->prepare("SELECT id FROM users WHERE username = ?");
+        $stmtT->execute([$targetUsername]);
+        $targetId = $stmtT->fetchColumn();
+
+        if (!$targetId) throw new Exception("Usuario no encontrado");
+
+        // Buscar info del video
+        $stmtV = $pdo->prepare("SELECT title, thumbnailUrl FROM videos WHERE id = ?");
+        $stmtV->execute([$videoId]);
+        $v = $stmtV->fetch();
+
+        $text = "@$senderName te recomendó: {$v['title']}";
+        $link = "/watch/$videoId";
+        $meta = json_encode(['thumb' => fix_url($v['thumbnailUrl'])]);
+
+        $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp, metadata) VALUES (?, ?, 'SYSTEM', ?, ?, 0, ?, ?)")
+            ->execute([uniqid('n_sh_'), $targetId, $text, $link, time(), $meta]);
+
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
+}
+
 function interact_transfer_balance($pdo, $input) {
     $senderId = $input['userId']; $targetUsername = trim($input['targetUsername'], '@ '); $amount = floatval($input['amount']);
     if ($amount <= 0) respond(false, null, 'Monto inválido');
@@ -116,7 +152,7 @@ function interact_get_comments($pdo, $videoId) {
 }
 
 function interact_add_comment($pdo, $input) {
-    $cid = uniqid('c_'); $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")->execute([$cid, $input['videoId'], $input['userId'], $input['text'], time()]);
+    $cid = uniqid('c_'); $pdo->prepare("INSERT INTO comments (id, videoId, userId, text, timestamp) VALUES (?, ?, ?, ?, ?)")->execute([cid, $input['videoId'], $input['userId'], $input['text'], time()]);
     $res = $pdo->query("SELECT c.*, u.username, u.avatarUrl as userAvatarUrl FROM comments c JOIN users u ON c.userId = u.id WHERE c.id = '$cid'")->fetch(); $res['userAvatarUrl'] = fix_url($res['userAvatarUrl']);
     respond(true, $res);
 }

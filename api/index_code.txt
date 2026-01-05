@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V11.10 (Restored Admin Routes & Clean Buffer)
+ * StreamPay - Core Controller V11.11 (Internal Sharing & Commments)
  */
 ob_start(); 
 ini_set('display_errors', 0); 
@@ -117,6 +117,7 @@ try {
         case 'purchase_video': interact_purchase($pdo, $input); break;
         case 'purchase_vip_instant': interact_purchase_vip_instant($pdo, $input); break;
         case 'transfer_balance': interact_transfer_balance($pdo, $input); break;
+        case 'share_video': interact_share_video($pdo, $input); break;
         case 'rate_video': 
             if (($input['type'] ?? '') === 'view') {
                 $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$input['videoId']]);
