@@ -1,9 +1,7 @@
-
 <?php
 /**
- * StreamPay - Core Controller V11.8 (Separated View/Watched Logic)
+ * StreamPay - Core Controller V11.9 (No Whitespace Policy)
  */
-
 ob_start(); 
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -157,21 +155,6 @@ try {
         case 'list_ftp_files': if(function_exists('listFtpFiles')) listFtpFiles($pdo, $_GET['path'] ?? '/'); else respond(false, null, "Módulo FTP no disponible"); break;
         case 'import_ftp_file': if(function_exists('importFtpFile')) importFtpFile($pdo, $input); else respond(false, null, "Módulo FTP no disponible"); break;
         case 'scan_ftp_recursive': if(function_exists('scanFtpRecursive')) scanFtpRecursive($pdo, $input); else respond(false, null, "Módulo FTP no disponible"); break;
-        case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;
-        case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
-        case 'admin_save_transcode_profile': admin_save_transcode_profile($pdo, $input); break;
-        case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $_GET['extension'] ?? ''); break;
-        case 'admin_get_transcode_log': admin_get_transcode_log(); break;
-        case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
-        case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
-        case 'admin_clear_transcode_queue': admin_clear_transcode_queue($pdo); break;
-        case 'admin_retry_failed_transcodes': admin_retry_failed_transcodes($pdo); break;
-        case 'admin_remove_from_queue': admin_remove_from_queue($pdo, $_GET['videoId'] ?? ''); break;
-        case 'admin_skip_transcode': admin_skip_transcode($pdo, $_GET['videoId'] ?? ''); break;
-        case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
-        case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
-        case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $_GET['type'] ?? ''); break;
-        case 'admin_organize_paquete': admin_organize_paquete($pdo, $input); break;
         default: respond(false, null, "Acción desconocida: $action"); break;
     }
 } catch (Exception $e) {

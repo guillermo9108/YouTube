@@ -1,6 +1,5 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Heart, MessageCircle, Share2, Volume2, VolumeX, Smartphone, RefreshCw, ThumbsDown, Plus, Check, Lock, DollarSign, Send, X, Loader2, ArrowLeft, Play, Pause } from 'lucide-react';
+import { Heart, MessageCircle, Share2, ThumbsDown, Send, X, Loader2, ArrowLeft, Pause } from 'lucide-react';
 import { db } from '../../services/db';
 import { Video, Comment, UserInteraction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -27,7 +26,6 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [likeCount, setLikeCount] = useState(video.likes || 0);
-  const [isSubscribed, setIsSubscribed] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
@@ -35,7 +33,6 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
       db.getInteraction(user.id, video.id).then(setInteraction);
       if (!hasFullAccess) db.hasPurchased(user.id, video.id).then(setIsUnlocked);
       db.getComments(video.id).then(setComments);
-      db.checkSubscription(user.id, video.creatorId).then(setIsSubscribed);
       setDataLoaded(true);
     }
   }, [user, video.id, isNear, hasFullAccess]);
@@ -45,8 +42,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
     if (isActive && isUnlocked) {
         el.currentTime = 0; 
         setPaused(false);
-        // Shorts siempre intentan autoplay silenciado para compatibilidad máxima
-        el.muted = true;
+        el.muted = true; // Forzar mute para autoplay
         const p = el.play(); if (p) p.catch(() => {});
         db.incrementView(video.id);
     } else { el.pause(); }
@@ -77,8 +73,9 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
   };
 
   const videoSrc = useMemo(() => {
+    const token = localStorage.getItem('sp_session_token') || '';
     const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
-    return `${window.location.origin}/${base}&token=${localStorage.getItem('sp_session_token') || ''}`;
+    return `${window.location.origin}/${base}&token=${token}`;
   }, [video.id]);
 
   if (!isNear) return <div className="w-full h-full snap-start bg-black shrink-0 flex items-center justify-center"><Loader2 className="animate-spin text-slate-800" /></div>;
@@ -90,7 +87,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
           <>
             <video
                 ref={videoRef} src={videoSrc} poster={video.thumbnailUrl}
-                className="w-full h-full object-cover" loop playsInline preload="auto" crossOrigin="anonymous"
+                className="w-full h-full object-cover" loop playsInline autoPlay muted preload="auto" crossOrigin="anonymous"
             />
             {paused && <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50"><Pause size={64} fill="currentColor" /></div>}
             {showHeart && <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in fade-in duration-300"><Heart size={120} className="text-red-500 fill-red-500 drop-shadow-2xl" /></div>}
@@ -109,7 +106,6 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
       </div>
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80 pointer-events-none z-10" />
       
-      {/* BARRA LATERAL DE ACCIONES */}
       <div className="absolute right-2 bottom-24 z-30 flex flex-col items-center gap-5 pb-safe">
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-colors ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>

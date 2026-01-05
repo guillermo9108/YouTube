@@ -3,10 +3,8 @@
 function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
-    // Filtrar segmentos vacíos (como // en rutas de red)
     $pathParts = array_values(array_filter(explode('/', $fullPathNormalized)));
     
-    // 1. Limpieza básica del nombre
     $cleanText = function($txt) {
         $junk = ['/\b(1080p|720p|4k|x264|h264|bluray|web-dl|mkv|mp4)\b/i', '/\./', '/_/'];
         $t = $txt;
@@ -20,12 +18,9 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
     $detectedCollection = null;
 
     $partsCount = count($pathParts);
-    
-    // 2. Buscar coincidencia en la ruta con las categorías del administrador
     for ($i = $partsCount - 1; $i >= 0; $i--) {
         $segment = trim($pathParts[$i]);
         if (empty($segment) || $segment === basename($fullPath)) continue;
-
         foreach ($hierarchy as $cat) {
             if (strcasecmp($segment, $cat['name']) === 0) {
                 $detectedCat = $cat['name'];
@@ -43,7 +38,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
             }
         }
     }
-
     return [
         'title' => ucwords(strtolower($cleanName)), 
         'category' => $detectedCat,
@@ -66,22 +60,6 @@ function getPriceForCategory($catName, $settings, $parentCatName = null) {
 }
 
 function write_log($message, $level = 'INFO') {
-    // Para evitar consultas a BD en cada log, intentamos detectar si el log está activo
-    // Si ya existe un objeto global de settings lo usamos, sino consultamos
-    static $logEnabled = null;
-    if ($logEnabled === null) {
-        try {
-            global $pdo;
-            if (isset($pdo)) {
-                $logEnabled = (bool)($pdo->query("SELECT enableDebugLog FROM system_settings WHERE id = 1")->fetchColumn());
-            } else {
-                $logEnabled = true; // Fallback a activo si no hay PDO aún
-            }
-        } catch (Exception $e) { $logEnabled = true; }
-    }
-
-    if (!$logEnabled && $level !== 'FATAL' && $level !== 'ERROR') return;
-
     $logFile = __DIR__ . '/debug_log.txt';
     $timestamp = date('Y-m-d H:i:s');
     $formattedMessage = "[$timestamp] [$level] $message" . PHP_EOL;
@@ -95,13 +73,11 @@ function resolve_video_path($pathOrUrl) {
     $cleanPath = (strpos($path, 'api/') === 0) ? substr($path, 4) : $path;
     $internalPath = __DIR__ . '/' . $cleanPath;
     if (file_exists($internalPath) && is_file($internalPath)) return realpath($internalPath);
-    $fallback = str_replace('api/', '', $path);
-    if (file_exists($fallback) && is_file($fallback)) return $fallback;
     return false;
 }
 
 function fix_url($url) {
-    if (empty($url)) return null; // FIX: Devolver null para que el frontend use las iniciales
+    if (empty($url)) return null; 
     if (strpos($url, 'http') === 0) return $url;
     if (strpos($url, 'data:') === 0) return $url;
     $clean = ltrim($url, '/');
@@ -110,19 +86,25 @@ function fix_url($url) {
 }
 
 function streamVideo($id, $pdo) {
+    // Crucial: Limpiar buffer de salida para evitar que errores PHP rompan el stream binario
     while (ob_get_level()) ob_end_clean();
+    
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $videoUrl = $stmt->fetchColumn();
-    if (!$videoUrl) { header("HTTP/1.0 404 Not Found"); exit; }
+    if (!$videoUrl) { header("HTTP/1.1 404 Not Found"); exit; }
+    
     $realPath = resolve_video_path($videoUrl);
-    if (!$realPath || !file_exists($realPath)) { header("HTTP/1.0 404 Not Found"); exit; }
-    $fileSize = sprintf("%u", filesize($realPath));
+    if (!$realPath || !file_exists($realPath)) { header("HTTP/1.1 404 Not Found"); exit; }
+    
+    $fileSize = filesize($realPath);
     $fp = fopen($realPath, 'rb');
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     $mime = ($ext === 'mkv') ? 'video/x-matroska' : (($ext === 'webm') ? 'video/webm' : 'video/mp4');
+    
     header("Content-Type: $mime");
-    header('Accept-Ranges: bytes');
+    header("Accept-Ranges: bytes");
+    
     if (isset($_SERVER['HTTP_RANGE'])) {
         preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
         $offset = intval($matches[1]);
@@ -131,8 +113,15 @@ function streamVideo($id, $pdo) {
         header("Content-Range: bytes $offset-$end/$fileSize");
         header("Content-Length: " . ($end - $offset + 1));
         fseek($fp, $offset);
-    } else { header("Content-Length: $fileSize"); }
-    while (!feof($fp)) { echo fread($fp, 1024 * 128); flush(); if (connection_aborted()) break; }
+    } else {
+        header("Content-Length: $fileSize");
+    }
+    
+    while (!feof($fp)) {
+        echo fread($fp, 1024 * 128);
+        flush();
+        if (connection_aborted()) break;
+    }
     fclose($fp);
     exit;
 }
