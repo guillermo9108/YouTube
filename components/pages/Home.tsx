@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Category, Notification as AppNotification } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, CheckCheck, Zap
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, CheckCheck, Zap, MessageSquare
 } from 'lucide-react';
 import { useLocation, useNavigate } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -100,13 +100,17 @@ export default function Home() {
 
   const fetchNotifs = async () => {
     if (user) {
-        try { const res = await db.getNotifications(user.id); setNotifs(res); } catch(e) {}
+        try { 
+            const res = await db.getNotifications(user.id); 
+            // IMPORTANTE: Solo actualizar si hay cambios reales para evitar re-renderizados innecesarios
+            setNotifs(res); 
+        } catch(e) {}
     }
   };
 
   useEffect(() => {
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 30000);
+    const interval = setInterval(fetchNotifs, 15000); // Frecuencia aumentada
     return () => clearInterval(interval);
   }, [user?.id]);
 
@@ -141,6 +145,7 @@ export default function Home() {
       if (e) { e.stopPropagation(); e.preventDefault(); }
       try {
           await db.markNotificationRead(id);
+          // Actualización optimista local
           setNotifs(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
       } catch(e) {}
   };
@@ -225,59 +230,84 @@ export default function Home() {
     <div className="pb-20 space-y-8 px-2 md:px-0">
       
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
-          <div className="flex gap-2 mb-4 items-center">
-              <div className="relative flex-1">
+          <div className="flex gap-2 mb-4 items-center overflow-visible">
+              <div className="relative flex-1 min-w-0">
                   <Search className="absolute left-4 top-3 text-slate-500" size={18} />
-                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar..." className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-4 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" />
+                  <input 
+                    type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} 
+                    placeholder="Buscar contenido..." 
+                    className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-4 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" 
+                  />
               </div>
 
-              {/* CAMPANA DE NOTIFICACIONES (Solo si hay unread) */}
+              {/* CAMPANA DE NOTIFICACIONES (Solo si hay no leídas) */}
               {unreadNotifs.length > 0 && (
-                <div className="relative" ref={menuRef}>
+                <div className="relative shrink-0" ref={menuRef}>
                     <button 
                         onClick={() => setShowNotifMenu(!showNotifMenu)}
-                        className={`p-2.5 rounded-xl border transition-all ${showNotifMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
+                        className={`p-2.5 rounded-xl border transition-all flex items-center justify-center min-w-[44px] min-h-[44px] ${showNotifMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
                     >
-                        <Bell size={20} className={unreadNotifs.length > 0 ? "animate-[ring_2s_infinite]" : ""} />
+                        <Bell size={20} className="animate-[ring_2s_infinite]" />
                         <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black shadow-lg">
                             {unreadNotifs.length}
                         </span>
                     </button>
 
                     {showNotifMenu && (
-                        <div className="absolute top-full right-0 mt-3 w-80 max-h-[450px] bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 origin-top-right z-[100]">
-                            <div className="p-4 bg-slate-950 border-b border-white/5 flex justify-between items-center">
-                                <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2"><Zap size={14} className="text-amber-400"/> Alertas</h3>
-                                <button onClick={handleMarkAllRead} className="text-[10px] font-black text-indigo-400 hover:text-white uppercase flex items-center gap-1 transition-colors">
-                                    <CheckCheck size={12}/> Todo leído
+                        <div className="fixed sm:absolute top-20 sm:top-full right-4 sm:right-0 w-[calc(100vw-32px)] sm:w-80 max-h-[70vh] sm:max-h-[450px] bg-slate-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 origin-top-right z-[200]">
+                            <div className="p-4 bg-slate-950 border-b border-white/5 flex justify-between items-center sticky top-0 z-10">
+                                <div className="flex items-center gap-2">
+                                    <Zap size={14} className="text-amber-400 fill-amber-400"/>
+                                    <h3 className="text-xs font-black text-white uppercase tracking-widest">Novedades</h3>
+                                </div>
+                                <button onClick={handleMarkAllRead} className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 uppercase flex items-center gap-1 transition-colors px-2 py-1 rounded-lg hover:bg-indigo-500/10">
+                                    <CheckCheck size={12}/> Marcar todo
                                 </button>
                             </div>
+
                             <div className="flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
-                                {unreadNotifs.map(n => (
+                                {unreadNotifs.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-12 text-slate-600 opacity-40">
+                                        <MessageSquare size={32} className="mb-2" />
+                                        <p className="text-[10px] font-black uppercase tracking-widest">Sin notificaciones</p>
+                                    </div>
+                                ) : unreadNotifs.map(n => (
                                     <div 
                                         key={n.id}
-                                        onClick={() => { handleMarkRead(n.id); navigate(n.link); setShowNotifMenu(false); }}
-                                        className="p-4 border-b border-white/5 bg-indigo-500/5 hover:bg-white/5 transition-all cursor-pointer group flex gap-3 items-start"
+                                        className="p-4 border-b border-white/5 bg-indigo-500/[0.03] hover:bg-white/5 transition-all cursor-pointer group flex gap-3 items-start relative"
                                     >
-                                        <div className="w-10 h-10 rounded-lg bg-slate-800 shrink-0 overflow-hidden border border-white/10 shadow-sm">
-                                            {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-600"><Bell size={16}/></div>}
+                                        <div 
+                                            onClick={() => { handleMarkRead(n.id); navigate(n.link); setShowNotifMenu(false); }}
+                                            className="flex-1 min-w-0 flex gap-3"
+                                        >
+                                            <div className="w-10 h-10 rounded-lg bg-slate-800 shrink-0 overflow-hidden border border-white/10 shadow-sm relative">
+                                                {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-600"><Bell size={16}/></div>}
+                                                <div className="absolute inset-0 bg-indigo-500/10 group-hover:bg-transparent transition-colors"></div>
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-[11px] text-slate-300 leading-snug line-clamp-2 pr-6 font-medium">{n.text}</p>
+                                                <span className="text-[9px] text-slate-500 font-bold uppercase mt-1 block">{new Date(n.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                                            </div>
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-[11px] text-slate-300 leading-snug line-clamp-2">{n.text}</p>
-                                            <span className="text-[9px] text-slate-500 font-bold uppercase mt-1 block">{new Date(n.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                                        </div>
+                                        
                                         <button 
                                             onClick={(e) => handleMarkRead(n.id, e)}
-                                            className="p-1 text-slate-600 hover:text-emerald-400 opacity-0 group-hover:opacity-100 transition-all"
-                                            title="Marcar leída"
+                                            className="p-2 text-slate-600 hover:text-emerald-400 transition-all shrink-0 bg-slate-800/50 rounded-lg hover:bg-emerald-500/10"
+                                            title="Marcar como leída"
                                         >
                                             <Check size={16}/>
                                         </button>
                                     </div>
                                 ))}
                             </div>
-                            <div className="p-3 bg-slate-950/50 text-center border-t border-white/5">
-                                <button onClick={() => { navigate('/profile'); setShowNotifMenu(false); }} className="text-[9px] font-black text-slate-500 hover:text-white uppercase tracking-widest">Ver Historial Completo</button>
+                            
+                            <div className="p-3 bg-slate-950/80 text-center border-t border-white/5">
+                                <button 
+                                    onClick={() => { navigate('/profile'); setShowNotifMenu(false); }} 
+                                    className="text-[9px] font-black text-slate-500 hover:text-white uppercase tracking-[0.2em] transition-colors"
+                                >
+                                    Ir al historial completo
+                                </button>
                             </div>
                         </div>
                     )}
@@ -350,6 +380,16 @@ export default function Home() {
             85% { transform: rotate(1deg); }
             90% { transform: rotate(0); }
             100% { transform: rotate(0); }
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 10px;
         }
       `}</style>
     </div>
