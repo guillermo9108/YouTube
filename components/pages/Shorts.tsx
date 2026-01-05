@@ -30,7 +30,6 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Carga PREVENTIVA de datos cuando el video está "Cerca" (isNear)
   useEffect(() => {
     if (user && isNear && !dataLoaded) {
       db.getInteraction(user.id, video.id).then(setInteraction);
@@ -44,9 +43,12 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
   useEffect(() => {
     const el = videoRef.current; if (!el) return;
     if (isActive && isUnlocked) {
-        el.currentTime = 0; setPaused(false);
+        el.currentTime = 0; 
+        setPaused(false);
+        // Shorts siempre intentan autoplay silenciado para compatibilidad máxima
+        el.muted = true;
         const p = el.play(); if (p) p.catch(() => {});
-        db.incrementView(video.id); // View instantánea en Shorts
+        db.incrementView(video.id);
     } else { el.pause(); }
   }, [isActive, isUnlocked]);
 
@@ -74,6 +76,11 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
     }
   };
 
+  const videoSrc = useMemo(() => {
+    const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
+    return `${window.location.origin}/${base}&token=${localStorage.getItem('sp_session_token') || ''}`;
+  }, [video.id]);
+
   if (!isNear) return <div className="w-full h-full snap-start bg-black shrink-0 flex items-center justify-center"><Loader2 className="animate-spin text-slate-800" /></div>;
 
   return (
@@ -82,7 +89,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
         {isUnlocked ? (
           <>
             <video
-                ref={videoRef} src={video.videoUrl} poster={video.thumbnailUrl}
+                ref={videoRef} src={videoSrc} poster={video.thumbnailUrl}
                 className="w-full h-full object-cover" loop playsInline preload="auto" crossOrigin="anonymous"
             />
             {paused && <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50"><Pause size={64} fill="currentColor" /></div>}
@@ -101,19 +108,36 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess }: ShortItemProps) =
         )}
       </div>
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80 pointer-events-none z-10" />
-      <div className="absolute right-2 bottom-20 z-30 flex flex-col items-center gap-5 pb-safe">
+      
+      {/* BARRA LATERAL DE ACCIONES */}
+      <div className="absolute right-2 bottom-24 z-30 flex flex-col items-center gap-5 pb-safe">
         <div className="flex flex-col items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 ${interaction?.liked ? 'text-red-500' : 'text-white'}`}><Heart size={26} fill={interaction?.liked ? "currentColor" : "white"} fillOpacity={interaction?.liked ? 1 : 0.2} /></button>
+          <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-colors ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>
+             <Heart size={26} fill={interaction?.liked ? "currentColor" : "white"} fillOpacity={interaction?.liked ? 1 : 0.2} />
+          </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{likeCount}</span>
         </div>
+
         <div className="flex flex-col items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white"><MessageCircle size={26} fill="white" fillOpacity={0.2} /></button>
+          <button onClick={(e) => { e.stopPropagation(); handleRate('dislike'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-colors ${interaction?.disliked ? 'text-red-500' : 'text-white'}`}>
+             <ThumbsDown size={26} fill={interaction?.disliked ? "currentColor" : "white"} fillOpacity={interaction?.disliked ? 1 : 0.2} />
+          </button>
+          <span className="text-[10px] font-black text-white drop-shadow-md">NO</span>
+        </div>
+
+        <div className="flex flex-col items-center gap-1">
+          <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+             <MessageCircle size={26} fill="white" fillOpacity={0.2} />
+          </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{comments.length}</span>
         </div>
-        <button onClick={(e) => { e.stopPropagation(); navigator.share?.({title: video.title, url: window.location.href}); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white"><Share2 size={26} fill="white" fillOpacity={0.2} /></button>
+
+        <button onClick={(e) => { e.stopPropagation(); navigator.share?.({title: video.title, url: window.location.href}); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+            <Share2 size={26} fill="white" fillOpacity={0.2} />
+        </button>
       </div>
 
-      <div className="absolute bottom-6 left-3 right-16 z-30 text-white flex flex-col gap-3 pointer-events-none pb-safe">
+      <div className="absolute bottom-10 left-3 right-16 z-30 text-white flex flex-col gap-3 pointer-events-none pb-safe">
          <div className="flex items-center gap-3 pointer-events-auto">
             <Link to={`/channel/${video.creatorId}`} className="relative shrink-0">
                 <div className="w-11 h-11 rounded-full border-2 border-white overflow-hidden bg-slate-800 shadow-xl">{video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{video.creatorName[0]}</div>}</div>
@@ -182,7 +206,7 @@ export default function Shorts() {
   }, [user]);
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative" style={{ scrollBehavior: 'smooth' }}>
+    <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative">
       <div className="fixed top-4 left-4 z-50"><Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link></div>
       {videos.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4"><Loader2 className="animate-spin text-indigo-500" size={32}/><p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p></div>
@@ -191,7 +215,7 @@ export default function Shorts() {
              <ShortItem 
                 video={video} 
                 isActive={idx === activeIndex} 
-                isNear={Math.abs(idx - activeIndex) <= 2} // Carga adyacentes instantáneamente
+                isNear={Math.abs(idx - activeIndex) <= 2}
                 hasFullAccess={hasFullAccess} 
              />
         </div>
