@@ -28,6 +28,8 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
   const [comments, setComments] = useState<Comment[]>([]);
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
+  
+  // INICIALIZACIÓN: Usar los likes reales del video desde el primer render
   const [likeCount, setLikeCount] = useState(video.likes || 0);
   const [dataLoaded, setDataLoaded] = useState(false);
 
@@ -45,7 +47,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
     if (isActive && isUnlocked) {
         el.currentTime = 0; 
         setPaused(false);
-        el.muted = false; // Intentar con audio si está activo
+        el.muted = false; 
         const p = el.play(); if (p) p.catch(() => { el.muted = true; el.play(); });
         db.incrementView(video.id);
     } else { el.pause(); }
@@ -55,7 +57,8 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
     if (!user) return;
     try {
         const res = await db.rateVideo(user.id, video.id, rating);
-        setInteraction(res); if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
+        setInteraction(res); 
+        if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
     } catch(e) {}
   };
 
@@ -187,7 +190,6 @@ export default function Shorts() {
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Share Interno
   const [videoToShare, setVideoToShare] = useState<Video | null>(null);
   const [shareSearch, setShareSearch] = useState('');
   const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
@@ -263,7 +265,6 @@ export default function Shorts() {
         </div>
       ))}
 
-      {/* MODAL DE COMPARTIR INTERNO */}
       {videoToShare && (
           <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
               <div className="bg-slate-900 border border-slate-800 rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">

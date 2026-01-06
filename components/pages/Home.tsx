@@ -10,6 +10,9 @@ import {
 import { useLocation, useNavigate } from '../Router';
 import AIConcierge from '../AIConcierge';
 
+// Helper de ordenamiento natural global
+const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: string | null) => void }) => (
     <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in sticky top-0 bg-black/80 backdrop-blur-md z-20">
         <button onClick={() => onNavigate(null)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
@@ -92,11 +95,9 @@ export default function Home() {
   const [visibleCount, setVisibleCount] = useState(12);
   const [isAiConfigured, setIsAiConfigured] = useState(false);
 
-  // Notificaciones locales en Home
   const [notifs, setNotifs] = useState<AppNotification[]>([]);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   
-  // FIX: Comparación numérica estricta porque PHP devuelve "0" o "1"
   const unreadNotifs = useMemo(() => notifs.filter(n => Number(n.isRead) === 0), [notifs]);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -145,7 +146,6 @@ export default function Home() {
       if (e) { e.stopPropagation(); e.preventDefault(); }
       try {
           await db.markNotificationRead(id);
-          // Actualización optimista: marcar como 1 (leído)
           setNotifs(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
       } catch(e) {}
   };
@@ -209,8 +209,8 @@ export default function Home() {
 
       switch (sortMode) {
           case 'ALPHA':
-              // MEJORA: Ordenamiento natural para 01, 02, 10
-              list.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
+              // MEJORA DEFINITIVA: Ordenamiento natural usando Collator nativo para manejar 01, 1, 002...
+              list.sort((a, b) => naturalCollator.compare(a.title, b.title));
               break;
           case 'RANDOM':
               list.sort(() => (Math.random() - 0.5)); 
@@ -232,7 +232,6 @@ export default function Home() {
     <div className="pb-20 space-y-8 px-2 md:px-0">
       
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
-          {/* Contenedor Flex: Asegura que el buscador ocupe el resto pero la campana tenga espacio fijo */}
           <div className="flex gap-3 mb-4 items-center w-full">
               <div className="relative flex-1 min-w-0">
                   <Search className="absolute left-4 top-3 text-slate-500" size={18} />
@@ -243,7 +242,6 @@ export default function Home() {
                   />
               </div>
 
-              {/* CAMPANA DE NOTIFICACIONES: Visible solo si hay unread real */}
               {unreadNotifs.length > 0 && (
                 <div className="relative shrink-0" ref={menuRef}>
                     <button 

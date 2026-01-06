@@ -11,6 +11,9 @@ import {
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
+// Helper de ordenamiento natural global
+const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 export default function Watch() {
     const { id } = useParams();
     const { user, refreshUser } = useAuth();
@@ -24,7 +27,10 @@ export default function Watch() {
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
     
+    // Conteo persistente inicializado desde el objeto video
     const [likes, setLikes] = useState(0);
+    const [dislikes, setDislikes] = useState(0);
+    
     const [comments, setComments] = useState<Comment[]>([]);
     const [showComments, setShowComments] = useState(false); 
     const [newComment, setNewComment] = useState('');
@@ -58,18 +64,20 @@ export default function Watch() {
 
                 if (v) {
                     setVideo(v); 
+                    // Inicializar conteos inmediatamente con datos de DB
                     setLikes(v.likes || 0);
+                    setDislikes((v as any).dislikes || 0);
                     setCategories(settings.categories || []);
 
                     // Obtener relacionados
                     const related = await db.getRelatedVideos(v.id);
                     
-                    // APLICAR ORDENAMIENTO DE CATEGORÍA AL FEED LATERAL
+                    // APLICAR ORDENAMIENTO NATURAL DE CATEGORÍA AL FEED LATERAL
                     const catDef = (settings.categories || []).find(c => c.name === v.category || c.name === v.parent_category);
                     const sortMode = catDef?.sortOrder || 'LATEST';
                     
                     if (sortMode === 'ALPHA') {
-                        related.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
+                        related.sort((a, b) => naturalCollator.compare(a.title, b.title));
                     } else if (sortMode === 'RANDOM') {
                         related.sort(() => Math.random() - 0.5);
                     } else {
@@ -98,7 +106,9 @@ export default function Watch() {
         try {
             const res = await db.rateVideo(user.id, video.id, type);
             setInteraction(res);
+            // El backend ahora devuelve los conteos actualizados
             if (res.newLikeCount !== undefined) setLikes(res.newLikeCount);
+            if ((res as any).newDislikeCount !== undefined) setDislikes((res as any).newDislikeCount);
         } catch (e) {}
     };
 
@@ -121,7 +131,6 @@ export default function Watch() {
         }
     };
 
-    // LÓGICA DE REPRODUCCIÓN CONTINUA Y AUTOCOMPRA
     const handleVideoEnded = async () => {
         if (!relatedVideos.length || !user) return;
         
@@ -130,7 +139,6 @@ export default function Watch() {
         const isOwner = user.id === nextVid.creatorId;
         const isVipTotal = user.vipExpiry && user.vipExpiry > Date.now() / 1000;
 
-        // Si ya tiene acceso
         const hasDirectAccess = isAdmin || isOwner || isVipTotal;
         
         if (hasDirectAccess) {
@@ -139,14 +147,12 @@ export default function Watch() {
             return;
         }
 
-        // Verificar si ya está comprado
         const alreadyPurchased = await db.hasPurchased(user.id, nextVid.id);
         if (alreadyPurchased) {
             navigate(`/watch/${nextVid.id}`);
             return;
         }
 
-        // Lógica de Autocompra basada en límite
         const price = Number(nextVid.price);
         const limit = Number(user.autoPurchaseLimit || 0);
 
@@ -246,8 +252,9 @@ export default function Watch() {
                                         <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"}/>
                                         <span className="text-xs font-bold">{likes}</span>
                                     </button>
-                                    <button onClick={() => handleRate('dislike')} className={`px-4 py-2 hover:bg-white/5 transition-all ${interaction?.disliked ? 'text-red-400' : 'text-slate-400'}`}>
+                                    <button onClick={() => handleRate('dislike')} className={`flex items-center gap-2 px-4 py-2 hover:bg-white/5 transition-all ${interaction?.disliked ? 'text-red-400' : 'text-slate-400'}`}>
                                         <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
+                                        <span className="text-xs font-bold">{dislikes}</span>
                                     </button>
                                 </div>
                                 <button onClick={() => setShowComments(!showComments)} className={`flex items-center gap-2 px-4 py-2 rounded-xl border border-white/5 transition-all ${showComments ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400'}`}>
@@ -317,7 +324,6 @@ export default function Watch() {
                 </div>
             </div>
 
-            {/* MODAL DE COMPARTIR INTERNO */}
             {showShareModal && (
                 <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
                     <div className="bg-slate-900 border border-slate-800 rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">

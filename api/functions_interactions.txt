@@ -115,12 +115,25 @@ function interact_rate($pdo, $input) {
     $userId = $input['userId'] ?? null; $videoId = $input['videoId']; $rating = $input['type'] ?? 'view';
     if ($userId) {
         $stmt = $pdo->prepare("SELECT liked, disliked FROM interactions WHERE userId = ? AND videoId = ?"); $stmt->execute([$userId, $videoId]); $curr = $stmt->fetch();
-        $liked = $curr ? $curr['liked'] : 0; $disliked = $curr ? $curr['disliked'] : 0;
-        if ($rating === 'like') { $liked = !$liked; if($liked) $disliked = 0; }
-        else { $disliked = !$disliked; if($disliked) $liked = 0; }
+        $liked = $curr ? intval($curr['liked']) : 0; $disliked = $curr ? intval($curr['disliked']) : 0;
+        
+        if ($rating === 'like') { $liked = ($liked === 1) ? 0 : 1; if($liked === 1) $disliked = 0; }
+        else { $disliked = ($disliked === 1) ? 0 : 1; if($disliked === 1) $liked = 0; }
+        
         $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE liked=VALUES(liked), disliked=VALUES(disliked)")->execute([$userId, $videoId, $liked, $disliked]);
+        
+        // SINCRONIZACIÓN: Actualizar la tabla videos con el conteo real
         $newLikeCount = (int)$pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId = '$videoId' AND liked = 1")->fetchColumn();
-        respond(true, ['liked' => (bool)$liked, 'disliked' => (bool)$disliked, 'newLikeCount' => $newLikeCount]);
+        $newDislikeCount = (int)$pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId = '$videoId' AND disliked = 1")->fetchColumn();
+        
+        $pdo->prepare("UPDATE videos SET likes = ?, dislikes = ? WHERE id = ?")->execute([$newLikeCount, $newDislikeCount, $videoId]);
+        
+        respond(true, [
+            'liked' => (bool)$liked, 
+            'disliked' => (bool)$disliked, 
+            'newLikeCount' => $newLikeCount,
+            'newDislikeCount' => $newDislikeCount
+        ]);
     } else {
         $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$videoId]);
         respond(true);
