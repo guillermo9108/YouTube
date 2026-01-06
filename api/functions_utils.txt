@@ -38,11 +38,13 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
             }
         }
     }
+
+    // PROTECCIÓN: Truncar strings para evitar SQL Error 1406
     return [
-        'title' => ucwords(strtolower($cleanName)), 
-        'category' => $detectedCat,
-        'parent_category' => $detectedParent,
-        'collection' => $detectedCollection
+        'title' => substr(ucwords(strtolower($cleanName)), 0, 250), 
+        'category' => substr($detectedCat, 0, 95),
+        'parent_category' => $detectedParent ? substr($detectedParent, 0, 95) : null,
+        'collection' => $detectedCollection ? substr($detectedCollection, 0, 95) : null
     ];
 }
 

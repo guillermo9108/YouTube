@@ -209,7 +209,8 @@ export default function Home() {
 
       switch (sortMode) {
           case 'ALPHA':
-              list.sort((a, b) => a.title.localeCompare(b.title));
+              // MEJORA: Ordenamiento natural para 01, 02, 10
+              list.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
               break;
           case 'RANDOM':
               list.sort(() => (Math.random() - 0.5)); 

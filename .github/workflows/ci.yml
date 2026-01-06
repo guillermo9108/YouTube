@@ -1,4 +1,3 @@
-
 name: Build and Release
 
 on:
@@ -59,9 +58,9 @@ jobs:
         done
 
         # COPIA CRÍTICA: Puente YouTube y sus dependencias de Node
-        cp api/yt_bridge.js dist/api/yt_bridge.js
-        cp api/package.json dist/api/package.json
-        cp -r api/node_modules dist/api/node_modules
+        cp api/yt_bridge.js dist/api/yt_bridge.js 2>/dev/null || :
+        cp api/package.json dist/api/package.json 2>/dev/null || :
+        cp -r api/node_modules dist/api/node_modules 2>/dev/null || :
         
         # Crear estructura de carpetas para subidas
         mkdir -p dist/api/uploads/videos

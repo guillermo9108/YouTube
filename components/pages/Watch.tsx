@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Video, Comment, UserInteraction } from '../../types';
+import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
@@ -22,13 +22,13 @@ export default function Watch() {
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
+    const [categories, setCategories] = useState<Category[]>([]);
     
     const [likes, setLikes] = useState(0);
     const [comments, setComments] = useState<Comment[]>([]);
-    const [showComments, setShowComments] = useState(false); // Ocultos por defecto
+    const [showComments, setShowComments] = useState(false); 
     const [newComment, setNewComment] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [inWatchLater, setInWatchLater] = useState(false);
 
     // Share Interno
     const [showShareModal, setShowShareModal] = useState(false);
@@ -38,12 +38,10 @@ export default function Watch() {
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const viewMarkedRef = useRef(false);
-    const watchedMarkedRef = useRef(false);
 
     useEffect(() => { 
         window.scrollTo(0, 0); refreshUser(); 
         viewMarkedRef.current = false;
-        watchedMarkedRef.current = false;
         setShowComments(false);
     }, [id]);
 
@@ -51,13 +49,36 @@ export default function Watch() {
         if (!id) return;
         setLoading(true);
         
-        const fetchMeta = async () => {
+        const fetchData = async () => {
             try {
-                const v = await db.getVideo(id);
+                const [v, settings] = await Promise.all([
+                    db.getVideo(id),
+                    db.getSystemSettings()
+                ]);
+
                 if (v) {
-                    setVideo(v); setLikes(v.likes || 0);
-                    db.getRelatedVideos(v.id).then(setRelatedVideos);
+                    setVideo(v); 
+                    setLikes(v.likes || 0);
+                    setCategories(settings.categories || []);
+
+                    // Obtener relacionados
+                    const related = await db.getRelatedVideos(v.id);
+                    
+                    // APLICAR ORDENAMIENTO DE CATEGORÍA AL FEED LATERAL
+                    const catDef = (settings.categories || []).find(c => c.name === v.category || c.name === v.parent_category);
+                    const sortMode = catDef?.sortOrder || 'LATEST';
+                    
+                    if (sortMode === 'ALPHA') {
+                        related.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
+                    } else if (sortMode === 'RANDOM') {
+                        related.sort(() => Math.random() - 0.5);
+                    } else {
+                        related.sort((a, b) => b.createdAt - a.createdAt);
+                    }
+
+                    setRelatedVideos(related);
                     db.getComments(v.id).then(setComments);
+
                     if (user) {
                         const [access, interact] = await Promise.all([
                             db.hasPurchased(user.id, v.id), 
@@ -65,12 +86,11 @@ export default function Watch() {
                         ]);
                         setIsUnlocked(access || user.role === 'ADMIN' || user.id === v.creatorId);
                         setInteraction(interact);
-                        setInWatchLater(user.watchLater?.includes(v.id) || false);
                     }
                 }
             } catch (e) {} finally { setLoading(false); }
         };
-        fetchMeta();
+        fetchData();
     }, [id, user?.id]);
 
     const handleRate = async (type: 'like' | 'dislike') => {
@@ -91,6 +111,56 @@ export default function Watch() {
             setComments(prev => [c, ...prev]);
             setNewComment('');
         } catch (e) {} finally { setIsSubmitting(false); }
+    };
+
+    const handleVideoTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+        const vid = e.currentTarget;
+        if (!viewMarkedRef.current && vid.currentTime > 2) {
+            viewMarkedRef.current = true;
+            db.incrementView(video!.id);
+        }
+    };
+
+    // LÓGICA DE REPRODUCCIÓN CONTINUA Y AUTOCOMPRA
+    const handleVideoEnded = async () => {
+        if (!relatedVideos.length || !user) return;
+        
+        const nextVid = relatedVideos[0];
+        const isAdmin = user.role === 'ADMIN';
+        const isOwner = user.id === nextVid.creatorId;
+        const isVipTotal = user.vipExpiry && user.vipExpiry > Date.now() / 1000;
+
+        // Si ya tiene acceso
+        const hasDirectAccess = isAdmin || isOwner || isVipTotal;
+        
+        if (hasDirectAccess) {
+            toast.info(`Siguiente: ${nextVid.title}`);
+            navigate(`/watch/${nextVid.id}`);
+            return;
+        }
+
+        // Verificar si ya está comprado
+        const alreadyPurchased = await db.hasPurchased(user.id, nextVid.id);
+        if (alreadyPurchased) {
+            navigate(`/watch/${nextVid.id}`);
+            return;
+        }
+
+        // Lógica de Autocompra basada en límite
+        const price = Number(nextVid.price);
+        const limit = Number(user.autoPurchaseLimit || 0);
+
+        if (price <= limit && Number(user.balance) >= price) {
+            try {
+                await db.purchaseVideo(user.id, nextVid.id);
+                toast.success(`Autocompra: ${nextVid.title} (${price} $)`);
+                navigate(`/watch/${nextVid.id}`);
+            } catch (e) {
+                toast.error("Error en autocompra automática");
+            }
+        } else {
+            toast.warning("Siguiente video requiere compra manual o subir límite");
+        }
     };
 
     const handleShareSearch = (val: string) => {
@@ -118,14 +188,6 @@ export default function Watch() {
         } catch (e: any) { toast.error(e.message); }
     };
 
-    const handleVideoTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
-        const vid = e.currentTarget;
-        if (!viewMarkedRef.current && vid.currentTime > 2) {
-            viewMarkedRef.current = true;
-            db.incrementView(video!.id);
-        }
-    };
-
     const streamUrl = useMemo(() => {
         if (!video) return '';
         const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
@@ -140,8 +202,15 @@ export default function Watch() {
                 <div className="relative aspect-video max-w-[1600px] mx-auto bg-black">
                     {isUnlocked ? (
                         <video 
-                            ref={videoRef} src={streamUrl} controls autoPlay playsInline className="w-full h-full object-contain" 
-                            onTimeUpdate={handleVideoTimeUpdate} crossOrigin="anonymous"
+                            ref={videoRef} 
+                            src={streamUrl} 
+                            controls 
+                            autoPlay 
+                            playsInline 
+                            className="w-full h-full object-contain" 
+                            onTimeUpdate={handleVideoTimeUpdate}
+                            onEnded={handleVideoEnded}
+                            crossOrigin="anonymous"
                         />
                     ) : (
                         <div onClick={() => navigate('/vip')} className="absolute inset-0 cursor-pointer group overflow-hidden">
@@ -190,7 +259,6 @@ export default function Watch() {
                         </div>
                     </div>
 
-                    {/* SECCIÓN DE COMENTARIOS COLAPSABLE */}
                     {showComments && (
                         <div className="space-y-6 animate-in slide-in-from-top-4 duration-300">
                             <h3 className="text-lg font-black text-white uppercase tracking-tighter flex items-center gap-2 border-l-4 border-indigo-500 pl-3">
@@ -235,7 +303,7 @@ export default function Watch() {
 
                 <div className="lg:w-80 space-y-6">
                     <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-2">Siguiente Contenido</h3>
-                    {relatedVideos.slice(0, 10).map(v => (
+                    {relatedVideos.slice(0, 15).map(v => (
                         <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
                             <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
                                 <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"/>

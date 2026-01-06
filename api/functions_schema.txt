@@ -33,8 +33,8 @@ function getAppSchema() {
                 'createdAt' => 'BIGINT',
                 'likes' => 'INT DEFAULT 0',
                 'dislikes' => 'INT DEFAULT 0',
-                'category' => "VARCHAR(50) DEFAULT 'GENERAL'",
-                'parent_category' => "VARCHAR(50) DEFAULT NULL",
+                'category' => "VARCHAR(100) DEFAULT 'GENERAL'",
+                'parent_category' => "VARCHAR(100) DEFAULT NULL",
                 'collection' => "VARCHAR(100) DEFAULT NULL",
                 'duration' => 'INT DEFAULT 0',
                 'fileHash' => 'VARCHAR(32)',
@@ -57,7 +57,7 @@ function getAppSchema() {
                 'stock' => 'INT DEFAULT 1',
                 'images' => 'JSON',
                 'sellerId' => 'VARCHAR(50)',
-                'category' => 'VARCHAR(50)',
+                'category' => 'VARCHAR(100)',
                 'itemCondition' => 'VARCHAR(50)',
                 'status' => "ENUM('ACTIVO', 'AGOTADO', 'ELIMINADO') DEFAULT 'ACTIVO'",
                 'createdAt' => 'BIGINT'
@@ -212,6 +212,11 @@ function syncTable($pdo, $tableName, $def) {
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
                     write_log("Columna añadida a $tableName: $colName", 'INFO');
+                } else {
+                    // Check if we need to modify varchar length (Extreme fix for category length)
+                    if (strpos(strtolower($colDef), 'varchar') !== false) {
+                        $pdo->exec("ALTER TABLE $tableName MODIFY COLUMN $colName $colDef");
+                    }
                 }
             }
         }
