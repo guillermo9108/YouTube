@@ -75,24 +75,28 @@ function video_get_unprocessed($pdo) {
  * MOTOR YOUTUBE (NODE BRIDGE)
  */
 function video_search_external($pdo, $q, $source) {
-    $bridgePath = __DIR__ . "/yt_bridge.js";
-    if (!file_exists($bridgePath)) respond(false, null, "yt_bridge.js no encontrado");
+    $bridgePath = realpath(__DIR__ . "/yt_bridge.js");
+    if (!$bridgePath || !file_exists($bridgePath)) {
+        respond(false, null, "Motor de búsqueda (yt_bridge.js) no hallado. Verifica que Node.js esté instalado en el servidor.");
+    }
 
     $cmd = "node " . escapeshellarg($bridgePath) . " search " . escapeshellarg($q);
     exec($cmd, $output, $returnVar);
-    if ($returnVar !== 0) respond(false, null, "Fallo en búsqueda YouTube");
+    if ($returnVar !== 0) respond(false, null, "Error ejecucion Node: " . implode(' ', $output));
 
     $data = json_decode(implode('', $output), true);
     respond(true, $data);
 }
 
 function video_server_import($pdo, $url) {
-    $bridgePath = __DIR__ . "/yt_bridge.js";
+    $bridgePath = realpath(__DIR__ . "/yt_bridge.js");
+    if (!$bridgePath) respond(false, null, "Error: Puente de YouTube no instalado.");
+
     $cmd = "node " . escapeshellarg($bridgePath) . " get_url " . escapeshellarg($url);
     exec($cmd, $output, $returnVar);
     
     $res = json_decode(implode('', $output), true);
-    if (!$res || empty($res['url'])) respond(false, null, "No se pudo extraer el enlace");
+    if (!$res || empty($res['url'])) respond(false, null, "No se pudo extraer el enlace directo del video.");
 
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $id = 'yt_' . uniqid();
