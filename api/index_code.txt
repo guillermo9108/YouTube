@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V11.13 (Payments Enabled)
+ * StreamPay - Core Controller V11.14 (Node-YouTube Enabled)
  */
 ob_start(); 
 ini_set('display_errors', 0); 
@@ -99,6 +99,8 @@ try {
         // VIDEOS
         case 'get_videos': video_get_all($pdo); break;
         case 'get_video': video_get_one($pdo, $_GET['id'] ?? ''); break;
+        case 'search_external': video_search_external($pdo, $_GET['q'] ?? '', $_GET['source'] ?? 'YOUTUBE'); break;
+        case 'server_import': video_server_import($pdo, $_GET['url'] ?? ''); break;
         case 'get_videos_by_creator': video_get_by_creator($pdo, $_GET['userId'] ?? ''); break;
         case 'get_related_videos': video_get_related($pdo, $_GET['videoId'] ?? ''); break;
         case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
