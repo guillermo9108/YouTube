@@ -1,6 +1,8 @@
-
 <?php
 
+/**
+ * PROCESAMIENTO DE FILAS (URLs y Metadatos)
+ */
 function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
@@ -16,6 +18,9 @@ function video_process_rows(&$rows) {
     }
 }
 
+/**
+ * OBTENCIÓN DE VIDEOS
+ */
 function video_get_all($pdo) {
     $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA') ORDER BY v.createdAt DESC");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -35,58 +40,214 @@ function video_get_one($pdo, $id) {
     respond(false, null, 'Video no encontrado');
 }
 
-/**
- * Motor de Búsqueda Externa (Exclusivo YouTube vía Node Bridge)
- */
-function video_search_external($pdo, $q, $source) {
-    // Escapar comando para ejecución segura
-    $bridgePath = __DIR__ . "/yt_bridge.js";
+function video_get_by_creator($pdo, $userId) {
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.creatorId = ? ORDER BY v.createdAt DESC");
+    $stmt->execute([$userId]);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
+}
+
+function video_get_related($pdo, $videoId) {
+    $stmt = $pdo->prepare("SELECT category FROM videos WHERE id = ?");
+    $stmt->execute([$videoId]);
+    $cat = $stmt->fetchColumn() ?: 'GENERAL';
     
-    if (!file_exists($bridgePath)) {
-        respond(false, null, "Motor de búsqueda (yt_bridge.js) no encontrado en el servidor.");
-    }
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.category = ? OR v.category = 'GENERAL') AND v.category NOT IN ('PENDING', 'PROCESSING') LIMIT 12");
+    $stmt->execute([$videoId, $cat]);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
+}
 
-    $cmd = "node " . escapeshellarg($bridgePath) . " search " . escapeshellarg($q);
-    exec($cmd, $output, $returnVar);
-
-    if ($returnVar !== 0) {
-        $errorMsg = !empty($output) ? implode(' ', $output) : "Fallo en la ejecución de Node.js";
-        respond(false, null, "Error en motor YouTube: " . $errorMsg);
-    }
-
-    $data = json_decode(implode('', $output), true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        respond(false, null, "Respuesta corrupta del motor de búsqueda.");
-    }
-
-    respond(true, $data);
+function video_get_unprocessed($pdo) {
+    $limit = intval($_GET['limit'] ?? 50);
+    $mode = $_GET['mode'] ?? 'normal';
+    $orderBy = ($mode === 'random') ? 'RAND()' : 'createdAt DESC';
+    
+    $stmt = $pdo->query("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 ORDER BY $orderBy LIMIT $limit");
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
 }
 
 /**
- * Importación desde Servidor (YouTube -> MP4 Local)
+ * MOTOR YOUTUBE (NODE BRIDGE)
  */
+function video_search_external($pdo, $q, $source) {
+    $bridgePath = __DIR__ . "/yt_bridge.js";
+    if (!file_exists($bridgePath)) respond(false, null, "yt_bridge.js no encontrado");
+
+    $cmd = "node " . escapeshellarg($bridgePath) . " search " . escapeshellarg($q);
+    exec($cmd, $output, $returnVar);
+    if ($returnVar !== 0) respond(false, null, "Fallo en búsqueda YouTube");
+
+    $data = json_decode(implode('', $output), true);
+    respond(true, $data);
+}
+
 function video_server_import($pdo, $url) {
     $bridgePath = __DIR__ . "/yt_bridge.js";
-    
-    // 1. Obtener URL real de descarga vía bridge Node
     $cmd = "node " . escapeshellarg($bridgePath) . " get_url " . escapeshellarg($url);
     exec($cmd, $output, $returnVar);
     
     $res = json_decode(implode('', $output), true);
-    if (!$res || empty($res['url'])) {
-        respond(false, null, "No se pudo extraer el enlace de descarga directo de YouTube.");
-    }
+    if (!$res || empty($res['url'])) respond(false, null, "No se pudo extraer el enlace");
 
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $id = 'yt_' . uniqid();
-    $title = $res['title'] ?? 'YouTube Import ' . date('Y-m-d');
-    $remoteUrl = $res['url'];
-
-    // Insertar en estado PENDING para que el GridProcessor local se encargue de
-    // descargar el archivo físicamente y extraer los metadatos (thumb/duración)
-    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, isLocal) VALUES (?, ?, 'Contenido importado de YouTube', 1.00, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0)");
-    $stmt->execute([$id, $title, $remoteUrl, $adminId, time()]);
-
+    $title = $res['title'] ?? 'YouTube Import';
+    
+    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, isLocal) VALUES (?, ?, 'Importado de YouTube', 1.00, 'api/uploads/thumbnails/default.jpg', ?, ?, ?, 'PENDING', 0)");
+    $stmt->execute([$id, $title, $res['url'], $adminId, time()]);
     respond(true, ['id' => $id, 'title' => $title]);
+}
+
+/**
+ * SUBIDA Y METADATOS
+ */
+function video_upload($pdo, $post, $files) {
+    $id = 'v_' . uniqid();
+    $userId = $post['userId'];
+    $title = $post['title'];
+    $desc = $post['description'];
+    $price = floatval($post['price']);
+    $cat = $post['category'];
+    $dur = intval($post['duration']);
+    
+    $videoUrl = "";
+    if (isset($files['video'])) {
+        $ext = pathinfo($files['video']['name'], PATHINFO_EXTENSION);
+        $videoUrl = "uploads/videos/{$id}.{$ext}";
+        move_uploaded_file($files['video']['tmp_name'], $videoUrl);
+    }
+    
+    $thumbUrl = "uploads/thumbnails/default.jpg";
+    if (isset($files['thumbnail'])) {
+        $thumbUrl = "uploads/thumbnails/{$id}.jpg";
+        move_uploaded_file($files['thumbnail']['tmp_name'], $thumbUrl);
+    }
+
+    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
+    $stmt->execute([$id, $title, $desc, $price, $thumbUrl, $videoUrl, $userId, time(), $cat, $dur]);
+    respond(true);
+}
+
+function video_update_metadata($pdo, $post, $files) {
+    $id = $post['id'];
+    $dur = intval($post['duration']);
+    $success = ($post['success'] ?? '1') === '1';
+    
+    if (!$success) {
+        $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1 WHERE id = ?")->execute([$id]);
+        $attempts = $pdo->query("SELECT processing_attempts FROM videos WHERE id = '$id'")->fetchColumn();
+        if ($attempts >= 3) $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA' WHERE id = ?")->execute([$id]);
+        respond(true);
+        return;
+    }
+
+    $fields = ["duration = ?", "category = 'PROCESSING'", "processing_attempts = 0"];
+    $params = [$dur];
+
+    if (isset($files['thumbnail'])) {
+        $thumbPath = "uploads/thumbnails/{$id}.jpg";
+        move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
+        $fields[] = "thumbnailUrl = ?";
+        $params[] = $thumbPath;
+    }
+
+    $params[] = $id;
+    $stmt = $pdo->prepare("UPDATE videos SET " . implode(', ', $fields) . " WHERE id = ?");
+    $stmt->execute($params);
+
+    // Trigger de organización instantánea
+    $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
+    video_organize_single($pdo, $id, $settings);
+    respond(true);
+}
+
+/**
+ * ESCANEO Y MANTENIMIENTO
+ */
+function video_scan_local($pdo, $input) {
+    $path = $input['path'] ?? '';
+    if (!is_dir($path)) respond(false, null, "Ruta no válida: $path");
+
+    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
+    $added = 0; $found = 0;
+    
+    foreach ($it as $file) {
+        if ($file->isDir()) continue;
+        $ext = strtolower($file->getExtension());
+        if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm'])) {
+            $found++;
+            $fullPath = $file->getRealPath();
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
+            $stmt->execute([$fullPath]);
+            if ($stmt->fetchColumn() == 0) {
+                $vidId = 'loc_' . md5($fullPath);
+                $title = pathinfo($fullPath, PATHINFO_FILENAME);
+                $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, 'api/uploads/thumbnails/default.jpg')");
+                $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
+                $added++;
+            }
+        }
+    }
+    respond(true, ['totalFound' => $found, 'newToImport' => $added]);
+}
+
+function video_organize_single($pdo, $id, $settings) {
+    $stmt = $pdo->prepare("SELECT * FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $v = $stmt->fetch();
+    if (!$v) return;
+
+    $hierarchy = json_decode($settings['categories'] ?? '[]', true);
+    $meta = smartParseFilename($v['videoUrl'], $v['category'], $hierarchy);
+    $price = getPriceForCategory($meta['category'], $settings, $meta['parent_category']);
+
+    $stmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?");
+    $stmt->execute([$meta['title'], $meta['category'], $meta['parent_category'], $meta['collection'], $price, $id]);
+}
+
+function video_smart_organize($pdo) {
+    $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
+    $stmt = $pdo->query("SELECT id FROM videos WHERE category = 'PROCESSING' LIMIT 100");
+    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($ids as $id) video_organize_single($pdo, $id, $settings);
+    respond(true, ['processed' => count($ids)]);
+}
+
+function video_reorganize_all($pdo) {
+    $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
+    $stmt = $pdo->query("SELECT id FROM videos WHERE category NOT IN ('PENDING', 'FAILED_METADATA')");
+    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($ids as $id) video_organize_single($pdo, $id, $settings);
+    respond(true, ['processed' => count($ids)]);
+}
+
+function video_fix_metadata($pdo) {
+    $pdo->query("UPDATE videos SET category = 'PENDING', processing_attempts = 0 WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg') AND category != 'FAILED_METADATA'");
+    respond(true, ['fixedBroken' => 1]);
+}
+
+function video_delete($pdo, $input) {
+    $id = $input['id'];
+    $uid = $input['userId'];
+    $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl, creatorId FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $v = $stmt->fetch();
+    
+    if (!$v) respond(false, null, "No encontrado");
+    $user = $pdo->query("SELECT role FROM users WHERE id = '$uid'")->fetch();
+    if ($v['creatorId'] !== $uid && $user['role'] !== 'ADMIN') respond(false, null, "No autorizado");
+
+    if (strpos($v['videoUrl'], 'uploads/videos/') !== false && file_exists($v['videoUrl'])) @unlink($v['videoUrl']);
+    if (strpos($v['thumbnailUrl'], 'uploads/thumbnails/') !== false && file_exists($v['thumbnailUrl'])) @unlink($v['thumbnailUrl']);
+    
+    $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+    $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
+    respond(true);
 }
 ?>
