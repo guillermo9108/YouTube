@@ -60,6 +60,7 @@ export interface Video {
   createdAt: number;
   views: number;
   likes: number;
+  dislikes: number;
   isLocal?: boolean | number | string;
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
@@ -81,6 +82,7 @@ export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
   newLikeCount?: number;
+  newDislikeCount?: number;
 }
 
 export interface VipPlan {

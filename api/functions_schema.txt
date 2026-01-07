@@ -208,14 +208,14 @@ function syncTable($pdo, $tableName, $def) {
             $existingCols = array_map('strtolower', array_column($existingColumnsData, 'Field'));
             foreach ($def['cols'] as $colName => $colDef) {
                 if (!in_array(strtolower($colName), $existingCols)) {
-                    // Column doesn't exist, add it
+                    // Si no existe, añadir sin PRIMARY KEY por si acaso
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
-                    write_log("Columna añadida a $tableName: $colName", 'INFO');
                 } else {
-                    // Check if we need to modify varchar length (Extreme fix for category length)
-                    if (strpos(strtolower($colDef), 'varchar') !== false) {
-                        $pdo->exec("ALTER TABLE $tableName MODIFY COLUMN $colName $colDef");
+                    // Si existe, modificar quitando PRIMARY KEY para evitar Error 1068
+                    if (strpos(strtolower($colDef), 'varchar') !== false || strpos(strtolower($colDef), 'decimal') !== false) {
+                        $modifyDef = str_ireplace("PRIMARY KEY", "", $colDef);
+                        $pdo->exec("ALTER TABLE $tableName MODIFY COLUMN $colName $modifyDef");
                     }
                 }
             }

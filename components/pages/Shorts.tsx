@@ -29,18 +29,23 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
   
-  // INICIALIZACIÓN: Usar los likes reales del video desde el primer render
+  // INICIALIZACIÓN REACTIVA: Sincronizar estados locales con el objeto video
   const [likeCount, setLikeCount] = useState(video.likes || 0);
+  const [dislikeCount, setDislikeCount] = useState(video.dislikes || 0);
   const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
+    // Al cargar o cambiar de video, sincronizar conteos
+    setLikeCount(video.likes || 0);
+    setDislikeCount(video.dislikes || 0);
+    
     if (user && isNear && !dataLoaded) {
       db.getInteraction(user.id, video.id).then(setInteraction);
       if (!hasFullAccess) db.hasPurchased(user.id, video.id).then(setIsUnlocked);
       db.getComments(video.id).then(setComments);
       setDataLoaded(true);
     }
-  }, [user, video.id, isNear, hasFullAccess]);
+  }, [user, video.id, isNear, hasFullAccess, video.likes, video.dislikes]);
 
   useEffect(() => {
     const el = videoRef.current; if (!el) return;
@@ -51,7 +56,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
         const p = el.play(); if (p) p.catch(() => { el.muted = true; el.play(); });
         db.incrementView(video.id);
     } else { el.pause(); }
-  }, [isActive, isUnlocked]);
+  }, [isActive, isUnlocked, video.id]);
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
@@ -59,6 +64,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
         const res = await db.rateVideo(user.id, video.id, rating);
         setInteraction(res); 
         if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
+        if (res.newDislikeCount !== undefined) setDislikeCount(res.newDislikeCount);
     } catch(e) {}
   };
 
@@ -124,7 +130,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
           <button onClick={(e) => { e.stopPropagation(); handleRate('dislike'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-colors ${interaction?.disliked ? 'text-red-500' : 'text-white'}`}>
              <ThumbsDown size={26} fill={interaction?.disliked ? "currentColor" : "white"} fillOpacity={interaction?.disliked ? 1 : 0.2} />
           </button>
-          <span className="text-[10px] font-black text-white drop-shadow-md">NO</span>
+          <span className="text-[10px] font-black text-white drop-shadow-md">{dislikeCount > 0 ? dislikeCount : 'NO'}</span>
         </div>
 
         <div className="flex flex-col items-center gap-1">
@@ -296,9 +302,6 @@ export default function Shorts() {
                                   <UserCheck size={16} className="ml-auto opacity-0 group-hover:opacity-100 text-white"/>
                               </button>
                           ))}
-                          {shareSearch.length >= 2 && shareSuggestions.length === 0 && (
-                              <p className="text-center text-slate-600 py-4 text-xs font-bold uppercase italic">No se encontraron usuarios</p>
-                          )}
                       </div>
                   </div>
               </div>

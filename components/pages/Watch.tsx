@@ -6,12 +6,12 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    SkipForward, ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck
+    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
-// Helper de ordenamiento natural global
+// Helper de ordenamiento natural avanzado
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 export default function Watch() {
@@ -25,11 +25,10 @@ export default function Watch() {
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
-    const [categories, setCategories] = useState<Category[]>([]);
     
-    // Conteo persistente inicializado desde el objeto video
-    const [likes, setLikes] = useState(0);
-    const [dislikes, setDislikes] = useState(0);
+    // Conteo persistente inicializado con null para detectar carga
+    const [likes, setLikes] = useState<number>(0);
+    const [dislikes, setDislikes] = useState<number>(0);
     
     const [comments, setComments] = useState<Comment[]>([]);
     const [showComments, setShowComments] = useState(false); 
@@ -64,15 +63,12 @@ export default function Watch() {
 
                 if (v) {
                     setVideo(v); 
-                    // Inicializar conteos inmediatamente con datos de DB
+                    // Sincronización inmediata con DB
                     setLikes(v.likes || 0);
-                    setDislikes((v as any).dislikes || 0);
-                    setCategories(settings.categories || []);
+                    setDislikes(v.dislikes || 0);
 
-                    // Obtener relacionados
+                    // Obtener relacionados y aplicar orden natural
                     const related = await db.getRelatedVideos(v.id);
-                    
-                    // APLICAR ORDENAMIENTO NATURAL DE CATEGORÍA AL FEED LATERAL
                     const catDef = (settings.categories || []).find(c => c.name === v.category || c.name === v.parent_category);
                     const sortMode = catDef?.sortOrder || 'LATEST';
                     
@@ -106,9 +102,8 @@ export default function Watch() {
         try {
             const res = await db.rateVideo(user.id, video.id, type);
             setInteraction(res);
-            // El backend ahora devuelve los conteos actualizados
             if (res.newLikeCount !== undefined) setLikes(res.newLikeCount);
-            if ((res as any).newDislikeCount !== undefined) setDislikes((res as any).newDislikeCount);
+            if (res.newDislikeCount !== undefined) setDislikes(res.newDislikeCount);
         } catch (e) {}
     };
 
@@ -133,39 +128,24 @@ export default function Watch() {
 
     const handleVideoEnded = async () => {
         if (!relatedVideos.length || !user) return;
-        
         const nextVid = relatedVideos[0];
-        const isAdmin = user.role === 'ADMIN';
-        const isOwner = user.id === nextVid.creatorId;
         const isVipTotal = user.vipExpiry && user.vipExpiry > Date.now() / 1000;
-
-        const hasDirectAccess = isAdmin || isOwner || isVipTotal;
+        const hasAccess = user.role === 'ADMIN' || user.id === nextVid.creatorId || isVipTotal;
         
-        if (hasDirectAccess) {
-            toast.info(`Siguiente: ${nextVid.title}`);
-            navigate(`/watch/${nextVid.id}`);
-            return;
-        }
-
-        const alreadyPurchased = await db.hasPurchased(user.id, nextVid.id);
-        if (alreadyPurchased) {
-            navigate(`/watch/${nextVid.id}`);
-            return;
-        }
+        if (hasAccess) { navigate(`/watch/${nextVid.id}`); return; }
+        const purchased = await db.hasPurchased(user.id, nextVid.id);
+        if (purchased) { navigate(`/watch/${nextVid.id}`); return; }
 
         const price = Number(nextVid.price);
         const limit = Number(user.autoPurchaseLimit || 0);
-
         if (price <= limit && Number(user.balance) >= price) {
             try {
                 await db.purchaseVideo(user.id, nextVid.id);
-                toast.success(`Autocompra: ${nextVid.title} (${price} $)`);
+                toast.success(`Autocompra: ${nextVid.title}`);
                 navigate(`/watch/${nextVid.id}`);
-            } catch (e) {
-                toast.error("Error en autocompra automática");
-            }
+            } catch (e) { toast.error("Error en autocompra"); }
         } else {
-            toast.warning("Siguiente video requiere compra manual o subir límite");
+            toast.warning("Próximo video requiere compra manual");
         }
     };
 
@@ -252,7 +232,7 @@ export default function Watch() {
                                         <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"}/>
                                         <span className="text-xs font-bold">{likes}</span>
                                     </button>
-                                    <button onClick={() => handleRate('dislike')} className={`flex items-center gap-2 px-4 py-2 hover:bg-white/5 transition-all ${interaction?.disliked ? 'text-red-400' : 'text-slate-400'}`}>
+                                    <button onClick={() => handleRate('dislike')} className={`flex items-center gap-2 px-4 py-2 hover:bg-white/5 transition-all border-r border-white/5 ${interaction?.disliked ? 'text-red-400' : 'text-slate-400'}`}>
                                         <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"}/>
                                         <span className="text-xs font-bold">{dislikes}</span>
                                     </button>
@@ -355,9 +335,6 @@ export default function Watch() {
                                         <UserCheck size={16} className="ml-auto opacity-0 group-hover:opacity-100 text-white"/>
                                     </button>
                                 ))}
-                                {shareSearch.length >= 2 && shareSuggestions.length === 0 && (
-                                    <p className="text-center text-slate-600 py-4 text-xs font-bold uppercase italic">No se encontraron usuarios</p>
-                                )}
                             </div>
                         </div>
                     </div>
