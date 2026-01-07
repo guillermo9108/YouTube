@@ -46,6 +46,13 @@ function getAppSchema() {
                 'reason' => 'TEXT DEFAULT NULL'
             ]
         ],
+        'search_history' => [
+            'cols' => [
+                'term' => 'VARCHAR(100) PRIMARY KEY',
+                'count' => 'INT DEFAULT 1',
+                'last_searched' => 'BIGINT'
+            ]
+        ],
         'marketplace_items' => [
             'cols' => [
                 'id' => 'VARCHAR(50) PRIMARY KEY',
@@ -208,11 +215,9 @@ function syncTable($pdo, $tableName, $def) {
             $existingCols = array_map('strtolower', array_column($existingColumnsData, 'Field'));
             foreach ($def['cols'] as $colName => $colDef) {
                 if (!in_array(strtolower($colName), $existingCols)) {
-                    // Si no existe, añadir sin PRIMARY KEY por si acaso
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
                 } else {
-                    // Si existe, modificar quitando PRIMARY KEY para evitar Error 1068
                     if (strpos(strtolower($colDef), 'varchar') !== false || strpos(strtolower($colDef), 'decimal') !== false) {
                         $modifyDef = str_ireplace("PRIMARY KEY", "", $colDef);
                         $pdo->exec("ALTER TABLE $tableName MODIFY COLUMN $colName $modifyDef");

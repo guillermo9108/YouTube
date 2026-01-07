@@ -43,6 +43,14 @@ class DBService {
         });
     }
 
+    public async saveSearch(term: string): Promise<void> {
+        return this.request<void>(`action=save_search`, { method: 'POST', body: JSON.stringify({ term }) });
+    }
+
+    public async getSearchSuggestions(q: string): Promise<any[]> {
+        return this.request<any[]>(`action=get_search_suggestions&q=${encodeURIComponent(q)}`);
+    }
+
     public async checkInstallation(): Promise<{status: string}> {
         return fetch('api/install.php?action=check').then(r => r.json()).then(res => ({ status: res.data?.installed ? 'installed' : 'not_installed' })).catch(() => ({ status: 'installed' })); 
     }
@@ -195,7 +203,6 @@ class DBService {
     public async handleVipRequest(adminId: string, reqId: string, status: string): Promise<void> { return this.request<void>(`action=handle_vip_request`, { method: 'POST', body: JSON.stringify({ adminId, reqId, status }) }); }
     public async purchaseVipInstant(userId: string, plan: VipPlan): Promise<void> { return this.request<void>(`action=purchase_vip_instant`, { method: 'POST', body: JSON.stringify({ userId, plan }) }); }
     
-    // TROPPIPAY INTEGRATION
     public async createPayLink(userId: string, plan: VipPlan): Promise<{paymentUrl: string}> {
         return this.request<{paymentUrl: string}>(`action=create_pay_link`, { method: 'POST', body: JSON.stringify({ userId, plan }) });
     }

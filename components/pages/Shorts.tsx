@@ -30,14 +30,14 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
   const [newComment, setNewComment] = useState('');
   
   // INICIALIZACIÓN REACTIVA: Sincronizar estados locales con el objeto video
-  const [likeCount, setLikeCount] = useState(video.likes || 0);
-  const [dislikeCount, setDislikeCount] = useState(video.dislikes || 0);
+  const [likeCount, setLikeCount] = useState(Number(video.likes || 0));
+  const [dislikeCount, setDislikeCount] = useState(Number(video.dislikes || 0));
   const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
-    // Al cargar o cambiar de video, sincronizar conteos
-    setLikeCount(video.likes || 0);
-    setDislikeCount(video.dislikes || 0);
+    // Al cargar o cambiar de video, sincronizar conteos inmediatamente
+    setLikeCount(Number(video.likes || 0));
+    setDislikeCount(Number(video.dislikes || 0));
     
     if (user && isNear && !dataLoaded) {
       db.getInteraction(user.id, video.id).then(setInteraction);

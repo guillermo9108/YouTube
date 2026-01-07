@@ -26,7 +26,7 @@ export default function Watch() {
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     
-    // Conteo persistente inicializado con null para detectar carga
+    // Conteo persistente sincronizado con la base de datos
     const [likes, setLikes] = useState<number>(0);
     const [dislikes, setDislikes] = useState<number>(0);
     
@@ -63,11 +63,11 @@ export default function Watch() {
 
                 if (v) {
                     setVideo(v); 
-                    // Sincronización inmediata con DB
-                    setLikes(v.likes || 0);
-                    setDislikes(v.dislikes || 0);
+                    // Sincronización inmediata de conteos reales desde la DB
+                    setLikes(Number(v.likes || 0));
+                    setDislikes(Number(v.dislikes || 0));
 
-                    // Obtener relacionados y aplicar orden natural
+                    // Obtener relacionados y aplicar ordenamiento natural
                     const related = await db.getRelatedVideos(v.id);
                     const catDef = (settings.categories || []).find(c => c.name === v.category || c.name === v.parent_category);
                     const sortMode = catDef?.sortOrder || 'LATEST';

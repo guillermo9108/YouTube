@@ -1,5 +1,46 @@
 <?php
 
+function interact_save_search($pdo, $input) {
+    $term = trim(strtolower($input['term'] ?? ''));
+    if (strlen($term) < 2) respond(true);
+    $pdo->prepare("INSERT INTO search_history (term, count, last_searched) VALUES (?, 1, ?) ON DUPLICATE KEY UPDATE count = count + 1, last_searched = ?")
+        ->execute([$term, time(), time()]);
+    respond(true);
+}
+
+function interact_get_search_suggestions($pdo, $q) {
+    $q = trim(strtolower($q));
+    if (strlen($q) < 2) respond(true, []);
+    
+    $suggestions = [];
+
+    // 1. Historial de búsquedas (Popularidad)
+    $stmt = $pdo->prepare("SELECT term as label, 'HISTORY' as type FROM search_history WHERE term LIKE ? ORDER BY count DESC LIMIT 5");
+    $stmt->execute(["%$q%"]);
+    $suggestions = array_merge($suggestions, $stmt->fetchAll());
+
+    // 2. Categorías y Subcategorías
+    $stmtS = $pdo->query("SELECT categories FROM system_settings LIMIT 1");
+    $cats = json_decode($stmtS->fetchColumn() ?: '[]', true);
+    foreach ($cats as $c) {
+        if (strpos(strtolower($c['name']), $q) !== false) {
+            $suggestions[] = ['label' => $c['name'], 'type' => 'CATEGORY', 'id' => $c['name']];
+        }
+    }
+
+    // 3. Videos
+    $stmt = $pdo->prepare("SELECT title as label, 'VIDEO' as type, id FROM videos WHERE title LIKE ? AND category NOT IN ('PENDING', 'PROCESSING') LIMIT 5");
+    $stmt->execute(["%$q%"]);
+    $suggestions = array_merge($suggestions, $stmt->fetchAll());
+
+    // 4. Marketplace
+    $stmt = $pdo->prepare("SELECT title as label, 'MARKET' as type, id FROM marketplace_items WHERE title LIKE ? AND status = 'ACTIVO' LIMIT 5");
+    $stmt->execute(["%$q%"]);
+    $suggestions = array_merge($suggestions, $stmt->fetchAll());
+
+    respond(true, array_slice($suggestions, 0, 15));
+}
+
 function interact_has_purchased($pdo, $userId, $videoId) {
     $stmt = $pdo->prepare("SELECT u.role, u.vipExpiry, v.creatorId, (SELECT role FROM users WHERE id = v.creatorId) as creatorRole FROM users u CROSS JOIN videos v WHERE u.id = ? AND v.id = ?");
     $stmt->execute([$userId, $videoId]); $data = $stmt->fetch(PDO::FETCH_ASSOC);
