@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
@@ -87,7 +86,11 @@ interface UnifiedSearchResults {
     videos: Video[];
     marketplace: MarketplaceItem[];
     users: User[];
-    subcategories: any[];
+    subcategories: {
+        id: string;
+        name: string;
+        videos: Video[];
+    }[];
 }
 
 // --- Componente Principal ---
@@ -235,11 +238,11 @@ export default function Home() {
       const filteredMkt = marketItems.filter(i => matchesFragmented(i.title + i.description, searchQuery));
       const filteredUsers = allUsers.filter(u => matchesFragmented(u.username, searchQuery));
       
-      const filteredSubCats: any[] = [];
+      const matchedSubCats: {id: string, name: string, videos: Video[]}[] = [];
       if (!activeCategory) {
           const matchedRoot = categories.filter(c => matchesFragmented(c.name, searchQuery));
           matchedRoot.forEach(c => {
-              filteredSubCats.push({
+              matchedSubCats.push({
                   name: c.name,
                   id: c.id,
                   videos: allVideos.filter(v => v.category === c.name || v.parent_category === c.name)
@@ -251,7 +254,7 @@ export default function Home() {
           videos: filteredVideos,
           marketplace: filteredMkt,
           users: filteredUsers,
-          subcategories: filteredSubCats
+          subcategories: matchedSubCats
       };
   }, [searchQuery, allVideos, marketItems, allUsers, categories, activeCategory]);
 

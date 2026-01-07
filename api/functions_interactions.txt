@@ -11,8 +11,9 @@ function interact_save_search($pdo, $input) {
 function build_multi_word_where($words, $column) {
     $clauses = [];
     foreach ($words as $w) {
+        $w = trim($w);
         if (empty($w)) continue;
-        $clauses[] = "$column LIKE '%$w%'";
+        $clauses[] = "$column LIKE " . '"%' . $w . '%"';
     }
     return count($clauses) > 0 ? "(" . implode(' AND ', $clauses) . ")" : "1=1";
 }
@@ -21,7 +22,9 @@ function interact_get_search_suggestions($pdo, $q) {
     $q = trim(strtolower($q));
     if (strlen($q) < 2) respond(true, []);
     
-    $words = explode(' ', $q);
+    $words = array_filter(explode(' ', $q));
+    if (empty($words)) respond(true, []);
+    
     $suggestions = [];
 
     // 1. Historial de búsquedas (Popularidad)
@@ -36,13 +39,14 @@ function interact_get_search_suggestions($pdo, $q) {
     $stmtU->execute();
     $suggestions = array_merge($suggestions, $stmtU->fetchAll());
 
-    // 3. Categorías y Subcategorías
+    // 3. Categorías
     $stmtS = $pdo->query("SELECT categories FROM system_settings LIMIT 1");
     $cats = json_decode($stmtS->fetchColumn() ?: '[]', true);
     foreach ($cats as $c) {
+        $name = strtolower($c['name']);
         $matchAll = true;
         foreach ($words as $w) {
-            if (strpos(strtolower($c['name']), $w) === false) { $matchAll = false; break; }
+            if (strpos($name, $w) === false) { $matchAll = false; break; }
         }
         if ($matchAll) {
             $suggestions[] = ['label' => $c['name'], 'type' => 'CATEGORY', 'id' => $c['name']];
@@ -68,13 +72,15 @@ function interact_request_content($pdo, $input) {
     $uid = $input['userId'];
     $query = trim($input['query']);
     if (empty($query)) respond(false, null, "Consulta vacía");
+    
+    // Guardamos en balance_requests con monto 0 para que aparezca al admin como petición
     $id = 'req_' . uniqid();
     $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, 0, 'PENDING', ?)")
-        ->execute([$id, $uid, time()]); // Reusamos tabla por simplicidad o insertamos en requests si existe
-    // En este sistema simplificado, guardamos la petición de texto
+        ->execute([$id, $uid, time()]);
+        
     $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) 
                   SELECT ?, id, 'SYSTEM', ?, '/admin', 0, ? FROM users WHERE role = 'ADMIN'")
-        ->execute([uniqid('n_'), "Nueva petición: $query", time()]);
+        ->execute([uniqid('n_'), "Sugerencia de Contenido: $query", time()]);
     respond(true);
 }
 

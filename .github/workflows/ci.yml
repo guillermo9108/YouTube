@@ -30,17 +30,6 @@ jobs:
     - name: Build Frontend
       run: npm run build
 
-    - name: Prepare Backend Node Deps
-      run: |
-        mkdir -p api
-        cd api
-        # Crear package.json si no existe
-        if [ ! -f package.json ]; then
-          echo '{"type":"commonjs"}' > package.json
-        fi
-        npm install yt-search @distube/ytdl-core
-        cd ..
-
     - name: Prepare Release Structure
       run: |
         mkdir -p dist/api
@@ -56,11 +45,6 @@ jobs:
                 cp "$file" "dist/api/$filename.php"
             fi
         done
-
-        # COPIA CRÍTICA: Puente YouTube y sus dependencias de Node
-        cp api/yt_bridge.js dist/api/yt_bridge.js 2>/dev/null || :
-        cp api/package.json dist/api/package.json 2>/dev/null || :
-        cp -r api/node_modules dist/api/node_modules 2>/dev/null || :
         
         # Crear estructura de carpetas para subidas
         mkdir -p dist/api/uploads/videos
