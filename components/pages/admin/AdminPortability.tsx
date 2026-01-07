@@ -28,6 +28,7 @@ export default function AdminPortability() {
     }, []);
 
     const loadJSZip = async () => {
+        // @ts-ignore - Bypass URL import for TypeScript
         const module = await import('https://esm.sh/jszip@3.10.1');
         return module.default;
     };
@@ -78,7 +79,7 @@ export default function AdminPortability() {
             // 3. Generar ZIP
             setProgress(80);
             setProgressLabel('Comprimiendo paquete (esto puede tardar)...');
-            const content = await zip.generateAsync({ type: "blob" }, (metadata) => {
+            const content = await zip.generateAsync({ type: "blob" }, (metadata: any) => {
                 setProgress(80 + Math.floor(metadata.percent * 0.15));
             });
 
