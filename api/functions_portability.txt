@@ -1,0 +1,111 @@
+<?php
+/**
+ * StreamPay - Módulo de Portabilidad V1.0
+ */
+
+function port_save_backup($pdo, $post, $files) {
+    $targetPath = rtrim($post['path'] ?? '', '/');
+    if (empty($targetPath)) respond(false, null, "La ruta de destino es obligatoria.");
+
+    if (!is_dir($targetPath)) {
+        if (!@mkdir($targetPath, 0777, true)) {
+            respond(false, null, "No se pudo crear el directorio de destino. Verifique permisos o open_basedir.");
+        }
+    }
+
+    if (!isset($files['backup']) || $files['backup']['error'] !== UPLOAD_ERR_OK) {
+        respond(false, null, "Error al recibir el archivo de backup.");
+    }
+
+    $fileName = 'backup_streampay_' . date('Ymd_His') . '.zip';
+    $dest = $targetPath . '/' . $fileName;
+
+    if (move_uploaded_file($files['backup']['tmp_name'], $dest)) {
+        respond(true, ['file' => $fileName, 'full_path' => $dest]);
+    } else {
+        respond(false, null, "Error al mover el archivo al destino final.");
+    }
+}
+
+function port_restore_backup($pdo, $input) {
+    $zipPath = $input['zipPath'] ?? '';
+    $videoLibraryPath = rtrim($input['videoLibraryPath'] ?? '', '/');
+
+    if (empty($zipPath) || !file_exists($zipPath)) respond(false, null, "El archivo ZIP no existe o no es accesible.");
+    if (empty($videoLibraryPath)) respond(false, null, "Debe especificar la ubicación de los videos en este servidor.");
+
+    $zip = new ZipArchive();
+    if ($zip->open($zipPath) !== TRUE) respond(false, null, "No se pudo abrir el archivo ZIP.");
+
+    // 1. Extraer miniaturas a la carpeta del sistema
+    $tempDir = __DIR__ . '/temp_restore_' . uniqid();
+    mkdir($tempDir);
+    $zip->extractTo($tempDir);
+    $zip->close();
+
+    $jsonPath = $tempDir . '/database.json';
+    if (!file_exists($jsonPath)) {
+        port_cleanup($tempDir);
+        respond(false, null, "El ZIP no contiene un archivo database.json válido.");
+    }
+
+    $data = json_decode(file_get_contents($jsonPath), true);
+    if (!$data || !isset($data['videos'])) {
+        port_cleanup($tempDir);
+        respond(false, null, "Formato de database.json inválido.");
+    }
+
+    // 2. Procesar miniaturas
+    $thumbDir = __DIR__ . '/uploads/thumbnails/';
+    if (!is_dir($thumbDir)) mkdir($thumbDir, 0777, true);
+
+    $thumbFiles = glob($tempDir . '/thumbnails/*.jpg');
+    foreach ($thumbFiles as $f) {
+        copy($f, $thumbDir . basename($f));
+    }
+
+    // 3. Re-mapear videos e insertar/actualizar en DB
+    $imported = 0;
+    $errors = 0;
+    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+
+    foreach ($data['videos'] as $v) {
+        // El nombre del archivo está guardado en el JSON como 'fileName' relativo
+        $fileName = $v['fileName'] ?? basename($v['videoUrl']);
+        $newAbsolutePath = $videoLibraryPath . '/' . $fileName;
+        
+        $sql = "INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, parent_category, collection, duration, isLocal) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ON DUPLICATE KEY UPDATE title=VALUES(title), videoUrl=VALUES(videoUrl), category=VALUES(category), price=VALUES(price)";
+        
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([
+                $v['id'], $v['title'], $v['description'], $v['price'], 
+                'api/uploads/thumbnails/' . basename($v['thumbnailUrl']), 
+                $newAbsolutePath,
+                $adminId, time(), $v['category'], $v['parent_category'], $v['collection'], $v['duration']
+            ]);
+            $imported++;
+        } catch (Exception $e) {
+            $errors++;
+        }
+    }
+
+    port_cleanup($tempDir);
+    respond(true, ['imported' => $imported, 'errors' => $errors]);
+}
+
+function port_cleanup($dir) {
+    if (!is_dir($dir)) return;
+    $it = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($it as $file) {
+        if ($file->isDir()) rmdir($file->getRealPath());
+        else unlink($file->getRealPath());
+    }
+    rmdir($dir);
+}
+?>

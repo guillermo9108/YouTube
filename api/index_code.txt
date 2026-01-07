@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V11.25
+ * StreamPay - Core Controller V11.30 (Portability Patch)
  */
 ob_start(); 
 ini_set('display_errors', 0); 
@@ -77,6 +77,7 @@ require_once 'functions_videos.php';
 require_once 'functions_interactions.php';
 require_once 'functions_market.php';
 require_once 'functions_admin.php';
+require_once 'functions_portability.php';
 
 if (file_exists('functions_ftp.php')) require_once 'functions_ftp.php';
 if (file_exists('functions_payment.php')) require_once 'functions_payment.php';
@@ -86,6 +87,10 @@ $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
 try {
     switch ($action) {
+        // PORTABILIDAD & BACKUPS
+        case 'port_save_backup': port_save_backup($pdo, $_POST, $_FILES); break;
+        case 'port_restore_backup': port_restore_backup($pdo, $input); break;
+
         // AUTH & USER
         case 'login': auth_login($pdo, $input); break;
         case 'register': auth_register($pdo, $input); break;
