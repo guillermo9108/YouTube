@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Category, Notification as AppNotification, MarketplaceItem, User } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, CheckCheck, Zap, MessageSquare, Clock, Film, ShoppingBag, Tag, Users, UserCheck, Star
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, Zap, Clock, Film, ShoppingBag, Tag, Users, Star
 } from 'lucide-react';
 import { useLocation, useNavigate, Link } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -81,6 +81,14 @@ const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick
         </button>
     );
 };
+
+// --- Interfaces de Búsqueda ---
+interface UnifiedSearchResults {
+    videos: Video[];
+    marketplace: MarketplaceItem[];
+    users: User[];
+    subcategories: any[];
+}
 
 // --- Componente Principal ---
 
@@ -166,7 +174,7 @@ export default function Home() {
 
   // --- Lógica de Búsqueda Mejorada ---
 
-  const matchesFragmented = (target: string, query: string) => {
+  const matchesFragmented = (target: string, query: string): boolean => {
       if (!target || !query) return false;
       const t = target.toLowerCase();
       const qWords = query.toLowerCase().split(' ').filter(w => w.length > 0);
@@ -220,16 +228,15 @@ export default function Home() {
 
   // --- Lógica de Resultados Dinámicos ---
 
-  const searchResults = useMemo(() => {
+  const searchResults = useMemo((): UnifiedSearchResults | null => {
       if (!searchQuery || searchQuery.length < 2) return null;
       
       const filteredVideos = allVideos.filter(v => matchesFragmented(v.title + v.creatorName, searchQuery));
       const filteredMkt = marketItems.filter(i => matchesFragmented(i.title + i.description, searchQuery));
       const filteredUsers = allUsers.filter(u => matchesFragmented(u.username, searchQuery));
       
-      const filteredSubCats = [];
+      const filteredSubCats: any[] = [];
       if (!activeCategory) {
-          // Buscar en nombres de categorías raíz
           const matchedRoot = categories.filter(c => matchesFragmented(c.name, searchQuery));
           matchedRoot.forEach(c => {
               filteredSubCats.push({
@@ -246,7 +253,7 @@ export default function Home() {
           users: filteredUsers,
           subcategories: filteredSubCats
       };
-  }, [searchQuery, allVideos, marketItems, allUsers, categories]);
+  }, [searchQuery, allVideos, marketItems, allUsers, categories, activeCategory]);
 
   const breadcrumbPath = useMemo(() => {
       if (!activeCategory) return [];
@@ -256,7 +263,7 @@ export default function Home() {
   }, [activeCategory, allVideos]);
 
   const currentSubCategories = useMemo(() => {
-      if (searchQuery) return []; // Los resultados de búsqueda se manejan aparte
+      if (searchQuery) return []; 
       if (!activeCategory) {
           return categories.map(c => ({ 
               name: c.name, 
@@ -283,7 +290,7 @@ export default function Home() {
   }, [activeCategory, categories, allVideos, searchQuery]);
 
   const filteredList = useMemo(() => {
-      if (searchQuery) return []; // En búsqueda usamos searchResults
+      if (searchQuery) return []; 
       let list = allVideos.filter(v => {
           if (!activeCategory) return true;
           return v.category === activeCategory || v.parent_category === activeCategory;
@@ -306,7 +313,6 @@ export default function Home() {
   return (
     <div className="pb-20 space-y-8 px-2 md:px-0">
       
-      {/* Barra de Búsqueda */}
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
           <div className="flex gap-3 mb-4 items-center w-full">
               <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
@@ -325,7 +331,6 @@ export default function Home() {
                       </button>
                   )}
 
-                  {/* Dropdown de Sugerencias */}
                   {showSuggestions && suggestions.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-white/10 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.7)] overflow-hidden z-50 animate-in fade-in zoom-in-95 origin-top backdrop-blur-xl">
                           <div className="max-h-[60vh] overflow-y-auto custom-scrollbar divide-y divide-white/5">
@@ -365,7 +370,6 @@ export default function Home() {
                   )}
               </div>
 
-              {/* Botón de Notificaciones */}
               <div className="relative shrink-0" ref={menuRef}>
                   <button 
                       onClick={() => setShowNotifMenu(!showNotifMenu)}
@@ -411,9 +415,6 @@ export default function Home() {
                                               <span className="text-[9px] text-slate-500 font-bold uppercase mt-1 block">{new Date(n.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                                           </div>
                                       </div>
-                                      {!n.isRead && (
-                                          <button onClick={(e) => handleMarkRead(n.id, e)} className="p-2 text-slate-500 hover:text-emerald-400 transition-all shrink-0 bg-slate-800/50 rounded-lg hover:bg-emerald-500/10" title="Marcar leída"><Check size={16}/></button>
-                                      )}
                                   </div>
                               ))}
                           </div>
@@ -425,11 +426,11 @@ export default function Home() {
       </div>
 
       {/* --- RENDERIZADO DE RESULTADOS --- */}
-      {searchQuery ? (
+      {searchQuery && searchResults ? (
           <div className="space-y-12 animate-in fade-in duration-500">
               
               {/* Sección Usuarios Encontrados */}
-              {searchResults?.users.length > 0 && (
+              {searchResults.users && searchResults.users.length > 0 && (
                   <div className="space-y-4">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-pink-500 pl-3">Canales y Usuarios</h3>
                       <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
@@ -450,7 +451,7 @@ export default function Home() {
               )}
 
               {/* Sección Colecciones Encontradas */}
-              {searchResults?.subcategories.length > 0 && (
+              {searchResults.subcategories && searchResults.subcategories.length > 0 && (
                   <div className="space-y-4">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-amber-500 pl-3">Colecciones y Carpetas</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -462,7 +463,7 @@ export default function Home() {
               )}
 
               {/* Sección Videos Encontrados */}
-              {searchResults?.videos.length > 0 && (
+              {searchResults.videos && searchResults.videos.length > 0 && (
                   <div className="space-y-4">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-indigo-500 pl-3">Videos</h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10">
@@ -474,7 +475,7 @@ export default function Home() {
               )}
 
               {/* Sección Tienda Encontrada */}
-              {searchResults?.marketplace.length > 0 && (
+              {searchResults.marketplace && searchResults.marketplace.length > 0 && (
                   <div className="space-y-4">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-emerald-500 pl-3">Artículos de la Tienda</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -498,7 +499,7 @@ export default function Home() {
               )}
 
               {/* Estado Sin Resultados */}
-              {searchResults.videos.length === 0 && searchResults.marketplace.length === 0 && searchResults.users.length === 0 && searchResults.subcategories.length === 0 && (
+              {searchResults && searchResults.videos.length === 0 && searchResults.marketplace.length === 0 && searchResults.users.length === 0 && searchResults.subcategories.length === 0 && (
                   <div className="text-center py-40">
                       <Shuffle className="mx-auto mb-4 text-slate-800" size={64}/>
                       <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">No hay coincidencias para "{searchQuery}"</p>

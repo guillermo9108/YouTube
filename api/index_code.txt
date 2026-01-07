@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V11.20
+ * StreamPay - Core Controller V11.25
  */
 ob_start(); 
 ini_set('display_errors', 0); 
