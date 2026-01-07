@@ -49,12 +49,25 @@ function video_get_by_creator($pdo, $userId) {
 }
 
 function video_get_related($pdo, $videoId) {
-    $stmt = $pdo->prepare("SELECT category FROM videos WHERE id = ?");
+    // Obtenemos la categoría y colección del video actual
+    $stmt = $pdo->prepare("SELECT category, collection FROM videos WHERE id = ?");
     $stmt->execute([$videoId]);
-    $cat = $stmt->fetchColumn() ?: 'GENERAL';
+    $current = $stmt->fetch();
     
-    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.category = ? OR v.category = 'GENERAL') AND v.category NOT IN ('PENDING', 'PROCESSING') LIMIT 12");
-    $stmt->execute([$videoId, $cat]);
+    $cat = $current['category'] ?: 'GENERAL';
+    $col = $current['collection'];
+    
+    // Prioridad 1: Misma colección (series, sagas)
+    // Prioridad 2: Misma categoría
+    // Aumentamos el límite a 50 para que el cliente pueda ordenar y buscar el siguiente capítulo
+    if ($col) {
+        $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.collection = ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.title ASC LIMIT 50");
+        $stmt->execute([$videoId, $col]);
+    } else {
+        $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.category = ? OR v.category = 'GENERAL') AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.createdAt DESC LIMIT 50");
+        $stmt->execute([$videoId, $cat]);
+    }
+    
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);

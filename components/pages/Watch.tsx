@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -26,7 +25,6 @@ export default function Watch() {
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     
-    // Conteo persistente sincronizado con la base de datos
     const [likes, setLikes] = useState<number>(0);
     const [dislikes, setDislikes] = useState<number>(0);
     
@@ -63,15 +61,14 @@ export default function Watch() {
 
                 if (v) {
                     setVideo(v); 
-                    // Sincronización inmediata de conteos reales desde la DB
                     setLikes(Number(v.likes || 0));
                     setDislikes(Number(v.dislikes || 0));
 
-                    // Obtener relacionados y aplicar ordenamiento natural
                     const related = await db.getRelatedVideos(v.id);
                     const catDef = (settings.categories || []).find(c => c.name === v.category || c.name === v.parent_category);
-                    const sortMode = catDef?.sortOrder || 'LATEST';
+                    const sortMode = catDef?.sortOrder || 'ALPHA'; 
                     
+                    // Ordenamos la lista para determinar el orden lógico de reproducción
                     if (sortMode === 'ALPHA') {
                         related.sort((a, b) => naturalCollator.compare(a.title, b.title));
                     } else if (sortMode === 'RANDOM') {
@@ -88,7 +85,7 @@ export default function Watch() {
                             db.hasPurchased(user.id, v.id), 
                             db.getInteraction(user.id, v.id)
                         ]);
-                        setIsUnlocked(access || user.role === 'ADMIN' || user.id === v.creatorId);
+                        setIsUnlocked(access || user.role?.trim().toUpperCase() === 'ADMIN' || user.id === v.creatorId);
                         setInteraction(interact);
                     }
                 }
@@ -127,10 +124,21 @@ export default function Watch() {
     };
 
     const handleVideoEnded = async () => {
-        if (!relatedVideos.length || !user) return;
-        const nextVid = relatedVideos[0];
+        if (!relatedVideos.length || !user || !video) return;
+        
+        // Playlist Inteligente:
+        // Buscamos el video que sigue al actual en el orden natural de la lista de relacionados
+        const allInCategory = [...relatedVideos, video].sort((a, b) => naturalCollator.compare(a.title, b.title));
+        const currentIndex = allInCategory.findIndex(v => v.id === video.id);
+        const nextVid = allInCategory[currentIndex + 1] || null;
+
+        if (!nextVid) {
+            toast.info("Has llegado al final de la colección.");
+            return;
+        }
+
         const isVipTotal = user.vipExpiry && user.vipExpiry > Date.now() / 1000;
-        const hasAccess = user.role === 'ADMIN' || user.id === nextVid.creatorId || isVipTotal;
+        const hasAccess = user.role?.trim().toUpperCase() === 'ADMIN' || user.id === nextVid.creatorId || isVipTotal;
         
         if (hasAccess) { navigate(`/watch/${nextVid.id}`); return; }
         const purchased = await db.hasPurchased(user.id, nextVid.id);
@@ -145,7 +153,7 @@ export default function Watch() {
                 navigate(`/watch/${nextVid.id}`);
             } catch (e) { toast.error("Error en autocompra"); }
         } else {
-            toast.warning("Próximo video requiere compra manual");
+            toast.warning("El próximo capítulo requiere compra manual");
         }
     };
 
@@ -155,8 +163,10 @@ export default function Watch() {
         if (val.length < 2) { setShareSuggestions([]); return; }
         shareTimeout.current = setTimeout(async () => {
             if (!user) return;
-            const hits = await db.searchUsers(user.id, val);
-            setShareSuggestions(hits);
+            try {
+                const hits = await db.searchUsers(user.id, val);
+                setShareSuggestions(hits);
+            } catch(e) {}
         }, 300);
     };
 

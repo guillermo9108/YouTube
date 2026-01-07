@@ -46,6 +46,16 @@ function getAppSchema() {
                 'reason' => 'TEXT DEFAULT NULL'
             ]
         ],
+        'requests' => [
+            'cols' => [
+                'id' => 'VARCHAR(50) PRIMARY KEY',
+                'userId' => 'VARCHAR(50)',
+                'query' => 'TEXT',
+                'status' => "ENUM('PENDING', 'COMPLETED', 'FAILED') DEFAULT 'PENDING'",
+                'createdAt' => 'BIGINT',
+                'isVip' => 'TINYINT(1) DEFAULT 0'
+            ]
+        ],
         'search_history' => [
             'cols' => [
                 'term' => 'VARCHAR(100) PRIMARY KEY',

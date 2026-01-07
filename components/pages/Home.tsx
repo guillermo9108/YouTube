@@ -160,7 +160,7 @@ export default function Home() {
                 db.getSystemSettings()
             ]);
             
-            setAllVideos(vids.filter(v => !['PENDING', 'PROCESSING'].includes(v.category)));
+            setAllVideos(vids.filter(v => !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category)));
             setMarketItems(mkt);
             setAllUsers(usersRes);
             setCategories(sets.categories || []);
@@ -209,7 +209,10 @@ export default function Home() {
       if (s.type === 'VIDEO') navigate(`/watch/${s.id}`);
       else if (s.type === 'MARKET') navigate(`/marketplace/${s.id}`);
       else if (s.type === 'USER') navigate(`/channel/${s.id}`);
-      else if (s.type === 'CATEGORY') setActiveCategory(s.label);
+      else if (s.type === 'CATEGORY') {
+          setActiveCategory(s.label);
+          setSearchQuery('');
+      }
   };
 
   const handleMarkRead = async (id: string, e?: React.MouseEvent) => {
@@ -232,23 +235,42 @@ export default function Home() {
   // --- Lógica de Resultados Dinámicos ---
 
   const searchResults = useMemo((): UnifiedSearchResults | null => {
-      if (!searchQuery || searchQuery.length < 2) return null;
+      // Fix: Ensure searchQuery is treated as a string to avoid 'unknown' inference issues
+      const queryStr = String(searchQuery || '');
+      if (!queryStr || queryStr.length < 2) return null;
       
-      const filteredVideos = allVideos.filter(v => matchesFragmented(v.title + v.creatorName, searchQuery));
-      const filteredMkt = marketItems.filter(i => matchesFragmented(i.title + i.description, searchQuery));
-      const filteredUsers = allUsers.filter(u => matchesFragmented(u.username, searchQuery));
+      const filteredVideos = allVideos.filter(v => matchesFragmented(v.title + v.creatorName, queryStr));
+      const filteredMkt = marketItems.filter(i => matchesFragmented(i.title + i.description, queryStr));
+      const filteredUsers = allUsers.filter(u => matchesFragmented(u.username, queryStr));
       
+      // Colecciones y Carpetas encontradas
       const matchedSubCats: {id: string, name: string, videos: Video[]}[] = [];
-      if (!activeCategory) {
-          const matchedRoot = categories.filter(c => matchesFragmented(c.name, searchQuery));
-          matchedRoot.forEach(c => {
+      
+      // 1. Categorías del sistema que coinciden
+      categories.forEach(c => {
+          if (matchesFragmented(c.name, queryStr)) {
               matchedSubCats.push({
-                  name: c.name,
                   id: c.id,
+                  name: c.name,
                   videos: allVideos.filter(v => v.category === c.name || v.parent_category === c.name)
               });
-          });
-      }
+          }
+      });
+
+      // 2. Carpetas físicas (Subcategorías de videos) que no son categorías raíz
+      const physicalFolders = Array.from(new Set(allVideos.map(v => String(v.category)))) as string[];
+      physicalFolders.forEach(folder => {
+          if (matchesFragmented(folder, queryStr)) {
+              // Evitar duplicar si ya se agregó desde categories
+              if (!matchedSubCats.find(s => s.name === folder)) {
+                  matchedSubCats.push({
+                      id: folder,
+                      name: folder,
+                      videos: allVideos.filter(v => v.category === folder)
+                  });
+              }
+          }
+      });
 
       return {
           videos: filteredVideos,
@@ -256,18 +278,26 @@ export default function Home() {
           users: filteredUsers,
           subcategories: matchedSubCats
       };
-  }, [searchQuery, allVideos, marketItems, allUsers, categories, activeCategory]);
+  }, [searchQuery, allVideos, marketItems, allUsers, categories]);
 
-  const breadcrumbPath = useMemo(() => {
+  // Fix: Explicitly type breadcrumbPath useMemo as string[] to resolve 'unknown' type errors
+  const breadcrumbPath = useMemo<string[]>(() => {
       if (!activeCategory) return [];
-      const currentVideoSample = allVideos.find(v => v.category === activeCategory);
-      if (currentVideoSample && currentVideoSample.parent_category) return [currentVideoSample.parent_category, activeCategory];
-      return [activeCategory];
+      const active = activeCategory as string;
+      const currentVideoSample = allVideos.find(v => v.category === active);
+      // Fix: Cast properties to string and use explicit return to ensure string[] type consistency
+      if (currentVideoSample && currentVideoSample.parent_category) return [currentVideoSample.parent_category as string, active];
+      return [active];
   }, [activeCategory, allVideos]);
 
-  const currentSubCategories = useMemo(() => {
-      if (searchQuery) return []; 
-      if (!activeCategory) {
+  // Fix: Explicitly type currentSubCategories useMemo to resolve 'unknown' inference issues
+  const currentSubCategories = useMemo<{name: string, id: string, videos: Video[]}[]>(() => {
+      // Fix: Cast searchQuery and activeCategory for type safety in useMemo
+      const queryStr = String(searchQuery || '');
+      const active = activeCategory as string | null;
+
+      if (queryStr) return []; 
+      if (!active) {
           return categories.map(c => ({ 
               name: c.name, 
               id: c.id, 
@@ -275,18 +305,18 @@ export default function Home() {
           })).filter(c => c.videos.length > 0);
       }
       
-      const rootCat = categories.find(c => c.name === activeCategory);
+      const rootCat = categories.find(c => c.name === active);
       if (rootCat && rootCat.autoSub) {
           const subs = Array.from(new Set(
               allVideos
-                .filter(v => v.parent_category === activeCategory)
+                .filter(v => v.parent_category === active)
                 .map(v => v.category)
-          ));
+          )) as string[];
 
           return subs.map(s => ({
               name: s,
               id: s,
-              videos: allVideos.filter(v => v.category === s && v.parent_category === activeCategory)
+              videos: allVideos.filter(v => v.category === s && v.parent_category === active)
           }));
       }
       return [];
@@ -362,7 +392,7 @@ export default function Home() {
                                               {s.type === 'HISTORY' ? 'Búsqueda Popular' : 
                                                s.type === 'VIDEO' ? 'En Videos' : 
                                                s.type === 'MARKET' ? 'En Tienda' : 
-                                               s.type === 'USER' ? 'Canal / Usuario' : 'Categoría'}
+                                               s.type === 'USER' ? 'Canal / Usuario' : 'Colección / Categoría'}
                                           </div>
                                       </div>
                                       <ChevronRight size={14} className="text-slate-700 opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1" />
