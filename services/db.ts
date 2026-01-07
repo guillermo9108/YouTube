@@ -181,8 +181,6 @@ class DBService {
         });
     }
 
-    public async searchExternal(query: string, source: 'STOCK' | 'YOUTUBE'): Promise<VideoResult[]> { return this.request<VideoResult[]>(`action=search_external&q=${encodeURIComponent(query)}&source=${source}`); }
-    public async serverImportVideo(url: string): Promise<void> { return this.request<void>(`action=server_import&url=${encodeURIComponent(url)}`, { method: 'POST' }); }
     public async getRequests(status: string = 'ALL'): Promise<ContentRequest[]> { return this.request<ContentRequest[]>(`action=get_requests&status=${status}`); }
     public async requestContent(userId: string, query: string, isVip: boolean): Promise<void> { return this.request<void>(`action=request_content`, { method: 'POST', body: JSON.stringify({ userId, query, isVip }) }); }
     public async updateRequestStatus(id: string, status: string): Promise<void> { return this.request<void>(`action=update_request_status`, { method: 'POST', body: JSON.stringify({ id, status }) }); }

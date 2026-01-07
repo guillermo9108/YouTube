@@ -8,37 +8,74 @@ function interact_save_search($pdo, $input) {
     respond(true);
 }
 
+function build_multi_word_where($words, $column) {
+    $clauses = [];
+    foreach ($words as $w) {
+        if (empty($w)) continue;
+        $clauses[] = "$column LIKE '%$w%'";
+    }
+    return count($clauses) > 0 ? "(" . implode(' AND ', $clauses) . ")" : "1=1";
+}
+
 function interact_get_search_suggestions($pdo, $q) {
     $q = trim(strtolower($q));
     if (strlen($q) < 2) respond(true, []);
     
+    $words = explode(' ', $q);
     $suggestions = [];
 
     // 1. Historial de búsquedas (Popularidad)
-    $stmt = $pdo->prepare("SELECT term as label, 'HISTORY' as type FROM search_history WHERE term LIKE ? ORDER BY count DESC LIMIT 5");
-    $stmt->execute(["%$q%"]);
+    $whereHist = build_multi_word_where($words, 'term');
+    $stmt = $pdo->prepare("SELECT term as label, 'HISTORY' as type FROM search_history WHERE $whereHist ORDER BY count DESC LIMIT 5");
+    $stmt->execute();
     $suggestions = array_merge($suggestions, $stmt->fetchAll());
 
-    // 2. Categorías y Subcategorías
+    // 2. Usuarios (Canales)
+    $whereUser = build_multi_word_where($words, 'username');
+    $stmtU = $pdo->prepare("SELECT username as label, 'USER' as type, id FROM users WHERE $whereUser LIMIT 3");
+    $stmtU->execute();
+    $suggestions = array_merge($suggestions, $stmtU->fetchAll());
+
+    // 3. Categorías y Subcategorías
     $stmtS = $pdo->query("SELECT categories FROM system_settings LIMIT 1");
     $cats = json_decode($stmtS->fetchColumn() ?: '[]', true);
     foreach ($cats as $c) {
-        if (strpos(strtolower($c['name']), $q) !== false) {
+        $matchAll = true;
+        foreach ($words as $w) {
+            if (strpos(strtolower($c['name']), $w) === false) { $matchAll = false; break; }
+        }
+        if ($matchAll) {
             $suggestions[] = ['label' => $c['name'], 'type' => 'CATEGORY', 'id' => $c['name']];
         }
     }
 
-    // 3. Videos
-    $stmt = $pdo->prepare("SELECT title as label, 'VIDEO' as type, id FROM videos WHERE title LIKE ? AND category NOT IN ('PENDING', 'PROCESSING') LIMIT 5");
-    $stmt->execute(["%$q%"]);
-    $suggestions = array_merge($suggestions, $stmt->fetchAll());
+    // 4. Videos
+    $whereVid = build_multi_word_where($words, 'title');
+    $stmtV = $pdo->prepare("SELECT title as label, 'VIDEO' as type, id FROM videos WHERE $whereVid AND category NOT IN ('PENDING', 'PROCESSING') LIMIT 5");
+    $stmtV->execute();
+    $suggestions = array_merge($suggestions, $stmtV->fetchAll());
 
-    // 4. Marketplace
-    $stmt = $pdo->prepare("SELECT title as label, 'MARKET' as type, id FROM marketplace_items WHERE title LIKE ? AND status = 'ACTIVO' LIMIT 5");
-    $stmt->execute(["%$q%"]);
-    $suggestions = array_merge($suggestions, $stmt->fetchAll());
+    // 5. Marketplace
+    $whereMkt = build_multi_word_where($words, 'title');
+    $stmtM = $pdo->prepare("SELECT title as label, 'MARKET' as type, id FROM marketplace_items WHERE $whereMkt AND status = 'ACTIVO' LIMIT 5");
+    $stmtM->execute();
+    $suggestions = array_merge($suggestions, $stmtM->fetchAll());
 
     respond(true, array_slice($suggestions, 0, 15));
+}
+
+function interact_request_content($pdo, $input) {
+    $uid = $input['userId'];
+    $query = trim($input['query']);
+    if (empty($query)) respond(false, null, "Consulta vacía");
+    $id = 'req_' . uniqid();
+    $pdo->prepare("INSERT INTO balance_requests (id, userId, amount, status, createdAt) VALUES (?, ?, 0, 'PENDING', ?)")
+        ->execute([$id, $uid, time()]); // Reusamos tabla por simplicidad o insertamos en requests si existe
+    // En este sistema simplificado, guardamos la petición de texto
+    $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) 
+                  SELECT ?, id, 'SYSTEM', ?, '/admin', 0, ? FROM users WHERE role = 'ADMIN'")
+        ->execute([uniqid('n_'), "Nueva petición: $query", time()]);
+    respond(true);
 }
 
 function interact_has_purchased($pdo, $userId, $videoId) {

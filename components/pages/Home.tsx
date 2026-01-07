@@ -3,11 +3,11 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
-import { Video, Category, Notification as AppNotification } from '../../types';
+import { Video, Category, Notification as AppNotification, MarketplaceItem, User } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, CheckCheck, Zap, MessageSquare, Clock, Film, ShoppingBag, Tag, UserPlus
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, CheckCheck, Zap, MessageSquare, Clock, Film, ShoppingBag, Tag, Users, UserCheck, Star
 } from 'lucide-react';
-import { useLocation, useNavigate } from '../Router';
+import { useLocation, useNavigate, Link } from '../Router';
 import AIConcierge from '../AIConcierge';
 
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -92,7 +92,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  
   const [allVideos, setAllVideos] = useState<Video[]>([]);
+  const [marketItems, setMarketItems] = useState<MarketplaceItem[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [visibleCount, setVisibleCount] = useState(12);
@@ -109,8 +113,6 @@ export default function Home() {
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const unreadNotifs = useMemo(() => notifs.filter(n => !n.isRead), [notifs]);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  // --- Lógica de Carga y Efectos ---
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -140,8 +142,16 @@ export default function Home() {
     const loadData = async () => {
         setLoading(true);
         try {
-            const [vids, sets] = await Promise.all([db.getAllVideos(), db.getSystemSettings()]);
+            const [vids, mkt, usersRes, sets] = await Promise.all([
+                db.getAllVideos(), 
+                db.getMarketplaceItems(),
+                db.getAllUsers(),
+                db.getSystemSettings()
+            ]);
+            
             setAllVideos(vids.filter(v => !['PENDING', 'PROCESSING'].includes(v.category)));
+            setMarketItems(mkt);
+            setAllUsers(usersRes);
             setCategories(sets.categories || []);
             setIsAiConfigured(!!sets.geminiKey && sets.geminiKey.trim().length > 5);
             
@@ -154,7 +164,14 @@ export default function Home() {
     loadData();
   }, [user?.id, location.pathname]);
 
-  // --- Manejadores de Búsqueda ---
+  // --- Lógica de Búsqueda Mejorada ---
+
+  const matchesFragmented = (target: string, query: string) => {
+      if (!target || !query) return false;
+      const t = target.toLowerCase();
+      const qWords = query.toLowerCase().split(' ').filter(w => w.length > 0);
+      return qWords.every(word => t.includes(word));
+  };
 
   const handleSearchChange = (val: string) => {
       setSearchQuery(val);
@@ -180,10 +197,9 @@ export default function Home() {
       executeSearch(s.label);
       if (s.type === 'VIDEO') navigate(`/watch/${s.id}`);
       else if (s.type === 'MARKET') navigate(`/marketplace/${s.id}`);
+      else if (s.type === 'USER') navigate(`/channel/${s.id}`);
       else if (s.type === 'CATEGORY') setActiveCategory(s.label);
   };
-
-  // --- Lógica de Notificaciones ---
 
   const handleMarkRead = async (id: string, e?: React.MouseEvent) => {
       if (e) { e.stopPropagation(); e.preventDefault(); }
@@ -202,19 +218,45 @@ export default function Home() {
       } catch(e) {}
   };
 
-  // --- Lógica de Categorías y Grid ---
+  // --- Lógica de Resultados Dinámicos ---
+
+  const searchResults = useMemo(() => {
+      if (!searchQuery || searchQuery.length < 2) return null;
+      
+      const filteredVideos = allVideos.filter(v => matchesFragmented(v.title + v.creatorName, searchQuery));
+      const filteredMkt = marketItems.filter(i => matchesFragmented(i.title + i.description, searchQuery));
+      const filteredUsers = allUsers.filter(u => matchesFragmented(u.username, searchQuery));
+      
+      const filteredSubCats = [];
+      if (!activeCategory) {
+          // Buscar en nombres de categorías raíz
+          const matchedRoot = categories.filter(c => matchesFragmented(c.name, searchQuery));
+          matchedRoot.forEach(c => {
+              filteredSubCats.push({
+                  name: c.name,
+                  id: c.id,
+                  videos: allVideos.filter(v => v.category === c.name || v.parent_category === c.name)
+              });
+          });
+      }
+
+      return {
+          videos: filteredVideos,
+          marketplace: filteredMkt,
+          users: filteredUsers,
+          subcategories: filteredSubCats
+      };
+  }, [searchQuery, allVideos, marketItems, allUsers, categories]);
 
   const breadcrumbPath = useMemo(() => {
       if (!activeCategory) return [];
       const currentVideoSample = allVideos.find(v => v.category === activeCategory);
-      if (currentVideoSample && currentVideoSample.parent_category) {
-          return [currentVideoSample.parent_category, activeCategory];
-      }
+      if (currentVideoSample && currentVideoSample.parent_category) return [currentVideoSample.parent_category, activeCategory];
       return [activeCategory];
   }, [activeCategory, allVideos]);
 
   const currentSubCategories = useMemo(() => {
-      // Si no hay categoría activa, mostramos las categorías raíz que tengan videos
+      if (searchQuery) return []; // Los resultados de búsqueda se manejan aparte
       if (!activeCategory) {
           return categories.map(c => ({ 
               name: c.name, 
@@ -223,7 +265,6 @@ export default function Home() {
           })).filter(c => c.videos.length > 0);
       }
       
-      // Si hay categoría activa y tiene habilitado "autoSub", mostramos sus carpetas (colecciones)
       const rootCat = categories.find(c => c.name === activeCategory);
       if (rootCat && rootCat.autoSub) {
           const subs = Array.from(new Set(
@@ -239,16 +280,13 @@ export default function Home() {
           }));
       }
       return [];
-  }, [activeCategory, categories, allVideos]);
+  }, [activeCategory, categories, allVideos, searchQuery]);
 
   const filteredList = useMemo(() => {
+      if (searchQuery) return []; // En búsqueda usamos searchResults
       let list = allVideos.filter(v => {
-          const matchSearch = v.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                              v.creatorName.toLowerCase().includes(searchQuery.toLowerCase());
-          
-          if (!activeCategory) return matchSearch;
-          const matchCat = v.category === activeCategory || v.parent_category === activeCategory;
-          return matchSearch && matchCat;
+          if (!activeCategory) return true;
+          return v.category === activeCategory || v.parent_category === activeCategory;
       });
 
       const currentCatSettings = categories.find(c => c.name === activeCategory || c.name === list[0]?.parent_category);
@@ -259,7 +297,7 @@ export default function Home() {
       else list.sort((a,b) => b.createdAt - a.createdAt);
 
       return list;
-  }, [allVideos, activeCategory, searchQuery, categories]);
+  }, [allVideos, activeCategory, categories, searchQuery]);
 
   const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
@@ -268,7 +306,7 @@ export default function Home() {
   return (
     <div className="pb-20 space-y-8 px-2 md:px-0">
       
-      {/* Barra de Búsqueda y Notificaciones */}
+      {/* Barra de Búsqueda */}
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
           <div className="flex gap-3 mb-4 items-center w-full">
               <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
@@ -278,7 +316,7 @@ export default function Home() {
                     onChange={(e) => handleSearchChange(e.target.value)}
                     onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)}
                     onKeyDown={(e) => e.key === 'Enter' && executeSearch(searchQuery)}
-                    placeholder="Videos, categorías o artículos..." 
+                    placeholder="Videos, colecciones, artículos o usuarios..." 
                     className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" 
                   />
                   {searchQuery && (
@@ -301,11 +339,13 @@ export default function Home() {
                                           s.type === 'HISTORY' ? 'bg-slate-800 text-slate-400' :
                                           s.type === 'VIDEO' ? 'bg-indigo-500/20 text-indigo-400' :
                                           s.type === 'MARKET' ? 'bg-emerald-500/20 text-emerald-400' :
+                                          s.type === 'USER' ? 'bg-pink-500/20 text-pink-400' :
                                           'bg-amber-500/20 text-amber-400'
                                       }`}>
                                           {s.type === 'HISTORY' && <Clock size={16}/>}
                                           {s.type === 'VIDEO' && <Film size={16}/>}
                                           {s.type === 'MARKET' && <ShoppingBag size={16}/>}
+                                          {s.type === 'USER' && <Users size={16}/>}
                                           {s.type === 'CATEGORY' && <Tag size={16}/>}
                                       </div>
                                       <div className="flex-1 min-w-0">
@@ -313,7 +353,8 @@ export default function Home() {
                                           <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                                               {s.type === 'HISTORY' ? 'Búsqueda Popular' : 
                                                s.type === 'VIDEO' ? 'En Videos' : 
-                                               s.type === 'MARKET' ? 'En Marketplace' : 'Categoría'}
+                                               s.type === 'MARKET' ? 'En Tienda' : 
+                                               s.type === 'USER' ? 'Canal / Usuario' : 'Categoría'}
                                           </div>
                                       </div>
                                       <ChevronRight size={14} className="text-slate-700 opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1" />
@@ -324,7 +365,7 @@ export default function Home() {
                   )}
               </div>
 
-              {/* Botón de Notificaciones (Campana) */}
+              {/* Botón de Notificaciones */}
               <div className="relative shrink-0" ref={menuRef}>
                   <button 
                       onClick={() => setShowNotifMenu(!showNotifMenu)}
@@ -338,7 +379,6 @@ export default function Home() {
                       )}
                   </button>
 
-                  {/* Menú de Notificaciones */}
                   {showNotifMenu && (
                       <div className="fixed sm:absolute top-[75px] sm:top-full right-4 sm:right-0 w-[calc(100vw-32px)] sm:w-80 max-h-[75vh] sm:max-h-[480px] bg-slate-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 origin-top-right z-[200]">
                           <div className="p-4 bg-slate-950 border-b border-white/5 flex justify-between items-center sticky top-0 z-10">
@@ -371,76 +411,118 @@ export default function Home() {
                                               <span className="text-[9px] text-slate-500 font-bold uppercase mt-1 block">{new Date(n.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                                           </div>
                                       </div>
-                                      
                                       {!n.isRead && (
-                                          <button 
-                                              onClick={(e) => handleMarkRead(n.id, e)}
-                                              className="p-2 text-slate-500 hover:text-emerald-400 transition-all shrink-0 bg-slate-800/50 rounded-lg hover:bg-emerald-500/10"
-                                              title="Marcar leída"
-                                          >
-                                              <Check size={16}/>
-                                          </button>
+                                          <button onClick={(e) => handleMarkRead(n.id, e)} className="p-2 text-slate-500 hover:text-emerald-400 transition-all shrink-0 bg-slate-800/50 rounded-lg hover:bg-emerald-500/10" title="Marcar leída"><Check size={16}/></button>
                                       )}
                                   </div>
                               ))}
-                          </div>
-                          
-                          <div className="p-3 bg-slate-950/80 text-center border-t border-white/5">
-                              <button 
-                                  onClick={() => { navigate('/profile'); setShowNotifMenu(false); }} 
-                                  className="text-[9px] font-black text-slate-500 hover:text-white uppercase tracking-[0.2em] transition-colors"
-                              >
-                                  Ver Historial Completo
-                              </button>
                           </div>
                       </div>
                   )}
               </div>
           </div>
-          
           <Breadcrumbs path={breadcrumbPath} onNavigate={setActiveCategory} />
       </div>
 
-      {/* Grid de Contenido */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 animate-in fade-in duration-500">
-          {/* Tarjetas de Subcategoría (Colecciones) */}
-          {currentSubCategories.map(sub => (
-              <SubCategoryCard 
-                  key={sub.id} 
-                  name={sub.name} 
-                  videos={sub.videos} 
-                  onClick={() => setActiveCategory(sub.name)} 
-              />
-          ))}
+      {/* --- RENDERIZADO DE RESULTADOS --- */}
+      {searchQuery ? (
+          <div className="space-y-12 animate-in fade-in duration-500">
+              
+              {/* Sección Usuarios Encontrados */}
+              {searchResults?.users.length > 0 && (
+                  <div className="space-y-4">
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-pink-500 pl-3">Canales y Usuarios</h3>
+                      <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
+                          {searchResults.users.map(u => (
+                              <Link key={u.id} to={`/channel/${u.id}`} className="bg-slate-900 border border-slate-800 p-4 rounded-3xl flex items-center gap-4 shrink-0 hover:bg-slate-800 transition-all shadow-lg min-w-[240px]">
+                                  <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-800 border-2 border-indigo-500/30">
+                                      {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{u.username[0]}</div>}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                      <div className="font-black text-white text-sm truncate">@{u.username}</div>
+                                      <div className="text-[10px] font-bold text-slate-500 uppercase">Ver Perfil</div>
+                                  </div>
+                                  <ChevronRight size={16} className="text-slate-700"/>
+                              </Link>
+                          ))}
+                      </div>
+                  </div>
+              )}
 
-          {/* Tarjetas de Video Individuales */}
-          {filteredList.slice(0, visibleCount).map((v: Video) => (
-              <VideoCard 
-                key={v.id} 
-                video={v} 
-                isUnlocked={isAdmin || user?.id === v.creatorId} 
-                isWatched={watchedIds.includes(v.id)} 
-              />
-          ))}
-      </div>
+              {/* Sección Colecciones Encontradas */}
+              {searchResults?.subcategories.length > 0 && (
+                  <div className="space-y-4">
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-amber-500 pl-3">Colecciones y Carpetas</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                          {searchResults.subcategories.map(sub => (
+                              <SubCategoryCard key={sub.id} name={sub.name} videos={sub.videos} onClick={() => { setActiveCategory(sub.name); setSearchQuery(''); }} />
+                          ))}
+                      </div>
+                  </div>
+              )}
 
-      {/* Paginación "Ver Más" */}
-      {filteredList.length > visibleCount && (
-          <div className="py-10 flex justify-center">
-              <button 
-                onClick={() => setVisibleCount(p => p + 12)}
-                className="px-10 py-4 bg-slate-900 border border-slate-800 text-white font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-slate-800 active:scale-95 transition-all shadow-xl"
-              >
-                  Cargar más contenido
-              </button>
+              {/* Sección Videos Encontrados */}
+              {searchResults?.videos.length > 0 && (
+                  <div className="space-y-4">
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-indigo-500 pl-3">Videos</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10">
+                          {searchResults.videos.map(v => (
+                              <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)} />
+                          ))}
+                      </div>
+                  </div>
+              )}
+
+              {/* Sección Tienda Encontrada */}
+              {searchResults?.marketplace.length > 0 && (
+                  <div className="space-y-4">
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-emerald-500 pl-3">Artículos de la Tienda</h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                          {searchResults.marketplace.map(item => (
+                              <Link key={item.id} to={`/marketplace/${item.id}`} className="group bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-emerald-500/50 transition-all flex flex-col shadow-lg">
+                                  <div className="aspect-[3/4] overflow-hidden relative bg-black">
+                                      {item.images?.[0] ? <img src={item.images[0]} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/> : <div className="w-full h-full flex items-center justify-center text-slate-800"><ShoppingBag size={32}/></div>}
+                                      <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-black text-emerald-400 border border-emerald-500/30">{item.price} $</div>
+                                  </div>
+                                  <div className="p-3 flex-1 flex flex-col">
+                                      <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight mb-1">{item.title}</h4>
+                                      <div className="mt-auto flex items-center gap-1">
+                                          <Star size={10} className="text-amber-500" fill="currentColor"/>
+                                          <span className="text-[9px] font-bold text-slate-500">{(item.rating || 0).toFixed(1)}</span>
+                                      </div>
+                                  </div>
+                              </Link>
+                          ))}
+                      </div>
+                  </div>
+              )}
+
+              {/* Estado Sin Resultados */}
+              {searchResults.videos.length === 0 && searchResults.marketplace.length === 0 && searchResults.users.length === 0 && searchResults.subcategories.length === 0 && (
+                  <div className="text-center py-40">
+                      <Shuffle className="mx-auto mb-4 text-slate-800" size={64}/>
+                      <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">No hay coincidencias para "{searchQuery}"</p>
+                  </div>
+              )}
+          </div>
+      ) : (
+          /* --- MODO EXPLORACIÓN (VISTA NORMAL) --- */
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 animate-in fade-in duration-500">
+              {currentSubCategories.map(sub => (
+                  <SubCategoryCard key={sub.id} name={sub.name} videos={sub.videos} onClick={() => setActiveCategory(sub.name)} />
+              ))}
+
+              {filteredList.slice(0, visibleCount).map((v: Video) => (
+                  <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)} />
+              ))}
           </div>
       )}
 
-      {/* Estado Vacío */}
-      {filteredList.length === 0 && currentSubCategories.length === 0 && (
-          <div className="text-center py-40">
-              <Shuffle className="mx-auto mb-4 text-slate-800" size={64}/>
-              <p className="text-slate-500 font-bold uppercase text-xs tracking-widest">No hay contenido en esta sección</p>
+      {!searchQuery && filteredList.length > visibleCount && (
+          <div className="py-10 flex justify-center">
+              <button onClick={() => setVisibleCount(p => p + 12)} className="px-10 py-4 bg-slate-900 border border-slate-800 text-white font-black rounded-2xl text-xs uppercase tracking-widest hover:bg-slate-800 active:scale-95 transition-all shadow-xl">
+                  Cargar más contenido
+              </button>
           </div>
       )}
 
@@ -449,24 +531,10 @@ export default function Home() {
       <style>{`
         @keyframes ring {
             0% { transform: rotate(0); }
-            5% { transform: rotate(30deg); }
-            10% { transform: rotate(-28deg); }
-            15% { transform: rotate(26deg); }
-            20% { transform: rotate(-24deg); }
-            25% { transform: rotate(22deg); }
-            30% { transform: rotate(-20deg); }
-            35% { transform: rotate(18deg); }
-            40% { transform: rotate(-16deg); }
-            45% { transform: rotate(14deg); }
-            50% { transform: rotate(-12deg); }
-            55% { transform: rotate(10deg); }
-            60% { transform: rotate(-8deg); }
-            65% { transform: rotate(6deg); }
-            70% { transform: rotate(-4deg); }
-            75% { transform: rotate(2deg); }
-            80% { transform: rotate(-1deg); }
-            85% { transform: rotate(1deg); }
-            90% { transform: rotate(0); }
+            10% { transform: rotate(20deg); }
+            20% { transform: rotate(-18deg); }
+            30% { transform: rotate(16deg); }
+            40% { transform: rotate(-14deg); }
             100% { transform: rotate(0); }
         }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }

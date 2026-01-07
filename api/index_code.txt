@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Core Controller V11.15
+ * StreamPay - Core Controller V11.20
  */
 ob_start(); 
 ini_set('display_errors', 0); 
@@ -99,8 +99,6 @@ try {
         // VIDEOS
         case 'get_videos': video_get_all($pdo); break;
         case 'get_video': video_get_one($pdo, $_GET['id'] ?? ''); break;
-        case 'search_external': video_search_external($pdo, $_GET['q'] ?? '', $_GET['source'] ?? 'YOUTUBE'); break;
-        case 'server_import': video_server_import($pdo, $_GET['url'] ?? ''); break;
         case 'get_videos_by_creator': video_get_by_creator($pdo, $_GET['userId'] ?? ''); break;
         case 'get_related_videos': video_get_related($pdo, $_GET['videoId'] ?? ''); break;
         case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
@@ -142,6 +140,7 @@ try {
         case 'toggle_subscribe': interact_toggle_subscribe($pdo, $input); break;
         case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'] ?? '', $_GET['creatorId'] ?? ''); break;
         case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId'] ?? ''); break;
+        case 'request_content': interact_request_content($pdo, $input); break;
 
         // PAYMENTS (TROPIPAY)
         case 'create_pay_link': if(function_exists('payment_create_link')) payment_create_link($pdo, $input); else respond(false, null, "Módulo de pago no disponible"); break;
@@ -172,6 +171,8 @@ try {
         case 'admin_clear_logs': admin_clear_logs(); break;
         case 'get_real_stats': get_real_stats($pdo); break;
         case 'get_requests': admin_get_requests($pdo, $_GET['status'] ?? 'ALL'); break;
+        case 'delete_request': admin_delete_request($pdo, $input); break;
+        case 'update_request_status': admin_update_request_status($pdo, $input); break;
 
         // ADMIN TRANSCODING
         case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;
