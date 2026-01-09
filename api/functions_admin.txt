@@ -1,3 +1,4 @@
+
 <?php
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS V11.4 (Optimizado Synology)
@@ -28,6 +29,7 @@ function admin_get_settings($pdo) {
         $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}', true);
         $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]', true);
         $settings['categories'] = json_decode($settings['categories'] ?? '[]', true);
+        $settings['libraryPaths'] = json_decode($settings['libraryPaths'] ?? '[]', true);
         $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true);
         $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? '{}', true);
         respond(true, $settings);
@@ -40,7 +42,7 @@ function admin_update_settings($pdo, $input) {
         'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
         'maxDuration', 'maxResolution', 'pexelsKey', 'pixabayKey', 'geminiKey', 
         'ytDlpPath', 'ffmpegPath', 'enableYoutube', 'categoryPrices', 
-        'customCategories', 'localLibraryPath', 'videoCommission', 
+        'customCategories', 'localLibraryPath', 'libraryPaths', 'videoCommission', 
         'marketCommission', 'transferFee', 'vipPlans', 'paymentInstructions',
         'currencyConversion', 'enableDebugLog', 'autoTranscode', 'transcodePreset',
         'proxyUrl', 'ftpSettings', 'categories', 'tropipayClientId', 'tropipayClientSecret'
