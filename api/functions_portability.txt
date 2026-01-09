@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Módulo de Portabilidad V1.0
+ * StreamPay - Módulo de Portabilidad V1.1
  */
 
 function port_save_backup($pdo, $post, $files) {
@@ -70,24 +70,49 @@ function port_restore_backup($pdo, $input) {
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
 
     foreach ($data['videos'] as $v) {
-        // El nombre del archivo está guardado en el JSON como 'fileName' relativo
-        $fileName = $v['fileName'] ?? basename($v['videoUrl']);
+        // Obtenemos el nombre del archivo del metadato fidedigno generado en la exportación
+        $fileName = $v['fileName'] ?? basename($v['videoUrl'] ?? '');
+        if (empty($fileName)) continue;
+
+        // Construir nueva ruta absoluta
         $newAbsolutePath = $videoLibraryPath . '/' . $fileName;
         
-        $sql = "INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, parent_category, collection, duration, isLocal) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                ON DUPLICATE KEY UPDATE title=VALUES(title), videoUrl=VALUES(videoUrl), category=VALUES(category), price=VALUES(price)";
+        // El thumbnailUrl debe apuntar a la carpeta local del nuevo servidor
+        $newThumbUrl = 'api/uploads/thumbnails/' . basename($v['thumbnailUrl'] ?? 'default.jpg');
+
+        $sql = "INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, parent_category, collection, duration, isLocal, transcode_status) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'NONE')
+                ON DUPLICATE KEY UPDATE 
+                    title = VALUES(title), 
+                    description = VALUES(description),
+                    price = VALUES(price),
+                    thumbnailUrl = VALUES(thumbnailUrl),
+                    videoUrl = VALUES(videoUrl),
+                    category = VALUES(category),
+                    parent_category = VALUES(parent_category),
+                    collection = VALUES(collection),
+                    duration = VALUES(duration),
+                    isLocal = 1";
         
         try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
-                $v['id'], $v['title'], $v['description'], $v['price'], 
-                'api/uploads/thumbnails/' . basename($v['thumbnailUrl']), 
+                $v['id'], 
+                $v['title'] ?? 'Restaurado', 
+                $v['description'] ?? '', 
+                floatval($v['price'] ?? 0), 
+                $newThumbUrl, 
                 $newAbsolutePath,
-                $adminId, time(), $v['category'], $v['parent_category'], $v['collection'], $v['duration']
+                $adminId, 
+                $v['createdAt'] ?? time(), 
+                $v['category'] ?? 'GENERAL', 
+                $v['parent_category'] ?? null, 
+                $v['collection'] ?? null, 
+                intval($v['duration'] ?? 0)
             ]);
             $imported++;
         } catch (Exception $e) {
+            write_log("Error restaurando video ID {$v['id']}: " . $e->getMessage(), 'ERROR');
             $errors++;
         }
     }

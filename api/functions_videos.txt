@@ -6,6 +6,10 @@
 function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
+        // Guardamos una copia de la ruta real antes de ofuscarla para la UI
+        // Esto es vital para el módulo de portabilidad
+        $v['rawPath'] = $v['videoUrl'];
+
         $isLocal = (isset($v['isLocal']) && ($v['isLocal'] == 1 || $v['isLocal'] === "1" || $v['isLocal'] === true));
         $isUploaded = (strpos($v['videoUrl'] ?? '', 'uploads/videos/') !== false);
         if ($isLocal || $isUploaded) {
@@ -49,7 +53,6 @@ function video_get_by_creator($pdo, $userId) {
 }
 
 function video_get_related($pdo, $videoId) {
-    // Obtenemos la categoría y colección del video actual
     $stmt = $pdo->prepare("SELECT category, collection FROM videos WHERE id = ?");
     $stmt->execute([$videoId]);
     $current = $stmt->fetch();
@@ -57,9 +60,6 @@ function video_get_related($pdo, $videoId) {
     $cat = $current['category'] ?: 'GENERAL';
     $col = $current['collection'];
     
-    // Prioridad 1: Misma colección (series, sagas)
-    // Prioridad 2: Misma categoría
-    // Aumentamos el límite a 50 para que el cliente pueda ordenar y buscar el siguiente capítulo
     if ($col) {
         $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.collection = ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.title ASC LIMIT 50");
         $stmt->execute([$videoId, $col]);
@@ -84,9 +84,6 @@ function video_get_unprocessed($pdo) {
     respond(true, $videos);
 }
 
-/**
- * SUBIDA Y METADATOS
- */
 function video_upload($pdo, $post, $files) {
     $id = 'v_' . uniqid();
     $userId = $post['userId'];
@@ -141,15 +138,11 @@ function video_update_metadata($pdo, $post, $files) {
     $stmt = $pdo->prepare("UPDATE videos SET " . implode(', ', $fields) . " WHERE id = ?");
     $stmt->execute($params);
 
-    // Trigger de organización instantánea
     $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
     video_organize_single($pdo, $id, $settings);
     respond(true);
 }
 
-/**
- * ESCANEO Y MANTENIMIENTO
- */
 function video_scan_local($pdo, $input) {
     $path = $input['path'] ?? '';
     if (!is_dir($path)) respond(false, null, "Ruta no válida: $path");
