@@ -1,7 +1,7 @@
 
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V11.4 (Optimizado Synology)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V12.0 (Multi-Volume Support)
  */
 
 function admin_get_settings($pdo) {
@@ -208,39 +208,67 @@ function admin_cleanup_files($pdo) {
     respond(true, ['videos' => $deleted]);
 }
 
+/**
+ * ESTADÍSTICAS MEJORADAS MULTI-DISCO
+ */
 function admin_get_local_stats($pdo) {
-    $df = @disk_free_space("/") / (1024*1024*1024);
-    $dt = @disk_total_space("/") / (1024*1024*1024);
-    $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal=1")->fetchColumn();
+    // 1. Obtener todas las rutas configuradas
+    $stmt = $pdo->query("SELECT localLibraryPath, libraryPaths FROM system_settings WHERE id = 1");
+    $sets = $stmt->fetch();
+    $extraPaths = json_decode($sets['libraryPaths'] ?: '[]', true);
     
-    $folderUsage = [];
-    foreach(['uploads/videos', 'uploads/thumbnails', 'uploads/market'] as $d) {
-        $size = 0;
-        if(is_dir($d)) { 
-            foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($d)) as $f) { 
-                if($f->isFile()) $size += $f->getSize(); 
-            } 
+    $searchPaths = [];
+    if (!empty($sets['localLibraryPath'])) $searchPaths[] = $sets['localLibraryPath'];
+    foreach($extraPaths as $ep) $searchPaths[] = $ep;
+    $searchPaths[] = __DIR__; // Carpeta actual de la PWA
+
+    $volumes = [];
+    $seenMounts = [];
+
+    foreach (array_unique($searchPaths) as $path) {
+        $path = trim($path);
+        if (!is_dir($path)) continue;
+
+        $realPath = realpath($path);
+        // Intentamos detectar el punto de montaje para no repetir discos físicos
+        // En Linux/Synology esto ayuda a agrupar rutas por partición
+        $df = @disk_free_space($realPath);
+        $dt = @disk_total_space($realPath);
+        
+        $volumeId = $df . "-" . $dt; // Identificador único rudimentario por capacidad
+        
+        // Calcular cuánto pesan los videos registrados en esta ruta específica
+        $stmtV = $pdo->prepare("SELECT SUM(duration) as total_dur, COUNT(*) as count FROM videos WHERE videoUrl LIKE ?");
+        $stmtV->execute([$path . '%']);
+        $pathStats = $stmtV->fetch();
+
+        if (!isset($seenMounts[$volumeId])) {
+            $volumes[] = [
+                'name' => basename($realPath) ?: 'Raíz',
+                'path' => $realPath,
+                'free' => round($df / (1024*1024*1024), 2),
+                'total' => round($dt / (1024*1024*1024), 2),
+                'used_pwa' => 0, // Estimación opcional
+                'video_count' => $pathStats['count']
+            ];
+            $seenMounts[$volumeId] = count($volumes) - 1;
+        } else {
+            // Si es el mismo disco físico pero otra ruta, sumamos los contadores
+            $idx = $seenMounts[$volumeId];
+            $volumes[$idx]['video_count'] += $pathStats['count'];
         }
-        $folderUsage[basename($d)] = round($size / (1024*1024), 2);
     }
 
+    $dbVideos = $pdo->query("SELECT COUNT(*) FROM videos WHERE isLocal=1")->fetchColumn();
     $catStats = $pdo->query("SELECT category, COUNT(*) as count, SUM(views) as totalViews FROM videos GROUP BY category")->fetchAll();
     
     respond(true, [
-        'disk_free' => round($df, 2),
-        'disk_total' => round($dt, 2),
+        'volumes' => $volumes,
         'db_videos' => $dbVideos,
-        'folder_usage' => $folderUsage,
         'category_stats' => $catStats,
-        'active_processes' => [] 
+        'disk_free' => round(@disk_free_space("/") / (1024*1024*1024), 2),
+        'disk_total' => round(@disk_total_space("/") / (1024*1024*1024), 2),
     ]);
-}
-
-function admin_get_requests($pdo, $status) {
-    $sql = "SELECT r.*, u.username FROM requests r LEFT JOIN users u ON r.userId = u.id";
-    if ($status !== 'ALL') { $sql .= " WHERE r.status = '$status'"; }
-    $sql .= " ORDER BY r.createdAt DESC";
-    respond(true, $pdo->query($sql)->fetchAll());
 }
 
 function admin_get_logs() {
@@ -263,8 +291,6 @@ function get_real_stats($pdo) {
     ];
     respond(true, $stats);
 }
-
-// --- TRANSCODING HELPERS ---
 
 function admin_get_transcode_profiles($pdo) {
     $stmt = $pdo->query("SELECT * FROM transcode_profiles ORDER BY extension ASC");
@@ -338,21 +364,84 @@ function admin_transcode_scan_filters($pdo, $input) {
     respond(true, ['count' => $count]);
 }
 
-// --- CLEANER V8 ---
+/**
+ * MOTOR DE PURGA AVANZADO (Basado en ROI y ubicación real)
+ */
+function admin_file_cleanup_preview($pdo, $type) {
+    $sql = "SELECT v.*, (SELECT COUNT(*) FROM transactions WHERE videoId = v.id) as sales FROM videos v WHERE isLocal = 1 ";
+    
+    if ($type === 'LOW_ROI') {
+        // Videos con menos de 5 vistas que pesan "algo" (aquí simulamos por duración ya que no tenemos filesize en DB)
+        $sql .= " AND views < 5 AND category != 'PENDING' ORDER BY views ASC LIMIT 50";
+    } elseif ($type === 'ORPHAN_DB') {
+        // En un escenario real, aquí verificaríamos file_exists($v['videoUrl'])
+        $sql .= " AND category = 'FAILED_METADATA' LIMIT 50";
+    } else {
+        $sql .= " ORDER BY createdAt ASC LIMIT 50";
+    }
 
-function admin_smart_cleaner_preview($pdo, $input) { 
-    respond(true, ['preview' => [], 'stats' => ['spaceReclaimed' => '0 GB']]); 
+    $res = $pdo->query($sql)->fetchAll();
+    foreach($res as &$v) {
+        $v['reason'] = ($v['views'] < 2) ? "Baja Tracción" : "Antigüedad";
+        if (strpos($v['videoUrl'], 'uploads/') !== false) $v['size_fmt'] = "Interno";
+        else {
+            $real = resolve_video_path($v['videoUrl']);
+            $v['size_fmt'] = $real ? round(filesize($real) / (1024*1024), 2) . " MB" : "Error 404";
+            if (!$real) $v['reason'] = "Archivo No Encontrado";
+        }
+    }
+    respond(true, $res);
 }
 
-function admin_smart_cleaner_execute($pdo, $input) { 
-    respond(true, ['deleted' => 0]); 
-}
-
-function admin_file_cleanup_preview($pdo, $type) { 
-    respond(true, []); 
+function admin_smart_cleaner_execute($pdo, $input) {
+    $ids = $input['videoIds'] ?? [];
+    $deleted = 0;
+    foreach ($ids as $id) {
+        $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
+        $stmt->execute([$id]);
+        $v = $stmt->fetch();
+        if ($v) {
+            $path = resolve_video_path($v['videoUrl']);
+            if ($path && file_exists($path)) {
+                @unlink($path);
+                $deleted++;
+            }
+            // Borrar registro de DB para liberar índice
+            $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
+        }
+    }
+    respond(true, ['deleted' => $deleted]);
 }
 
 function admin_organize_paquete($pdo, $input) { 
-    respond(true, ['cleaned' => 0]); 
+    // Simulación de búsqueda de archivos basura en todos los volúmenes
+    $stmt = $pdo->query("SELECT libraryPaths FROM system_settings WHERE id = 1");
+    $paths = json_decode($stmt->fetchColumn() ?: '[]', true);
+    
+    $plan = [];
+    foreach($paths as $p) {
+        if (!is_dir($p)) continue;
+        // Buscamos archivos .txt o .nfo que a veces ensucian el Pakete
+        foreach(glob($p . "/*.{txt,nfo,jpg_old}", GLOB_BRACE) as $f) {
+            $plan[] = ['file' => basename($f), 'path' => $f, 'reason' => 'Residuo de Metadatos', 'size' => round(filesize($f)/1024, 2) . ' KB'];
+        }
+    }
+
+    if (!($input['simulate'] ?? true)) {
+        foreach($plan as $item) @unlink($item['path']);
+        respond(true, ['cleaned' => count($plan)]);
+    }
+    
+    respond(true, ['plan' => $plan]); 
+}
+
+function admin_delete_request($pdo, $input) {
+    $pdo->prepare("DELETE FROM requests WHERE id = ?")->execute([$input['id']]);
+    respond(true);
+}
+
+function admin_update_request_status($pdo, $input) {
+    $pdo->prepare("UPDATE requests SET status = ? WHERE id = ?")->execute([$input['status'], $input['id']]);
+    respond(true);
 }
 ?>
