@@ -11,6 +11,11 @@ import {
     AlertCircle, Gauge, ChevronRight, Download, Server
 } from 'lucide-react';
 
+interface StorageAlert {
+    level: 'CRITICAL' | 'WARNING' | 'INFO';
+    text: string;
+}
+
 export default function AdminLocalFiles() {
     const toast = useToast();
     const [stats, setStats] = useState<any>(null);
@@ -92,7 +97,7 @@ export default function AdminLocalFiles() {
 
     // Cálculo de alertas multi-volumen
     const alerts = useMemo(() => {
-        const list = [];
+        const list: StorageAlert[] = [];
         if (stats && stats.volumes) {
             stats.volumes.forEach((v: any) => {
                 const usage = (v.total - v.free) / v.total;
