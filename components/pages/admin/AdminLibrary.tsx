@@ -1,9 +1,13 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
-import { Video } from '../../../types';
+import { Video, SystemSettings } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-import { FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers } from 'lucide-react';
+import { 
+    FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, 
+    CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers, 
+    HardDrive, List, Play, ChevronRight 
+} from 'lucide-react';
 
 interface ScannerPlayerProps {
     video: Video;
@@ -22,11 +26,9 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         vid.src = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
         vid.muted = true;
         
-        // Timeout de seguridad: si en 10 segundos no capturamos, forzamos reporte
         timeoutRef.current = window.setTimeout(() => {
             if (!processedRef.current) {
                 const dur = (vid.duration && isFinite(vid.duration)) ? vid.duration : 0;
-                // Si llegamos aquí, informamos que el cliente no pudo renderizar pero tenemos duración
                 onComplete(dur, null, dur > 0, true);
                 processedRef.current = true;
             }
@@ -43,7 +45,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
     const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
-        // Detección de video interpretado como audio (MP4 HEVC en navegadores no compatibles)
         if (vid.videoWidth === 0 && vid.duration > 0) {
             processedRef.current = true;
             setStatus('Incompatible (Audio Mode)');
@@ -55,7 +56,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const vid = e.currentTarget;
         if (processedRef.current) return;
 
-        // Captura normal si hay dimensiones
         if (vid.currentTime > 1.2 && vid.videoWidth > 0) {
             processedRef.current = true;
             setStatus('Capturando...');
@@ -99,6 +99,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 export default function AdminLibrary() {
     const toast = useToast();
     const [localPath, setLocalPath] = useState('');
+    const [libraryPaths, setLibraryPaths] = useState<string[]>([]);
     const [isIndexing, setIsIndexing] = useState(false);
     const [activeScan, setActiveScan] = useState(false);
     const [isOrganizing, setIsOrganizing] = useState(false);
@@ -108,6 +109,14 @@ export default function AdminLibrary() {
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
     const [currentScanIndex, setCurrentScanIndex] = useState(0);
     const [stats, setStats] = useState({ pending: 0, processing: 0, public: 0, broken: 0, general: 0, total: 0 });
+
+    const loadSettings = async () => {
+        try {
+            const s = await db.getSystemSettings();
+            setLocalPath(s.localLibraryPath || '');
+            setLibraryPaths(s.libraryPaths || []);
+        } catch(e) {}
+    };
 
     const loadStats = async () => {
         try {
@@ -129,24 +138,39 @@ export default function AdminLibrary() {
     };
 
     useEffect(() => { 
-        db.getSystemSettings().then(s => setLocalPath(s.localLibraryPath || '')); 
+        loadSettings();
         loadStats();
     }, []);
 
     const addToLog = (msg: string) => { setScanLog(prev => [`> ${msg}`, ...prev].slice(0, 50)); };
 
-    const handleStep1 = async () => {
-        if (!localPath.trim()) return;
+    const handleStep1 = async (useGlobalPaths: boolean = false) => {
+        // Permitimos escanear si hay una ruta escrita O si hay rutas configuradas globalmente
+        if (!useGlobalPaths && !localPath.trim()) {
+            toast.warning("Escribe una ruta o usa el escaneo de volúmenes configurados.");
+            return;
+        }
+
         setIsIndexing(true);
-        addToLog('Iniciando escaneo de disco...');
+        addToLog(useGlobalPaths ? 'Iniciando escaneo MULTI-VOLUMEN...' : `Escaneando ruta: ${localPath}`);
+        
         try {
-            await db.updateSystemSettings({ localLibraryPath: localPath });
-            const res = await db.scanLocalLibrary(localPath);
-            if (res.message) addToLog(res.message);
+            // Sincronizamos la ruta local si se escribió algo
+            if (localPath.trim()) {
+                await db.updateSystemSettings({ localLibraryPath: localPath });
+            }
+
+            // Si es global, pasamos string vacío para que el backend use los libraryPaths de MariaDB
+            const res = await db.scanLocalLibrary(useGlobalPaths ? '' : localPath);
+            
+            if (res.errors && res.errors.length > 0) {
+                res.errors.forEach((err: string) => addToLog(`ERROR: ${err}`));
+            }
+
             addToLog(`Escaneo completado. Encontrados: ${res.totalFound}. Nuevos: ${res.newToImport}`);
             toast.success("Paso 1 Finalizado");
             loadStats();
-        } catch (e: any) { addToLog(`ERROR: ${e.message}`); }
+        } catch (e: any) { addToLog(`ERROR CRÍTICO: ${e.message}`); }
         finally { setIsIndexing(false); }
     };
 
@@ -241,9 +265,9 @@ export default function AdminLibrary() {
     };
 
     return (
-        <div className="space-y-6 pb-20 max-w-4xl mx-auto">
-            <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
-                <Database className="text-indigo-400"/> Gestión de Librería
+        <div className="space-y-6 pb-20 max-w-4xl mx-auto px-2">
+            <h2 className="text-2xl font-black flex items-center gap-2 text-white uppercase italic tracking-tighter">
+                <Database className="text-indigo-500"/> Gestión de Librería
             </h2>
             
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -269,74 +293,140 @@ export default function AdminLibrary() {
                 </div>
             </div>
             
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-                <div className="border-l-4 border-blue-500 pl-4">
-                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">1. Registro Físico</h3>
-                    <p className="text-xs text-slate-500 mb-4">Sincroniza los archivos del disco duro con la base de datos.</p>
-                    <div className="flex gap-2">
-                        <input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-indigo-300 outline-none focus:border-indigo-500" placeholder="/volume1/videos/..." />
-                        <button onClick={handleStep1} disabled={isIndexing} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 px-6 rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all flex items-center gap-2">
-                            {isIndexing ? <RefreshCw className="animate-spin" size={14}/> : <FolderSearch size={14}/>} Escanear
+            <div className="bg-slate-900 border border-slate-800 rounded-[32px] p-6 shadow-xl space-y-8">
+                
+                {/* PASO 1: REGISTRO FÍSICO */}
+                <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-black">1</div>
+                        <div>
+                            <h3 className="font-black text-white text-sm uppercase tracking-widest leading-none">Registro Físico Multi-Disco</h3>
+                            <p className="text-[10px] text-slate-500 uppercase font-bold mt-1">Sincroniza archivos desde todos tus volúmenes</p>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-4">
+                        {/* Listado de Rutas Activas */}
+                        <div className="space-y-2">
+                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1 ml-1"><List size={10}/> Volúmenes a Procesar:</label>
+                            <div className="flex flex-wrap gap-2">
+                                <div className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-[10px] font-mono text-indigo-400 flex items-center gap-2">
+                                    <HardDrive size={12}/> {localPath || '/root'} (Principal)
+                                </div>
+                                {libraryPaths.map((path, i) => (
+                                    <div key={i} className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-[10px] font-mono text-slate-300 flex items-center gap-2">
+                                        <HardDrive size={12} className="text-slate-500"/> {path}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col md:flex-row gap-3 pt-2">
+                            <div className="flex-1 flex gap-2">
+                                <input 
+                                    type="text" 
+                                    value={localPath} 
+                                    onChange={e => setLocalPath(e.target.value)} 
+                                    className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-xs font-mono text-white outline-none focus:border-indigo-500 transition-colors" 
+                                    placeholder="Ruta específica para un escaneo rápido..." 
+                                />
+                                <button 
+                                    onClick={() => handleStep1(false)} 
+                                    disabled={isIndexing || !localPath.trim()} 
+                                    className="bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-white px-5 rounded-xl text-[10px] font-black uppercase transition-all"
+                                >
+                                    Escanear Esta
+                                </button>
+                            </div>
+                            <button 
+                                onClick={() => handleStep1(true)} 
+                                disabled={isIndexing} 
+                                className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 py-3 md:px-8 rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/20 active:scale-95"
+                            >
+                                {isIndexing ? <RefreshCw className="animate-spin" size={16}/> : <Layers size={16}/>} 
+                                Escanear Todos los Discos
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* PASO 2 */}
+                    <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">2</div>
+                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Extracción de Medios</h3>
+                        </div>
+                        <button onClick={handleStep2} disabled={activeScan || stats.pending === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
+                            <Film size={18}/> Iniciar Extracción ({stats.pending})
+                        </button>
+                    </div>
+
+                    {/* PASO 3 */}
+                    <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-black">3</div>
+                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Organización IA</h3>
+                        </div>
+                        <button onClick={handleStep3} disabled={isOrganizing || stats.processing === 0} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
+                            {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} Publicar ({stats.processing})
                         </button>
                     </div>
                 </div>
 
-                <div className="border-l-4 border-emerald-500 pl-4">
-                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">2. Extracción de Metadatos</h3>
-                    <p className="text-xs text-slate-500 mb-4">Captura miniaturas y duración. Si el navegador no puede, se delegará al servidor.</p>
-                    <button onClick={handleStep2} disabled={activeScan || stats.pending === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-emerald-900/20 transition-all flex items-center justify-center gap-2">
-                        <Film size={18}/> Iniciar Extracción ({stats.pending})
+                {/* BOTONES ADICIONALES */}
+                <div className="pt-4 border-t border-slate-800 grid grid-cols-2 gap-4">
+                    <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.general === 0)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] text-slate-400 flex items-center justify-center gap-2">
+                        {isFixing ? <RefreshCw className="animate-spin" size={14}/> : <ShieldAlert size={14}/>} Mantenimiento ({stats.broken})
                     </button>
-                </div>
-
-                <div className="border-l-4 border-purple-500 pl-4">
-                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">3. Publicación Inteligente</h3>
-                    <p className="text-xs text-slate-500 mb-4">Organiza por categorías y asigna precios finales.</p>
-                    <button onClick={handleStep3} disabled={isOrganizing || stats.processing === 0} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-purple-900/20 transition-all flex items-center justify-center gap-2">
-                        {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} Publicar ({stats.processing})
-                    </button>
-                </div>
-
-                <div className="border-l-4 border-red-500 pl-4">
-                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">4. Mantenimiento Avanzado</h3>
-                    <p className="text-xs text-slate-500 mb-4">Corrige videos rotos ({stats.broken}) y re-categoriza videos GENERAL ({stats.general}).</p>
-                    <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.general === 0)} className="w-full bg-slate-800 border border-red-500/30 hover:bg-slate-700 disabled:bg-slate-900 disabled:opacity-50 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg transition-all flex items-center justify-center gap-2">
-                        {isFixing ? <RefreshCw className="animate-spin" size={18}/> : <ShieldAlert className="text-red-500" size={18}/>} Ejecutar Mantenimiento
-                    </button>
-                </div>
-
-                <div className="border-l-4 border-indigo-600 pl-4 pt-2">
-                    <h3 className="font-black text-white text-sm uppercase tracking-widest mb-1">5. Re-sincronización Global</h3>
-                    <p className="text-xs text-slate-500 mb-4">Re-evalúa TODA la base de datos con las categorías y precios actuales.</p>
-                    <button onClick={handleStep5} disabled={isReorganizingAll || stats.total === 0} className="w-full bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-800 py-4 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-2xl transition-all flex items-center justify-center gap-2 border border-indigo-500/30">
-                        {isReorganizingAll ? <Loader2 className="animate-spin" size={18}/> : <Layers size={18}/>} Re-categorizar Todo el Catálogo
+                    <button onClick={handleStep5} disabled={isReorganizingAll || stats.total === 0} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] text-slate-400 flex items-center justify-center gap-2">
+                        {isReorganizingAll ? <Loader2 className="animate-spin" size={14}/> : <Layers size={14}/>} Sincronizar Todo
                     </button>
                 </div>
             </div>
 
-            <div className="bg-black/60 p-4 rounded-2xl border border-slate-800 h-48 overflow-y-auto font-mono text-[10px] text-slate-500 shadow-inner custom-scrollbar">
+            {/* CONSOLA LOG */}
+            <div className="bg-black/80 p-4 rounded-2xl border border-slate-800 h-48 overflow-y-auto font-mono text-[10px] text-slate-500 shadow-inner custom-scrollbar">
+                <div className="flex items-center gap-2 mb-3 border-b border-slate-800 pb-2">
+                    <Terminal size={12} className="text-slate-600"/>
+                    <span className="font-black uppercase tracking-widest opacity-40">System Output</span>
+                </div>
                 {scanLog.map((l, i) => (
-                    <div key={i} className={`border-b border-white/5 py-1.5 ${l.includes('ERROR') ? 'text-red-400' : (l.includes('[OK]') ? 'text-emerald-400' : '')}`}>
-                        <span className="opacity-30 mr-2">[{new Date().toLocaleTimeString()}]</span>
+                    <div key={i} className={`py-1 ${l.includes('ERROR') ? 'text-red-400' : (l.includes('[OK]') ? 'text-emerald-400' : (l.includes('MULTI') ? 'text-indigo-400' : ''))}`}>
+                        <span className="opacity-20 mr-2">[{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}]</span>
                         {l}
                     </div>
                 ))}
+                {scanLog.length === 0 && <p className="italic opacity-30">Esperando comandos...</p>}
             </div>
 
+            {/* MODAL DE ESCANEO ACTIVO */}
             {activeScan && (
                 <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300">
-                    <div className="bg-slate-900 p-8 rounded-[32px] border border-slate-700 w-full max-w-md text-center shadow-2xl relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-slate-800">
-                            <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${((currentScanIndex + 1) / scanQueue.length) * 100}%` }}></div>
+                    <div className="bg-slate-900 p-8 rounded-[40px] border border-slate-700 w-full max-w-md text-center shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1.5 bg-slate-800">
+                            <div className="h-full bg-indigo-500 transition-all duration-500 shadow-[0_0_15px_rgba(79,70,229,0.6)]" style={{ width: `${((currentScanIndex + 1) / scanQueue.length) * 100}%` }}></div>
                         </div>
-                        <h4 className="font-black text-white mb-2 flex items-center justify-center gap-2 uppercase tracking-tighter text-lg">
-                            <Film size={20} className="text-emerald-400"/> {currentScanIndex + 1} / {scanQueue.length}
-                        </h4>
-                        <p className="text-[10px] text-slate-500 mb-6 truncate font-mono bg-black/30 p-2 rounded-lg">{scanQueue[currentScanIndex].title}</p>
+                        
+                        <div className="flex flex-col items-center mb-8">
+                            <div className="w-16 h-16 bg-indigo-500/10 rounded-3xl flex items-center justify-center text-indigo-400 mb-4 animate-bounce">
+                                <Film size={32}/>
+                            </div>
+                            <h4 className="font-black text-white uppercase tracking-tighter text-xl leading-none">
+                                Procesando Archivo
+                            </h4>
+                            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mt-2">
+                                {currentScanIndex + 1} de {scanQueue.length}
+                            </p>
+                        </div>
+
+                        <p className="text-[10px] text-indigo-400 mb-6 truncate font-mono bg-indigo-500/5 p-3 rounded-2xl border border-indigo-500/10 italic">
+                            {scanQueue[currentScanIndex].title}
+                        </p>
                         
                         <ScannerPlayer key={scanQueue[currentScanIndex].id} video={scanQueue[currentScanIndex]} onComplete={handleVideoProcessed} />
                         
-                        <button onClick={() => setActiveScan(false)} className="mt-8 bg-red-950/20 hover:bg-red-900/40 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] py-3 px-10 rounded-xl border border-red-900/30 transition-all">Cancelar</button>
+                        <button onClick={() => setActiveScan(false)} className="mt-8 w-full bg-red-950/20 hover:bg-red-900/40 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] py-4 rounded-2xl border border-red-900/30 transition-all active:scale-95">Detener Escáner</button>
                     </div>
                 </div>
             )}
