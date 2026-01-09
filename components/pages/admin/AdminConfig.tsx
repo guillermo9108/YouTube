@@ -7,7 +7,7 @@ import {
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
     CreditCard, Globe, Palette, ChevronRight, 
     FolderTree, DollarSign, Settings2, Info, RefreshCw, Database,
-    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc, FileText, Crown, Edit3, Coins
+    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc, FileText, Crown, Edit3, Coins, FolderPlus, X
 } from 'lucide-react';
 import { InfoTooltip } from './components/InfoTooltip';
 
@@ -19,6 +19,7 @@ export default function AdminConfig() {
     const [syncing, setSyncing] = useState(false);
     
     const [activeSection, setActiveSection] = useState<string | null>('CATEGORIES');
+    const [newVolumePath, setNewVolumePath] = useState('');
 
     const loadSettings = async () => {
         setLoading(true);
@@ -26,6 +27,7 @@ export default function AdminConfig() {
             const s: any = await db.getSystemSettings();
             if (!s.categories) s.categories = [];
             if (!s.vipPlans) s.vipPlans = [];
+            if (!s.libraryPaths) s.libraryPaths = [];
             setSettings(s);
         } catch(e) { toast.error("Error al cargar configuración"); }
         finally { setLoading(false); }
@@ -58,6 +60,22 @@ export default function AdminConfig() {
 
     const updateValue = (key: keyof SystemSettings, val: any) => {
         setSettings(prev => prev ? { ...prev, [key]: val } : null);
+    };
+
+    // --- Volumenes ---
+    const addVolumePath = () => {
+        if (!newVolumePath.trim()) return;
+        const currentPaths = settings?.libraryPaths || [];
+        if (currentPaths.includes(newVolumePath)) {
+            toast.warning("Esta ruta ya existe.");
+            return;
+        }
+        updateValue('libraryPaths', [...currentPaths, newVolumePath.trim()]);
+        setNewVolumePath('');
+    };
+
+    const removeVolumePath = (path: string) => {
+        updateValue('libraryPaths', (settings?.libraryPaths || []).filter(p => p !== path));
     };
 
     // --- Categorías ---
@@ -137,6 +155,48 @@ export default function AdminConfig() {
                         {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar
                     </button>
                 </div>
+            </div>
+
+            {/* 0. DISCOS & VOLÚMENES */}
+            <div className="space-y-3">
+                <SectionHeader id="VOLUMES" label="Discos & Volúmenes (Multi-HDD)" icon={HardDrive} />
+                {activeSection === 'VOLUMES' && (
+                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
+                        <div>
+                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 mb-4"><Info size={12}/> Configura las rutas de tus discos duros</span>
+                            
+                            <div className="flex gap-2 mb-6">
+                                <input 
+                                    type="text" 
+                                    value={newVolumePath} 
+                                    onChange={e => setNewVolumePath(e.target.value)}
+                                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white text-xs font-mono focus:border-indigo-500 outline-none" 
+                                    placeholder="Ej: /volume2/videos"
+                                />
+                                <button onClick={addVolumePath} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-xl active:scale-90 transition-all">
+                                    <FolderPlus size={20}/>
+                                </button>
+                            </div>
+
+                            <div className="space-y-2">
+                                {(settings?.libraryPaths || []).map(path => (
+                                    <div key={path} className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-2xl group">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg"><HardDrive size={16}/></div>
+                                            <span className="text-xs font-mono text-slate-300 truncate">{path}</span>
+                                        </div>
+                                        <button onClick={() => removeVolumePath(path)} className="p-2 text-slate-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                                            <X size={18}/>
+                                        </button>
+                                    </div>
+                                ))}
+                                {(!settings?.libraryPaths || settings.libraryPaths.length === 0) && (
+                                    <p className="text-center py-6 text-slate-600 text-xs italic">No hay rutas configuradas. Solo se usará la ruta local por defecto.</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* 1. GESTOR DE CATEGORÍAS */}
@@ -359,7 +419,7 @@ export default function AdminConfig() {
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta Librería NAS/Local</label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta Librería Principal (Root)</label>
                             <input type="text" value={settings?.localLibraryPath || ''} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono" placeholder="/volume1/videos/..."/>
                         </div>
                         <div className="grid grid-cols-2 gap-4">

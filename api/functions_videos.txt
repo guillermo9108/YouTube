@@ -1,3 +1,4 @@
+
 <?php
 
 /**
@@ -6,10 +7,7 @@
 function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
-        // Guardamos una copia de la ruta real antes de ofuscarla para la UI
-        // Esto es vital para el módulo de portabilidad
         $v['rawPath'] = $v['videoUrl'];
-
         $isLocal = (isset($v['isLocal']) && ($v['isLocal'] == 1 || $v['isLocal'] === "1" || $v['isLocal'] === true));
         $isUploaded = (strpos($v['videoUrl'] ?? '', 'uploads/videos/') !== false);
         if ($isLocal || $isUploaded) {
@@ -22,14 +20,60 @@ function video_process_rows(&$rows) {
     }
 }
 
-/**
- * OBTENCIÓN DE VIDEOS
- */
 function video_get_all($pdo) {
     $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA') ORDER BY v.createdAt DESC");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
+}
+
+function video_scan_local($pdo, $input) {
+    // Si viene una sola ruta en el input, la convertimos en array. 
+    // Si no, buscamos libraryPaths en la configuración.
+    $paths = [];
+    if (!empty($input['path'])) {
+        $paths = [$input['path']];
+    } else {
+        $stmt = $pdo->query("SELECT libraryPaths FROM system_settings WHERE id = 1");
+        $paths = json_decode($stmt->fetchColumn() ?: '[]', true);
+    }
+
+    if (empty($paths)) respond(false, null, "No hay rutas de volumen configuradas.");
+
+    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+    $added = 0; $found = 0; $errors = [];
+
+    foreach ($paths as $path) {
+        $path = trim($path);
+        if (!is_dir($path)) {
+            $errors[] = "Ruta no encontrada: $path";
+            continue;
+        }
+
+        try {
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
+            foreach ($it as $file) {
+                if ($file->isDir()) continue;
+                $ext = strtolower($file->getExtension());
+                if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm'])) {
+                    $found++;
+                    $fullPath = $file->getRealPath();
+                    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
+                    $stmt->execute([$fullPath]);
+                    if ($stmt->fetchColumn() == 0) {
+                        $vidId = 'loc_' . md5($fullPath);
+                        $title = pathinfo($fullPath, PATHINFO_FILENAME);
+                        $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, 'api/uploads/thumbnails/default.jpg')");
+                        $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
+                        $added++;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            $errors[] = "Error escaneando $path: " . $e->getMessage();
+        }
+    }
+    respond(true, ['totalFound' => $found, 'newToImport' => $added, 'errors' => $errors]);
 }
 
 function video_get_one($pdo, $id) {
@@ -56,10 +100,8 @@ function video_get_related($pdo, $videoId) {
     $stmt = $pdo->prepare("SELECT category, collection FROM videos WHERE id = ?");
     $stmt->execute([$videoId]);
     $current = $stmt->fetch();
-    
     $cat = $current['category'] ?: 'GENERAL';
     $col = $current['collection'];
-    
     if ($col) {
         $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.collection = ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.title ASC LIMIT 50");
         $stmt->execute([$videoId, $col]);
@@ -67,7 +109,6 @@ function video_get_related($pdo, $videoId) {
         $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.category = ? OR v.category = 'GENERAL') AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.createdAt DESC LIMIT 50");
         $stmt->execute([$videoId, $cat]);
     }
-    
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
@@ -77,7 +118,6 @@ function video_get_unprocessed($pdo) {
     $limit = intval($_GET['limit'] ?? 50);
     $mode = $_GET['mode'] ?? 'normal';
     $orderBy = ($mode === 'random') ? 'RAND()' : 'createdAt DESC';
-    
     $stmt = $pdo->query("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 ORDER BY $orderBy LIMIT $limit");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
@@ -92,20 +132,17 @@ function video_upload($pdo, $post, $files) {
     $price = floatval($post['price']);
     $cat = $post['category'];
     $dur = intval($post['duration']);
-    
     $videoUrl = "";
     if (isset($files['video'])) {
         $ext = pathinfo($files['video']['name'], PATHINFO_EXTENSION);
         $videoUrl = "uploads/videos/{$id}.{$ext}";
         move_uploaded_file($files['video']['tmp_name'], $videoUrl);
     }
-    
     $thumbUrl = "uploads/thumbnails/default.jpg";
     if (isset($files['thumbnail'])) {
         $thumbUrl = "uploads/thumbnails/{$id}.jpg";
         move_uploaded_file($files['thumbnail']['tmp_name'], $thumbUrl);
     }
-
     $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
     $stmt->execute([$id, $title, $desc, $price, $thumbUrl, $videoUrl, $userId, time(), $cat, $dur]);
     respond(true);
@@ -115,7 +152,6 @@ function video_update_metadata($pdo, $post, $files) {
     $id = $post['id'];
     $dur = intval($post['duration']);
     $success = ($post['success'] ?? '1') === '1';
-    
     if (!$success) {
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1 WHERE id = ?")->execute([$id]);
         $attempts = $pdo->query("SELECT processing_attempts FROM videos WHERE id = '$id'")->fetchColumn();
@@ -123,52 +159,20 @@ function video_update_metadata($pdo, $post, $files) {
         respond(true);
         return;
     }
-
     $fields = ["duration = ?", "category = 'PROCESSING'", "processing_attempts = 0"];
     $params = [$dur];
-
     if (isset($files['thumbnail'])) {
         $thumbPath = "uploads/thumbnails/{$id}.jpg";
         move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
         $fields[] = "thumbnailUrl = ?";
         $params[] = $thumbPath;
     }
-
     $params[] = $id;
     $stmt = $pdo->prepare("UPDATE videos SET " . implode(', ', $fields) . " WHERE id = ?");
     $stmt->execute($params);
-
     $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
     video_organize_single($pdo, $id, $settings);
     respond(true);
-}
-
-function video_scan_local($pdo, $input) {
-    $path = $input['path'] ?? '';
-    if (!is_dir($path)) respond(false, null, "Ruta no válida: $path");
-
-    $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
-    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
-    $added = 0; $found = 0;
-    
-    foreach ($it as $file) {
-        if ($file->isDir()) continue;
-        $ext = strtolower($file->getExtension());
-        if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm'])) {
-            $found++;
-            $fullPath = $file->getRealPath();
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
-            $stmt->execute([$fullPath]);
-            if ($stmt->fetchColumn() == 0) {
-                $vidId = 'loc_' . md5($fullPath);
-                $title = pathinfo($fullPath, PATHINFO_FILENAME);
-                $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, 'api/uploads/thumbnails/default.jpg')");
-                $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
-                $added++;
-            }
-        }
-    }
-    respond(true, ['totalFound' => $found, 'newToImport' => $added]);
 }
 
 function video_organize_single($pdo, $id, $settings) {
@@ -176,11 +180,9 @@ function video_organize_single($pdo, $id, $settings) {
     $stmt->execute([$id]);
     $v = $stmt->fetch();
     if (!$v) return;
-
     $hierarchy = json_decode($settings['categories'] ?? '[]', true);
     $meta = smartParseFilename($v['videoUrl'], $v['category'], $hierarchy);
     $price = getPriceForCategory($meta['category'], $settings, $meta['parent_category']);
-
     $stmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?");
     $stmt->execute([$meta['title'], $meta['category'], $meta['parent_category'], $meta['collection'], $price, $id]);
 }
@@ -212,14 +214,11 @@ function video_delete($pdo, $input) {
     $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl, creatorId FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $v = $stmt->fetch();
-    
     if (!$v) respond(false, null, "No encontrado");
     $user = $pdo->query("SELECT role FROM users WHERE id = '$uid'")->fetch();
     if ($v['creatorId'] !== $uid && $user['role'] !== 'ADMIN') respond(false, null, "No autorizado");
-
     if (strpos($v['videoUrl'], 'uploads/videos/') !== false && file_exists($v['videoUrl'])) @unlink($v['videoUrl']);
     if (strpos($v['thumbnailUrl'], 'uploads/thumbnails/') !== false && file_exists($v['thumbnailUrl'])) @unlink($v['thumbnailUrl']);
-    
     $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
     $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
     respond(true);

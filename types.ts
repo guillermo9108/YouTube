@@ -68,9 +68,9 @@ export interface Video {
   size_fmt?: string;
 }
 
+// Added Comment interface to fix module export errors
 export interface Comment {
   id: string;
-  videoId: string;
   userId: string;
   username: string;
   userAvatarUrl?: string;
@@ -78,21 +78,13 @@ export interface Comment {
   timestamp: number;
 }
 
+// Added UserInteraction interface to fix module export errors
 export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
+  watched: boolean;
   newLikeCount?: number;
   newDislikeCount?: number;
-}
-
-export interface VipPlan {
-  id: string;
-  name: string;
-  price: number;
-  type: 'ACCESS' | 'BALANCE';
-  durationDays?: number;
-  bonusPercent?: number;
-  highlight?: boolean;
 }
 
 export interface SystemSettings {
@@ -106,6 +98,7 @@ export interface SystemSettings {
   ffmpegPath: string;
   categories: Category[];
   localLibraryPath: string; 
+  libraryPaths?: string[]; // NUEVO: Soporte para múltiples discos/volúmenes
   videoCommission: number;
   marketCommission: number;
   transferFee?: number;
@@ -153,16 +146,6 @@ export interface Notification {
     avatarUrl?: string;
 }
 
-export interface VideoResult {
-  id: string;
-  title: string;
-  thumbnail: string;
-  downloadUrl: string;
-  source: string;
-  author: string;
-  duration?: number;
-}
-
 export interface ContentRequest {
   id: string;
   userId: string;
@@ -171,6 +154,13 @@ export interface ContentRequest {
   status: 'PENDING' | 'COMPLETED' | 'FAILED' | string;
   createdAt: number;
   isVip: boolean;
+}
+
+// Added VideoResult interface to fix module export errors
+export interface VideoResult {
+  success: boolean;
+  message?: string;
+  id?: string;
 }
 
 export interface MarketplaceItem {
@@ -193,10 +183,7 @@ export interface MarketplaceItem {
     sellerAvatarUrl?: string;
 }
 
-export interface CartItem extends MarketplaceItem {
-    quantity: number;
-}
-
+// Added MarketplaceReview interface to fix module export errors
 export interface MarketplaceReview {
     id: string;
     itemId: string;
@@ -206,6 +193,10 @@ export interface MarketplaceReview {
     rating: number;
     comment: string;
     timestamp: number;
+}
+
+export interface CartItem extends MarketplaceItem {
+    quantity: number;
 }
 
 export interface BalanceRequest {
@@ -237,4 +228,14 @@ export interface FtpFile {
   path: string;
   type: 'file' | 'dir';
   size?: string;
+}
+
+export interface VipPlan {
+  id: string;
+  name: string;
+  price: number;
+  type: 'ACCESS' | 'BALANCE';
+  durationDays?: number;
+  bonusPercent?: number;
+  highlight?: boolean;
 }

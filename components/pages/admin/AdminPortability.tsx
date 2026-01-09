@@ -7,7 +7,7 @@ import {
     AlertCircle, CheckCircle2, Loader2, Save, HardDrive, ShieldAlert,
     RefreshCw, Info, FileJson
 } from 'lucide-react';
-import { Video } from '../../../types';
+import { Video, SystemSettings } from '../../../types';
 
 export default function AdminPortability() {
     const toast = useToast();
@@ -19,11 +19,11 @@ export default function AdminPortability() {
     const [restoreZipPath, setRestoreZipPath] = useState('/volumeUSB1/PAKETE/backup.zip');
     const [restoreVideoPath, setRestoreVideoPath] = useState('/volume1/videos/PAKETE/');
 
-    const [stats, setStats] = useState({ totalVideos: 0, totalSize: '0 MB' });
+    const [stats, setStats] = useState({ totalVideos: 0, analyzed: false });
 
     useEffect(() => {
         db.getAllVideos().then(vids => {
-            setStats({ totalVideos: vids.length, totalSize: 'Analizado' });
+            setStats({ totalVideos: vids.length, analyzed: true });
         });
     }, []);
 
@@ -34,33 +34,46 @@ export default function AdminPortability() {
     };
 
     const handleExport = async () => {
-        if (!confirm(`¿Iniciar exportación de ${stats.totalVideos} registros a ${exportPath}?`)) return;
+        if (!confirm(`¿Iniciar exportación de ${stats.totalVideos} registros? Se preservará la estructura de sub-carpetas.`)) return;
         
         setLoading(true);
         setProgress(5);
-        setProgressLabel('Preparando motor de compresión...');
+        setProgressLabel('Iniciando motor de portabilidad...');
 
         try {
             const JSZip = await loadJSZip();
             const zip = new JSZip();
-            const videos = await db.getAllVideos();
+            const [videos, settings] = await Promise.all([
+                db.getAllVideos(),
+                db.getSystemSettings()
+            ]);
+
+            const rootPath = settings.localLibraryPath || '';
             
-            // 1. Crear JSON con rutas relativas reales
+            // 1. Crear JSON con rutas relativas y configuración de categorías
             const backupData = {
-                version: "1.1",
+                version: "1.2",
                 timestamp: Date.now(),
+                system_metadata: {
+                    categories: settings.categories || []
+                },
                 videos: videos.map(v => {
-                    // Importante: Usamos rawPath si existe, si no extraemos de videoUrl
-                    // rawPath fue inyectado por el backend actualizado para admins.
                     const realPath = (v as any).rawPath || v.videoUrl;
                     
-                    // Extraer nombre de archivo de forma robusta (soporta / y \)
-                    const fileName = realPath.split(/[\\/]/).pop();
+                    // Calculamos la ruta relativa respecto a la raíz de la librería
+                    // Ej: /mnt/media/Pelis/Movie.mp4 -> Pelis/Movie.mp4
+                    let relativePath = realPath;
+                    if (rootPath && realPath.startsWith(rootPath)) {
+                        relativePath = realPath.substring(rootPath.length).replace(/^[\\/]+/, '');
+                    } else {
+                        // Fallback: solo el nombre si no coincide con la raíz
+                        relativePath = realPath.split(/[\\/]/).pop();
+                    }
 
                     return {
                         ...v,
-                        fileName: fileName,
-                        originalPath: realPath
+                        relativePath: relativePath,
+                        fileName: realPath.split(/[\\/]/).pop()
                     };
                 })
             };
@@ -68,7 +81,7 @@ export default function AdminPortability() {
 
             // 2. Añadir miniaturas
             setProgress(20);
-            setProgressLabel('Recolectando miniaturas...');
+            setProgressLabel('Empaquetando miniaturas...');
             const thumbFolder = zip.folder("thumbnails");
             
             let count = 0;
@@ -78,26 +91,25 @@ export default function AdminPortability() {
                         const resp = await fetch(v.thumbnailUrl);
                         if (resp.ok) {
                             const blob = await resp.blob();
-                            // El nombre de la miniatura suele ser el ID del video .jpg
                             const thumbName = v.thumbnailUrl.split('/').pop() || `${v.id}.jpg`;
                             thumbFolder.file(thumbName, blob);
                         }
                     } catch (e) { console.warn("Fallo al incluir thumb:", v.title); }
                 }
                 count++;
-                if (count % 5 === 0) setProgress(20 + Math.floor((count / videos.length) * 50));
+                if (count % 10 === 0) setProgress(20 + Math.floor((count / videos.length) * 50));
             }
 
             // 3. Generar ZIP
-            setProgress(80);
-            setProgressLabel('Comprimiendo paquete...');
+            setProgress(75);
+            setProgressLabel('Comprimiendo paquete (ZIP)...');
             const content = await zip.generateAsync({ type: "blob" }, (metadata: any) => {
-                setProgress(80 + Math.floor(metadata.percent * 0.15));
+                setProgress(75 + Math.floor(metadata.percent * 0.20));
             });
 
             // 4. Enviar al Backend
             setProgress(95);
-            setProgressLabel('Guardando archivo en destino...');
+            setProgressLabel('Guardando en destino final...');
             const fd = new FormData();
             fd.append('backup', content, 'backup.zip');
             fd.append('path', exportPath);
@@ -107,9 +119,9 @@ export default function AdminPortability() {
                 body: fd
             });
 
-            toast.success("Paquete guardado en: " + res.full_path);
+            toast.success("Backup jerárquico guardado en: " + res.full_path);
         } catch (e: any) {
-            toast.error("Error: " + e.message);
+            toast.error("Error en exportación: " + e.message);
         } finally {
             setLoading(false);
             setProgress(0);
@@ -122,10 +134,10 @@ export default function AdminPortability() {
             return;
         }
 
-        if (!confirm("Se importarán los registros. Las rutas de video se re-mapearán a la carpeta local indicada. ¿Continuar?")) return;
+        if (!confirm("Se restaurarán videos y se crearán categorías faltantes. Las sub-carpetas serán respetadas. ¿Continuar?")) return;
 
         setLoading(true);
-        setProgressLabel('Sincronizando catálogo con el nuevo almacenamiento...');
+        setProgressLabel('Restaurando categorías y mapeando sub-carpetas...');
         try {
             const res = await db.request<any>('action=port_restore_backup', {
                 method: 'POST',
@@ -134,10 +146,10 @@ export default function AdminPortability() {
                     videoLibraryPath: restoreVideoPath
                 })
             });
-            toast.success(`Restauración finalizada. ${res.imported} videos mapeados.`);
+            toast.success(`Éxito: ${res.imported} videos mapeados y ${res.categories_synced || 0} categorías sincronizadas.`);
             db.setHomeDirty();
         } catch (e: any) {
-            toast.error("Error en restauración: " + e.message);
+            toast.error("Fallo en restauración: " + e.message);
         } finally {
             setLoading(false);
         }
@@ -149,18 +161,10 @@ export default function AdminPortability() {
             <div className="bg-indigo-600 rounded-3xl p-8 text-white shadow-2xl relative overflow-hidden">
                 <div className="absolute -right-10 -top-10 opacity-20 rotate-12"><Package size={200}/></div>
                 <div className="relative z-10">
-                    <h2 className="text-3xl font-black uppercase italic tracking-tighter mb-2">Gestor de Portabilidad Pro</h2>
+                    <h2 className="text-3xl font-black uppercase italic tracking-tighter mb-2">Portabilidad Jerárquica</h2>
                     <p className="text-indigo-100 text-sm font-bold uppercase tracking-widest max-w-xl">
-                        Mueve tu catálogo completo entre servidores NAS manteniendo títulos, precios y miniaturas.
+                        Mueve tu catálogo manteniendo la estructura de sub-carpetas y la configuración de categorías.
                     </p>
-                </div>
-            </div>
-
-            <div className="bg-amber-950/30 border border-amber-500/30 p-4 rounded-2xl flex gap-4 items-start">
-                <ShieldAlert className="text-amber-500 shrink-0" size={24}/>
-                <div className="text-[11px] text-amber-200/80 leading-relaxed uppercase font-bold">
-                    <p className="text-amber-500 font-black mb-1">Nota sobre Re-mapeo</p>
-                    Al restaurar, el sistema buscará el nombre original del archivo (ej: video1.mp4) dentro de la "Nueva Ruta" que especifiques abajo. Asegúrate de haber copiado físicamente tus videos a esa carpeta antes de restaurar.
                 </div>
             </div>
 
@@ -170,12 +174,12 @@ export default function AdminPortability() {
                 <div className="bg-slate-900 border border-slate-800 p-8 rounded-[40px] shadow-xl space-y-6">
                     <div className="flex items-center gap-3 mb-2">
                         <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center"><Download size={24}/></div>
-                        <h3 className="font-black text-white uppercase text-lg tracking-tighter">Exportar Catálogo</h3>
+                        <h3 className="font-black text-white uppercase text-lg tracking-tighter">Generar Backup</h3>
                     </div>
 
                     <div className="space-y-4">
                         <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Ruta Destino Backup (Ej: USB)</label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Carpeta de Destino (.zip)</label>
                             <div className="relative mt-1">
                                 <Folder size={16} className="absolute left-4 top-3.5 text-slate-500"/>
                                 <input 
@@ -185,13 +189,14 @@ export default function AdminPortability() {
                             </div>
                         </div>
 
-                        <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 text-white">
-                                    <FileJson size={14} className="text-amber-500"/>
-                                    <span className="text-xs font-bold">{stats.totalVideos} Videos a Exportar</span>
-                                </div>
-                                <div className="text-[9px] text-slate-600 font-black uppercase">Metadatos OK</div>
+                        <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2">
+                            <div className="flex items-center justify-between text-white">
+                                <span className="text-[10px] font-black text-slate-500 uppercase">Videos en catálogo</span>
+                                <span className="text-xs font-bold">{stats.totalVideos}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-indigo-400">
+                                <span className="text-[10px] font-black text-slate-500 uppercase">Incluye Categorías</span>
+                                <CheckCircle2 size={14}/>
                             </div>
                         </div>
 
@@ -200,7 +205,7 @@ export default function AdminPortability() {
                             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-5 rounded-3xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3 uppercase text-xs tracking-widest"
                         >
                             {loading ? <RefreshCw className="animate-spin" size={18}/> : <Save size={18}/>}
-                            Generar Paquete .ZIP
+                            Exportar Todo
                         </button>
                     </div>
                 </div>
@@ -209,12 +214,12 @@ export default function AdminPortability() {
                 <div className="bg-slate-900 border border-slate-800 p-8 rounded-[40px] shadow-xl space-y-6">
                     <div className="flex items-center gap-3 mb-2">
                         <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center"><Upload size={24}/></div>
-                        <h3 className="font-black text-white uppercase text-lg tracking-tighter">Restaurar en Servidor</h3>
+                        <h3 className="font-black text-white uppercase text-lg tracking-tighter">Restaurar Paquete</h3>
                     </div>
 
                     <div className="space-y-4">
                         <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Archivo ZIP de Origen</label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Ruta del archivo Backup (.zip)</label>
                             <div className="relative mt-1">
                                 <FileArchive size={16} className="absolute left-4 top-3.5 text-slate-500"/>
                                 <input 
@@ -225,7 +230,7 @@ export default function AdminPortability() {
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nueva Ruta de los Archivos (.mp4)</label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nueva Carpeta de Librería</label>
                             <div className="relative mt-1">
                                 <HardDrive size={16} className="absolute left-4 top-3.5 text-slate-500"/>
                                 <input 
@@ -234,6 +239,7 @@ export default function AdminPortability() {
                                     placeholder="/volume1/videos/..."
                                 />
                             </div>
+                            <p className="text-[9px] text-amber-500 font-bold uppercase mt-2 px-1">Se respetarán las subcarpetas relativas</p>
                         </div>
 
                         <button 
@@ -241,7 +247,7 @@ export default function AdminPortability() {
                             className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-black py-5 rounded-3xl shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3 uppercase text-xs tracking-widest"
                         >
                             {loading ? <Loader2 className="animate-spin" size={18}/> : <CheckCircle2 size={18}/>}
-                            Ejecutar Migración
+                            Ejecutar Restauración
                         </button>
                     </div>
                 </div>

@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Módulo de Portabilidad V1.1
+ * StreamPay - Módulo de Portabilidad V1.2 (Soporte Jerárquico)
  */
 
 function port_save_backup($pdo, $post, $files) {
@@ -37,7 +37,7 @@ function port_restore_backup($pdo, $input) {
     $zip = new ZipArchive();
     if ($zip->open($zipPath) !== TRUE) respond(false, null, "No se pudo abrir el archivo ZIP.");
 
-    // 1. Extraer miniaturas a la carpeta del sistema
+    // 1. Extraer a carpeta temporal
     $tempDir = __DIR__ . '/temp_restore_' . uniqid();
     mkdir($tempDir);
     $zip->extractTo($tempDir);
@@ -55,7 +55,36 @@ function port_restore_backup($pdo, $input) {
         respond(false, null, "Formato de database.json inválido.");
     }
 
-    // 2. Procesar miniaturas
+    // 2. Restaurar/Crear Categorías (Metadata)
+    $categoriesSynced = 0;
+    if (isset($data['system_metadata']['categories'])) {
+        $backupCats = $data['system_metadata']['categories'];
+        
+        // Obtener actuales
+        $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
+        $currentCats = json_decode($stmtS->fetchColumn() ?: '[]', true);
+        
+        $newCatList = $currentCats;
+        foreach ($backupCats as $bCat) {
+            $exists = false;
+            foreach ($currentCats as $cCat) {
+                if (strcasecmp($bCat['name'], $cCat['name']) === 0) {
+                    $exists = true; break;
+                }
+            }
+            if (!$exists) {
+                $newCatList[] = $bCat;
+                $categoriesSynced++;
+            }
+        }
+        
+        if ($categoriesSynced > 0) {
+            $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
+                ->execute([json_encode($newCatList)]);
+        }
+    }
+
+    // 3. Procesar miniaturas
     $thumbDir = __DIR__ . '/uploads/thumbnails/';
     if (!is_dir($thumbDir)) mkdir($thumbDir, 0777, true);
 
@@ -64,18 +93,22 @@ function port_restore_backup($pdo, $input) {
         copy($f, $thumbDir . basename($f));
     }
 
-    // 3. Re-mapear videos e insertar/actualizar en DB
+    // 4. Re-mapear videos jerárquicamente
     $imported = 0;
     $errors = 0;
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
 
     foreach ($data['videos'] as $v) {
-        // Obtenemos el nombre del archivo del metadato fidedigno generado en la exportación
-        $fileName = $v['fileName'] ?? basename($v['videoUrl'] ?? '');
-        if (empty($fileName)) continue;
+        // Obtenemos la ruta relativa (preserva subcarpetas)
+        // Ej: Pelis/Accion/Peli.mp4
+        $relPath = $v['relativePath'] ?? $v['fileName'] ?? basename($v['videoUrl'] ?? '');
+        if (empty($relPath)) continue;
 
-        // Construir nueva ruta absoluta
-        $newAbsolutePath = $videoLibraryPath . '/' . $fileName;
+        // Limpiar separadores para compatibilidad multiplataforma
+        $relPath = str_replace('\\', '/', $relPath);
+        
+        // Construir nueva ruta absoluta uniendo el nuevo root con el path relativo del backup
+        $newAbsolutePath = $videoLibraryPath . '/' . $relPath;
         
         // El thumbnailUrl debe apuntar a la carpeta local del nuevo servidor
         $newThumbUrl = 'api/uploads/thumbnails/' . basename($v['thumbnailUrl'] ?? 'default.jpg');
@@ -118,7 +151,11 @@ function port_restore_backup($pdo, $input) {
     }
 
     port_cleanup($tempDir);
-    respond(true, ['imported' => $imported, 'errors' => $errors]);
+    respond(true, [
+        'imported' => $imported, 
+        'errors' => $errors, 
+        'categories_synced' => $categoriesSynced
+    ]);
 }
 
 function port_cleanup($dir) {
