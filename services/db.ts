@@ -29,14 +29,25 @@ class DBService {
         }
         return fetch(url, options).then(async (response) => {
             const rawText = await response.text();
+            
             if (response.status === 401) {
                 window.dispatchEvent(new Event('sp_session_expired'));
                 throw new Error("Sesión expirada");
             }
+
+            if (!response.ok && response.status === 405) {
+                throw new Error("El servidor no permite esta operación (405). Contacte al soporte.");
+            }
+
             let json: any;
-            try { json = JSON.parse(rawText); } catch (e) {
-                this.logRemote(`Malformed JSON from ${endpoint}: ${rawText.substring(0, 500)}`, 'ERROR');
-                throw new Error(`Error del servidor.`);
+            try { 
+                json = JSON.parse(rawText); 
+            } catch (e) {
+                if (rawText.includes('<html') || rawText.includes('<title>')) {
+                    throw new Error(`Error del servidor (HTML detectado). Posible bloqueo de seguridad.`);
+                }
+                this.logRemote(`Malformed JSON from ${endpoint}: ${rawText.substring(0, 200)}`, 'ERROR');
+                throw new Error(`Respuesta inválida del servidor.`);
             }
             if (json.success === false) throw new Error(json.error || 'Error desconocido');
             return json.data as T;
@@ -87,8 +98,9 @@ class DBService {
         return this.request<User | null>(`action=get_user&userId=${userId}`);
     }
 
+    // Cambiado a GET para mayor compatibilidad con Nginx
     public async heartbeat(userId: string): Promise<User> {
-        return this.request<User>(`action=heartbeat`, { method: 'POST', body: JSON.stringify({ userId }) });
+        return this.request<User>(`action=heartbeat&userId=${userId}`);
     }
 
     public saveOfflineUser(user: User): void { localStorage.setItem('sp_offline_user', JSON.stringify(user)); }

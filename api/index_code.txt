@@ -1,6 +1,7 @@
+
 <?php
 /**
- * StreamPay - Core Controller V11.30 (Portability Patch)
+ * StreamPay - Core Controller V11.40 (Fix 405 Heartbeat)
  */
 ob_start(); 
 ini_set('display_errors', 0); 

@@ -36,7 +36,10 @@ export default function GridProcessor() {
         
         const startPlay = async () => {
             try {
-                await vid.play();
+                // Manejar error de play() si el navegador bloquea el fondo o se desmonta
+                await vid.play().catch(e => {
+                    console.warn("GridProcessor: play() rechazado, continuando...", e.name);
+                });
                 setStatus('CAPTURING');
             } catch (e) {}
         };

@@ -36,7 +36,8 @@ function auth_logout($pdo, $input) {
 }
 
 function auth_heartbeat($pdo, $input) {
-    $uid = trim($input['userId'] ?? '', '"\' '); $token = getBearerToken();
+    $uid = trim($input['userId'] ?? $_GET['userId'] ?? '', '"\' '); 
+    $token = getBearerToken();
     if (!$uid || !$token) { http_response_code(401); respond(false, null, 'Sesión no proporcionada'); }
     $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?"); $stmt->execute([$uid]); $u = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($u && $u['currentSessionId'] === $token) {
@@ -98,7 +99,7 @@ function auth_update_user($pdo, $input) {
     if (!empty($data['newPassword'])) { $fields[] = "password_hash = ?"; $params[] = password_hash($data['newPassword'], PASSWORD_DEFAULT); }
     if (!empty($data['toggleWatchLater'])) {
         $vid = $data['toggleWatchLater'];
-        $curr = json_decode($pdo->query("SELECT watchLater FROM users WHERE id = '$uid'")->fetchColumn() ?: '[]', true);
+        $curr = json_decode($pdo->query("SELECT watchLater FROM users id = '$uid'")->fetchColumn() ?: '[]', true);
         if (in_array($vid, $curr)) $curr = array_values(array_diff($curr, [$vid])); else $curr[] = $vid;
         $fields[] = "watchLater = ?"; $params[] = json_encode($curr);
     }

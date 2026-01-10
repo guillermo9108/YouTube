@@ -34,8 +34,9 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
             }
         }, 10000);
 
-        vid.play().catch(() => {
-            setStatus('Codec no soportado');
+        vid.play().catch((e) => {
+            setStatus('Codec no soportado o pausa de sistema');
+            console.warn("AdminLibrary: play() interrumpido", e.name);
         });
 
         return () => {
