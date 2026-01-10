@@ -1,4 +1,3 @@
-
 <?php
 // DEFINICIÓN DEL ESQUEMA MAESTRO
 function getAppSchema() {
@@ -146,15 +145,22 @@ function getAppSchema() {
                 'ytDlpPath' => 'VARCHAR(255)',
                 'ffmpegPath' => 'VARCHAR(255) DEFAULT "ffmpeg"',
                 'geminiKey' => 'VARCHAR(255)',
+                'pexelsKey' => 'VARCHAR(255) DEFAULT NULL',
+                'pixabayKey' => 'VARCHAR(255) DEFAULT NULL',
                 'tropipayClientId' => 'VARCHAR(255)',
                 'tropipayClientSecret' => 'VARCHAR(255)',
                 'currencyConversion' => 'DECIMAL(10, 2) DEFAULT 300.00',
                 'enableYoutube' => 'TINYINT(1) DEFAULT 0',
                 'autoTranscode' => 'TINYINT(1) DEFAULT 0',
+                'transcodePreset' => "VARCHAR(50) DEFAULT 'ultrafast'",
+                'proxyUrl' => 'VARCHAR(255) DEFAULT NULL',
                 'is_transcoder_active' => 'TINYINT(1) DEFAULT 0',
                 'categories' => 'JSON DEFAULT NULL',
                 'categoryPrices' => 'JSON DEFAULT NULL',
+                'customCategories' => 'JSON DEFAULT NULL',
                 'libraryPaths' => 'JSON DEFAULT NULL',
+                'ftpSettings' => 'JSON DEFAULT NULL',
+                'paymentInstructions' => 'TEXT DEFAULT NULL',
                 'categoryHierarchy' => 'JSON DEFAULT NULL',
                 'autoGroupFolders' => 'TINYINT(1) DEFAULT 1',
                 'localLibraryPath' => "VARCHAR(255) DEFAULT ''",
