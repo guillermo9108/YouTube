@@ -153,6 +153,7 @@ function getAppSchema() {
                 'autoTranscode' => 'TINYINT(1) DEFAULT 0',
                 'is_transcoder_active' => 'TINYINT(1) DEFAULT 0',
                 'categories' => 'JSON DEFAULT NULL',
+                'categoryPrices' => 'JSON DEFAULT NULL',
                 'libraryPaths' => 'JSON DEFAULT NULL',
                 'categoryHierarchy' => 'JSON DEFAULT NULL',
                 'autoGroupFolders' => 'TINYINT(1) DEFAULT 1',

@@ -1,7 +1,7 @@
 
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V12.0 (Multi-Volume Support)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V12.1 (Fix Missing Functions)
  */
 
 function admin_get_settings($pdo) {
@@ -75,6 +75,22 @@ function admin_update_settings($pdo, $input) {
     } catch (Exception $e) {
         respond(false, null, "Error en base de datos: " . $e->getMessage());
     }
+}
+
+function admin_get_requests($pdo, $status = 'ALL') {
+    $sql = "SELECT r.*, u.username FROM requests r LEFT JOIN users u ON r.userId = u.id";
+    if ($status !== 'ALL') {
+        $sql .= " WHERE r.status = :status";
+    }
+    $sql .= " ORDER BY r.createdAt DESC";
+    
+    $stmt = $pdo->prepare($sql);
+    if ($status !== 'ALL') {
+        $stmt->execute(['status' => $status]);
+    } else {
+        $stmt->execute();
+    }
+    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
 function admin_add_balance($pdo, $input) {
