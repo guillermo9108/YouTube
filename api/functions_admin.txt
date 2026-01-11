@@ -1,7 +1,6 @@
-
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V12.6 (FFmpeg 2.7.1 Bruteforce Fix)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V12.7 (Smart Cleaner Preview Fix)
  */
 
 function admin_get_settings($pdo) {
@@ -54,14 +53,6 @@ function admin_process_next_transcode($pdo) {
     $stmtP->execute([$ext]);
     $profileArgs = $stmtP->fetchColumn();
     
-    /**
-     * PERFIL "NUCLEAR" v2.7.1 - Diseñado para archivos con metadatos DAR 0:0
-     * -s 1280x720: Forzamos tamaño fijo para evitar errores de cálculo de dimensiones.
-     * -aspect 16:9: Forzamos la relación de aspecto para corregir el DAR 0:0.
-     * -pix_fmt yuv420p: Forzamos el formato de píxel antes de abrir el encoder.
-     * -ac 2 -ar 44100: Forzamos estéreo y frecuencia para corregir el "0 channels".
-     * -vtag avc1: Aseguramos compatibilidad absoluta con navegadores.
-     */
     if (!$profileArgs) {
         $profileArgs = "-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 1280x720 -aspect 16:9 -r 30 -b:v 1500k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100 -ab 128k";
     }
@@ -78,7 +69,6 @@ function admin_process_next_transcode($pdo) {
     if (!is_dir($outFolder)) mkdir($outFolder, 0777, true);
     $outputPath = $outFolder . $video['id'] . '.mp4';
 
-    // Construcción del comando con parámetros de salida explícitos
     $cmd = escapeshellarg($ffmpegPath) . " -i " . escapeshellarg($inputPath) . " -y " . $profileArgs . " " . escapeshellarg($outputPath) . " 2>&1";
     
     $output = [];
@@ -313,6 +303,56 @@ function admin_file_cleanup_preview($pdo, $type) {
         else { $real = resolve_video_path($v['videoUrl']); $v['size_fmt'] = $real ? round(filesize($real) / (1024*1024), 2) . " MB" : "Error 404"; if (!$real) $v['reason'] = "Archivo No Encontrado"; }
     }
     respond(true, $res);
+}
+
+/**
+ * PREVIEW DEL LIMPIADOR INTELIGENTE
+ */
+function admin_smart_cleaner_preview($pdo, $input) {
+    $minDays = intval($input['minDays'] ?? 30);
+    $maxViews = intval($input['maxViews'] ?? 5);
+    $category = $input['category'] ?? 'ALL';
+    $limit = intval($input['maxDeleteLimit'] ?? 100);
+    
+    $timeLimit = time() - ($minDays * 86400);
+    
+    $sql = "SELECT id, title, videoUrl, views, createdAt, category FROM videos WHERE createdAt < ? AND views <= ?";
+    $params = [$timeLimit, $maxViews];
+    
+    if ($category !== 'ALL') {
+        $sql .= " AND category = ?";
+        $params[] = $category;
+    }
+    
+    $sql .= " ORDER BY views ASC, createdAt ASC LIMIT ?";
+    $params[] = $limit;
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $totalSize = 0;
+    foreach ($rows as &$v) {
+        $v['reason'] = ($v['views'] == 0) ? "Cero Vistas" : "Baja Tracción";
+        $real = resolve_video_path($v['videoUrl']);
+        if ($real && file_exists($real)) {
+            $bytes = filesize($real);
+            $totalSize += $bytes;
+            $v['size_fmt'] = round($bytes / (1024 * 1024), 2) . " MB";
+        } else {
+            $v['size_fmt'] = "Archivo perdido";
+            $v['reason'] = "Error 404";
+        }
+    }
+    
+    $gb = round($totalSize / (1024 * 1024 * 1024), 2);
+    
+    respond(true, [
+        'preview' => $rows,
+        'stats' => [
+            'spaceReclaimed' => "$gb GB"
+        ]
+    ]);
 }
 
 function admin_smart_cleaner_execute($pdo, $input) {
