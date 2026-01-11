@@ -1,7 +1,7 @@
 
 <?php
 /**
- * StreamPay - Core Controller V11.40 (Fix 405 Heartbeat)
+ * StreamPay - Core Controller V11.41 (Fix Transcoder Worker)
  */
 ob_start(); 
 ini_set('display_errors', 0); 
@@ -186,6 +186,7 @@ try {
         case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $_GET['extension'] ?? ''); break;
         case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
         case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
+        case 'admin_process_next_transcode': admin_process_next_transcode($pdo); break;
         case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
         case 'admin_get_transcode_log': admin_get_transcode_log(); break;
         case 'admin_retry_failed_transcodes': admin_retry_failed_transcodes($pdo); break;
