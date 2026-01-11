@@ -1,4 +1,3 @@
-
 import { 
     User, Video, Transaction, VipPlan, Comment, UserInteraction, 
     Notification as AppNotification, VideoResult, ContentRequest, 
@@ -35,24 +34,56 @@ class DBService {
                 throw new Error("Sesión expirada");
             }
 
-            if (!response.ok && response.status === 405) {
-                throw new Error("El servidor no permite esta operación (405). Contacte al soporte.");
-            }
-
             let json: any;
             try { 
                 json = JSON.parse(rawText); 
             } catch (e) {
-                if (rawText.includes('<html') || rawText.includes('<title>')) {
-                    throw new Error(`Error del servidor (HTML detectado). Posible bloqueo de seguridad.`);
-                }
-                this.logRemote(`Malformed JSON from ${endpoint}: ${rawText.substring(0, 200)}`, 'ERROR');
+                this.logRemote(`Malformed JSON from ${endpoint}: ${rawText.substring(0, 100)}`, 'ERROR');
                 throw new Error(`Respuesta inválida del servidor.`);
             }
             if (json.success === false) throw new Error(json.error || 'Error desconocido');
             return json.data as T;
         });
     }
+
+    // --- MÉTODOS CON FALLBACK OFFLINE MEJORADO ---
+
+    public async getAllVideos(): Promise<Video[]> { 
+        try {
+            const vids = await this.request<Video[]>('action=get_videos');
+            localStorage.setItem('sp_cache_vids', JSON.stringify(vids));
+            return vids;
+        } catch (e) {
+            console.warn("Usando cache local de videos (BD offline)");
+            const cached = localStorage.getItem('sp_cache_vids');
+            return cached ? JSON.parse(cached) : [];
+        }
+    }
+
+    public async getMarketplaceItems(): Promise<MarketplaceItem[]> { 
+        try {
+            const items = await this.request<MarketplaceItem[]>('action=get_marketplace_items');
+            localStorage.setItem('sp_cache_market', JSON.stringify(items));
+            return items;
+        } catch (e) {
+            console.warn("Usando cache local de marketplace (BD offline)");
+            const cached = localStorage.getItem('sp_cache_market');
+            return cached ? JSON.parse(cached) : [];
+        }
+    }
+
+    public async getSystemSettings(): Promise<SystemSettings> { 
+        try {
+            const s = await this.request<SystemSettings>('action=get_system_settings');
+            localStorage.setItem('sp_cache_settings', JSON.stringify(s));
+            return s;
+        } catch (e) {
+            const cached = localStorage.getItem('sp_cache_settings');
+            return cached ? JSON.parse(cached) : { categories: [] } as any;
+        }
+    }
+
+    // --- MÉTODOS ESTÁNDAR ---
 
     public async saveSearch(term: string): Promise<void> {
         return this.request<void>(`action=save_search`, { method: 'POST', body: JSON.stringify({ term }) });
@@ -98,7 +129,6 @@ class DBService {
         return this.request<User | null>(`action=get_user&userId=${userId}`);
     }
 
-    // Cambiado a GET para mayor compatibilidad con Nginx
     public async heartbeat(userId: string): Promise<User> {
         return this.request<User>(`action=heartbeat&userId=${userId}`);
     }
@@ -109,8 +139,6 @@ class DBService {
         const data = localStorage.getItem('sp_offline_user');
         return data ? JSON.parse(data) : null;
     }
-
-    public async getAllVideos(): Promise<Video[]> { return this.request<Video[]>('action=get_videos'); }
 
     public async getVideo(id: string): Promise<Video | null> { return this.request<Video | null>(`action=get_video&id=${id}`); }
 
@@ -139,8 +167,6 @@ class DBService {
     public async toggleSubscribe(userId: string, creatorId: string): Promise<{isSubscribed: boolean}> {
         return this.request<{isSubscribed: boolean}>(`action=toggle_subscribe`, { method: 'POST', body: JSON.stringify({ userId, creatorId }) });
     }
-
-    public async getSystemSettings(): Promise<SystemSettings> { return this.request<SystemSettings>('action=get_system_settings'); }
 
     public async updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> {
         return this.request<void>('action=update_system_settings', { method: 'POST', body: JSON.stringify(settings) });
@@ -198,7 +224,6 @@ class DBService {
     public async updateRequestStatus(id: string, status: string): Promise<void> { return this.request<void>(`action=update_request_status`, { method: 'POST', body: JSON.stringify({ id, status }) }); }
     public async deleteRequest(id: string): Promise<void> { return this.request<void>(`action=delete_request`, { method: 'POST', body: JSON.stringify({ id }) }); }
 
-    public async getMarketplaceItems(): Promise<MarketplaceItem[]> { return this.request<MarketplaceItem[]>('action=get_marketplace_items'); }
     public async adminGetMarketplaceItems(): Promise<MarketplaceItem[]> { return this.request<MarketplaceItem[]>('action=admin_get_marketplace_items'); }
     public async getMarketplaceItem(id: string): Promise<MarketplaceItem | null> { return this.request<MarketplaceItem | null>(`action=get_marketplace_item&id=${id}`); }
     public async createListing(formData: FormData): Promise<void> { return this.request<void>(`action=create_listing`, { method: 'POST', body: formData }); }
