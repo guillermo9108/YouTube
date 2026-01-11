@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle
+    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -70,31 +70,60 @@ export default function Watch() {
                     const catDef = (settings.categories || []).find(c => c.name === v.category || c.name === v.parent_category);
                     const sortMode = catDef?.sortOrder || 'ALPHA'; 
                     
-                    // --- MOTOR DE JERARQUÍA INTELIGENTE ---
-                    // Prioridad 1: Misma subcategoría (carpeta específica)
-                    // Prioridad 2: Misma categoría raíz (carpeta padre)
-                    // Prioridad 3: Resto
+                    // --- MOTOR DE JERARQUÍA INTELIGENTE Y ANTI-BUCLE ---
+                    // 1. Identificar de dónde venimos para evitar bucles
+                    const prevId = sessionStorage.getItem('sp_prev_video_id');
+                    
+                    // 2. Ordenar por jerarquía de carpetas
                     related.sort((a, b) => {
-                        // 1. Prioridad por Subcategoría Exacta (v.category)
+                        // Prioridad por Subcategoría Exacta (v.category)
                         const aSameSub = a.category === v.category;
                         const bSameSub = b.category === v.category;
                         if (aSameSub && !bSameSub) return -1;
                         if (!aSameSub && bSameSub) return 1;
 
-                        // 2. Prioridad por Categoría Padre (v.parent_category)
+                        // Prioridad por Categoría Padre (v.parent_category)
                         const aSameParent = a.parent_category === v.parent_category;
                         const bSameParent = b.parent_category === v.parent_category;
                         if (aSameParent && !bSameParent) return -1;
                         if (!aSameParent && bSameParent) return 1;
 
-                        // 3. Aplicar orden preferido de la categoría para elementos del mismo nivel
-                        if (sortMode === 'ALPHA') return naturalCollator.compare(a.title, b.title);
-                        if (sortMode === 'LATEST') return b.createdAt - a.createdAt;
-                        
                         return 0;
                     });
 
-                    setRelatedVideos(related);
+                    // 3. LOGICA SECUENCIAL DENTRO DE LA MISMA COLECCIÓN
+                    // Si estamos en la misma subcategoría, queremos que el "siguiente" sea el alfabéticamente posterior
+                    const sameSubVideos = related.filter(rv => rv.category === v.category);
+                    const otherVideos = related.filter(rv => rv.category !== v.category);
+
+                    if (sortMode === 'ALPHA') {
+                        // Separar en posteriores y anteriores al actual
+                        const nextInSequence = sameSubVideos.filter(rv => naturalCollator.compare(rv.title, v.title) > 0)
+                            .sort((a, b) => naturalCollator.compare(a.title, b.title));
+                        
+                        const prevInSequence = sameSubVideos.filter(rv => naturalCollator.compare(rv.title, v.title) < 0)
+                            .sort((a, b) => naturalCollator.compare(a.title, b.title));
+                        
+                        // Reensamblar: [Siguientes capítulos] -> [Capítulos anteriores] -> [Otras categorías]
+                        let finalOrder = [...nextInSequence, ...prevInSequence, ...otherVideos];
+
+                        // 4. FILTRO ANTI-BUCLE: Si el video que sigue es exactamente el anterior, moverlo al final
+                        if (prevId && finalOrder.length > 1 && finalOrder[0].id === prevId) {
+                            const loopingVid = finalOrder.shift();
+                            if (loopingVid) finalOrder.push(loopingVid);
+                        }
+
+                        setRelatedVideos(finalOrder);
+                    } else {
+                        // Para otros modos (LATEST/RANDOM), solo aplicamos el filtro anti-bucle básico
+                        let finalOrder = [...related];
+                        if (prevId && finalOrder.length > 1 && finalOrder[0].id === prevId) {
+                            const loopingVid = finalOrder.shift();
+                            if (loopingVid) finalOrder.push(loopingVid);
+                        }
+                        setRelatedVideos(finalOrder);
+                    }
+
                     db.getComments(v.id).then(setComments);
 
                     if (user) {
@@ -140,10 +169,15 @@ export default function Watch() {
         }
     };
 
+    const navigateToNext = (nextVid: Video) => {
+        if (video) sessionStorage.setItem('sp_prev_video_id', video.id);
+        navigate(`/watch/${nextVid.id}`);
+    };
+
     const handleVideoEnded = async () => {
         if (!relatedVideos.length || !user || !video) return;
         
-        // Playlist Jerárquica: El orden ya viene pre-calculado en relatedVideos
+        // El orden ya viene pre-calculado y corregido para evitar bucles
         const nextVid = relatedVideos[0] || null;
 
         if (!nextVid) {
@@ -154,9 +188,9 @@ export default function Watch() {
         const isVipTotal = user.vipExpiry && user.vipExpiry > Date.now() / 1000;
         const hasAccess = user.role?.trim().toUpperCase() === 'ADMIN' || user.id === nextVid.creatorId || isVipTotal;
         
-        if (hasAccess) { navigate(`/watch/${nextVid.id}`); return; }
+        if (hasAccess) { navigateToNext(nextVid); return; }
         const purchased = await db.hasPurchased(user.id, nextVid.id);
-        if (purchased) { navigate(`/watch/${nextVid.id}`); return; }
+        if (purchased) { navigateToNext(nextVid); return; }
 
         const price = Number(nextVid.price);
         const limit = Number(user.autoPurchaseLimit || 0);
@@ -164,7 +198,7 @@ export default function Watch() {
             try {
                 await db.purchaseVideo(user.id, nextVid.id);
                 toast.success(`Autocompra: ${nextVid.title}`);
-                navigate(`/watch/${nextVid.id}`);
+                navigateToNext(nextVid);
             } catch (e) { toast.error("Error en autocompra"); }
         } else {
             toast.warning("El próximo capítulo requiere compra manual");
@@ -315,14 +349,19 @@ export default function Watch() {
                 <div className="lg:w-80 space-y-6">
                     <div className="flex items-center justify-between px-2">
                         <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">Siguiente Contenido</h3>
-                        <span className="text-[9px] font-black bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20">JERARQUÍA ACTIVA</span>
+                        <span className="text-[9px] font-black bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20">SECUENCIA ACTIVA</span>
                     </div>
                     
                     <div className="space-y-4">
-                        {relatedVideos.slice(0, visibleRelatedCount).map(v => (
-                            <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
+                        {relatedVideos.slice(0, visibleRelatedCount).map((v, idx) => (
+                            <Link key={v.id} to={`/watch/${v.id}`} onClick={(e) => { e.preventDefault(); navigateToNext(v); }} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
                                 <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
                                     <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" />
+                                    {idx === 0 && (
+                                        <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <ArrowRightCircle size={32} className="text-white drop-shadow-xl"/>
+                                        </div>
+                                    )}
                                     {v.category === video?.category && (
                                         <div className="absolute top-1 right-1 bg-indigo-600 p-1 rounded-md shadow-lg border border-white/20">
                                             <CheckCircle2 size={10} className="text-white"/>
