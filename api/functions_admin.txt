@@ -1,7 +1,7 @@
 
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V12.3 (FFmpeg 2.7.1 Fix)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V12.4 (FFmpeg 2.7.1 Ultimate Fix)
  */
 
 function admin_get_settings($pdo) {
@@ -38,34 +38,33 @@ function admin_get_settings($pdo) {
 }
 
 /**
- * EJECUTOR FÍSICO DE TRANSCODIFICACIÓN - MEJORADO PARA v2.7.1
+ * EJECUTOR FÍSICO DE TRANSCODIFICACIÓN - MEJORADO PARA v2.7.1 ULTIMATE
  */
 function admin_process_next_transcode($pdo) {
-    // 1. Obtener la configuración
     $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
     $ffmpegPath = $stmtS->fetchColumn();
     if (!$ffmpegPath) respond(false, null, "FFmpeg no configurado");
 
-    // 2. Obtener el siguiente video en cola
     $stmtV = $pdo->query("SELECT * FROM videos WHERE transcode_status = 'WAITING' LIMIT 1");
     $video = $stmtV->fetch();
     if (!$video) respond(true, ['message' => 'Cola vacía']);
 
-    // 3. Obtener el perfil adecuado
     $ext = strtolower(pathinfo($video['videoUrl'], PATHINFO_EXTENSION));
     $stmtP = $pdo->prepare("SELECT command_args FROM transcode_profiles WHERE extension = ?");
     $stmtP->execute([$ext]);
     $profileArgs = $stmtP->fetchColumn();
     
-    // Fallback optimizado con FIX de Píxeles e hilos para v2.7.1
+    // PERFIL DE SUPERVIVENCIA v2.7.1:
+    // 1. -profile:v baseline -level 3.0: El modo más compatible de H264.
+    // 2. -pix_fmt yuv420p: Evita errores con formatos de color 'none' o avanzados.
+    // 3. -threads 1: Evita colapsos de memoria en NAS antiguos.
+    // 4. -b:v 1500k: Fuerza bitrate para evitar que herede bitrates basura del origen.
     if (!$profileArgs) {
-        $profileArgs = "-c:v libx264 -preset ultrafast -crf 28 -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -pix_fmt yuv420p -strict experimental -c:a aac -ac 2";
+        $profileArgs = "-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -b:v 1500k -threads 1 -strict experimental -c:a aac -ac 2 -ar 44100 -ab 128k";
     }
 
-    // 4. Marcar como procesando
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', transcode_progress = 5 WHERE id = ?")->execute([$video['id']]);
 
-    // 5. Preparar Rutas
     $inputPath = resolve_video_path($video['videoUrl']);
     if (!$inputPath) {
         $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo de origen no accesible' WHERE id = ?")->execute([$video['id']]);
@@ -76,7 +75,7 @@ function admin_process_next_transcode($pdo) {
     if (!is_dir($outFolder)) mkdir($outFolder, 0777, true);
     $outputPath = $outFolder . $video['id'] . '.mp4';
 
-    // 6. Ejecutar Comando
+    // Ejecución con redirección de logs
     $cmd = escapeshellarg($ffmpegPath) . " -i " . escapeshellarg($inputPath) . " -y " . $profileArgs . " " . escapeshellarg($outputPath) . " 2>&1";
     
     $output = [];
@@ -84,16 +83,14 @@ function admin_process_next_transcode($pdo) {
     exec($cmd, $output, $returnVar);
 
     $logString = implode("\n", $output);
-    write_log("FFmpeg Output for {$video['id']}: " . substr($logString, -800), 'INFO');
+    write_log("FFmpeg Execution for {$video['id']}: " . substr($logString, -1000), 'INFO');
 
     if ($returnVar === 0 && file_exists($outputPath) && filesize($outputPath) > 1000) {
-        // Éxito: Actualizar video a la nueva ruta MP4
         $newUrl = 'api/uploads/videos/converted/' . $video['id'] . '.mp4';
         $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE', transcode_progress = 100 WHERE id = ?")
             ->execute([$newUrl, $video['id']]);
         respond(true, ['message' => 'Video convertido con éxito', 'id' => $video['id']]);
     } else {
-        // Fallo - Guardamos el error específico del encoder para debug
         $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = ? WHERE id = ?")
             ->execute([substr($logString, -500), $video['id']]);
         respond(false, null, "FFmpeg falló. Revise el log de salida.");

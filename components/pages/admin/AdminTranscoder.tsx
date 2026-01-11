@@ -27,7 +27,7 @@ export default function AdminTranscoder() {
 
     const [editingProfile, setEditingProfile] = useState({ 
         extension: '', 
-        command_args: '-c:v libx264 -preset ultrafast -crf 28 -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -pix_fmt yuv420p -strict experimental -c:a aac -ac 2', 
+        command_args: '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -b:v 1500k -threads 1 -strict experimental -c:a aac -ac 2 -ar 44100 -ab 128k', 
         description: '' 
     });
 
@@ -139,12 +139,12 @@ export default function AdminTranscoder() {
         
         switch(level) {
             case 1: args = '-c copy'; break;
-            case 2: args = '-c:v libx264 -preset ultrafast -crf 28 -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -pix_fmt yuv420p -strict experimental -c:a aac -ac 2'; break;
-            case 3: args = '-vf "scale=trunc(iw/2)*2:720,setsar=1" -c:v libx264 -preset ultrafast -crf 30 -pix_fmt yuv420p -strict experimental -c:a aac -ac 2'; break;
+            case 2: args = '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -b:v 1500k -threads 1 -strict experimental -c:a aac -ac 2 -ar 44100'; break;
+            case 3: args = '-vf "scale=trunc(iw/2)*2:720,setsar=1" -c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -pix_fmt yuv420p -b:v 1000k -threads 1 -strict experimental -c:a aac -ac 2 -ar 44100'; break;
         }
 
         extensions.forEach(ext => handleSaveProfile(ext, args));
-        toast.success("Presets v2.7.1 (Safe Mode) aplicados");
+        toast.success("Presets v2.7.1 (Baseline Mode) aplicados");
     };
 
     return (
@@ -188,7 +188,7 @@ export default function AdminTranscoder() {
                         <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center"><Gauge size={28}/></div>
                         <div>
                             <h3 className="text-xl font-black text-white uppercase tracking-tighter italic leading-none">Perfiles Synology v2.7.1</h3>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">H.264 & AAC con filtros de corrección de píxel y audio</p>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">H.264 Baseline & hilos bloqueados para estabilidad</p>
                         </div>
                     </div>
 
@@ -198,12 +198,12 @@ export default function AdminTranscoder() {
                             <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Re-empaquetado MP4 sin carga de CPU. Rápido y seguro.</p>
                         </button>
                         <button onClick={() => applyHardwarePreset(2)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-amber-500/50 transition-all group">
-                            <div className="text-xs font-black text-amber-400 uppercase tracking-widest mb-1">Modo Seguro 1080p</div>
-                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Corrección de YUV420P y dimensiones pares para evitar fallos de encoder.</p>
+                            <div className="text-xs font-black text-amber-400 uppercase tracking-widest mb-1">Compatibilidad Ultimate</div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Baseline Profile + PixFmt Fix. Evita fallos de encoder al abrir stream.</p>
                         </button>
                         <button onClick={() => applyHardwarePreset(3)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-red-500/50 transition-all group">
-                            <div className="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Ultra-Compat 720p</div>
-                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Escalado forzado a 720p y corrección de audio a estéreo.</p>
+                            <div className="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Bajo Recurso 720p</div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Reduce bitrate y escala a 720p para aliviar CPU del NAS.</p>
                         </button>
                     </div>
                 </div>
