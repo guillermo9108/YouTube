@@ -26,19 +26,24 @@ function video_get_all($pdo) {
     respond(true, $videos);
 }
 
+/**
+ * ESCANEO LOCAL ROBUSTO (Ignora errores de permisos y carpetas de sistema)
+ */
 function video_scan_local($pdo, $input) {
-    // 1. Obtener Rutas
     $paths = [];
     if (!empty($input['path'])) {
         $paths = [$input['path']];
     } else {
-        $stmt = $pdo->query("SELECT libraryPaths FROM system_settings WHERE id = 1");
-        $paths = json_decode($stmt->fetchColumn() ?: '[]', true);
+        $stmt = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
+        $sets = $stmt->fetch();
+        $paths = json_decode($sets['libraryPaths'] ?: '[]', true);
+        if ($sets['localLibraryPath']) $paths[] = $sets['localLibraryPath'];
     }
 
-    if (empty($paths)) respond(false, null, "No hay rutas de volumen configuradas.");
+    $paths = array_unique(array_filter($paths));
+    if (empty($paths)) respond(false, null, "No hay rutas configuradas.");
 
-    // 2. Obtener Configuración de Categorías para Auto-Creación
+    // Obtener Configuración de Categorías
     $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
     $currentCategories = json_decode($stmtS->fetchColumn() ?: '[]', true);
     $catNames = array_map('strtolower', array_column($currentCategories, 'name'));
@@ -46,6 +51,9 @@ function video_scan_local($pdo, $input) {
 
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $added = 0; $found = 0; $errors = [];
+    
+    // Lista negra de carpetas de sistema (comunes en NAS y Windows)
+    $blacklist = ['#recycle', '@eaDir', '$RECYCLE.BIN', 'System Volume Information', '.Thumbnails', '.DS_Store', 'lost+found'];
 
     foreach ($paths as $rootPath) {
         $rootPath = trim($rootPath);
@@ -54,48 +62,69 @@ function video_scan_local($pdo, $input) {
             continue;
         }
 
-        // --- AUTO-CREACIÓN DE CATEGORÍAS (Basado en carpetas de nivel 1) ---
-        $dirEntries = scandir($rootPath);
-        foreach ($dirEntries as $entry) {
-            if ($entry === '.' || $entry === '..') continue;
-            $fullEntryPath = $rootPath . DIRECTORY_SEPARATOR . $entry;
-            
-            if (is_dir($fullEntryPath)) {
-                $cleanCatName = strtoupper(trim($entry));
-                if (!in_array(strtolower($cleanCatName), $catNames)) {
-                    // Crear nueva categoría si no existe
-                    $newCat = [
-                        'id' => 'cat_' . uniqid(),
-                        'name' => $cleanCatName,
-                        'price' => 1.00,
-                        'autoSub' => true,
-                        'sortOrder' => 'ALPHA'
-                    ];
-                    $currentCategories[] = $newCat;
-                    $catNames[] = strtolower($cleanCatName);
-                    $categoriesChanged = true;
-                }
-            }
+        if (!is_readable($rootPath)) {
+            $errors[] = "Sin permiso de lectura en raíz: $rootPath";
+            continue;
         }
 
-        // 3. Escaneo de Archivos
+        // 1. Auto-Categorización (Carpetas Nivel 1)
         try {
-            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($rootPath));
+            $dirEntries = @scandir($rootPath);
+            if ($dirEntries) {
+                foreach ($dirEntries as $entry) {
+                    if ($entry === '.' || $entry === '..' || in_array($entry, $blacklist)) continue;
+                    $fullEntryPath = $rootPath . DIRECTORY_SEPARATOR . $entry;
+                    if (is_dir($fullEntryPath) && is_readable($fullEntryPath)) {
+                        $cleanCatName = strtoupper(trim($entry));
+                        if (!in_array(strtolower($cleanCatName), $catNames)) {
+                            $currentCategories[] = [
+                                'id' => 'cat_' . uniqid(),
+                                'name' => $cleanCatName,
+                                'price' => 1.00,
+                                'autoSub' => true,
+                                'sortOrder' => 'ALPHA'
+                            ];
+                            $catNames[] = strtolower($cleanCatName);
+                            $categoriesChanged = true;
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) {}
+
+        // 2. Escaneo Recursivo Seguro
+        try {
+            $directory = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
+            
+            // Filtro para ignorar la lista negra de forma recursiva
+            $filter = new RecursiveCallbackFilterIterator($directory, function ($current, $key, $iterator) use ($blacklist) {
+                if ($current->isDir()) {
+                    if (in_array($current->getFilename(), $blacklist)) return false;
+                    return @is_readable($current->getPathname());
+                }
+                return true;
+            });
+
+            $it = new RecursiveIteratorIterator($filter, RecursiveIteratorIterator::SELF_FIRST);
+
             foreach ($it as $file) {
                 if ($file->isDir()) continue;
                 $ext = strtolower($file->getExtension());
-                if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm'])) {
+                if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm', 'ts'])) {
                     $found++;
                     $fullPath = $file->getRealPath();
+                    if (!$fullPath) continue;
+
+                    // Verificar si ya existe en DB (Por URL o ID MD5)
+                    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? OR id = ?");
+                    $vidId = 'loc_' . md5($fullPath);
+                    $stmt->execute([$fullPath, $vidId]);
                     
-                    // Verificar si ya existe en DB
-                    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
-                    $stmt->execute([$fullPath]);
                     if ($stmt->fetchColumn() == 0) {
-                        $vidId = 'loc_' . md5($fullPath);
                         $title = pathinfo($fullPath, PATHINFO_FILENAME);
+                        // Limpiar nombres (Puntos por espacios, etc)
+                        $title = trim(str_replace(['.', '_', '-'], ' ', $title));
                         
-                        // Insertar como PENDING para procesamiento de miniaturas
                         $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, 'api/uploads/thumbnails/default.jpg')");
                         $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
                         $added++;
@@ -103,11 +132,10 @@ function video_scan_local($pdo, $input) {
                 }
             }
         } catch (Exception $e) {
-            $errors[] = "Error escaneando $rootPath: " . $e->getMessage();
+            $errors[] = "Error parcial en $rootPath: " . $e->getMessage();
         }
     }
 
-    // Guardar nuevas categorías si se crearon
     if ($categoriesChanged) {
         $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
             ->execute([json_encode($currentCategories)]);
@@ -145,8 +173,8 @@ function video_get_related($pdo, $videoId) {
     $stmt = $pdo->prepare("SELECT category, parent_category, collection FROM videos WHERE id = ?");
     $stmt->execute([$videoId]);
     $current = $stmt->fetch();
+    if (!$current) respond(true, []);
     
-    // Obtener un pool amplio para que el frontend ordene jerárquicamente
     $stmt = $pdo->prepare("
         SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
         FROM videos v 
@@ -188,11 +216,13 @@ function video_upload($pdo, $post, $files) {
     $videoUrl = "";
     if (isset($files['video'])) {
         $ext = pathinfo($files['video']['name'], PATHINFO_EXTENSION);
+        if (!is_dir('uploads/videos')) mkdir('uploads/videos', 0777, true);
         $videoUrl = "uploads/videos/{$id}.{$ext}";
         move_uploaded_file($files['video']['tmp_name'], $videoUrl);
     }
     $thumbUrl = "uploads/thumbnails/default.jpg";
     if (isset($files['thumbnail'])) {
+        if (!is_dir('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
         $thumbUrl = "uploads/thumbnails/{$id}.jpg";
         move_uploaded_file($files['thumbnail']['tmp_name'], $thumbUrl);
     }
@@ -215,6 +245,7 @@ function video_update_metadata($pdo, $post, $files) {
     $fields = ["duration = ?", "category = 'PROCESSING'", "processing_attempts = 0"];
     $params = [$dur];
     if (isset($files['thumbnail'])) {
+        if (!is_dir('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
         $thumbPath = "uploads/thumbnails/{$id}.jpg";
         move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
         $fields[] = "thumbnailUrl = ?";
@@ -245,7 +276,7 @@ function video_smart_organize($pdo) {
     $stmt = $pdo->query("SELECT id FROM videos WHERE category = 'PROCESSING' LIMIT 100");
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     foreach ($ids as $id) video_organize_single($pdo, $id, $settings);
-    respond(true, ['processed' => count($ids)]);
+    respond(true, ['processed' => count($ids), 'remaining' => 0]);
 }
 
 function video_reorganize_all($pdo) {
@@ -253,12 +284,12 @@ function video_reorganize_all($pdo) {
     $stmt = $pdo->query("SELECT id FROM videos WHERE category NOT IN ('PENDING', 'FAILED_METADATA')");
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     foreach ($ids as $id) video_organize_single($pdo, $id, $settings);
-    respond(true, ['processed' => count($ids)]);
+    respond(true, ['processed' => count($ids), 'total' => count($ids)]);
 }
 
 function video_fix_metadata($pdo) {
     $pdo->query("UPDATE videos SET category = 'PENDING', processing_attempts = 0 WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg') AND category != 'FAILED_METADATA'");
-    respond(true, ['fixedBroken' => 1]);
+    respond(true, ['fixedBroken' => 1, 'reCategorized' => 0]);
 }
 
 function video_delete($pdo, $input) {

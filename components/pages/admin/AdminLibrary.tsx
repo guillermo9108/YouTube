@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video, SystemSettings } from '../../../types';
@@ -6,7 +5,7 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, 
     CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers, 
-    HardDrive, List, Play, ChevronRight 
+    HardDrive, List, Play, ChevronRight, XCircle
 } from 'lucide-react';
 
 interface ScannerPlayerProps {
@@ -143,25 +142,17 @@ export default function AdminLibrary() {
         loadStats();
     }, []);
 
-    const addToLog = (msg: string) => { setScanLog(prev => [`> ${msg}`, ...prev].slice(0, 50)); };
+    const addToLog = (msg: string) => { setScanLog(prev => [`> ${msg}`, ...prev].slice(0, 100)); };
 
     const handleStep1 = async (useGlobalPaths: boolean = false) => {
-        // Permitimos escanear si hay una ruta escrita O si hay rutas configuradas globalmente
-        if (!useGlobalPaths && !localPath.trim()) {
-            toast.warning("Escribe una ruta o usa el escaneo de volúmenes configurados.");
-            return;
-        }
-
         setIsIndexing(true);
         addToLog(useGlobalPaths ? 'Iniciando escaneo MULTI-VOLUMEN...' : `Escaneando ruta: ${localPath}`);
         
         try {
-            // Sincronizamos la ruta local si se escribió algo
             if (localPath.trim()) {
                 await db.updateSystemSettings({ localLibraryPath: localPath });
             }
 
-            // Si es global, pasamos string vacío para que el backend use los libraryPaths de MariaDB
             const res = await db.scanLocalLibrary(useGlobalPaths ? '' : localPath);
             
             if (res.errors && res.errors.length > 0) {
@@ -237,8 +228,7 @@ export default function AdminLibrary() {
             const res = await db.fixLibraryMetadata();
             addToLog(`Mantenimiento completado.`);
             addToLog(`- Videos rotos reseteados: ${res.fixedBroken}`);
-            addToLog(`- Videos re-categorizados: ${res.reCategorized}`);
-            if (res.fixedBroken > 0 || res.reCategorized > 0) {
+            if (res.fixedBroken > 0) {
                 toast.success("Mantenimiento finalizado");
                 db.setHomeDirty();
             } else {
@@ -296,7 +286,6 @@ export default function AdminLibrary() {
             
             <div className="bg-slate-900 border border-slate-800 rounded-[32px] p-6 shadow-xl space-y-8">
                 
-                {/* PASO 1: REGISTRO FÍSICO */}
                 <div className="space-y-4">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-black">1</div>
@@ -307,7 +296,6 @@ export default function AdminLibrary() {
                     </div>
 
                     <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-4">
-                        {/* Listado de Rutas Activas */}
                         <div className="space-y-2">
                             <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1 ml-1"><List size={10}/> Volúmenes a Procesar:</label>
                             <div className="flex flex-wrap gap-2">
@@ -352,7 +340,6 @@ export default function AdminLibrary() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* PASO 2 */}
                     <div className="space-y-3">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">2</div>
@@ -363,7 +350,6 @@ export default function AdminLibrary() {
                         </button>
                     </div>
 
-                    {/* PASO 3 */}
                     <div className="space-y-3">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-black">3</div>
@@ -375,7 +361,6 @@ export default function AdminLibrary() {
                     </div>
                 </div>
 
-                {/* BOTONES ADICIONALES */}
                 <div className="pt-4 border-t border-slate-800 grid grid-cols-2 gap-4">
                     <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.general === 0)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] text-slate-400 flex items-center justify-center gap-2">
                         {isFixing ? <RefreshCw className="animate-spin" size={14}/> : <ShieldAlert size={14}/>} Mantenimiento ({stats.broken})
@@ -386,22 +371,27 @@ export default function AdminLibrary() {
                 </div>
             </div>
 
-            {/* CONSOLA LOG */}
-            <div className="bg-black/80 p-4 rounded-2xl border border-slate-800 h-48 overflow-y-auto font-mono text-[10px] text-slate-500 shadow-inner custom-scrollbar">
-                <div className="flex items-center gap-2 mb-3 border-b border-slate-800 pb-2">
-                    <Terminal size={12} className="text-slate-600"/>
-                    <span className="font-black uppercase tracking-widest opacity-40">System Output</span>
-                </div>
-                {scanLog.map((l, i) => (
-                    <div key={i} className={`py-1 ${l.includes('ERROR') ? 'text-red-400' : (l.includes('[OK]') ? 'text-emerald-400' : (l.includes('MULTI') ? 'text-indigo-400' : ''))}`}>
-                        <span className="opacity-20 mr-2">[{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}]</span>
-                        {l}
+            <div className="bg-black/80 p-4 rounded-2xl border border-slate-800 h-64 flex flex-col shadow-inner">
+                <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
+                    <div className="flex items-center gap-2">
+                        <Terminal size={12} className="text-slate-600"/>
+                        <span className="font-black text-[10px] uppercase tracking-widest text-slate-500 opacity-60">System Output</span>
                     </div>
-                ))}
-                {scanLog.length === 0 && <p className="italic opacity-30">Esperando comandos...</p>}
+                    <button onClick={() => setScanLog([])} className="text-[9px] font-black uppercase text-slate-600 hover:text-white flex items-center gap-1 transition-colors">
+                        <XCircle size={10}/> Limpiar Consola
+                    </button>
+                </div>
+                <div className="flex-1 overflow-y-auto font-mono text-[10px] space-y-1.5 custom-scrollbar pr-2">
+                    {scanLog.map((l, i) => (
+                        <div key={i} className={`py-1 border-b border-white/5 last:border-0 ${l.includes('ERROR') ? 'text-red-400 font-bold' : (l.includes('[OK]') ? 'text-emerald-400' : (l.includes('MULTI') ? 'text-indigo-400' : 'text-slate-400'))}`}>
+                            <span className="opacity-20 mr-2 shrink-0">[{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}]</span>
+                            <span className="break-words">{l}</span>
+                        </div>
+                    ))}
+                    {scanLog.length === 0 && <p className="italic opacity-30 text-center py-10">Esperando comandos del administrador...</p>}
+                </div>
             </div>
 
-            {/* MODAL DE ESCANEO ACTIVO */}
             {activeScan && (
                 <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300">
                     <div className="bg-slate-900 p-8 rounded-[40px] border border-slate-700 w-full max-w-md text-center shadow-2xl relative overflow-hidden">
