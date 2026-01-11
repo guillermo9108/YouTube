@@ -27,7 +27,7 @@ export default function AdminTranscoder() {
 
     const [editingProfile, setEditingProfile] = useState({ 
         extension: '', 
-        command_args: '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1" -r 30 -b:v 2000k -maxrate 2500k -bufsize 4000k -threads 1 -strict experimental -c:a aac -ac 2 -ar 44100 -ab 128k', 
+        command_args: '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 1280x720 -aspect 16:9 -r 30 -b:v 1500k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100 -ab 128k', 
         description: '' 
     });
 
@@ -123,7 +123,7 @@ export default function AdminTranscoder() {
                 body: JSON.stringify({ 
                     extension: ext, 
                     command_args: args, 
-                    description: editingProfile.description || 'Optimizado para Synology 2.7.1 (Aspect Fix)'
+                    description: editingProfile.description || 'Optimizado para Synology 2.7.1 (Bruteforce Mode)'
                 })
             });
             toast.success(`Perfil .${ext} guardado`);
@@ -139,12 +139,12 @@ export default function AdminTranscoder() {
         
         switch(level) {
             case 1: args = '-c copy'; break;
-            case 2: args = '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1" -r 30 -b:v 2000k -maxrate 2500k -bufsize 4000k -threads 1 -strict experimental -c:a aac -ac 2 -ar 44100'; break;
-            case 3: args = '-vf "scale=trunc(iw/2)*2:720,setsar=1" -c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -pix_fmt yuv420p -r 30 -b:v 1200k -maxrate 1500k -bufsize 3000k -threads 1 -strict experimental -c:a aac -ac 2 -ar 44100'; break;
+            case 2: args = '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 1280x720 -aspect 16:9 -r 30 -b:v 2000k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100'; break;
+            case 3: args = '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 854x480 -aspect 16:9 -r 24 -b:v 1000k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100'; break;
         }
 
         extensions.forEach(ext => handleSaveProfile(ext, args));
-        toast.success("Presets v2.7.1 (Aspect Fix) aplicados");
+        toast.success("Presets v2.7.1 (Bruteforce Mode) aplicados");
     };
 
     return (
@@ -188,7 +188,7 @@ export default function AdminTranscoder() {
                         <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center"><Gauge size={28}/></div>
                         <div>
                             <h3 className="text-xl font-black text-white uppercase tracking-tighter italic leading-none">Perfiles Synology v2.7.1</h3>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">H.264 Baseline & Fix de Aspect Ratio (DAR 0:0)</p>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Corrección de DAR 0:0 y 0-channels (Bruteforce)</p>
                         </div>
                     </div>
 
@@ -198,12 +198,12 @@ export default function AdminTranscoder() {
                             <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Re-empaquetado MP4 sin carga de CPU. Rápido y seguro.</p>
                         </button>
                         <button onClick={() => applyHardwarePreset(2)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-amber-500/50 transition-all group">
-                            <div className="text-xs font-black text-amber-400 uppercase tracking-widest mb-1">Baseline Aspect Fix</div>
-                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Repara errores DAR 0:0 y fuerza bitrate estable para fluidez.</p>
+                            <div className="text-xs font-black text-amber-400 uppercase tracking-widest mb-1">Bruteforce 720p</div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Ignora metadatos originales. Fuerza 1280x720, 16:9 y Audio Estéreo.</p>
                         </button>
                         <button onClick={() => applyHardwarePreset(3)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-red-500/50 transition-all group">
-                            <div className="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Económico 720p</div>
-                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Reduce bitrate y escala a 720p para aliviar CPU del NAS.</p>
+                            <div className="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Mobile SD 480p</div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Bajo bitrate para máxima velocidad de red en NAS antiguos.</p>
                         </button>
                     </div>
                 </div>

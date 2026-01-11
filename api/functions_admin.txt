@@ -1,7 +1,7 @@
 
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V12.5 (FFmpeg 2.7.1 DAR 0:0 Fix)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V12.6 (FFmpeg 2.7.1 Bruteforce Fix)
  */
 
 function admin_get_settings($pdo) {
@@ -38,7 +38,7 @@ function admin_get_settings($pdo) {
 }
 
 /**
- * EJECUTOR FÍSICO DE TRANSCODIFICACIÓN - FIX DAR 0:0
+ * EJECUTOR FÍSICO DE TRANSCODIFICACIÓN - MODO FUERZA BRUTA PARA v2.7.1
  */
 function admin_process_next_transcode($pdo) {
     $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
@@ -55,14 +55,15 @@ function admin_process_next_transcode($pdo) {
     $profileArgs = $stmtP->fetchColumn();
     
     /**
-     * PERFIL DE COMPATIBILIDAD TOTAL v2.7.1
-     * -vf "...,setsar=1": Corrige el error DAR 0:0 forzando aspecto 1:1 de píxel.
-     * -r 30: Fuerza framerate constante para evitar fallos de sincronización.
-     * -b:v 2000k: Asegura un bitrate de video saludable.
-     * -maxrate / -bufsize: Controla picos de bitrate que el NAS i686 no pueda procesar.
+     * PERFIL "NUCLEAR" v2.7.1 - Diseñado para archivos con metadatos DAR 0:0
+     * -s 1280x720: Forzamos tamaño fijo para evitar errores de cálculo de dimensiones.
+     * -aspect 16:9: Forzamos la relación de aspecto para corregir el DAR 0:0.
+     * -pix_fmt yuv420p: Forzamos el formato de píxel antes de abrir el encoder.
+     * -ac 2 -ar 44100: Forzamos estéreo y frecuencia para corregir el "0 channels".
+     * -vtag avc1: Aseguramos compatibilidad absoluta con navegadores.
      */
     if (!$profileArgs) {
-        $profileArgs = "-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1\" -r 30 -b:v 2000k -maxrate 2500k -bufsize 4000k -threads 1 -strict experimental -c:a aac -ac 2 -ar 44100 -ab 128k";
+        $profileArgs = "-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 1280x720 -aspect 16:9 -r 30 -b:v 1500k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100 -ab 128k";
     }
 
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', transcode_progress = 5 WHERE id = ?")->execute([$video['id']]);
@@ -77,6 +78,7 @@ function admin_process_next_transcode($pdo) {
     if (!is_dir($outFolder)) mkdir($outFolder, 0777, true);
     $outputPath = $outFolder . $video['id'] . '.mp4';
 
+    // Construcción del comando con parámetros de salida explícitos
     $cmd = escapeshellarg($ffmpegPath) . " -i " . escapeshellarg($inputPath) . " -y " . $profileArgs . " " . escapeshellarg($outputPath) . " 2>&1";
     
     $output = [];
@@ -84,17 +86,17 @@ function admin_process_next_transcode($pdo) {
     exec($cmd, $output, $returnVar);
 
     $logString = implode("\n", $output);
-    write_log("FFmpeg Final Output for {$video['id']}: " . substr($logString, -1200), 'INFO');
+    write_log("FFmpeg Bruteforce for {$video['id']}: " . substr($logString, -1500), 'INFO');
 
     if ($returnVar === 0 && file_exists($outputPath) && filesize($outputPath) > 1000) {
         $newUrl = 'api/uploads/videos/converted/' . $video['id'] . '.mp4';
         $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE', transcode_progress = 100 WHERE id = ?")
             ->execute([$newUrl, $video['id']]);
-        respond(true, ['message' => 'Video convertido con éxito', 'id' => $video['id']]);
+        respond(true, ['message' => 'Video convertido (Bruteforce)', 'id' => $video['id']]);
     } else {
         $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = ? WHERE id = ?")
             ->execute([substr($logString, -800), $video['id']]);
-        respond(false, null, "Fallo técnico en codificación");
+        respond(false, null, "Fallo en modo Bruteforce");
     }
 }
 
