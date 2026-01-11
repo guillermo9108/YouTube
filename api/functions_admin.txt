@@ -1,7 +1,7 @@
 
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V12.2 (FFmpeg 2.7.1 Optimization)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V12.3 (FFmpeg 2.7.1 Fix)
  */
 
 function admin_get_settings($pdo) {
@@ -38,7 +38,7 @@ function admin_get_settings($pdo) {
 }
 
 /**
- * EJECUTOR FÍSICO DE TRANSCODIFICACIÓN
+ * EJECUTOR FÍSICO DE TRANSCODIFICACIÓN - MEJORADO PARA v2.7.1
  */
 function admin_process_next_transcode($pdo) {
     // 1. Obtener la configuración
@@ -57,8 +57,10 @@ function admin_process_next_transcode($pdo) {
     $stmtP->execute([$ext]);
     $profileArgs = $stmtP->fetchColumn();
     
-    // Fallback default args optimizados para v2.7.1
-    if (!$profileArgs) $profileArgs = "-c:v libx264 -preset ultrafast -crf 28 -strict experimental -c:a aac";
+    // Fallback optimizado con FIX de Píxeles e hilos para v2.7.1
+    if (!$profileArgs) {
+        $profileArgs = "-c:v libx264 -preset ultrafast -crf 28 -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" -pix_fmt yuv420p -strict experimental -c:a aac -ac 2";
+    }
 
     // 4. Marcar como procesando
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', transcode_progress = 5 WHERE id = ?")->execute([$video['id']]);
@@ -75,7 +77,6 @@ function admin_process_next_transcode($pdo) {
     $outputPath = $outFolder . $video['id'] . '.mp4';
 
     // 6. Ejecutar Comando
-    // Nota: Usamos 2>&1 para redirigir el log de error de FFmpeg a la salida
     $cmd = escapeshellarg($ffmpegPath) . " -i " . escapeshellarg($inputPath) . " -y " . $profileArgs . " " . escapeshellarg($outputPath) . " 2>&1";
     
     $output = [];
@@ -83,19 +84,19 @@ function admin_process_next_transcode($pdo) {
     exec($cmd, $output, $returnVar);
 
     $logString = implode("\n", $output);
-    write_log("FFmpeg Output for {$video['id']}: " . substr($logString, -500), 'INFO');
+    write_log("FFmpeg Output for {$video['id']}: " . substr($logString, -800), 'INFO');
 
-    if ($returnVar === 0 && file_exists($outputPath)) {
+    if ($returnVar === 0 && file_exists($outputPath) && filesize($outputPath) > 1000) {
         // Éxito: Actualizar video a la nueva ruta MP4
         $newUrl = 'api/uploads/videos/converted/' . $video['id'] . '.mp4';
         $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE', transcode_progress = 100 WHERE id = ?")
             ->execute([$newUrl, $video['id']]);
         respond(true, ['message' => 'Video convertido con éxito', 'id' => $video['id']]);
     } else {
-        // Fallo
+        // Fallo - Guardamos el error específico del encoder para debug
         $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = ? WHERE id = ?")
-            ->execute([substr($logString, 0, 500), $video['id']]);
-        respond(false, null, "FFmpeg falló con código $returnVar");
+            ->execute([substr($logString, -500), $video['id']]);
+        respond(false, null, "FFmpeg falló. Revise el log de salida.");
     }
 }
 
