@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck
+    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -24,6 +24,7 @@ export default function Watch() {
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
+    const [visibleRelatedCount, setVisibleRelatedCount] = useState(15);
     
     const [likes, setLikes] = useState<number>(0);
     const [dislikes, setDislikes] = useState<number>(0);
@@ -46,6 +47,7 @@ export default function Watch() {
         window.scrollTo(0, 0); refreshUser(); 
         viewMarkedRef.current = false;
         setShowComments(false);
+        setVisibleRelatedCount(15);
     }, [id]);
 
     useEffect(() => {
@@ -68,14 +70,29 @@ export default function Watch() {
                     const catDef = (settings.categories || []).find(c => c.name === v.category || c.name === v.parent_category);
                     const sortMode = catDef?.sortOrder || 'ALPHA'; 
                     
-                    // Ordenamos la lista para determinar el orden lógico de reproducción
-                    if (sortMode === 'ALPHA') {
-                        related.sort((a, b) => naturalCollator.compare(a.title, b.title));
-                    } else if (sortMode === 'RANDOM') {
-                        related.sort(() => Math.random() - 0.5);
-                    } else {
-                        related.sort((a, b) => b.createdAt - a.createdAt);
-                    }
+                    // --- MOTOR DE JERARQUÍA INTELIGENTE ---
+                    // Prioridad 1: Misma subcategoría (carpeta específica)
+                    // Prioridad 2: Misma categoría raíz (carpeta padre)
+                    // Prioridad 3: Resto
+                    related.sort((a, b) => {
+                        // 1. Prioridad por Subcategoría Exacta (v.category)
+                        const aSameSub = a.category === v.category;
+                        const bSameSub = b.category === v.category;
+                        if (aSameSub && !bSameSub) return -1;
+                        if (!aSameSub && bSameSub) return 1;
+
+                        // 2. Prioridad por Categoría Padre (v.parent_category)
+                        const aSameParent = a.parent_category === v.parent_category;
+                        const bSameParent = b.parent_category === v.parent_category;
+                        if (aSameParent && !bSameParent) return -1;
+                        if (!aSameParent && bSameParent) return 1;
+
+                        // 3. Aplicar orden preferido de la categoría para elementos del mismo nivel
+                        if (sortMode === 'ALPHA') return naturalCollator.compare(a.title, b.title);
+                        if (sortMode === 'LATEST') return b.createdAt - a.createdAt;
+                        
+                        return 0;
+                    });
 
                     setRelatedVideos(related);
                     db.getComments(v.id).then(setComments);
@@ -126,11 +143,8 @@ export default function Watch() {
     const handleVideoEnded = async () => {
         if (!relatedVideos.length || !user || !video) return;
         
-        // Playlist Inteligente:
-        // Buscamos el video que sigue al actual en el orden natural de la lista de relacionados
-        const allInCategory = [...relatedVideos, video].sort((a, b) => naturalCollator.compare(a.title, b.title));
-        const currentIndex = allInCategory.findIndex(v => v.id === video.id);
-        const nextVid = allInCategory[currentIndex + 1] || null;
+        // Playlist Jerárquica: El orden ya viene pre-calculado en relatedVideos
+        const nextVid = relatedVideos[0] || null;
 
         if (!nextVid) {
             toast.info("Has llegado al final de la colección.");
@@ -299,18 +313,39 @@ export default function Watch() {
                 </div>
 
                 <div className="lg:w-80 space-y-6">
-                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-2">Siguiente Contenido</h3>
-                    {relatedVideos.slice(0, 15).map(v => (
-                        <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
-                            <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
-                                <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"/>
-                            </div>
-                            <div className="flex-1 min-w-0 py-1">
-                                <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase tracking-tighter leading-tight group-hover:text-indigo-400">{v.title}</h4>
-                                <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
-                            </div>
-                        </Link>
-                    ))}
+                    <div className="flex items-center justify-between px-2">
+                        <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">Siguiente Contenido</h3>
+                        <span className="text-[9px] font-black bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20">JERARQUÍA ACTIVA</span>
+                    </div>
+                    
+                    <div className="space-y-4">
+                        {relatedVideos.slice(0, visibleRelatedCount).map(v => (
+                            <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
+                                <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
+                                    <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" loading="lazy" />
+                                    {v.category === video?.category && (
+                                        <div className="absolute top-1 right-1 bg-indigo-600 p-1 rounded-md shadow-lg border border-white/20">
+                                            <CheckCircle2 size={10} className="text-white"/>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex-1 min-w-0 py-1">
+                                    <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase tracking-tighter leading-tight group-hover:text-indigo-400">{v.title}</h4>
+                                    <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
+                                    <div className="text-[8px] text-indigo-400 font-black uppercase mt-0.5 truncate">{v.category}</div>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+
+                    {relatedVideos.length > visibleRelatedCount && (
+                        <button 
+                            onClick={() => setVisibleRelatedCount(prev => prev + 15)}
+                            className="w-full py-3 bg-slate-900 border border-slate-800 rounded-2xl text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-slate-800 hover:text-white transition-all flex items-center justify-center gap-2"
+                        >
+                            <PlusCircle size={14}/> Cargar más relacionados
+                        </button>
+                    )}
                 </div>
             </div>
 

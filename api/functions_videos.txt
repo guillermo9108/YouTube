@@ -1,4 +1,3 @@
-
 <?php
 
 /**
@@ -28,8 +27,7 @@ function video_get_all($pdo) {
 }
 
 function video_scan_local($pdo, $input) {
-    // Si viene una sola ruta en el input, la convertimos en array. 
-    // Si no, buscamos libraryPaths en la configuración.
+    // 1. Obtener Rutas
     $paths = [];
     if (!empty($input['path'])) {
         $paths = [$input['path']];
@@ -40,29 +38,64 @@ function video_scan_local($pdo, $input) {
 
     if (empty($paths)) respond(false, null, "No hay rutas de volumen configuradas.");
 
+    // 2. Obtener Configuración de Categorías para Auto-Creación
+    $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
+    $currentCategories = json_decode($stmtS->fetchColumn() ?: '[]', true);
+    $catNames = array_map('strtolower', array_column($currentCategories, 'name'));
+    $categoriesChanged = false;
+
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $added = 0; $found = 0; $errors = [];
 
-    foreach ($paths as $path) {
-        $path = trim($path);
-        if (!is_dir($path)) {
-            $errors[] = "Ruta no encontrada: $path";
+    foreach ($paths as $rootPath) {
+        $rootPath = trim($rootPath);
+        if (!is_dir($rootPath)) {
+            $errors[] = "Ruta no encontrada: $rootPath";
             continue;
         }
 
+        // --- AUTO-CREACIÓN DE CATEGORÍAS (Basado en carpetas de nivel 1) ---
+        $dirEntries = scandir($rootPath);
+        foreach ($dirEntries as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $fullEntryPath = $rootPath . DIRECTORY_SEPARATOR . $entry;
+            
+            if (is_dir($fullEntryPath)) {
+                $cleanCatName = strtoupper(trim($entry));
+                if (!in_array(strtolower($cleanCatName), $catNames)) {
+                    // Crear nueva categoría si no existe
+                    $newCat = [
+                        'id' => 'cat_' . uniqid(),
+                        'name' => $cleanCatName,
+                        'price' => 1.00,
+                        'autoSub' => true,
+                        'sortOrder' => 'ALPHA'
+                    ];
+                    $currentCategories[] = $newCat;
+                    $catNames[] = strtolower($cleanCatName);
+                    $categoriesChanged = true;
+                }
+            }
+        }
+
+        // 3. Escaneo de Archivos
         try {
-            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path));
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($rootPath));
             foreach ($it as $file) {
                 if ($file->isDir()) continue;
                 $ext = strtolower($file->getExtension());
                 if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm'])) {
                     $found++;
                     $fullPath = $file->getRealPath();
+                    
+                    // Verificar si ya existe en DB
                     $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ?");
                     $stmt->execute([$fullPath]);
                     if ($stmt->fetchColumn() == 0) {
                         $vidId = 'loc_' . md5($fullPath);
                         $title = pathinfo($fullPath, PATHINFO_FILENAME);
+                        
+                        // Insertar como PENDING para procesamiento de miniaturas
                         $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, 'api/uploads/thumbnails/default.jpg')");
                         $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
                         $added++;
@@ -70,10 +103,22 @@ function video_scan_local($pdo, $input) {
                 }
             }
         } catch (Exception $e) {
-            $errors[] = "Error escaneando $path: " . $e->getMessage();
+            $errors[] = "Error escaneando $rootPath: " . $e->getMessage();
         }
     }
-    respond(true, ['totalFound' => $found, 'newToImport' => $added, 'errors' => $errors]);
+
+    // Guardar nuevas categorías si se crearon
+    if ($categoriesChanged) {
+        $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
+            ->execute([json_encode($currentCategories)]);
+    }
+
+    respond(true, [
+        'totalFound' => $found, 
+        'newToImport' => $added, 
+        'categoriesCreated' => $categoriesChanged,
+        'errors' => $errors
+    ]);
 }
 
 function video_get_one($pdo, $id) {
@@ -97,18 +142,26 @@ function video_get_by_creator($pdo, $userId) {
 }
 
 function video_get_related($pdo, $videoId) {
-    $stmt = $pdo->prepare("SELECT category, collection FROM videos WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT category, parent_category, collection FROM videos WHERE id = ?");
     $stmt->execute([$videoId]);
     $current = $stmt->fetch();
-    $cat = $current['category'] ?: 'GENERAL';
-    $col = $current['collection'];
-    if ($col) {
-        $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND v.collection = ? AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.title ASC LIMIT 50");
-        $stmt->execute([$videoId, $col]);
-    } else {
-        $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id != ? AND (v.category = ? OR v.category = 'GENERAL') AND v.category NOT IN ('PENDING', 'PROCESSING') ORDER BY v.createdAt DESC LIMIT 50");
-        $stmt->execute([$videoId, $cat]);
-    }
+    
+    // Obtener un pool amplio para que el frontend ordene jerárquicamente
+    $stmt = $pdo->prepare("
+        SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl 
+        FROM videos v 
+        LEFT JOIN users u ON v.creatorId = u.id 
+        WHERE v.id != ? 
+          AND v.category NOT IN ('PENDING', 'PROCESSING') 
+        ORDER BY 
+          CASE WHEN v.collection = ? THEN 0 ELSE 1 END,
+          CASE WHEN v.category = ? THEN 0 ELSE 1 END,
+          CASE WHEN v.parent_category = ? THEN 0 ELSE 1 END,
+          RAND()
+        LIMIT 100
+    ");
+    $stmt->execute([$videoId, $current['collection'], $current['category'], $current['parent_category']]);
+    
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
