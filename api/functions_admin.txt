@@ -1,13 +1,12 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V12.7 (Smart Cleaner Preview Fix)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V12.8 (Analytics & Finance Pro)
  */
 
 function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($settings) {
-        // Auto-detección mejorada de FFmpeg en Synology/NAS
         if (empty($settings['ffmpegPath']) || $settings['ffmpegPath'] === 'ffmpeg') {
             $commonPaths = [
                 '/usr/bin/ffmpeg',
@@ -36,9 +35,6 @@ function admin_get_settings($pdo) {
     respond(false, null, "No se pudo cargar la configuración");
 }
 
-/**
- * EJECUTOR FÍSICO DE TRANSCODIFICACIÓN - MODO FUERZA BRUTA PARA v2.7.1
- */
 function admin_process_next_transcode($pdo) {
     $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
     $ffmpegPath = $stmtS->fetchColumn();
@@ -131,6 +127,57 @@ function admin_get_requests($pdo, $status = 'ALL') {
     $stmt = $pdo->prepare($sql);
     if ($status !== 'ALL') $stmt->execute(['status' => $status]); else $stmt->execute();
     respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function get_real_stats($pdo) {
+    $from = $_GET['from'] ?? (time() - (30 * 86400));
+    $to = $_GET['to'] ?? time();
+
+    // 1. KPIs Generales
+    $userCount = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
+    $systemRevenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
+    $totalBalance = $pdo->query("SELECT SUM(balance) FROM users")->fetchColumn() ?: 0;
+
+    // 2. Historial Diario (Ingresos)
+    $stmtD = $pdo->prepare("
+        SELECT FROM_UNIXTIME(timestamp, '%Y-%m-%d') as date, SUM(adminFee) as revenue 
+        FROM transactions 
+        WHERE timestamp BETWEEN ? AND ? 
+        GROUP BY date 
+        ORDER BY date ASC
+    ");
+    $stmtD->execute([$from, $to]);
+    $daily = $stmtD->fetchAll();
+
+    // 3. Historial Mensual (Ingresos)
+    $stmtM = $pdo->prepare("
+        SELECT FROM_UNIXTIME(timestamp, '%Y-%m') as date, SUM(adminFee) as revenue 
+        FROM transactions 
+        GROUP BY date 
+        ORDER BY date ASC 
+        LIMIT 12
+    ");
+    $stmtM->execute();
+    $monthly = $stmtM->fetchAll();
+
+    // 4. Métricas de Actividad (Últimos 30 días para Simulador)
+    $activeUsers30d = $pdo->query("SELECT COUNT(DISTINCT buyerId) FROM transactions WHERE timestamp > " . (time() - (30 * 86400)))->fetchColumn() ?: 0;
+    $totalTx30d = $pdo->query("SELECT COUNT(*) FROM transactions WHERE timestamp > " . (time() - (30 * 86400)))->fetchColumn() ?: 0;
+    
+    respond(true, [
+        'userCount' => (int)$userCount,
+        'systemRevenue' => (float)$systemRevenue,
+        'totalBalance' => (float)$totalBalance,
+        'history' => [
+            'daily' => $daily,
+            'monthly' => $monthly
+        ],
+        'averages' => [
+            'activeUsers30d' => (int)$activeUsers30d,
+            'avgTxPerUser' => $activeUsers30d > 0 ? round($totalTx30d / $activeUsers30d, 2) : 0,
+            'arpu' => $userCount > 0 ? round($systemRevenue / $userCount, 2) : 0
+        ]
+    ]);
 }
 
 function admin_add_balance($pdo, $input) {
@@ -255,15 +302,6 @@ function admin_get_logs() {
 
 function admin_clear_logs() { @file_put_contents('debug_log.txt', ''); respond(true); }
 
-function get_real_stats($pdo) {
-    respond(true, [
-        'userCount' => $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn(),
-        'systemRevenue' => $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0,
-        'totalBalance' => $pdo->query("SELECT SUM(balance) FROM users")->fetchColumn() ?: 0,
-        'history' => ['daily' => [], 'monthly' => []]
-    ]);
-}
-
 function admin_get_transcode_profiles($pdo) { respond(true, $pdo->query("SELECT * FROM transcode_profiles ORDER BY extension ASC")->fetchAll()); }
 function admin_save_transcode_profile($pdo, $input) {
     $ext = strtolower($input['extension'] ?? ''); $args = $input['command_args'] ?? '';
@@ -305,9 +343,6 @@ function admin_file_cleanup_preview($pdo, $type) {
     respond(true, $res);
 }
 
-/**
- * PREVIEW DEL LIMPIADOR INTELIGENTE
- */
 function admin_smart_cleaner_preview($pdo, $input) {
     $minDays = intval($input['minDays'] ?? 30);
     $maxViews = intval($input['maxViews'] ?? 5);
