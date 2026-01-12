@@ -29,13 +29,11 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
   const [showComments, setShowComments] = useState(false);
   const [newComment, setNewComment] = useState('');
   
-  // INICIALIZACIÓN REACTIVA: Sincronizar estados locales con el objeto video
   const [likeCount, setLikeCount] = useState(Number(video.likes || 0));
   const [dislikeCount, setDislikeCount] = useState(Number(video.dislikes || 0));
   const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
-    // Al cargar o cambiar de video, sincronizar conteos inmediatamente
     setLikeCount(Number(video.likes || 0));
     setDislikeCount(Number(video.dislikes || 0));
     
@@ -53,9 +51,17 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
         el.currentTime = 0; 
         setPaused(false);
         el.muted = false; 
-        const p = el.play(); if (p) p.catch(() => { el.muted = true; el.play(); });
+        el.play().catch(() => {
+            // Si falla el play con sonido, intentamos muteado (requerido por algunos navegadores)
+            el.muted = true;
+            el.play().catch(() => { /* Silenciar error de interrupción */ });
+        });
         db.incrementView(video.id);
-    } else { el.pause(); }
+    } else { 
+        try {
+            el.pause(); 
+        } catch (e) {}
+    }
   }, [isActive, isUnlocked, video.id]);
 
   const handleRate = async (rating: 'like' | 'dislike') => {
@@ -77,8 +83,13 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
         clickTimerRef.current = window.setTimeout(() => {
             clickTimerRef.current = null;
             if (videoRef.current) {
-                if (videoRef.current.paused) { videoRef.current.play(); setPaused(false); }
-                else { videoRef.current.pause(); setPaused(true); }
+                if (videoRef.current.paused) { 
+                    videoRef.current.play().catch(() => {}); 
+                    setPaused(false); 
+                } else { 
+                    videoRef.current.pause(); 
+                    setPaused(true); 
+                }
             }
         }, 250);
     }

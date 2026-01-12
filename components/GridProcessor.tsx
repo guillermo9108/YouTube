@@ -34,18 +34,18 @@ export default function GridProcessor() {
         vid.muted = true; 
         vid.crossOrigin = "anonymous"; 
         
-        const startPlay = async () => {
-            try {
-                // Manejar error de play() si el navegador bloquea el fondo o se desmonta
-                await vid.play().catch(e => {
-                    console.warn("GridProcessor: play() rechazado, continuando...", e.name);
+        // Manejo asíncrono seguro
+        const playPromise = vid.play();
+        if (playPromise !== undefined) {
+            playPromise
+                .then(() => {
+                    if (videoRef.current) setStatus('CAPTURING');
+                })
+                .catch(() => {
+                    // Ignorar errores de reproducción interrumpida
                 });
-                setStatus('CAPTURING');
-            } catch (e) {}
-        };
-        startPlay();
+        }
 
-        // Timeout de seguridad: si no procesamos en 12s, reportamos incompatibilidad
         safetyTimeoutRef.current = window.setTimeout(() => {
             if (!processedRef.current && activeTask) {
                 const dur = (vid.duration && isFinite(vid.duration)) ? vid.duration : 0;
@@ -55,6 +55,8 @@ export default function GridProcessor() {
 
         return () => {
             if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+            // Limpieza agresiva del objeto de video para liberar memoria y detener procesos
+            vid.pause();
             vid.removeAttribute('src');
             vid.load();
         };
@@ -83,7 +85,6 @@ export default function GridProcessor() {
         const vid = e.currentTarget;
         if (!activeTask || processedRef.current) return;
 
-        // Si el navegador detecta width=0, es incompatible (se comporta como audio)
         if (vid.readyState >= 1 && vid.videoWidth === 0 && vid.duration > 0) {
             handleForceComplete(vid.duration, true);
             return;
@@ -99,6 +100,7 @@ export default function GridProcessor() {
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0);
                     canvas.toBlob(async (blob) => {
+                        if (!activeTask) return;
                         setStatus('DONE');
                         const file = blob ? new File([blob], "thumb.jpg", { type: "image/jpeg" }) : null;
                         

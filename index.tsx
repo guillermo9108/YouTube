@@ -7,11 +7,22 @@ import { db } from './services/db';
 
 // Capture Global JS Errors and report to Server Log
 window.onerror = function(message, source, lineno, colno, error) {
+    const msg = String(message);
+    // Ignorar errores de interrupción de video que son normales en navegación rápida
+    if (msg.includes('AbortError') || msg.includes('play()') || msg.includes('supported source')) {
+        return;
+    }
     const report = `JS ERROR: ${message} at ${source}:${lineno}:${colno}`;
     db.logRemote(report, 'ERROR');
 };
 
 window.onunhandledrejection = function(event) {
+    const reason = String(event.reason);
+    // Ignorar promesas rechazadas por interrupción de carga de medios
+    if (reason.includes('AbortError') || reason.includes('play()') || reason.includes('supported source')) {
+        event.preventDefault();
+        return;
+    }
     const report = `UNHANDLED PROMISE: ${event.reason}`;
     db.logRemote(report, 'ERROR');
 };
