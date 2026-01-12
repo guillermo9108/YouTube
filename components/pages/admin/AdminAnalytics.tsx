@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { VipPlan } from '../../../types';
 import { 
     Calculator, TrendingUp, Users, DollarSign, 
     RefreshCw, Activity, Crown, Repeat, Zap, 
-    Calendar, HelpCircle, ArrowRight, Coins, Clock, ArrowUpRight
+    Calendar, HelpCircle, Coins, Clock, ArrowUpRight
 } from 'lucide-react';
 
 const InfoHint = ({ title, text, formula }: { title: string, text: string, formula?: string }) => {
@@ -42,18 +41,16 @@ export default function AdminAnalytics() {
         to: new Date().toISOString().split('T')[0]
     });
 
-    // Estado del Simulador Pro V4
     const [sim, setSim] = useState({
         users: 100,
         newUsersPerMonth: 30,
         churn: 5,
-        // Added missing 'growth' property to fix type error in projection calculation
         growth: 0,
         conversion: 20,
         avgFrequency: 1.2,
-        fixedCosts: 1500, // Gasto de 1500 pesos mencionado por el usuario
+        fixedCosts: 1500, 
         avgTicket: 200,
-        planMix: {} as Record<string, number> // Cantidad estimada por ID de plan
+        planMix: {} as Record<string, number> 
     });
 
     const loadData = async () => {
@@ -72,7 +69,6 @@ export default function AdminAnalytics() {
             setVipPlans(plans);
 
             if (rs) {
-                // Inyectar realidad al simulador
                 const realMix: Record<string, number> = {};
                 plans.forEach(p => { realMix[p.id] = rs.planMix?.[p.name] || 0; });
 
@@ -90,7 +86,7 @@ export default function AdminAnalytics() {
 
     useEffect(() => { loadData(); }, [dateRange]);
 
-    // Función: Actualizar Ticket desde el Mix de Membresías
+    // Función: De Mix a Ticket (AOV)
     const updateTicketFromMix = (newMix: Record<string, number>) => {
         let totalVal = 0;
         let totalQty = 0;
@@ -103,12 +99,11 @@ export default function AdminAnalytics() {
         setSim(prev => ({ ...prev, planMix: newMix, avgTicket: parseFloat(calculatedTicket.toFixed(1)) }));
     };
 
-    // Función: Redistribuir Mix basado en un Ticket Promedio Target (Ajuste Proporcional)
+    // Función: De Ticket Slider a Mix (Redistribución)
     const updateMixFromTicket = (targetTicket: number) => {
         const newMix = { ...sim.planMix };
         const totalVentasActuales = Object.values(newMix).reduce((a: number, b: number) => a + b, 0) || 20;
         
-        // Algoritmo: Priorizar planes con precios más cercanos al target
         vipPlans.forEach(p => {
             const diff = Math.abs(p.price - targetTicket);
             const weight = diff === 0 ? 10 : (1 / diff) * 10;
@@ -125,7 +120,6 @@ export default function AdminAnalytics() {
         updateTicketFromMix(realMix);
     };
 
-    // Motor de Proyección Financiera
     const projection = useMemo(() => {
         const steps = 12;
         const data = [];
@@ -133,9 +127,9 @@ export default function AdminAnalytics() {
         let cumulativeNetProfit = 0;
 
         for (let i = 1; i <= steps; i++) {
-            // Fix: ensure arithmetic operands are correctly typed numbers
             const losses = currentUsers * (sim.churn / 100);
-            const growth = currentUsers * (sim.growth / 100 || 0) + sim.newUsersPerMonth;
+            // Fix: Removed logical OR operator inside arithmetic operation to resolve type inference error on right-hand side.
+            const growth = currentUsers * (sim.growth / 100) + sim.newUsersPerMonth;
             currentUsers = Math.max(0, currentUsers + growth - losses);
 
             const activeBuyers = currentUsers * (sim.conversion / 100);
@@ -154,6 +148,7 @@ export default function AdminAnalytics() {
         }
 
         const revenuePerUser = (sim.conversion/100) * sim.avgTicket * sim.avgFrequency;
+        // Fix: Ensured right-hand side of division is treated as a valid number type.
         const breakEvenUsers = Math.ceil(sim.fixedCosts / (revenuePerUser || 1));
 
         return { data, totalProfit: cumulativeNetProfit, breakEvenUsers };
@@ -182,11 +177,10 @@ export default function AdminAnalytics() {
     return (
         <div className="space-y-6 animate-in fade-in pb-24 px-1">
             
-            {/* Header Control */}
             <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 border border-slate-800 p-2 rounded-[32px] shadow-xl gap-2">
                 <div className="flex p-1 bg-slate-950 rounded-2xl w-full md:w-auto">
                     <button onClick={() => setActiveView('REAL')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeView === 'REAL' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
-                        <Activity size={14}/> Historial
+                        <Activity size={14}/> Realidad
                     </button>
                     <button onClick={() => setActiveView('SIMULATOR')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeView === 'SIMULATOR' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
                         <Calculator size={14}/> Simulador
@@ -204,11 +198,11 @@ export default function AdminAnalytics() {
                 <div className="space-y-6">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg">
-                            <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Recaudado Brutal</div>
+                            <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Ingresos VIP/Saldo</div>
                             <div className="text-3xl font-black text-emerald-400">{realStats?.totalRevenue?.toFixed(0)} $</div>
                         </div>
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg">
-                            <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Ticket Promedio</div>
+                            <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Ticket Real Mes</div>
                             <div className="text-3xl font-black text-white">{realStats?.averages?.arpu} $</div>
                         </div>
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg">
@@ -216,8 +210,8 @@ export default function AdminAnalytics() {
                             <div className="text-3xl font-black text-indigo-400">{realStats?.activeUsers}</div>
                         </div>
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg">
-                            <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Conversión</div>
-                            <div className="text-3xl font-black text-white">{realStats?.averages?.conversion}%</div>
+                            <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Frecuencia</div>
+                            <div className="text-3xl font-black text-white">{realStats?.averages?.frequency}x</div>
                         </div>
                     </div>
 
@@ -231,7 +225,6 @@ export default function AdminAnalytics() {
             ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in slide-in-from-bottom-4">
                     
-                    {/* Panel de Control: Mix de Membresías */}
                     <div className="lg:col-span-4 space-y-4">
                         <div className="bg-slate-900 p-6 md:p-8 rounded-[40px] border border-slate-800 shadow-xl space-y-8 h-full">
                             
@@ -239,10 +232,10 @@ export default function AdminAnalytics() {
                                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                                     <div className="flex items-center gap-3">
                                         <Crown size={18} className="text-amber-400"/>
-                                        <h3 className="font-black text-white uppercase text-[10px] tracking-widest">Mix de Ventas</h3>
+                                        <h3 className="font-black text-white uppercase text-[10px] tracking-widest">Mix de Ventas Estimado</h3>
                                     </div>
                                     <button onClick={syncRealMix} className="text-[8px] font-black text-indigo-400 hover:text-white uppercase flex items-center gap-1 bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 transition-all">
-                                        <RefreshCw size={10}/> Cargar Real
+                                        <RefreshCw size={10}/> Sincronizar Mes
                                     </button>
                                 </div>
                                 
@@ -258,11 +251,11 @@ export default function AdminAnalytics() {
                                                         </div>
                                                         <div className="min-w-0">
                                                             <div className="text-[10px] font-black text-white truncate uppercase">{plan.name}</div>
-                                                            <div className="text-[8px] font-bold text-slate-500 uppercase">{plan.price} Pesos</div>
+                                                            <div className="text-[8px] font-bold text-slate-500 uppercase">{plan.price} $</div>
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center gap-2">
-                                                        <span className="text-[9px] font-black text-slate-600 uppercase">Estimadas:</span>
+                                                        <span className="text-[9px] font-black text-slate-600 uppercase">Q:</span>
                                                         <input 
                                                             type="number" min="0" max="5000"
                                                             value={sim.planMix[plan.id] || 0}
@@ -274,9 +267,9 @@ export default function AdminAnalytics() {
                                                         />
                                                     </div>
                                                 </div>
-                                                {isBalance && plan.bonusPercent! > 0 && (
-                                                    <div className="text-[7px] font-black text-emerald-500 uppercase ml-10">Bono Activo: +{plan.bonusPercent}%</div>
-                                                )}
+                                                <div className="w-full h-1 bg-slate-900 rounded-full overflow-hidden">
+                                                    <div className={`h-full ${isBalance ? 'bg-emerald-500/40' : 'bg-blue-500/40'}`} style={{ width: `${Math.min(100, (Number(sim.planMix[plan.id]) || 0) * 5)}%`}}></div>
+                                                </div>
                                             </div>
                                         );
                                     })}
@@ -288,7 +281,7 @@ export default function AdminAnalytics() {
                                     <div className="flex justify-between mb-2">
                                         <div className="flex items-center">
                                             <label className="text-[10px] font-black text-slate-500 uppercase">Gastos Mensuales</label>
-                                            <InfoHint title="Costos Fijos" text="Suma de servidores, dominios, licencias y personal que debes cubrir cada mes." />
+                                            <InfoHint title="Costos Fijos" text="Suma de servidores, dominios, licencias y personal." />
                                         </div>
                                         <span className="text-sm font-black text-red-400">{sim.fixedCosts} $</span>
                                     </div>
@@ -299,7 +292,7 @@ export default function AdminAnalytics() {
                                     <div className="flex justify-between mb-2">
                                         <div className="flex items-center">
                                             <label className="text-[10px] font-black text-slate-500 uppercase">Ticket Medio Target</label>
-                                            <InfoHint title="Valor de Compra" text="Si modificas esto, el sistema ajustará automáticamente cuántas membresías de cada tipo necesitas vender." formula="Ingresos / Ventas Totales" />
+                                            <InfoHint title="AOV" text="Si mueves esto, el mix de planes de arriba se re-ajustará solo para intentar alcanzar el promedio." />
                                         </div>
                                         <span className="text-sm font-black text-amber-400">${sim.avgTicket}</span>
                                     </div>
@@ -315,13 +308,12 @@ export default function AdminAnalytics() {
                         </div>
                     </div>
 
-                    {/* Resultados Visuales Proyectados */}
                     <div className="lg:col-span-8 space-y-6">
                         <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 md:p-12 shadow-2xl relative overflow-hidden flex flex-col min-h-[600px]">
                             
                             <div className="flex flex-col md:flex-row justify-between items-start gap-8 mb-12 relative z-10">
                                 <div>
-                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Utilidad Neta Proyectada</h3>
+                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Proyección de Flujo Neto</h3>
                                     <p className="text-xs text-slate-500 font-bold uppercase mt-1">Simulación basada en Mix de Membresías vs Gastos</p>
                                     <div className="mt-6 flex flex-wrap gap-3">
                                         <div className="bg-slate-950 px-4 py-2 rounded-2xl border border-indigo-500/20">
@@ -359,11 +351,9 @@ export default function AdminAnalytics() {
                                     <div className={`text-xl font-black ${projection.data[11].profitability >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{projection.data[11].profitability}%</div>
                                 </div>
                                 <div className="bg-slate-950/40 p-4 rounded-3xl border border-white/5 text-center">
-                                    <div className="text-[9px] font-black text-slate-600 uppercase mb-1">Carga Saldo (Mix)</div>
+                                    <div className="text-[9px] font-black text-slate-600 uppercase mb-1">Total Ventas Mix</div>
                                     <div className="text-xl font-black text-indigo-400">
-                                        {/* Fix for Error: Operator '+' cannot be applied to types 'number' and 'unknown'. */}
-                                        {/* Cast 'qty' to number explicitly */}
-                                        {Object.entries(sim.planMix).filter(([id]) => vipPlans.find(p => p.id === id)?.type === 'BALANCE').reduce((acc, [_, qty]) => acc + (qty as number), 0)}
+                                        {Object.values(sim.planMix).reduce((a, b) => (a as number) + (b as number), 0) as number}
                                     </div>
                                 </div>
                             </div>
@@ -373,12 +363,6 @@ export default function AdminAnalytics() {
 
                 </div>
             )}
-            
-            <style>{`
-                .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-                .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
-            `}</style>
         </div>
     );
 }
