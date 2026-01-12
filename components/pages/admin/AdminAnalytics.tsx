@@ -5,10 +5,41 @@ import { VipPlan } from '../../../types';
 import { 
     Calculator, TrendingUp, Users, DollarSign, 
     RefreshCw, BarChart3, ShieldAlert, Activity, 
-    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap, Loader2, Repeat, Target, UserPlus, Calendar, ArrowUpRight, ArrowDownLeft
+    ArrowRightLeft, Scale, PieChart, Landmark, TrendingDown, Wallet, Zap, Loader2, Repeat, Target, UserPlus, Calendar, ArrowUpRight, ArrowDownLeft, Info, HelpCircle
 } from 'lucide-react';
 
 type Granularity = 'DAYS' | 'MONTHS';
+
+/**
+ * Componente de información contextual para el simulador
+ */
+const InfoHint = ({ title, text, formula }: { title: string, text: string, formula?: string }) => {
+    const [show, setShow] = useState(false);
+    return (
+        <div className="relative inline-block ml-1.5 align-middle">
+            <button 
+                onMouseEnter={() => setShow(true)} 
+                onMouseLeave={() => setShow(false)}
+                onClick={() => setShow(!show)}
+                className="text-slate-600 hover:text-indigo-400 transition-colors"
+            >
+                <HelpCircle size={12} />
+            </button>
+            {show && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-950 border border-slate-700 text-[10px] text-slate-300 rounded-xl shadow-2xl z-50 pointer-events-none animate-in fade-in zoom-in-95">
+                    <p className="font-black text-indigo-400 uppercase mb-1 tracking-widest border-b border-white/5 pb-1">{title}</p>
+                    <p className="leading-relaxed mb-2 font-medium">{text}</p>
+                    {formula && (
+                        <div className="bg-black/40 p-1.5 rounded-lg border border-white/5 font-mono text-indigo-300/80">
+                            Fórmula: {formula}
+                        </div>
+                    )}
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-700"></div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 export default function AdminAnalytics() {
     const [realStats, setRealStats] = useState<any>(null);
@@ -17,13 +48,11 @@ export default function AdminAnalytics() {
     const [timeframe, setTimeframe] = useState<Granularity>('DAYS');
     const [activeView, setActiveView] = useState<'REAL' | 'SIMULATOR'>('REAL');
     
-    // Filtros de fecha reales
     const [dateRange, setDateRange] = useState({
         from: new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0],
         to: new Date().toISOString().split('T')[0]
     });
 
-    // --- MOTOR DE SIMULACIÓN RECURRENTE V2 ---
     const [sim, setSim] = useState({
         users: 100,
         newUsersPerMonth: 25,
@@ -54,7 +83,6 @@ export default function AdminAnalytics() {
             const plans = settings.vipPlans || [];
             setVipPlans(plans);
 
-            // Sincronizar mezcla de planes por defecto
             if (plans.length > 0 && Object.keys(sim.planMix).length === 0) {
                 const equalShare = Math.floor(100 / plans.length);
                 const initialMix: Record<string, number> = {};
@@ -64,7 +92,6 @@ export default function AdminAnalytics() {
                 setSim(prev => ({ ...prev, planMix: initialMix }));
             }
 
-            // Inyectar datos reales en simulador (Modo Híbrido)
             if (rs && rs.userCount) {
                 setSim(prev => ({ 
                     ...prev, 
@@ -73,11 +100,7 @@ export default function AdminAnalytics() {
                     avgFrequency: rs.averages?.avgTxPerUser || prev.avgFrequency
                 }));
             }
-        } catch(e) { 
-            console.error("Analytics Load Error:", e); 
-        } finally { 
-            setLoading(false); 
-        }
+        } catch(e) { console.error(e); } finally { setLoading(false); }
     };
 
     useEffect(() => { loadData(); }, [dateRange]);
@@ -93,25 +116,17 @@ export default function AdminAnalytics() {
             const losses = currentUsers * (sim.churn / 100);
             const growth = currentUsers * (sim.growth / 100) + sim.newUsersPerMonth;
             currentUsers = Math.max(0, currentUsers + growth - losses);
-
             const activeBuyers = currentUsers * (sim.conversion / 100);
             
             let avgPlanPrice = 0;
-            vipPlans.forEach(p => {
-                avgPlanPrice += (Number(p.price) * ((sim.planMix[p.id] || 0) / 100));
-            });
+            vipPlans.forEach(p => { avgPlanPrice += (Number(p.price) * ((sim.planMix[p.id] || 0) / 100)); });
 
-            // Ingresos recurrentes por frecuencia de recarga
             const totalMembershipRev = activeBuyers * (avgPlanPrice * sim.avgFrequency);
-            const circulatingVolume = currentUsers * sim.p2pVolume;
-            const p2pProfit = circulatingVolume * (sim.p2pCommission / 100) * (sim.reinvestmentRate / 100);
-
-            const grossRevenue = totalMembershipRev + p2pProfit;
+            const grossRevenue = totalMembershipRev;
             const netMonthlyProfit = grossRevenue - totalFixedCosts;
             const profitability = grossRevenue > 0 ? (netMonthlyProfit / grossRevenue) * 100 : -100;
 
             cumulativeNetProfit += netMonthlyProfit;
-
             data.push({
                 label: `M${i}`,
                 users: Math.round(currentUsers),
@@ -121,14 +136,12 @@ export default function AdminAnalytics() {
             });
         }
 
-        const breakEvenUsers = Math.ceil(totalFixedCosts / (((sim.conversion/100) * projectionAvgPlanPrice(vipPlans, sim.planMix) * sim.avgFrequency) || 1));
+        const avgPrice = vipPlans.reduce((acc, p) => acc + (Number(p.price) * ((sim.planMix[p.id] || 0) / 100)), 0);
+        const revenuePerUser = (sim.conversion/100) * avgPrice * sim.avgFrequency;
+        const breakEvenUsers = Math.ceil(totalFixedCosts / (revenuePerUser || 1));
 
         return { data, totalProfit: cumulativeNetProfit, breakEvenUsers, totalFixedCosts };
     }, [sim, vipPlans]);
-
-    function projectionAvgPlanPrice(plans: VipPlan[], mix: Record<string, number>) {
-        return plans.reduce((acc, p) => acc + (Number(p.price) * ((mix[p.id] || 0) / 100)), 0);
-    }
 
     const renderChart = (points: any[], dataKey: string, color: string, showGradient = true) => {
         if (!points || points.length < 2) return null;
@@ -136,13 +149,11 @@ export default function AdminAnalytics() {
         const max = Math.max(...values) * 1.1 || 100;
         const min = Math.min(...values, 0);
         const range = max - min;
-
         const path = points.map((p, i) => {
             const x = (i / (points.length - 1)) * 100;
-            const y = 100 - (((Number(p[dataKey]) - min) / range) * 100);
+            const y = 100 - (((Number(p[dataKey]) - min) / (range || 1)) * 100);
             return `${x},${y}`;
         }).join(' ');
-
         return (
             <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
                 {showGradient && (
@@ -162,7 +173,6 @@ export default function AdminAnalytics() {
     return (
         <div className="space-y-6 animate-in fade-in pb-24">
             
-            {/* Header de Stats */}
             <div className="flex flex-col md:flex-row justify-between items-center bg-slate-900 border border-slate-800 p-2 rounded-3xl shadow-xl gap-2">
                 <div className="flex p-1 bg-slate-950 rounded-2xl w-full md:w-auto">
                     <button onClick={() => setActiveView('REAL')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${activeView === 'REAL' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
@@ -185,7 +195,6 @@ export default function AdminAnalytics() {
 
             {activeView === 'REAL' ? (
                 <div className="space-y-6">
-                    {/* KPIs de Realidad */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg relative overflow-hidden group">
                             <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform"><Users size={80}/></div>
@@ -213,7 +222,6 @@ export default function AdminAnalytics() {
                         </div>
                     </div>
 
-                    {/* Gráfico de Tendencia Real */}
                     <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 md:p-10 shadow-2xl overflow-hidden flex flex-col h-[450px]">
                         <div className="flex justify-between items-center mb-8">
                             <div>
@@ -227,10 +235,8 @@ export default function AdminAnalytics() {
                         </div>
                         <div className="flex-1 w-full bg-slate-950/20 rounded-3xl p-6 border border-slate-800/50 relative">
                             {renderChart(timeframe === 'DAYS' ? (realStats?.history?.daily || []) : (realStats?.history?.monthly || []), 'revenue', '#10b981')}
-                            
-                            {/* Ejes visuales */}
                             <div className="absolute bottom-4 left-6 right-6 flex justify-between text-[8px] font-black text-slate-700 uppercase">
-                                <span>{timeframe === 'DAYS' ? 'Periodo 30d' : 'Anual'}</span>
+                                <span>{timeframe === 'DAYS' ? 'Periodo' : 'Anual'}</span>
                                 <span>HOY</span>
                             </div>
                         </div>
@@ -238,11 +244,9 @@ export default function AdminAnalytics() {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {/* Simulador: Controles Columna Izquierda */}
                     <div className="lg:col-span-4 space-y-4">
                         <div className="bg-slate-900 p-8 rounded-[40px] border border-slate-800 shadow-xl space-y-8 h-full overflow-y-auto max-h-[80vh] custom-scrollbar">
                             
-                            {/* SECCIÓN CRECIMIENTO */}
                             <div className="space-y-6">
                                 <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
                                     <UserPlus size={18} className="text-emerald-400"/>
@@ -251,7 +255,10 @@ export default function AdminAnalytics() {
                                 
                                 <div>
                                     <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nuevos Usuarios / Mes</label>
+                                        <div className="flex items-center">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nuevos Usuarios / Mes</label>
+                                            <InfoHint title="Adquisición Orgánica" text="Cantidad de nuevos usuarios que se registran mensualmente por marketing, boca a boca o invitaciones." formula="Registros / Mes" />
+                                        </div>
                                         <span className="text-sm font-black text-white">+{sim.newUsersPerMonth}</span>
                                     </div>
                                     <input type="range" min="0" max="1000" step="10" value={sim.newUsersPerMonth} onChange={e => setSim({...sim, newUsersPerMonth: parseInt(e.target.value)})} className="w-full accent-emerald-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
@@ -259,14 +266,16 @@ export default function AdminAnalytics() {
 
                                 <div>
                                     <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Churn Rate (%)</label>
+                                        <div className="flex items-center">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Churn Rate (%)</label>
+                                            <InfoHint title="Tasa de Abandono" text="El porcentaje de usuarios existentes que dejan de utilizar la plataforma cada mes. Crucial para la sostenibilidad." formula="(Usuarios Perdidos / Total) * 100" />
+                                        </div>
                                         <span className="text-sm font-black text-red-400">-{sim.churn}%</span>
                                     </div>
                                     <input type="range" min="0" max="30" step="1" value={sim.churn} onChange={e => setSim({...sim, churn: parseInt(e.target.value)})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                                 </div>
                             </div>
 
-                            {/* SECCIÓN ACTIVIDAD RECURRENTE */}
                             <div className="space-y-6">
                                 <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
                                     <Repeat size={18} className="text-indigo-400"/>
@@ -275,7 +284,10 @@ export default function AdminAnalytics() {
 
                                 <div>
                                     <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tasa Conversión VIP (%)</label>
+                                        <div className="flex items-center">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Conversión VIP (%)</label>
+                                            <InfoHint title="Tasa de Pago" text="Porcentaje de la base total de usuarios que realizan al menos una recarga de saldo o compra al mes." formula="(Usuarios que Pagan / Total) * 100" />
+                                        </div>
                                         <span className="text-sm font-black text-white">{sim.conversion}%</span>
                                     </div>
                                     <input type="range" min="1" max="100" step="1" value={sim.conversion} onChange={e => setSim({...sim, conversion: parseInt(e.target.value)})} className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
@@ -283,14 +295,16 @@ export default function AdminAnalytics() {
 
                                 <div>
                                     <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Renovaciones / Mes</label>
+                                        <div className="flex items-center">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Renovaciones / Mes</label>
+                                            <InfoHint title="Frecuencia de Compra" text="Cuántas veces el mismo usuario VIP vuelve a recargar saldo o comprar videos dentro del mismo mes." formula="Ticket Promedio x Frecuencia" />
+                                        </div>
                                         <span className="text-sm font-black text-indigo-400">{sim.avgFrequency}x</span>
                                     </div>
                                     <input type="range" min="1" max="10" step="0.5" value={sim.avgFrequency} onChange={e => setSim({...sim, avgFrequency: parseFloat(e.target.value)})} className="w-full accent-indigo-400 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                                 </div>
                             </div>
 
-                            {/* SECCIÓN COSTOS */}
                             <div className="space-y-6">
                                 <div className="flex items-center gap-3 border-b border-slate-800 pb-2">
                                     <TrendingDown size={18} className="text-red-400"/>
@@ -299,31 +313,38 @@ export default function AdminAnalytics() {
 
                                 <div>
                                     <div className="flex justify-between mb-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Contenido Nuevo / Mes</label>
+                                        <div className="flex items-center">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Costo Contenido / Mes</label>
+                                            <InfoHint title="Inversión en Media" text="Presupuesto mensual destinado a la compra, almacenamiento o mantenimiento del servidor de video." />
+                                        </div>
                                         <span className="text-sm font-black text-red-400">${sim.contentInflow}</span>
                                     </div>
                                     <input type="range" min="0" max="10000" step="250" value={sim.contentInflow} onChange={e => setSim({...sim, contentInflow: parseInt(e.target.value)})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer" />
                                 </div>
                             </div>
-
                         </div>
                     </div>
 
-                    {/* Simulador: Resultados Columna Derecha */}
                     <div className="lg:col-span-8 space-y-6">
                         <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 md:p-12 shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[600px]">
                             <div className="relative z-10">
                                 <div className="flex flex-col md:flex-row justify-between items-start gap-8 mb-12">
                                     <div>
                                         <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Proyección de Flujo Neto</h3>
-                                        <p className="text-sm text-slate-500">Simulación a 12 meses basada en recurrencia de saldo.</p>
+                                        <p className="text-sm text-slate-500">Estimación financiera basada en los KPIs configurados.</p>
                                         <div className="mt-4 flex flex-wrap gap-3">
                                             <div className="bg-slate-950 px-4 py-2 rounded-2xl border border-indigo-500/20">
-                                                <span className="text-[8px] font-black text-indigo-400 uppercase block">Punto de Equilibrio</span>
+                                                <div className="flex items-center gap-1 mb-0.5">
+                                                    <span className="text-[8px] font-black text-indigo-400 uppercase">Punto de Equilibrio</span>
+                                                    <InfoHint title="Break-Even Point" text="Mínimo de usuarios necesarios para que las ganancias cubran los costos fijos. Por debajo de esto, hay pérdida." formula="Gastos / ARPU" />
+                                                </div>
                                                 <span className="text-sm font-bold text-white">{projection.breakEvenUsers} <span className="text-[10px] text-slate-500">Usuarios</span></span>
                                             </div>
                                             <div className="bg-slate-950 px-4 py-2 rounded-2xl border border-red-500/20">
-                                                <span className="text-[8px] font-black text-red-400 uppercase block">Costos Fijos Totales</span>
+                                                <div className="flex items-center gap-1 mb-0.5">
+                                                    <span className="text-[8px] font-black text-red-400 uppercase">Costos Fijos</span>
+                                                    <InfoHint title="Burn Rate" text="Gastos totales que deben pagarse cada mes independientemente de los ingresos." formula="Contenido + Operaciones" />
+                                                </div>
                                                 <span className="text-sm font-bold text-white">${projection.totalFixedCosts}</span>
                                             </div>
                                         </div>
@@ -332,14 +353,15 @@ export default function AdminAnalytics() {
                                         <div className={`text-4xl font-black ${projection.totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                             {projection.totalProfit >= 0 ? '+' : ''}{Math.round(projection.totalProfit).toLocaleString()} $
                                         </div>
-                                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">UTILIDAD PROYECTADA (AÑO 1)</div>
+                                        <div className="flex justify-end items-center mt-1">
+                                            <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Utilidad (Año 1)</div>
+                                            <InfoHint title="Net Profit" text="Beneficio total acumulado tras 12 meses de operación, deduciendo todos los gastos proyectados." formula="Ingresos - Egresos (12 meses)" />
+                                        </div>
                                     </div>
                                 </div>
 
                                 <div className="h-64 w-full bg-slate-950/30 rounded-[32px] p-8 border border-slate-800/50 mb-12 relative">
                                     {renderChart(projection.data, 'profit', projection.totalProfit >= 0 ? '#10b981' : '#f43f5e')}
-                                    
-                                    {/* Guía de los meses */}
                                     <div className="absolute -bottom-6 left-8 right-8 flex justify-between text-[8px] font-black text-slate-600 uppercase">
                                         {projection.data.map((d, i) => <span key={i}>{d.label}</span>)}
                                     </div>
@@ -355,11 +377,17 @@ export default function AdminAnalytics() {
                                         <div className="text-xl font-black text-white">${projection.data[11].revenue}</div>
                                     </div>
                                     <div className="bg-slate-950/40 p-4 rounded-3xl border border-white/5 text-center">
-                                        <div className="text-[9px] font-black text-slate-600 uppercase mb-1">Margen Final</div>
+                                        <div className="flex justify-center items-center gap-1 mb-1">
+                                            <div className="text-[9px] font-black text-slate-600 uppercase">Margen Final</div>
+                                            <InfoHint title="Margen de Utilidad" text="Porcentaje de ingreso neto que queda como beneficio respecto al ingreso total en el último mes." formula="(Utilidad / Ingreso) * 100" />
+                                        </div>
                                         <div className={`text-xl font-black ${projection.data[11].profitability >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{projection.data[11].profitability}%</div>
                                     </div>
                                     <div className="bg-slate-950/40 p-4 rounded-3xl border border-white/5 text-center">
-                                        <div className="text-[9px] font-black text-slate-600 uppercase mb-1">ARPU Target</div>
+                                        <div className="flex justify-center items-center gap-1 mb-1">
+                                            <div className="text-[9px] font-black text-slate-600 uppercase">ARPU Target</div>
+                                            <InfoHint title="Average Revenue Per User" text="Ingreso promedio que genera un usuario al mes. Define el valor económico de cada registro." formula="Ingreso Total / Base Usuarios" />
+                                        </div>
                                         <div className="text-xl font-black text-amber-400">${(projection.data[11].revenue / projection.data[11].users).toFixed(2)}</div>
                                     </div>
                                 </div>
