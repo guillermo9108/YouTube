@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V12.8 (Analytics & Finance Pro)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V12.9 (Auditoría Financiera Real)
  */
 
 function admin_get_settings($pdo) {
@@ -35,6 +35,65 @@ function admin_get_settings($pdo) {
     respond(false, null, "No se pudo cargar la configuración");
 }
 
+function get_real_stats($pdo) {
+    $from = $_GET['from'] ?? (time() - (30 * 86400));
+    $to = $_GET['to'] ?? time();
+
+    // 1. KPIs Generales
+    $userCount = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn() ?: 1;
+    $systemRevenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
+    
+    // 2. Transacciones Reales de Membresía y Recargas (VIP / DEPOSIT)
+    $stmtMemb = $pdo->prepare("
+        SELECT COUNT(*) as total_tx, COUNT(DISTINCT buyerId) as unique_buyers, SUM(amount) as total_volume 
+        FROM transactions 
+        WHERE type IN ('VIP', 'DEPOSIT') AND timestamp BETWEEN ? AND ?
+    ");
+    $stmtMemb->execute([$from, $to]);
+    $membData = $stmtMemb->fetch();
+
+    // 3. Historial Diario para Gráficos
+    $stmtD = $pdo->prepare("
+        SELECT FROM_UNIXTIME(timestamp, '%Y-%m-%d') as date, SUM(adminFee) as revenue 
+        FROM transactions 
+        WHERE timestamp BETWEEN ? AND ? 
+        GROUP BY date 
+        ORDER BY date ASC
+    ");
+    $stmtD->execute([$from, $to]);
+    $daily = $stmtD->fetchAll();
+
+    // 4. Historial Mensual (Ingresos)
+    $stmtM = $pdo->prepare("
+        SELECT FROM_UNIXTIME(timestamp, '%Y-%m') as date, SUM(adminFee) as revenue 
+        FROM transactions 
+        GROUP BY date 
+        ORDER BY date ASC 
+        LIMIT 12
+    ");
+    $stmtM->execute();
+    $monthly = $stmtM->fetchAll();
+
+    // 5. Cálculos para Simulador (Modo Híbrido)
+    $activeUsers30d = $membData['unique_buyers'] ?: 0;
+    $totalTx30d = $membData['total_tx'] ?: 0;
+    $totalVipVolume = $membData['total_volume'] ?: 0;
+    
+    respond(true, [
+        'userCount' => (int)$userCount,
+        'systemRevenue' => (float)$systemRevenue,
+        'history' => [
+            'daily' => $daily,
+            'monthly' => $monthly
+        ],
+        'averages' => [
+            'activeUsers30d' => (int)$activeUsers30d,
+            'avgTxPerUser' => $activeUsers30d > 0 ? round($totalTx30d / $activeUsers30d, 2) : 0,
+            'arpu' => $activeUsers30d > 0 ? round($totalVipVolume / $activeUsers30d, 2) : 0
+        ]
+    ]);
+}
+
 function admin_process_next_transcode($pdo) {
     $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
     $ffmpegPath = $stmtS->fetchColumn();
@@ -54,35 +113,25 @@ function admin_process_next_transcode($pdo) {
     }
 
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING', transcode_progress = 5 WHERE id = ?")->execute([$video['id']]);
-
     $inputPath = resolve_video_path($video['videoUrl']);
     if (!$inputPath) {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo de origen no accesible' WHERE id = ?")->execute([$video['id']]);
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no accesible' WHERE id = ?")->execute([$video['id']]);
         respond(false, null, "Archivo no encontrado");
     }
 
     $outFolder = __DIR__ . '/uploads/videos/converted/';
     if (!is_dir($outFolder)) mkdir($outFolder, 0777, true);
     $outputPath = $outFolder . $video['id'] . '.mp4';
-
     $cmd = escapeshellarg($ffmpegPath) . " -i " . escapeshellarg($inputPath) . " -y " . $profileArgs . " " . escapeshellarg($outputPath) . " 2>&1";
     
-    $output = [];
-    $returnVar = 0;
     exec($cmd, $output, $returnVar);
-
-    $logString = implode("\n", $output);
-    write_log("FFmpeg Bruteforce for {$video['id']}: " . substr($logString, -1500), 'INFO');
-
-    if ($returnVar === 0 && file_exists($outputPath) && filesize($outputPath) > 1000) {
+    if ($returnVar === 0 && file_exists($outputPath)) {
         $newUrl = 'api/uploads/videos/converted/' . $video['id'] . '.mp4';
-        $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE', transcode_progress = 100 WHERE id = ?")
-            ->execute([$newUrl, $video['id']]);
-        respond(true, ['message' => 'Video convertido (Bruteforce)', 'id' => $video['id']]);
+        $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE', transcode_progress = 100 WHERE id = ?")->execute([$newUrl, $video['id']]);
+        respond(true, ['message' => 'Video convertido', 'id' => $video['id']]);
     } else {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = ? WHERE id = ?")
-            ->execute([substr($logString, -800), $video['id']]);
-        respond(false, null, "Fallo en modo Bruteforce");
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Fallo FFmpeg' WHERE id = ?")->execute([$video['id']]);
+        respond(false, null, "Fallo en conversión");
     }
 }
 
@@ -96,28 +145,17 @@ function admin_update_settings($pdo, $input) {
         'currencyConversion', 'enableDebugLog', 'autoTranscode', 'transcodePreset',
         'proxyUrl', 'ftpSettings', 'categories', 'is_transcoder_active', 'tropipayClientId', 'tropipayClientSecret'
     ];
-
-    $fields = [];
-    $params = [];
-    
+    $fields = []; $params = [];
     foreach ($input as $key => $val) {
         if (in_array($key, $allowed)) {
             $fields[] = "`$key` = ?";
-            if (is_array($val) || is_object($val)) {
-                $params[] = json_encode($val, JSON_UNESCAPED_UNICODE);
-            } else {
-                $params[] = $val;
-            }
+            $params[] = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
         }
     }
-
-    if (empty($fields)) respond(true, null, "No hay cambios válidos");
+    if (empty($fields)) respond(true);
     $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
-    try {
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        respond(true);
-    } catch (Exception $e) { respond(false, null, "Error BD: " . $e->getMessage()); }
+    $pdo->prepare($sql)->execute($params);
+    respond(true);
 }
 
 function admin_get_requests($pdo, $status = 'ALL') {
@@ -129,66 +167,14 @@ function admin_get_requests($pdo, $status = 'ALL') {
     respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
-function get_real_stats($pdo) {
-    $from = $_GET['from'] ?? (time() - (30 * 86400));
-    $to = $_GET['to'] ?? time();
-
-    // 1. KPIs Generales
-    $userCount = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
-    $systemRevenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
-    $totalBalance = $pdo->query("SELECT SUM(balance) FROM users")->fetchColumn() ?: 0;
-
-    // 2. Historial Diario (Ingresos)
-    $stmtD = $pdo->prepare("
-        SELECT FROM_UNIXTIME(timestamp, '%Y-%m-%d') as date, SUM(adminFee) as revenue 
-        FROM transactions 
-        WHERE timestamp BETWEEN ? AND ? 
-        GROUP BY date 
-        ORDER BY date ASC
-    ");
-    $stmtD->execute([$from, $to]);
-    $daily = $stmtD->fetchAll();
-
-    // 3. Historial Mensual (Ingresos)
-    $stmtM = $pdo->prepare("
-        SELECT FROM_UNIXTIME(timestamp, '%Y-%m') as date, SUM(adminFee) as revenue 
-        FROM transactions 
-        GROUP BY date 
-        ORDER BY date ASC 
-        LIMIT 12
-    ");
-    $stmtM->execute();
-    $monthly = $stmtM->fetchAll();
-
-    // 4. Métricas de Actividad (Últimos 30 días para Simulador)
-    $activeUsers30d = $pdo->query("SELECT COUNT(DISTINCT buyerId) FROM transactions WHERE timestamp > " . (time() - (30 * 86400)))->fetchColumn() ?: 0;
-    $totalTx30d = $pdo->query("SELECT COUNT(*) FROM transactions WHERE timestamp > " . (time() - (30 * 86400)))->fetchColumn() ?: 0;
-    
-    respond(true, [
-        'userCount' => (int)$userCount,
-        'systemRevenue' => (float)$systemRevenue,
-        'totalBalance' => (float)$totalBalance,
-        'history' => [
-            'daily' => $daily,
-            'monthly' => $monthly
-        ],
-        'averages' => [
-            'activeUsers30d' => (int)$activeUsers30d,
-            'avgTxPerUser' => $activeUsers30d > 0 ? round($totalTx30d / $activeUsers30d, 2) : 0,
-            'arpu' => $userCount > 0 ? round($systemRevenue / $userCount, 2) : 0
-        ]
-    ]);
-}
-
 function admin_add_balance($pdo, $input) {
-    $targetId = $input['userId'] ?? $input['targetId'] ?? null;
+    $targetId = $input['userId'] ?? null;
     $amount = floatval($input['amount'] ?? 0);
     if (!$targetId || $amount <= 0) respond(false, null, 'Datos inválidos');
     $pdo->beginTransaction();
     try {
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
-        $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp) VALUES (?, ?, ?, 'DEPOSIT', ?)")
-            ->execute([uniqid('dep_'), $targetId, $amount, time()]);
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp) VALUES (?, ?, ?, 'DEPOSIT', ?)")->execute([uniqid('dep_'), $targetId, $amount, time()]);
         $pdo->commit();
         respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
@@ -204,7 +190,6 @@ function admin_handle_balance_request($pdo, $input) {
         if ($status === 'APPROVED') {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp) VALUES (?, ?, ?, 'DEPOSIT', ?)")->execute([uniqid('dep_'), $req['userId'], $req['amount'], time()]);
-            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")->execute([uniqid('n_'), $req['userId'], "Tu recarga de {$req['amount']}$ ha sido aprobada.", time()]);
         }
         $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
         $pdo->commit(); respond(true);
@@ -229,7 +214,6 @@ function admin_handle_vip_request($pdo, $input) {
                 $newExpiry = max($current, $now) + ($days * 86400);
                 $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
             }
-            $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")->execute([uniqid('n_'), $userId, "Tu membresía/recarga ha sido activada.", time()]);
         }
         $pdo->prepare("UPDATE vip_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
         $pdo->commit(); respond(true);
@@ -348,24 +332,15 @@ function admin_smart_cleaner_preview($pdo, $input) {
     $maxViews = intval($input['maxViews'] ?? 5);
     $category = $input['category'] ?? 'ALL';
     $limit = intval($input['maxDeleteLimit'] ?? 100);
-    
     $timeLimit = time() - ($minDays * 86400);
-    
     $sql = "SELECT id, title, videoUrl, views, createdAt, category FROM videos WHERE createdAt < ? AND views <= ?";
     $params = [$timeLimit, $maxViews];
-    
-    if ($category !== 'ALL') {
-        $sql .= " AND category = ?";
-        $params[] = $category;
-    }
-    
+    if ($category !== 'ALL') { $sql .= " AND category = ?"; $params[] = $category; }
     $sql .= " ORDER BY views ASC, createdAt ASC LIMIT ?";
     $params[] = $limit;
-    
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
     $totalSize = 0;
     foreach ($rows as &$v) {
         $v['reason'] = ($v['views'] == 0) ? "Cero Vistas" : "Baja Tracción";
@@ -374,20 +349,10 @@ function admin_smart_cleaner_preview($pdo, $input) {
             $bytes = filesize($real);
             $totalSize += $bytes;
             $v['size_fmt'] = round($bytes / (1024 * 1024), 2) . " MB";
-        } else {
-            $v['size_fmt'] = "Archivo perdido";
-            $v['reason'] = "Error 404";
-        }
+        } else { $v['size_fmt'] = "Archivo perdido"; $v['reason'] = "Error 404"; }
     }
-    
     $gb = round($totalSize / (1024 * 1024 * 1024), 2);
-    
-    respond(true, [
-        'preview' => $rows,
-        'stats' => [
-            'spaceReclaimed' => "$gb GB"
-        ]
-    ]);
+    respond(true, ['preview' => $rows, 'stats' => [ 'spaceReclaimed' => "$gb GB" ]]);
 }
 
 function admin_smart_cleaner_execute($pdo, $input) {
