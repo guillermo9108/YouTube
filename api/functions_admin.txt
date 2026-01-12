@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V12.9 (Auditoría Financiera Real)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V13.0 (Auditoría Financiera Real)
  */
 
 function admin_get_settings($pdo) {
@@ -39,22 +39,30 @@ function get_real_stats($pdo) {
     $from = $_GET['from'] ?? (time() - (30 * 86400));
     $to = $_GET['to'] ?? time();
 
-    // 1. KPIs Generales
+    // 1. Usuarios Totales (Censo)
     $userCount = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn() ?: 1;
-    $systemRevenue = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
     
-    // 2. Transacciones Reales de Membresía y Recargas (VIP / DEPOSIT)
-    $stmtMemb = $pdo->prepare("
-        SELECT COUNT(*) as total_tx, COUNT(DISTINCT buyerId) as unique_buyers, SUM(amount) as total_volume 
+    // 2. Desglose de Ingresos Reales por tipo
+    $stmtRevenue = $pdo->prepare("
+        SELECT 
+            SUM(CASE WHEN type IN ('PURCHASE', 'MARKETPLACE', 'TRANSFER_SENT') THEN adminFee ELSE 0 END) as total_commissions,
+            SUM(CASE WHEN type = 'VIP' THEN amount ELSE 0 END) as total_vip_sales,
+            COUNT(DISTINCT buyerId) as active_buyers,
+            COUNT(*) as total_tx
         FROM transactions 
-        WHERE type IN ('VIP', 'DEPOSIT') AND timestamp BETWEEN ? AND ?
+        WHERE timestamp BETWEEN ? AND ?
     ");
-    $stmtMemb->execute([$from, $to]);
-    $membData = $stmtMemb->fetch();
+    $stmtRevenue->execute([$from, $to]);
+    $rev = $stmtRevenue->fetch();
 
-    // 3. Historial Diario para Gráficos
+    $totalRevenue = floatval($rev['total_commissions'] ?? 0) + floatval($rev['total_vip_sales'] ?? 0);
+    $activeUsers = intval($rev['active_buyers'] ?? 0);
+    $totalTx = intval($rev['total_tx'] ?? 0);
+
+    // 3. Historial Diario (Solo para el gráfico)
     $stmtD = $pdo->prepare("
-        SELECT FROM_UNIXTIME(timestamp, '%Y-%m-%d') as date, SUM(adminFee) as revenue 
+        SELECT FROM_UNIXTIME(timestamp, '%Y-%m-%d') as date, 
+               SUM(CASE WHEN type = 'VIP' THEN amount ELSE adminFee END) as revenue 
         FROM transactions 
         WHERE timestamp BETWEEN ? AND ? 
         GROUP BY date 
@@ -63,9 +71,10 @@ function get_real_stats($pdo) {
     $stmtD->execute([$from, $to]);
     $daily = $stmtD->fetchAll();
 
-    // 4. Historial Mensual (Ingresos)
+    // 4. Historial Mensual
     $stmtM = $pdo->prepare("
-        SELECT FROM_UNIXTIME(timestamp, '%Y-%m') as date, SUM(adminFee) as revenue 
+        SELECT FROM_UNIXTIME(timestamp, '%Y-%m') as date, 
+               SUM(CASE WHEN type = 'VIP' THEN amount ELSE adminFee END) as revenue 
         FROM transactions 
         GROUP BY date 
         ORDER BY date ASC 
@@ -74,22 +83,24 @@ function get_real_stats($pdo) {
     $stmtM->execute();
     $monthly = $stmtM->fetchAll();
 
-    // 5. Cálculos para Simulador (Modo Híbrido)
-    $activeUsers30d = $membData['unique_buyers'] ?: 0;
-    $totalTx30d = $membData['total_tx'] ?: 0;
-    $totalVipVolume = $membData['total_volume'] ?: 0;
+    // 5. KPIs para Simulador
+    $conversion = ($userCount > 0) ? round(($activeUsers / $userCount) * 100, 2) : 0;
+    $arpu = ($activeUsers > 0) ? round($totalRevenue / $activeUsers, 2) : 0;
+    $frequency = ($activeUsers > 0) ? round($totalTx / $activeUsers, 2) : 1;
     
     respond(true, [
         'userCount' => (int)$userCount,
-        'systemRevenue' => (float)$systemRevenue,
+        'totalRevenue' => $totalRevenue,
+        'activeUsers' => $activeUsers,
         'history' => [
             'daily' => $daily,
             'monthly' => $monthly
         ],
         'averages' => [
-            'activeUsers30d' => (int)$activeUsers30d,
-            'avgTxPerUser' => $activeUsers30d > 0 ? round($totalTx30d / $activeUsers30d, 2) : 0,
-            'arpu' => $activeUsers30d > 0 ? round($totalVipVolume / $activeUsers30d, 2) : 0
+            'conversion' => $conversion,
+            'arpu' => $arpu,
+            'frequency' => $frequency,
+            'totalTx' => $totalTx
         ]
     ]);
 }
