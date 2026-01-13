@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Category, Notification as AppNotification, MarketplaceItem, User } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, Zap, Clock, Film, ShoppingBag, Tag, Users, Star, Menu, Crown, User as UserIcon
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, Zap, Clock, Film, ShoppingBag, Tag, Users, Star, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, Heart, History
 } from 'lucide-react';
 import { useLocation, useNavigate, Link } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -13,6 +13,83 @@ import AIConcierge from '../AIConcierge';
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 // --- Componentes Auxiliares ---
+
+const Sidebar = ({ isOpen, onClose, user, isAdmin, logout }: { isOpen: boolean, onClose: () => void, user: User | null, isAdmin: boolean, logout: () => void }) => {
+    const navigate = useNavigate();
+    
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-[100] animate-in fade-in duration-300">
+            {/* Overlay */}
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
+            
+            {/* Drawer */}
+            <div className="absolute top-0 left-0 bottom-0 w-[280px] bg-slate-900 border-r border-white/5 shadow-2xl flex flex-col animate-in slide-in-from-left duration-500">
+                <div className="p-6 bg-slate-950 border-b border-white/5 relative">
+                    <button onClick={onClose} className="absolute top-4 right-4 text-slate-500 hover:text-white">
+                        <X size={20}/>
+                    </button>
+                    
+                    <div className="flex items-center gap-4 mb-6">
+                        <div className="w-14 h-14 rounded-2xl bg-indigo-600 border-2 border-white/10 overflow-hidden shadow-lg">
+                            {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white text-xl">{user?.username[0]}</div>}
+                        </div>
+                        <div className="min-w-0">
+                            <div className="font-black text-white truncate">@{user?.username}</div>
+                            <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">{user?.role}</div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Tu Saldo</p>
+                        <div className="text-xl font-black text-emerald-400">{Number(user?.balance).toFixed(2)} $</div>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+                    <button onClick={() => { navigate('/'); onClose(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-white/5 text-slate-300 hover:text-white transition-all group">
+                        <HomeIcon size={20} className="text-slate-500 group-hover:text-indigo-400"/>
+                        <span className="text-xs font-black uppercase tracking-widest">Inicio</span>
+                    </button>
+                    <button onClick={() => { navigate('/profile'); onClose(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-white/5 text-slate-300 hover:text-white transition-all group">
+                        <UserIcon size={20} className="text-slate-500 group-hover:text-indigo-400"/>
+                        <span className="text-xs font-black uppercase tracking-widest">Mi Perfil</span>
+                    </button>
+                    <button onClick={() => { navigate('/watch-later'); onClose(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-white/5 text-slate-300 hover:text-white transition-all group">
+                        <Clock size={20} className="text-slate-500 group-hover:text-amber-400"/>
+                        <span className="text-xs font-black uppercase tracking-widest">Ver más tarde</span>
+                    </button>
+                    <button onClick={() => { navigate('/vip'); onClose(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-white/5 text-slate-300 hover:text-white transition-all group">
+                        <Crown size={20} className="text-slate-500 group-hover:text-amber-500"/>
+                        <span className="text-xs font-black uppercase tracking-widest">VIP & Recargas</span>
+                    </button>
+                    <button onClick={() => { navigate('/marketplace'); onClose(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-white/5 text-slate-300 hover:text-white transition-all group">
+                        <ShoppingBag size={20} className="text-slate-500 group-hover:text-emerald-400"/>
+                        <span className="text-xs font-black uppercase tracking-widest">Tienda</span>
+                    </button>
+                    
+                    {isAdmin && (
+                        <div className="pt-4 mt-4 border-t border-white/5">
+                            <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2 px-4">Administración</p>
+                            <button onClick={() => { navigate('/admin'); onClose(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 transition-all border border-indigo-500/20">
+                                <ShieldCheck size={20}/>
+                                <span className="text-xs font-black uppercase tracking-widest">Panel Admin</span>
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 bg-slate-950/50 border-t border-white/5">
+                    <button onClick={() => { logout(); onClose(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl text-red-400 hover:bg-red-500/10 transition-all">
+                        <LogOut size={20}/>
+                        <span className="text-xs font-black uppercase tracking-widest">Cerrar Sesión</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: string | null) => void }) => (
     <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in sticky top-0 bg-black/80 backdrop-blur-md z-20">
@@ -97,7 +174,7 @@ interface UnifiedSearchResults {
 // --- Componente Principal ---
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -113,6 +190,7 @@ export default function Home() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [visibleCount, setVisibleCount] = useState(12);
   const [isAiConfigured, setIsAiConfigured] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Search State
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -123,7 +201,10 @@ export default function Home() {
   // Notifications State
   const [notifs, setNotifs] = useState<AppNotification[]>([]);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
-  const unreadNotifs = useMemo(() => notifs.filter(n => !n.isRead), [notifs]);
+  
+  // FIX: Comparación numérica robusta para isRead (0 o "0" significa no leído)
+  const unreadNotifs = useMemo(() => notifs.filter(n => Number(n.isRead) === 0), [notifs]);
+  
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -338,10 +419,12 @@ export default function Home() {
   return (
     <div className="pb-20 space-y-6">
       
+      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
+
       {/* Search & Header Bar */}
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
           <div className="flex gap-3 mb-4 items-center w-full">
-              <button onClick={() => navigate('/profile')} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400 active:scale-95 transition-transform">
+              <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400 active:scale-95 transition-transform">
                   <Menu size={20}/>
               </button>
 
@@ -433,7 +516,7 @@ export default function Home() {
                               ) : notifs.map(n => (
                                   <div 
                                       key={n.id}
-                                      className={`p-4 border-b border-white/5 transition-all cursor-pointer group flex gap-3 items-start relative ${!n.isRead ? 'bg-indigo-500/[0.04]' : 'opacity-60 grayscale'}`}
+                                      className={`p-4 border-b border-white/5 transition-all cursor-pointer group flex gap-3 items-start relative ${Number(n.isRead) === 0 ? 'bg-indigo-500/[0.04]' : 'opacity-60 grayscale'}`}
                                   >
                                       <div 
                                           onClick={() => { handleMarkRead(n.id); navigate(n.link); setShowNotifMenu(false); }}

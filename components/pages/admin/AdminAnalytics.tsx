@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
-import { VipPlan } from '../../../types';
+import { VipPlan, SystemSettings } from '../../../types';
 import { 
     Calculator, TrendingUp, RefreshCw, Activity, Crown, 
     Calendar, HelpCircle, Clock, AlertTriangle, Zap
@@ -51,8 +51,9 @@ export default function AdminAnalytics() {
         planMix: {} as Record<string, number> 
     });
 
-    // Filtramos SOLO planes de ACCESO TOTAL para el simulador con mayor robustez
+    // FIX: Filtramos SOLO planes de ACCESO TOTAL con máxima robustez (case-insensitive + trim)
     const accessPlans = useMemo(() => {
+        if (!allVipPlans || !Array.isArray(allVipPlans)) return [];
         return allVipPlans.filter(p => {
             if (!p.type) return false;
             const typeStr = String(p.type).toUpperCase().trim();
@@ -72,14 +73,21 @@ export default function AdminAnalytics() {
             ]);
 
             setRealStats(rs);
-            const plans: VipPlan[] = settings?.vipPlans || [];
+            
+            // Aseguramos que vipPlans sea un array incluso si viene corrupto de la BD
+            const rawPlans = settings?.vipPlans;
+            let plans: VipPlan[] = [];
+            if (Array.isArray(rawPlans)) {
+                plans = rawPlans;
+            } else if (typeof rawPlans === 'string') {
+                try { plans = JSON.parse(rawPlans); } catch(e) { plans = []; }
+            }
+
             setAllVipPlans(plans);
 
+            // Inicializar Mix con los datos reales si existen
             const initialMix: Record<string, number> = {};
-            plans.filter(p => {
-                const typeStr = String(p.type || '').toUpperCase().trim();
-                return typeStr === 'ACCESS';
-            }).forEach(p => { 
+            plans.filter(p => String(p.type || '').toUpperCase().trim() === 'ACCESS').forEach(p => { 
                 initialMix[p.id] = rs?.planMix?.[p.name] || 0; 
             });
 
@@ -89,8 +97,11 @@ export default function AdminAnalytics() {
                 avgTicket: rs?.averages?.arpu || prev.avgTicket,
                 planMix: initialMix
             }));
-        } catch(e) { console.error("Error loading analytics data:", e); } 
-        finally { setLoading(false); }
+        } catch(e) { 
+            console.error("Error loading analytics data:", e); 
+        } finally { 
+            setLoading(false); 
+        }
     };
 
     useEffect(() => { loadData(); }, [dateRange]);
@@ -262,7 +273,10 @@ export default function AdminAnalytics() {
                                 </div>
                                 <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                                     {accessPlans.length === 0 ? (
-                                        <p className="text-center text-[10px] text-slate-600 italic py-10 uppercase tracking-widest">No hay planes de acceso</p>
+                                        <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
+                                            <Zap className="text-slate-700 animate-pulse" size={48}/>
+                                            <p className="text-[10px] text-slate-600 italic uppercase tracking-widest leading-relaxed">No hay planes de tipo "ACCESS" <br/> configurados en Admin > Config.</p>
+                                        </div>
                                     ) : accessPlans.map(plan => (
                                         <div key={plan.id} className="bg-slate-950 p-4 rounded-3xl border border-white/5 group hover:border-indigo-500/30 transition-all">
                                             <div className="flex justify-between items-center">
