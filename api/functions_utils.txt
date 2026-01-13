@@ -39,7 +39,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
         }
     }
 
-    // PROTECCIÓN: Truncar strings para evitar SQL Error 1406
     return [
         'title' => substr(ucwords(strtolower($cleanName)), 0, 250), 
         'category' => substr($detectedCat, 0, 95),
@@ -71,7 +70,7 @@ function write_log($message, $level = 'INFO') {
 function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
     $path = str_replace('\\', '/', $pathOrUrl);
-    if (file_exists($path) && is_file($path)) return $path;
+    if (file_exists($path) && is_file($path)) return realpath($path);
     $cleanPath = (strpos($path, 'api/') === 0) ? substr($path, 4) : $path;
     $internalPath = __DIR__ . '/' . $cleanPath;
     if (file_exists($internalPath) && is_file($internalPath)) return realpath($internalPath);
@@ -79,16 +78,17 @@ function resolve_video_path($pathOrUrl) {
 }
 
 function fix_url($url) {
-    if (empty($url)) return null; 
+    if (empty($url)) return "api/uploads/thumbnails/default.jpg"; 
     if (strpos($url, 'http') === 0) return $url;
     if (strpos($url, 'data:') === 0) return $url;
     $clean = ltrim($url, '/');
     if (strpos($clean, 'api/') === 0) return $clean;
+    // Si la ruta empieza con uploads/, añadir api/ delante
+    if (strpos($clean, 'uploads/') === 0) return 'api/' . $clean;
     return 'api/' . $clean;
 }
 
 function streamVideo($id, $pdo) {
-    // Crucial: Limpiar buffer de salida para evitar que errores PHP rompan el stream binario
     while (ob_get_level()) ob_end_clean();
     
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");

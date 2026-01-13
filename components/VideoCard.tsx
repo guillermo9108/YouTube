@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
-import { CheckCircle2, Clock, MoreVertical, ImageOff } from 'lucide-react';
+import { CheckCircle2, Clock, MoreVertical, ImageOff, Play } from 'lucide-react';
 import { db } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -17,16 +16,16 @@ interface VideoCardProps {
 const formatTimeAgo = (timestamp: number) => {
   const seconds = Math.floor(Date.now() / 1000 - timestamp);
   let interval = seconds / 31536000;
-  if (interval > 1) return Math.floor(interval) + " years ago";
+  if (interval > 1) return Math.floor(interval) + " a";
   interval = seconds / 2592000;
-  if (interval > 1) return Math.floor(interval) + " months ago";
+  if (interval > 1) return Math.floor(interval) + " m";
   interval = seconds / 86400;
-  if (interval > 1) return Math.floor(interval) + " days ago";
+  if (interval > 1) return Math.floor(interval) + " d";
   interval = seconds / 3600;
-  if (interval > 1) return Math.floor(interval) + " hours ago";
+  if (interval > 1) return Math.floor(interval) + " h";
   interval = seconds / 60;
-  if (interval > 1) return Math.floor(interval) + " min ago";
-  return "Just now";
+  if (interval > 1) return Math.floor(interval) + " min";
+  return "Ahora";
 };
 
 const formatDuration = (seconds: number) => {
@@ -64,55 +63,59 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       <Link 
         to={`/watch/${video.id}`} 
         onClick={handleClick} 
-        className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-sm hover:shadow-xl hover:shadow-indigo-500/10 hover:scale-[1.02] transition-all duration-300 block ring-1 ring-white/5 hover:ring-indigo-500/30"
+        className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 shadow-sm hover:shadow-2xl hover:shadow-indigo-500/20 hover:scale-[1.03] transition-all duration-500 block ring-1 ring-white/5 hover:ring-indigo-500/40"
       >
         {!imgError ? (
             <img 
               src={video.thumbnailUrl} 
               alt={video.title} 
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
-              loading="lazy" decoding="async" onError={() => setImgError(true)}
+              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
+              loading="lazy" decoding="async" 
+              onError={() => setImgError(true)}
             />
         ) : (
-            <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600"><ImageOff size={24} /></div>
+            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-800 p-4">
+                <Play size={48} className="opacity-20 mb-2"/>
+                <span className="text-[8px] font-black uppercase tracking-widest opacity-20 text-center">{video.title}</span>
+            </div>
         )}
         
-        <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md backdrop-blur-sm">
+        <div className="absolute bottom-2 right-2 bg-black/80 text-white text-[10px] font-black px-2 py-0.5 rounded-lg backdrop-blur-md border border-white/5">
            {formatDuration(video.duration)}
         </div>
 
         {isNew && !isWatched && (
-            <div className="absolute top-1.5 left-1.5 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm animate-pulse">NEW</div>
+            <div className="absolute top-2 left-2 bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-red-900/40 animate-pulse uppercase tracking-widest">NUEVO</div>
         )}
 
         <button 
             onClick={handleWatchLater}
-            className={`absolute top-1.5 right-1.5 p-1.5 rounded-lg backdrop-blur-md border border-white/10 transition-all opacity-0 group-hover:opacity-100 ${inWatchLater ? 'bg-indigo-600 text-white' : 'bg-black/40 text-slate-300 hover:text-white'}`}
+            className={`absolute top-2 right-2 p-2 rounded-xl backdrop-blur-md border border-white/10 transition-all duration-300 opacity-0 group-hover:opacity-100 ${inWatchLater ? 'bg-indigo-600 text-white' : 'bg-black/40 text-slate-300 hover:text-white'}`}
         >
             <Clock size={16} fill={inWatchLater ? "currentColor" : "none"} />
         </button>
 
         {isWatched && (
-             <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                 <div className="flex items-center gap-1 text-slate-200 bg-black/40 px-2 py-1 rounded backdrop-blur-md border border-white/10">
-                    <CheckCircle2 size={14} /> <span className="text-[10px] font-bold tracking-wider">WATCHED</span>
+             <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[2px]">
+                 <div className="flex items-center gap-2 text-slate-200 bg-indigo-600/80 px-3 py-1 rounded-full backdrop-blur-md border border-white/10 shadow-xl">
+                    <CheckCircle2 size={14} /> <span className="text-[10px] font-black tracking-widest uppercase">VISTO</span>
                  </div>
              </div>
         )}
         
         {!isUnlocked && !isWatched && (
-            <div className="absolute bottom-1.5 left-1.5 bg-amber-400 text-black text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">
+            <div className="absolute bottom-2 left-2 bg-amber-400 text-black text-[10px] font-black px-2 py-0.5 rounded-lg shadow-lg flex items-center gap-1.5 border border-amber-500/20">
                 {video.price} $
             </div>
         )}
       </Link>
 
-      <div className="flex gap-3 px-1 md:px-0">
-        <Link to={`/channel/${video.creatorId}`} className="shrink-0 mt-0.5">
+      <div className="flex gap-3 px-1">
+        <Link to={`/channel/${video.creatorId}`} className="shrink-0 mt-1">
             {video.creatorAvatarUrl ? (
-                <img src={video.creatorAvatarUrl} className="w-9 h-9 rounded-full object-cover bg-slate-800 border border-slate-800 group-hover:border-indigo-500/50 transition-colors" alt={video.creatorName} />
+                <img src={video.creatorAvatarUrl} className="w-10 h-10 rounded-2xl object-cover bg-slate-900 border border-white/5 group-hover:border-indigo-500 transition-colors shadow-md" alt={video.creatorName} />
             ) : (
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white shadow-inner">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-sm font-black text-white shadow-inner uppercase">
                     {video.creatorName?.[0] || '?'}
                 </div>
             )}
@@ -120,23 +123,23 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
 
         <div className="flex-1 min-w-0 flex flex-col">
             <Link to={`/watch/${video.id}`} onClick={handleClick} title={video.title}>
-                <h3 className="text-sm md:text-[15px] font-semibold text-white leading-snug line-clamp-2 mb-1 group-hover:text-indigo-400 transition-colors">{video.title}</h3>
+                <h3 className="text-sm font-black text-white leading-tight line-clamp-2 mb-1 group-hover:text-indigo-400 transition-colors uppercase tracking-tighter italic">{video.title}</h3>
             </Link>
-            <div className="text-[11px] md:text-xs text-slate-400 flex flex-col gap-0.5">
-                <Link to={`/channel/${video.creatorId}`} className="hover:text-slate-200 transition-colors flex items-center gap-1 w-fit">
+            <div className="text-[10px] text-slate-500 flex flex-col gap-0.5">
+                <Link to={`/channel/${video.creatorId}`} className="hover:text-slate-200 transition-colors flex items-center gap-1 w-fit font-bold uppercase tracking-widest text-slate-400">
                     {video.creatorName || 'Usuario'}
-                    <CheckCircle2 size={10} className="text-slate-500 fill-slate-800" />
+                    <CheckCircle2 size={10} className="text-indigo-500" />
                 </Link>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2 font-bold">
                     <span>{video.views} vistas</span>
-                    <span className="text-slate-600">•</span>
+                    <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
                     <span>{formatTimeAgo(video.createdAt)}</span>
                 </div>
             </div>
         </div>
 
-        <button className="shrink-0 text-slate-500 hover:text-white self-start opacity-0 group-hover:opacity-100 transition-opacity -mr-1">
-            <MoreVertical size={18} />
+        <button className="shrink-0 text-slate-600 hover:text-white self-start opacity-0 group-hover:opacity-100 transition-opacity p-1">
+            <MoreVertical size={20} />
         </button>
       </div>
     </div>

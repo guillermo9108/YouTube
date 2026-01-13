@@ -7,12 +7,16 @@ function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
         $v['rawPath'] = $v['videoUrl'];
+        // Detección mejorada de video que requiere streaming por proxy
         $isLocal = (isset($v['isLocal']) && ($v['isLocal'] == 1 || $v['isLocal'] === "1" || $v['isLocal'] === true));
         $isUploaded = (strpos($v['videoUrl'] ?? '', 'uploads/videos/') !== false);
+        
         if ($isLocal || $isUploaded) {
+            // Siempre usar el proxy de stream para archivos que están en el disco del servidor
             $v['videoUrl'] = "api/index.php?action=stream&id=" . $v['id'];
             $v['isLocal'] = true;
         }
+        
         if (isset($v['thumbnailUrl'])) { $v['thumbnailUrl'] = fix_url($v['thumbnailUrl']); }
         if (isset($v['creatorAvatarUrl'])) { $v['creatorAvatarUrl'] = fix_url($v['creatorAvatarUrl']); }
         if (!isset($v['transcode_status'])) $v['transcode_status'] = 'NONE';
@@ -26,9 +30,6 @@ function video_get_all($pdo) {
     respond(true, $videos);
 }
 
-/**
- * ESCANEO LOCAL ROBUSTO (Ignora errores de permisos y carpetas de sistema)
- */
 function video_scan_local($pdo, $input) {
     $paths = [];
     if (!empty($input['path'])) {
@@ -43,7 +44,6 @@ function video_scan_local($pdo, $input) {
     $paths = array_unique(array_filter($paths));
     if (empty($paths)) respond(false, null, "No hay rutas configuradas.");
 
-    // Obtener Configuración de Categorías
     $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
     $currentCategories = json_decode($stmtS->fetchColumn() ?: '[]', true);
     $catNames = array_map('strtolower', array_column($currentCategories, 'name'));
@@ -51,23 +51,13 @@ function video_scan_local($pdo, $input) {
 
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $added = 0; $found = 0; $errors = [];
-    
-    // Lista negra de carpetas de sistema (comunes en NAS y Windows)
     $blacklist = ['#recycle', '@eaDir', '$RECYCLE.BIN', 'System Volume Information', '.Thumbnails', '.DS_Store', 'lost+found'];
 
     foreach ($paths as $rootPath) {
         $rootPath = trim($rootPath);
-        if (!is_dir($rootPath)) {
-            $errors[] = "Ruta no encontrada: $rootPath";
-            continue;
-        }
+        if (!is_dir($rootPath)) { $errors[] = "Ruta no encontrada: $rootPath"; continue; }
+        if (!is_readable($rootPath)) { $errors[] = "Sin permiso de lectura en raíz: $rootPath"; continue; }
 
-        if (!is_readable($rootPath)) {
-            $errors[] = "Sin permiso de lectura en raíz: $rootPath";
-            continue;
-        }
-
-        // 1. Auto-Categorización (Carpetas Nivel 1)
         try {
             $dirEntries = @scandir($rootPath);
             if ($dirEntries) {
@@ -92,11 +82,8 @@ function video_scan_local($pdo, $input) {
             }
         } catch (Exception $e) {}
 
-        // 2. Escaneo Recursivo Seguro
         try {
             $directory = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
-            
-            // Filtro para ignorar la lista negra de forma recursiva
             $filter = new RecursiveCallbackFilterIterator($directory, function ($current, $key, $iterator) use ($blacklist) {
                 if ($current->isDir()) {
                     if (in_array($current->getFilename(), $blacklist)) return false;
@@ -104,9 +91,7 @@ function video_scan_local($pdo, $input) {
                 }
                 return true;
             });
-
             $it = new RecursiveIteratorIterator($filter, RecursiveIteratorIterator::SELF_FIRST);
-
             foreach ($it as $file) {
                 if ($file->isDir()) continue;
                 $ext = strtolower($file->getExtension());
@@ -114,39 +99,23 @@ function video_scan_local($pdo, $input) {
                     $found++;
                     $fullPath = $file->getRealPath();
                     if (!$fullPath) continue;
-
-                    // Verificar si ya existe en DB (Por URL o ID MD5)
                     $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? OR id = ?");
                     $vidId = 'loc_' . md5($fullPath);
                     $stmt->execute([$fullPath, $vidId]);
-                    
                     if ($stmt->fetchColumn() == 0) {
                         $title = pathinfo($fullPath, PATHINFO_FILENAME);
-                        // Limpiar nombres (Puntos por espacios, etc)
                         $title = trim(str_replace(['.', '_', '-'], ' ', $title));
-                        
                         $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, 'api/uploads/thumbnails/default.jpg')");
                         $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
                         $added++;
                     }
                 }
             }
-        } catch (Exception $e) {
-            $errors[] = "Error parcial en $rootPath: " . $e->getMessage();
-        }
+        } catch (Exception $e) { $errors[] = "Error parcial en $rootPath: " . $e->getMessage(); }
     }
 
-    if ($categoriesChanged) {
-        $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
-            ->execute([json_encode($currentCategories)]);
-    }
-
-    respond(true, [
-        'totalFound' => $found, 
-        'newToImport' => $added, 
-        'categoriesCreated' => $categoriesChanged,
-        'errors' => $errors
-    ]);
+    if ($categoriesChanged) { $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")->execute([json_encode($currentCategories)]); }
+    respond(true, ['totalFound' => $found, 'newToImport' => $added, 'categoriesCreated' => $categoriesChanged, 'errors' => $errors]);
 }
 
 function video_get_one($pdo, $id) {

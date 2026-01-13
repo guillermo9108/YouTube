@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -6,12 +5,11 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle
+    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 
-// Helper de ordenamiento natural avanzado
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 export default function Watch() {
@@ -23,6 +21,7 @@ export default function Watch() {
     const [video, setVideo] = useState<Video | null>(null);
     const [loading, setLoading] = useState(true);
     const [isUnlocked, setIsUnlocked] = useState(false);
+    const [isPurchasing, setIsPurchasing] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     const [visibleRelatedCount, setVisibleRelatedCount] = useState(15);
@@ -35,7 +34,6 @@ export default function Watch() {
     const [newComment, setNewComment] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Share Interno
     const [showShareModal, setShowShareModal] = useState(false);
     const [shareSearch, setShareSearch] = useState('');
     const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
@@ -45,7 +43,8 @@ export default function Watch() {
     const viewMarkedRef = useRef(false);
 
     useEffect(() => { 
-        window.scrollTo(0, 0); refreshUser(); 
+        window.scrollTo(0, 0); 
+        refreshUser(); 
         viewMarkedRef.current = false;
         setShowComments(false);
         setVisibleRelatedCount(15);
@@ -71,7 +70,6 @@ export default function Watch() {
                     const catDef = (settings.categories || []).find(c => c.name === v.category || c.name === v.parent_category);
                     const sortMode = catDef?.sortOrder || 'ALPHA'; 
                     
-                    // --- MOTOR DE JERARQUÍA INTELIGENTE Y ANTI-BUCLE ---
                     const prevId = sessionStorage.getItem('sp_prev_video_id');
                     
                     related.sort((a, b) => {
@@ -131,6 +129,27 @@ export default function Watch() {
         fetchData();
     }, [id, user?.id]);
 
+    const handlePurchase = async () => {
+        if (!user || !video || isPurchasing) return;
+        if (user.balance < video.price) {
+            toast.error("Saldo insuficiente para comprar este video.");
+            navigate('/vip');
+            return;
+        }
+
+        setIsPurchasing(true);
+        try {
+            await db.purchaseVideo(user.id, video.id);
+            setIsUnlocked(true);
+            toast.success("¡Video desbloqueado con éxito!");
+            refreshUser();
+        } catch (e: any) {
+            toast.error("Error al procesar la compra: " + e.message);
+        } finally {
+            setIsPurchasing(false);
+        }
+    };
+
     const handleRate = async (type: 'like' | 'dislike') => {
         if (!user || !video) return;
         try {
@@ -183,14 +202,20 @@ export default function Watch() {
 
         const price = Number(nextVid.price);
         const limit = Number(user.autoPurchaseLimit || 0);
+        
+        // --- LOGICA DE COMPRA AUTOMÁTICA REFORZADA ---
         if (price <= limit && Number(user.balance) >= price) {
             try {
                 await db.purchaseVideo(user.id, nextVid.id);
-                toast.success(`Autocompra: ${nextVid.title}`);
+                toast.success(`Autocompra de seguridad: ${nextVid.title}`);
+                refreshUser(); // Actualizar saldo después de autocompra
                 navigateToNext(nextVid);
-            } catch (e) { toast.error("Error en autocompra"); }
+            } catch (e) { 
+                toast.error("Error en autocompra automática."); 
+            }
         } else {
-            toast.warning("El próximo capítulo requiere compra manual");
+            toast.warning("El próximo contenido requiere compra manual (excede límite o saldo insuficiente).");
+            navigateToNext(nextVid); // Navegar de todos modos, se mostrará bloqueado
         }
     };
 
@@ -223,9 +248,11 @@ export default function Watch() {
 
     const streamUrl = useMemo(() => {
         if (!video) return '';
+        const token = localStorage.getItem('sp_session_token') || '';
+        // CORRECCIÓN: Usar ruta relativa para evitar problemas en subdirectorios de NAS
         const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
-        return `${window.location.origin}/${base}&token=${localStorage.getItem('sp_session_token') || ''}`;
-    }, [video]);
+        return `${base}&token=${token}`;
+    }, [video?.id]);
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
@@ -246,12 +273,36 @@ export default function Watch() {
                             crossOrigin="anonymous"
                         />
                     ) : (
-                        <div onClick={() => navigate('/vip')} className="absolute inset-0 cursor-pointer group overflow-hidden">
-                            {video && <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-md opacity-40 scale-110"/>}
+                        <div className="absolute inset-0 group overflow-hidden">
+                            {video && <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-2xl opacity-40 scale-110"/>}
                             <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-center p-6">
-                                <div className="p-5 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full mb-4 shadow-2xl"><Lock size={40} className="text-white"/></div>
-                                <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Contenido Premium</h2>
-                                <div className="px-6 py-2 bg-amber-500 text-black font-black rounded-full text-lg">DESBLOQUEAR POR {video?.price} $</div>
+                                <div className="p-5 bg-white/5 backdrop-blur-3xl border border-white/10 rounded-full mb-6 shadow-2xl"><Lock size={48} className="text-amber-500 animate-pulse"/></div>
+                                <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter mb-2">Contenido Premium</h2>
+                                <p className="text-slate-400 text-sm mb-8 uppercase font-bold tracking-widest">Desbloquea el acceso permanente a este video</p>
+                                
+                                <div className="flex flex-col gap-3 w-full max-w-xs">
+                                    <button 
+                                        onClick={handlePurchase}
+                                        disabled={isPurchasing}
+                                        className="w-full px-8 py-5 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-2xl text-lg flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all"
+                                    >
+                                        {isPurchasing ? <Loader2 className="animate-spin"/> : <ShoppingCart size={24}/>}
+                                        {isPurchasing ? 'PROCESANDO...' : `COMPRAR POR ${video?.price} $`}
+                                    </button>
+                                    <button 
+                                        onClick={() => navigate('/vip')}
+                                        className="w-full py-4 bg-white/10 hover:bg-white/20 text-white font-black rounded-2xl text-xs uppercase tracking-widest transition-all"
+                                    >
+                                        VER PLANES VIP
+                                    </button>
+                                </div>
+                                
+                                {user && (
+                                    <div className="mt-8 flex items-center gap-2 bg-black/40 px-4 py-2 rounded-full border border-white/10">
+                                        <Wallet size={14} className="text-emerald-400"/>
+                                        <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Tu Saldo: {Number(user.balance).toFixed(2)} $</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -291,6 +342,11 @@ export default function Watch() {
                                 <button onClick={() => setShowShareModal(true)} className="p-2.5 bg-slate-900 border border-white/5 rounded-xl text-slate-400 hover:text-white"><Share2 size={18}/></button>
                             </div>
                         </div>
+                        {video?.description && (
+                            <div className="mt-6 bg-white/5 p-5 rounded-3xl border border-white/5">
+                                <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">{video.description}</p>
+                            </div>
+                        )}
                     </div>
 
                     {showComments && (
