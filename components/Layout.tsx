@@ -292,6 +292,18 @@ export default function Layout() {
             </div>
         </div>
       )}
+
+      {/* Mobile Top Header (Minimal) */}
+      {!isShortsMode && (
+        <header className="md:hidden flex items-center justify-between px-4 h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/5 sticky top-0 z-50">
+            <Link to="/" className="font-bold text-lg bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</Link>
+            <div className="flex items-center gap-3">
+                 <Link to="/vip" className="text-amber-400"><Crown size={20}/></Link>
+                 <NotificationBell notifs={notifs} setNotifs={setNotifs} isMobile={true} />
+            </div>
+        </header>
+      )}
+
       <header className="hidden md:flex items-center justify-between px-6 py-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="flex items-center gap-4">
             <Link to="/profile" className="relative text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800">

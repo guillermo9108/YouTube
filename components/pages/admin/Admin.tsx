@@ -57,7 +57,8 @@ export default function Admin() {
 
   return (
     <div className="space-y-6 pb-24 px-2 md:px-0">
-      <div className="flex gap-2 overflow-x-auto bg-slate-900 p-2 rounded-xl scrollbar-hide sticky top-[72px] z-30 shadow-lg border border-white/5">
+      {/* Navegación Admin Sticky: top-14 (56px) para móvil, top-[72px] para escritorio */}
+      <div className="flex gap-2 overflow-x-auto bg-slate-900/95 backdrop-blur-md p-2 rounded-xl scrollbar-hide sticky top-14 md:top-[72px] z-30 shadow-lg border border-white/5 -mx-2 px-4 md:mx-0 md:px-2">
            {tabs.map(t => (
                <Link 
                   key={t.id} 
