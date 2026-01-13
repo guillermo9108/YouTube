@@ -3,13 +3,12 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, Category, VipPlan } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
+// Added Globe to imports to fix error on line 149
 import { 
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
-    CreditCard, Globe, Palette, ChevronRight, 
-    FolderTree, DollarSign, Settings2, Info, RefreshCw, Database,
-    Clock, Percent, HardDrive, ShieldCheck, Zap, SortAsc, FileText, Crown, Edit3, Coins, FolderPlus, X
+    CreditCard, ChevronRight, FolderTree, DollarSign, Database,
+    Clock, Percent, HardDrive, Crown, Coins, FolderPlus, X, Info, Smartphone, Wallet, Globe
 } from 'lucide-react';
-import { InfoTooltip } from './components/InfoTooltip';
 
 export default function AdminConfig() {
     const toast = useToast();
@@ -28,6 +27,12 @@ export default function AdminConfig() {
             if (!s.categories) s.categories = [];
             if (!s.vipPlans) s.vipPlans = [];
             if (!s.libraryPaths) s.libraryPaths = [];
+            if (!s.paymentMethods) s.paymentMethods = {
+                tropipay: { enabled: false, instructions: '' },
+                card: { enabled: false, instructions: '' },
+                mobile: { enabled: false, instructions: '' },
+                manual: { enabled: true, instructions: 'Escribe a soporte para recargar.' }
+            };
             setSettings(s);
         } catch(e) { toast.error("Error al cargar configuración"); }
         finally { setLoading(false); }
@@ -40,86 +45,35 @@ export default function AdminConfig() {
         setSaving(true);
         try {
             await db.updateSystemSettings(settings);
-            toast.success("Sistema Sincronizado");
+            toast.success("Ajustes sincronizados");
             await loadSettings();
         } catch(e: any) { toast.error("Error al guardar: " + e.message); }
         finally { setSaving(false); }
-    };
-
-    const handleRepairDb = async () => {
-        setSyncing(true);
-        try {
-            await db.adminRepairDb();
-            toast.success("Estructura de Base de Datos Reparada");
-        } catch(e: any) { 
-            toast.error("Fallo al sincronizar: " + e.message);
-        } finally { 
-            setSyncing(false); 
-        }
     };
 
     const updateValue = (key: keyof SystemSettings, val: any) => {
         setSettings(prev => prev ? { ...prev, [key]: val } : null);
     };
 
-    // --- Volumenes ---
-    const addVolumePath = () => {
-        if (!newVolumePath.trim()) return;
-        const currentPaths = settings?.libraryPaths || [];
-        if (currentPaths.includes(newVolumePath)) {
-            toast.warning("Esta ruta ya existe.");
-            return;
-        }
-        updateValue('libraryPaths', [...currentPaths, newVolumePath.trim()]);
-        setNewVolumePath('');
+    const updatePaymentMethod = (method: 'tropipay' | 'card' | 'mobile' | 'manual', field: 'enabled' | 'instructions', val: any) => {
+        if (!settings) return;
+        const currentMethods = settings.paymentMethods || {};
+        const methodConfig = currentMethods[method] || { enabled: false, instructions: '' };
+        
+        updateValue('paymentMethods', {
+            ...currentMethods,
+            [method]: { ...methodConfig, [field]: val }
+        });
     };
 
-    const removeVolumePath = (path: string) => {
-        updateValue('libraryPaths', (settings?.libraryPaths || []).filter(p => p !== path));
-    };
-
-    // --- Categorías ---
     const addCategory = () => {
-        const newCat: Category = { 
-            id: 'c_' + Date.now(), 
-            name: 'NUEVA CATEGORÍA', 
-            price: 1.00, 
-            autoSub: false,
-            sortOrder: 'LATEST'
-        };
+        const newCat: Category = { id: 'c_' + Date.now(), name: 'NUEVA', price: 1.0, autoSub: false, sortOrder: 'LATEST' };
         updateValue('categories', [...(settings?.categories || []), newCat]);
     };
 
-    const updateCategory = (id: string, field: keyof Category, val: any) => {
-        const next = settings?.categories.map(c => c.id === id ? { ...c, [field]: val } : c) || [];
-        updateValue('categories', next);
-    };
-
-    const removeCategory = (id: string) => {
-        updateValue('categories', settings?.categories.filter(c => c.id !== id) || []);
-    };
-
-    // --- VIP Plans ---
     const addVipPlan = () => {
-        const newPlan: VipPlan = {
-            id: 'plan_' + Date.now(),
-            name: 'NUEVO PLAN',
-            price: 10,
-            type: 'ACCESS',
-            durationDays: 30,
-            bonusPercent: 0,
-            highlight: false
-        };
+        const newPlan: VipPlan = { id: 'p_' + Date.now(), name: 'NUEVO', price: 10, type: 'ACCESS', durationDays: 30 };
         updateValue('vipPlans', [...(settings?.vipPlans || []), newPlan]);
-    };
-
-    const updateVipPlan = (id: string, field: keyof VipPlan, val: any) => {
-        const next = settings?.vipPlans?.map(p => p.id === id ? { ...p, [field]: val } : p) || [];
-        updateValue('vipPlans', next);
-    };
-
-    const removeVipPlan = (id: string) => {
-        updateValue('vipPlans', settings?.vipPlans?.filter(p => p.id !== id) || []);
     };
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>;
@@ -141,345 +95,87 @@ export default function AdminConfig() {
 
     return (
         <div className="max-w-2xl mx-auto space-y-4 animate-in fade-in pb-32 px-2">
-            
             <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-2xl flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="text-center md:text-left">
-                    <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic">Ajustes Globales</h2>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Configuración del Servidor & Ecosistema</p>
+                <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic">Ajustes Globales</h2>
+                <button onClick={handleSaveConfig} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 px-8 rounded-2xl flex items-center gap-2 active:scale-95 transition-all">
+                    {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar Cambios
+                </button>
+            </div>
+
+            <SectionHeader id="CATEGORIES" label="Categorías & Precios" icon={Tag} />
+            {activeSection === 'CATEGORIES' && (
+                <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4">
+                    <button onClick={addCategory} className="w-full bg-slate-800 py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase text-indigo-400"><Plus size={16}/> Añadir Categoría</button>
+                    {settings?.categories.map(cat => (
+                        <div key={cat.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                            <input value={cat.name} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, name: e.target.value.toUpperCase()} : c))} className="bg-transparent border-b border-slate-800 text-white font-bold w-full p-1"/>
+                            <div className="flex gap-4">
+                                <div className="flex-1">
+                                    <label className="text-[9px] text-slate-500 uppercase font-black">Precio $</label>
+                                    <input type="number" step="0.1" value={cat.price} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, price: parseFloat(e.target.value)} : c))} className="w-full bg-slate-900 rounded p-2 text-white text-xs"/>
+                                </div>
+                                <button onClick={() => updateValue('categories', settings.categories.filter(c => c.id !== cat.id))} className="text-red-500 self-end p-2"><Trash2 size={16}/></button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                    <button onClick={handleRepairDb} disabled={syncing} className="flex-1 md:flex-none p-4 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-2xl transition-all active:scale-95" title="Sincronizar DB">
-                        {syncing ? <RefreshCw size={20} className="animate-spin"/> : <Database size={20}/>}
-                    </button>
-                    <button onClick={handleSaveConfig} disabled={saving} className="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-4 px-8 rounded-2xl flex items-center justify-center gap-2 shadow-2xl active:scale-95 transition-all">
-                        {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar
-                    </button>
-                </div>
-            </div>
+            )}
 
-            {/* 0. DISCOS & VOLÚMENES */}
-            <div className="space-y-3">
-                <SectionHeader id="VOLUMES" label="Discos & Volúmenes (Multi-HDD)" icon={HardDrive} />
-                {activeSection === 'VOLUMES' && (
-                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                        <div>
-                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1 mb-4"><Info size={12}/> Configura las rutas de tus discos duros</span>
-                            
-                            <div className="flex gap-2 mb-6">
-                                <input 
-                                    type="text" 
-                                    value={newVolumePath} 
-                                    onChange={e => setNewVolumePath(e.target.value)}
-                                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white text-xs font-mono focus:border-indigo-500 outline-none" 
-                                    placeholder="Ej: /volume2/videos"
-                                />
-                                <button onClick={addVolumePath} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-xl active:scale-90 transition-all">
-                                    <FolderPlus size={20}/>
-                                </button>
-                            </div>
-
-                            <div className="space-y-2">
-                                {(settings?.libraryPaths || []).map(path => (
-                                    <div key={path} className="flex items-center justify-between p-4 bg-slate-950 border border-slate-800 rounded-2xl group">
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg"><HardDrive size={16}/></div>
-                                            <span className="text-xs font-mono text-slate-300 truncate">{path}</span>
-                                        </div>
-                                        <button onClick={() => removeVolumePath(path)} className="p-2 text-slate-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
-                                            <X size={18}/>
-                                        </button>
-                                    </div>
-                                ))}
-                                {(!settings?.libraryPaths || settings.libraryPaths.length === 0) && (
-                                    <p className="text-center py-6 text-slate-600 text-xs italic">No hay rutas configuradas. Solo se usará la ruta local por defecto.</p>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 1. GESTOR DE CATEGORÍAS */}
-            <div className="space-y-3">
-                <SectionHeader id="CATEGORIES" label="Categorías & Precios" icon={Tag} />
-                {activeSection === 'CATEGORIES' && (
-                    <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
-                        <div className="flex justify-between items-center px-2">
-                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Info size={12}/> Gestiona tu catálogo</span>
-                            <button onClick={addCategory} className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-xl flex items-center gap-1 text-[10px] font-black uppercase shadow-lg active:scale-90 transition-all">
-                                <Plus size={16}/> Nueva
-                            </button>
-                        </div>
-
-                        <div className="space-y-3">
-                            {settings?.categories.map((cat) => (
-                                <div key={cat.id} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-4 group">
-                                    <div className="flex justify-between gap-2">
-                                        <input 
-                                            type="text" 
-                                            value={cat.name} 
-                                            onChange={e => updateCategory(cat.id, 'name', e.target.value.toUpperCase())}
-                                            className="bg-transparent border-b border-slate-800 focus:border-indigo-500 text-white font-black text-sm outline-none flex-1 py-1"
-                                        />
-                                        <button onClick={() => removeCategory(cat.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors">
-                                            <Trash2 size={16}/>
-                                        </button>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><DollarSign size={10}/> Precio Base</label>
-                                            <input 
-                                                type="number" 
-                                                value={cat.price} 
-                                                step="0.1"
-                                                onChange={e => updateCategory(cat.id, 'price', parseFloat(e.target.value))}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 outline-none"
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><FolderTree size={10}/> Modo Carpeta</label>
-                                            <label className="flex items-center gap-2 cursor-pointer bg-slate-900 p-2 rounded-xl border border-slate-800">
-                                                <input 
-                                                    type="checkbox" 
-                                                    checked={cat.autoSub} 
-                                                    onChange={e => updateCategory(cat.id, 'autoSub', e.target.checked)}
-                                                    className="accent-indigo-500 w-4 h-4"
-                                                />
-                                                <span className="text-[9px] font-black text-slate-400 uppercase">Sub-Auto</span>
-                                            </label>
-                                        </div>
-                                    </div>
-
-                                    <div className="pt-2 border-t border-slate-800/50">
-                                        <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1 mb-2"><SortAsc size={10}/> Orden de Visualización</label>
-                                        <select 
-                                            value={cat.sortOrder || 'LATEST'}
-                                            onChange={e => updateCategory(cat.id, 'sortOrder', e.target.value as any)}
-                                            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-indigo-300 outline-none"
-                                        >
-                                            <option value="LATEST">Fecha (Más reciente primero)</option>
-                                            <option value="ALPHA">Alfabético (A-Z)</option>
-                                            <option value="RANDOM">Aleatorio (Mezclar)</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 2. PLANES VIP */}
-            <div className="space-y-3">
-                <SectionHeader id="VIP" label="Membresías & Recargas" icon={Crown} />
-                {activeSection === 'VIP' && (
-                    <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
-                        <div className="flex justify-between items-center px-2">
-                            <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Zap size={12}/> Define tus pases de acceso y recargas</span>
-                            <button onClick={addVipPlan} className="bg-amber-600 hover:bg-amber-500 text-white p-2 rounded-xl flex items-center gap-1 text-[10px] font-black uppercase shadow-lg active:scale-90 transition-all">
-                                <Plus size={16}/> Nuevo Plan
-                            </button>
-                        </div>
-
-                        <div className="space-y-4">
-                            {settings?.vipPlans?.map((plan) => (
-                                <div key={plan.id} className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 relative overflow-hidden group">
-                                    {plan.highlight && <div className="absolute -right-10 top-2 rotate-45 bg-amber-500 text-black text-[8px] font-black px-10 py-1 uppercase shadow-xl">Popular</div>}
-                                    
-                                    <div className="flex justify-between gap-4">
-                                        <div className="flex-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase block mb-1">Nombre del Plan</label>
-                                            <input 
-                                                type="text" 
-                                                value={plan.name} 
-                                                onChange={e => updateVipPlan(plan.id, 'name', e.target.value)}
-                                                className="bg-transparent border-b border-slate-800 focus:border-amber-500 text-white font-black text-sm outline-none w-full py-1"
-                                            />
-                                        </div>
-                                        <div className="w-32">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase block mb-1">Tipo de Plan</label>
-                                            <select 
-                                                value={plan.type || 'ACCESS'}
-                                                onChange={e => updateVipPlan(plan.id, 'type', e.target.value)}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2 py-1.5 text-[10px] font-black text-white outline-none"
-                                            >
-                                                <option value="ACCESS">Días Acceso</option>
-                                                <option value="BALANCE">Recarga Saldo</option>
-                                            </select>
-                                        </div>
-                                        <button onClick={() => removeVipPlan(plan.id)} className="p-2 text-slate-600 hover:text-red-500 transition-colors self-start mt-4">
-                                            <Trash2 size={16}/>
-                                        </button>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-3 gap-4">
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><DollarSign size={10}/> Precio ($)</label>
-                                            <input 
-                                                type="number" 
-                                                value={plan.price} 
-                                                onChange={e => updateVipPlan(plan.id, 'price', parseFloat(e.target.value))}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 outline-none"
-                                            />
-                                        </div>
-                                        
-                                        {plan.type === 'BALANCE' ? (
-                                            <div className="space-y-1">
-                                                <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><Percent size={10}/> Bono extra</label>
-                                                <input 
-                                                    type="number" 
-                                                    value={plan.bonusPercent || 0} 
-                                                    onChange={e => updateVipPlan(plan.id, 'bonusPercent', parseInt(e.target.value))}
-                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-emerald-400 outline-none"
-                                                />
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-1">
-                                                <label className="text-[9px] font-black text-slate-600 uppercase flex items-center gap-1"><Clock size={10}/> Días</label>
-                                                <input 
-                                                    type="number" 
-                                                    value={plan.durationDays || 0} 
-                                                    onChange={e => updateVipPlan(plan.id, 'durationDays', parseInt(e.target.value))}
-                                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-blue-400 outline-none"
-                                                />
-                                            </div>
-                                        )}
-
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-600 uppercase block mb-1 text-center">Destacar</label>
-                                            <button 
-                                                onClick={() => updateVipPlan(plan.id, 'highlight', !plan.highlight)}
-                                                className={`w-full py-2 rounded-xl border font-black text-[10px] uppercase transition-all ${plan.highlight ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-slate-900 border-slate-800 text-slate-600'}`}
-                                            >
-                                                {plan.highlight ? 'SÍ' : 'NO'}
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {plan.type === 'BALANCE' && (
-                                        <div className="mt-2 flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 p-2 rounded-xl">
-                                            <Coins size={14} className="text-emerald-500"/>
-                                            <span className="text-[10px] font-bold text-emerald-400 uppercase">
-                                                Total a recibir: <span className="text-sm font-black">{(plan.price * (1 + (plan.bonusPercent || 0) / 100)).toFixed(2)} $</span>
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 3. ECONOMÍA & COMISIONES */}
-            <div className="space-y-3">
-                <SectionHeader id="FINANCE" label="Economía del Sistema" icon={Percent} />
-                {activeSection === 'FINANCE' && (
-                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Comisión Video (%)</label>
-                                <input type="number" value={settings?.videoCommission || 20} onChange={e => updateValue('videoCommission', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Comisión Tienda (%)</label>
-                                <input type="number" value={settings?.marketCommission || 25} onChange={e => updateValue('marketCommission', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Tarifa Transferencia P2P (%)</label>
-                            <input type="number" step="0.1" value={settings?.transferFee || 5.0} onChange={e => updateValue('transferFee', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 4. LÍMITES & AUTOMATIZACIÓN */}
-            <div className="space-y-3">
-                <SectionHeader id="AUTOMATION" label="Límites & Escaneo" icon={HardDrive} />
-                {activeSection === 'AUTOMATION' && (
-                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                        <div className="bg-slate-950 p-4 rounded-2xl border border-indigo-500/30">
-                            <label className="flex items-center justify-between cursor-pointer">
-                                <div className="flex items-center gap-2">
-                                    <FileText size={18} className="text-indigo-400"/>
-                                    <div>
-                                        <span className="text-xs font-black text-white uppercase">Registro Log Activo</span>
-                                        <p className="text-[9px] text-slate-500 uppercase font-bold mt-0.5">Guarda errores en debug_log.txt</p>
-                                    </div>
-                                </div>
-                                <input 
-                                    type="checkbox" 
-                                    checked={!!settings?.enableDebugLog} 
-                                    onChange={e => updateValue('enableDebugLog', e.target.checked ? 1 : 0)}
-                                    className="w-5 h-5 accent-indigo-500"
-                                />
-                            </label>
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta Librería Principal (Root)</label>
-                            <input type="text" value={settings?.localLibraryPath || ''} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white text-xs font-mono" placeholder="/volume1/videos/..."/>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Lote Escaneo (Paso 2)</label>
-                                <input type="number" value={settings?.batchSize || 2} onChange={e => updateValue('batchSize', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Resolución Máx</label>
-                                <select value={settings?.maxResolution || 1080} onChange={e => updateValue('maxResolution', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-sm font-bold">
-                                    <option value={720}>720p</option>
-                                    <option value={1080}>1080p</option>
-                                    <option value={2160}>4K</option>
+            <SectionHeader id="VIP" label="Membresías & Recargas" icon={Crown} />
+            {activeSection === 'VIP' && (
+                <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-4">
+                    <button onClick={addVipPlan} className="w-full bg-slate-800 py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase text-amber-400"><Plus size={16}/> Nuevo Plan</button>
+                    {settings?.vipPlans?.map(plan => (
+                        <div key={plan.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                            <div className="flex gap-2">
+                                <input value={plan.name} onChange={e => updateValue('vipPlans', settings.vipPlans!.map(p => p.id === plan.id ? {...p, name: e.target.value} : p))} className="bg-transparent border-b border-slate-800 text-white font-bold flex-1"/>
+                                <select value={plan.type} onChange={e => updateValue('vipPlans', settings.vipPlans!.map(p => p.id === plan.id ? {...p, type: e.target.value} : p))} className="bg-slate-800 text-[10px] text-white p-1 rounded">
+                                    <option value="ACCESS">Acceso VIP</option>
+                                    <option value="BALANCE">Recarga Saldo</option>
                                 </select>
                             </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 5. INTELIGENCIA IA */}
-            <div className="space-y-3">
-                <SectionHeader id="AI" label="Inteligencia & Media" icon={Sparkles} />
-                {activeSection === 'AI' && (
-                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Google Gemini API Key</label>
-                            <input type="password" value={settings?.geminiKey || ''} onChange={e => updateValue('geminiKey', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono" placeholder="AIza..."/>
-                        </div>
-                        <div>
-                            <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Ruta FFmpeg</label>
-                            <input type="text" value={settings?.ffmpegPath || ''} onChange={e => updateValue('ffmpegPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 6. PAGOS & PASARELA */}
-            <div className="space-y-3">
-                <SectionHeader id="PAYMENTS" label="Pagos (Tropipay)" icon={CreditCard} />
-                {activeSection === 'PAYMENTS' && (
-                    <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                        <div className="grid grid-cols-1 gap-4">
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Tropipay Client ID</label>
-                                <input type="text" value={settings?.tropipayClientId || ''} onChange={e => updateValue('tropipayClientId', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Tropipay Secret</label>
-                                <input type="password" value={settings?.tropipayClientSecret || ''} onChange={e => updateValue('tropipayClientSecret', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white text-xs font-mono"/>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Conversión Saldo / 1 EUR</label>
-                                <input type="number" value={settings?.currencyConversion || 300} onChange={e => updateValue('currencyConversion', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white font-black text-lg"/>
+                            <div className="flex gap-2">
+                                <input type="number" value={plan.price} onChange={e => updateValue('vipPlans', settings.vipPlans!.map(p => p.id === plan.id ? {...p, price: parseFloat(e.target.value)} : p))} className="w-full bg-slate-900 rounded p-2 text-white text-xs" placeholder="Precio"/>
+                                <button onClick={() => updateValue('vipPlans', settings.vipPlans!.filter(p => p.id !== plan.id))} className="text-red-500 p-2"><Trash2 size={16}/></button>
                             </div>
                         </div>
-                    </div>
-                )}
-            </div>
+                    ))}
+                </div>
+            )}
 
+            <SectionHeader id="PAYMENTS" label="Gestión de Cobros" icon={CreditCard} />
+            {activeSection === 'PAYMENTS' && (
+                <div className="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 space-y-8">
+                    {[
+                        { id: 'tropipay', label: 'Tropipay (Auto)', icon: Globe },
+                        { id: 'card', label: 'Tarjeta (Manual)', icon: CreditCard },
+                        { id: 'mobile', label: 'Saldo Móvil', icon: Smartphone },
+                        { id: 'manual', label: 'Solicitud Manual', icon: Wallet }
+                    ].map(m => {
+                        const config = settings?.paymentMethods?.[m.id as any] || { enabled: false, instructions: '' };
+                        return (
+                            <div key={m.id} className="space-y-3 p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <m.icon size={18} className="text-indigo-400"/>
+                                        <span className="text-sm font-black text-white uppercase">{m.label}</span>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" checked={config.enabled} onChange={e => updatePaymentMethod(m.id as any, 'enabled', e.target.checked)} className="sr-only peer"/>
+                                        <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                                    </label>
+                                </div>
+                                <textarea 
+                                    value={config.instructions} 
+                                    onChange={e => updatePaymentMethod(m.id as any, 'instructions', e.target.value)}
+                                    placeholder={`Instrucciones de pago para ${m.label}...`}
+                                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 min-h-[80px] outline-none focus:border-indigo-500"
+                                />
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }

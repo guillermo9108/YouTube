@@ -8,6 +8,7 @@ export enum UserRole {
   USER = 'USER'
 }
 
+// Added VideoCategory enum for video classification
 export enum VideoCategory {
   PERSONAL = 'PERSONAL',
   GENERAL = 'GENERAL',
@@ -68,7 +69,6 @@ export interface Video {
   size_fmt?: string;
 }
 
-// Added Comment interface to fix module export errors
 export interface Comment {
   id: string;
   userId: string;
@@ -78,13 +78,26 @@ export interface Comment {
   timestamp: number;
 }
 
-// Added UserInteraction interface to fix module export errors
 export interface UserInteraction {
   liked: boolean;
   disliked: boolean;
   watched: boolean;
   newLikeCount?: number;
   newDislikeCount?: number;
+}
+
+export interface PaymentMethodConfig {
+  enabled: boolean;
+  instructions: string;
+}
+
+// Added FtpSettings interface for SystemSettings
+export interface FtpSettings {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  rootPath: string;
 }
 
 export interface SystemSettings {
@@ -98,7 +111,7 @@ export interface SystemSettings {
   ffmpegPath: string;
   categories: Category[];
   localLibraryPath: string; 
-  libraryPaths?: string[]; // NUEVO: Soporte para múltiples discos/volúmenes
+  libraryPaths?: string[];
   videoCommission: number;
   marketCommission: number;
   transferFee?: number;
@@ -109,17 +122,16 @@ export interface SystemSettings {
   autoTranscode?: boolean | number;
   tropipayClientId?: string;
   tropipayClientSecret?: string;
-  customCategories?: string[];
-  categoryPrices?: Record<string, number>;
-  ftpSettings?: {
-    host: string;
-    port: number;
-    user: string;
-    pass: string;
-    rootPath: string;
+  paymentMethods?: {
+    tropipay?: PaymentMethodConfig;
+    card?: PaymentMethodConfig;
+    mobile?: PaymentMethodConfig;
+    manual?: PaymentMethodConfig;
   };
   is_transcoder_active?: boolean;
   maxResolution?: number;
+  // Added ftpSettings property
+  ftpSettings?: FtpSettings;
 }
 
 export interface Transaction {
@@ -156,13 +168,6 @@ export interface ContentRequest {
   isVip: boolean;
 }
 
-// Added VideoResult interface to fix module export errors
-export interface VideoResult {
-  success: boolean;
-  message?: string;
-  id?: string;
-}
-
 export interface MarketplaceItem {
     id: string;
     title: string;
@@ -183,16 +188,43 @@ export interface MarketplaceItem {
     sellerAvatarUrl?: string;
 }
 
-// Added MarketplaceReview interface to fix module export errors
+// Added MarketplaceReview interface
 export interface MarketplaceReview {
+  id: string;
+  userId: string;
+  username: string;
+  userAvatarUrl?: string;
+  rating: number;
+  comment: string;
+  timestamp: number;
+}
+
+// Added VideoResult interface
+export interface VideoResult {
+  id: string;
+  title: string;
+}
+
+// Added SmartCleanerResult interface
+export interface SmartCleanerResult {
+  preview: {
     id: string;
-    itemId: string;
-    userId: string;
-    username: string;
-    userAvatarUrl?: string;
-    rating: number;
-    comment: string;
-    timestamp: number;
+    title: string;
+    views: number;
+    size_fmt: string;
+    reason: string;
+  }[];
+  stats: {
+    spaceReclaimed: string;
+  };
+}
+
+// Added FtpFile interface
+export interface FtpFile {
+  name: string;
+  type: 'dir' | 'file';
+  path: string;
+  size?: string;
 }
 
 export interface CartItem extends MarketplaceItem {
@@ -214,20 +246,6 @@ export interface VipRequest {
     planSnapshot: any;
     paymentRef?: string;
     createdAt: number;
-}
-
-export interface SmartCleanerResult {
-  preview: any[];
-  stats: {
-    spaceReclaimed: string;
-  };
-}
-
-export interface FtpFile {
-  name: string;
-  path: string;
-  type: 'file' | 'dir';
-  size?: string;
 }
 
 export interface VipPlan {
