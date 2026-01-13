@@ -1,6 +1,7 @@
 
 import React from 'react';
-import { User as UserIcon, Wallet, Store, Settings, Database, Wrench, TrendingUp, Network, DownloadCloud, HardDrive, Cpu, Package } from 'lucide-react';
+// Added ShieldCheck to imports to fix error on line 71
+import { User as UserIcon, Wallet, Store, Settings, Database, Wrench, TrendingUp, Network, DownloadCloud, HardDrive, Cpu, Package, Home as HomeIcon, XCircle, ShieldCheck } from 'lucide-react';
 import { useLocation, Link } from '../../Router';
 
 import AdminUsers from './AdminUsers';
@@ -57,20 +58,32 @@ export default function Admin() {
 
   return (
     <div className="space-y-6 pb-24 px-2 md:px-0">
-      {/* Navegación Admin Sticky: top-14 (56px) para móvil, top-[72px] para escritorio */}
-      <div className="flex gap-2 overflow-x-auto bg-slate-900/95 backdrop-blur-md p-2 rounded-xl scrollbar-hide sticky top-14 md:top-[72px] z-30 shadow-lg border border-white/5 -mx-2 px-4 md:mx-0 md:px-2">
+      {/* Navegación Admin Sticky Header: top-0 para móvil (Encabezado Nativo), top-[72px] para escritorio */}
+      <div className="flex items-center gap-2 overflow-x-auto bg-slate-900 p-2 md:rounded-xl scrollbar-hide sticky top-0 md:top-[72px] z-[60] shadow-2xl border-b md:border border-white/10 -mx-4 px-4 md:mx-0 md:px-2 transition-all">
+           {/* Botón Salir Admin (Solo visible en móviles para navegación de retorno) */}
+           <Link 
+              to="/" 
+              className="md:hidden flex items-center gap-1.5 px-3 py-2 bg-red-950/40 border border-red-500/20 text-red-400 rounded-lg font-black text-[10px] uppercase mr-1"
+            >
+               <XCircle size={14}/> Salir
+           </Link>
+
+           <div className="hidden md:flex items-center px-2 mr-2 border-r border-white/5">
+                <ShieldCheck className="text-amber-500" size={18}/>
+           </div>
+
            {tabs.map(t => (
                <Link 
                   key={t.id} 
                   to={t.path} 
-                  className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 transition-all ${activeTab === t.id ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                  className={`px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap flex items-center gap-2 transition-all ${activeTab === t.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                 >
                    <t.icon size={16}/> {t.label}
                </Link>
            ))}
       </div>
 
-      <div className="min-h-[500px] animate-in fade-in duration-300">
+      <div className="min-h-[500px] animate-in fade-in duration-300 px-2 md:px-0 mt-4 md:mt-0">
           {activeTab === 'USERS' && <AdminUsers />}
           {activeTab === 'FINANCE' && <AdminFinance />}
           {activeTab === 'MARKET' && <AdminMarket />}

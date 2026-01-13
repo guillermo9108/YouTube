@@ -225,6 +225,7 @@ export default function Layout() {
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
   const isShortsMode = location.pathname === '/shorts';
+  const isAdminMode = location.pathname.startsWith('/admin');
 
   const Avatar = ({ size=24, className='' }: {size?: number, className?: string}) => {
       const initials = user?.username?.[0] || '?';
@@ -243,7 +244,7 @@ export default function Layout() {
   const isAdmin = user && user.role && user.role.trim().toUpperCase() === 'ADMIN';
 
   return (
-    <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : 'pb-20 md:pb-0'}`}>
+    <div className={`min-h-screen flex flex-col bg-black ${isShortsMode ? '' : (isAdminMode ? '' : 'pb-20 md:pb-0')}`}>
       {showSidebar && (
         <div className="fixed inset-0 z-[150] flex font-sans">
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={() => setShowSidebar(false)}></div>
@@ -293,8 +294,8 @@ export default function Layout() {
         </div>
       )}
 
-      {/* Mobile Top Header (Minimal) */}
-      {!isShortsMode && (
+      {/* Mobile Top Header (Minimal) - HIDDEN in Admin Mode */}
+      {!isShortsMode && !isAdminMode && (
         <header className="md:hidden flex items-center justify-between px-4 h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/5 sticky top-0 z-50">
             <Link to="/" className="font-bold text-lg bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">StreamPay</Link>
             <div className="flex items-center gap-3">
@@ -332,13 +333,13 @@ export default function Layout() {
           <Link to="/upload" className={isActive('/upload')}>Subir</Link>
         </div>
       </header>
-      <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : 'flex-1 container mx-auto px-4 pt-2 md:pt-8 max-w-5xl'}>
+      <main className={isShortsMode ? 'fixed inset-0 md:relative md:inset-auto h-[100dvh] md:h-[calc(100dvh-73px)] z-0' : (isAdminMode ? 'flex-1 pt-0 md:pt-8 md:container md:mx-auto md:max-w-5xl' : 'flex-1 container mx-auto px-4 pt-2 md:pt-8 max-w-5xl')}>
         <Outlet />
       </main>
       <UploadIndicator />
       <ServerTaskIndicator />
       <GridProcessor />
-      {!isStandalone && !bannerDismissed && (showInstallBanner || !isSecure) && (
+      {!isStandalone && !bannerDismissed && !isAdminMode && (showInstallBanner || !isSecure) && (
           <div className="fixed bottom-0 left-0 right-0 z-[100] bg-slate-900 border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom duration-500 pb-safe-area-bottom">
               <div className="p-4 flex items-center gap-4 max-w-lg mx-auto">
                   <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shrink-0 shadow-lg text-white font-bold text-xl">SP</div>
@@ -359,7 +360,8 @@ export default function Layout() {
               </div>
           </div>
       )}
-      {!isShortsMode && (
+      {/* Mobile Footer Navigation - HIDDEN in Admin Mode */}
+      {!isShortsMode && !isAdminMode && (
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-white/5 flex justify-around items-center py-3 z-50 safe-area-bottom">
           <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/')}`}><Home size={22} /><span className="text-[10px] font-bold uppercase tracking-widest">Inicio</span></Link>
           <Link to="/shorts" className={`flex flex-col items-center gap-1 ${isActive('/shorts')}`}><Smartphone size={22} /><span className="text-[10px] font-bold uppercase tracking-widest">Shorts</span></Link>
