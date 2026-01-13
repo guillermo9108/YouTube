@@ -342,7 +342,7 @@ export default function Home() {
       <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
           <div className="flex gap-3 mb-4 items-center w-full">
               <button onClick={() => navigate('/profile')} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400 active:scale-95 transition-transform">
-                  <UserIcon size={20}/>
+                  <Menu size={20}/>
               </button>
 
               <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
@@ -401,20 +401,19 @@ export default function Home() {
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0" ref={menuRef}>
-                  <Link to="/vip" className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-amber-400 active:scale-95 transition-transform">
-                      <Crown size={20}/>
-                  </Link>
-                  <button 
-                      onClick={() => setShowNotifMenu(!showNotifMenu)}
-                      className={`p-2.5 rounded-xl border transition-all flex items-center justify-center min-w-[46px] h-[46px] ${showNotifMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
-                  >
-                      <Bell size={22} className={unreadNotifs.length > 0 ? "animate-[ring_2s_infinite]" : ""} />
-                      {unreadNotifs.length > 0 && (
-                          <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black shadow-lg">
-                              {unreadNotifs.length}
-                          </span>
-                      )}
-                  </button>
+                  {(unreadNotifs.length > 0 || showNotifMenu) && (
+                      <button 
+                          onClick={() => setShowNotifMenu(!showNotifMenu)}
+                          className={`p-2.5 rounded-xl border transition-all flex items-center justify-center min-w-[46px] h-[46px] relative ${showNotifMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
+                      >
+                          <Bell size={22} className={unreadNotifs.length > 0 ? "animate-[ring_2s_infinite]" : ""} />
+                          {unreadNotifs.length > 0 && (
+                              <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black shadow-lg">
+                                  {unreadNotifs.length}
+                              </span>
+                          )}
+                      </button>
+                  )}
 
                   {showNotifMenu && (
                       <div className="fixed sm:absolute top-[75px] sm:top-full right-4 sm:right-0 w-[calc(100vw-32px)] sm:w-80 max-h-[75vh] sm:max-h-[480px] bg-slate-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 origin-top-right z-[200]">

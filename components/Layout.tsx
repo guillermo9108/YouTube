@@ -46,6 +46,14 @@ export default function Layout() {
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
   const isShortsMode = location.pathname === '/shorts';
   
+  if (isShortsMode) {
+      return (
+          <div className="fixed inset-0 bg-black overflow-hidden">
+              <Outlet />
+          </div>
+      );
+  }
+
   const Avatar = ({ size=24, className='' }: any) => (
       <div className={`rounded-full overflow-hidden bg-indigo-600 flex items-center justify-center shrink-0 ${className}`} style={{width: size, height: size}}>
         {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover" /> : <span className="text-white font-bold uppercase" style={{fontSize: size*0.4}}>{user?.username?.[0] || '?'}</span>}
@@ -54,7 +62,7 @@ export default function Layout() {
 
   return (
     <div className={`min-h-screen flex flex-col bg-black pb-20 md:pb-24`}>
-      <main className={isShortsMode ? 'fixed inset-0 z-0' : 'flex-1 container mx-auto px-4 pt-4 max-w-5xl'}>
+      <main className={'flex-1 container mx-auto px-4 pt-4 max-w-5xl'}>
         <Outlet />
       </main>
 

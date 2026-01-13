@@ -51,9 +51,13 @@ export default function AdminAnalytics() {
         planMix: {} as Record<string, number> 
     });
 
-    // Filtramos SOLO planes de ACCESO TOTAL para el simulador
+    // Filtramos SOLO planes de ACCESO TOTAL para el simulador con mayor robustez
     const accessPlans = useMemo(() => {
-        return allVipPlans.filter(p => p.type && p.type.toString().toUpperCase() === 'ACCESS');
+        return allVipPlans.filter(p => {
+            if (!p.type) return false;
+            const typeStr = String(p.type).toUpperCase().trim();
+            return typeStr === 'ACCESS';
+        });
     }, [allVipPlans]);
 
     const loadData = async () => {
@@ -68,11 +72,14 @@ export default function AdminAnalytics() {
             ]);
 
             setRealStats(rs);
-            const plans: VipPlan[] = settings.vipPlans || [];
+            const plans: VipPlan[] = settings?.vipPlans || [];
             setAllVipPlans(plans);
 
             const initialMix: Record<string, number> = {};
-            plans.filter(p => p.type && p.type.toString().toUpperCase() === 'ACCESS').forEach(p => { 
+            plans.filter(p => {
+                const typeStr = String(p.type || '').toUpperCase().trim();
+                return typeStr === 'ACCESS';
+            }).forEach(p => { 
                 initialMix[p.id] = rs?.planMix?.[p.name] || 0; 
             });
 
@@ -82,7 +89,7 @@ export default function AdminAnalytics() {
                 avgTicket: rs?.averages?.arpu || prev.avgTicket,
                 planMix: initialMix
             }));
-        } catch(e) { console.error(e); } 
+        } catch(e) { console.error("Error loading analytics data:", e); } 
         finally { setLoading(false); }
     };
 
