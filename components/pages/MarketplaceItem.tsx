@@ -39,7 +39,6 @@ export default function MarketplaceItemView() {
         setSubmittingReview(true);
         try {
             await db.addReview(id, user.id, rating, comment);
-            // Refresh
             const newReviews = await db.getReviews(id);
             setReviews(newReviews);
             setComment('');
@@ -145,7 +144,7 @@ export default function MarketplaceItemView() {
                             {item.sellerAvatarUrl ? <img src={item.sellerAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><User size={24}/></div>}
                         </div>
                         <div>
-                            <div className="font-bold text-white text-sm">Vendido por {item.sellerName}</div>
+                            <div className="font-bold text-white text-sm">Vendido por {item.sellerName || 'Usuario'}</div>
                             <div className="text-xs text-emerald-400 flex items-center gap-1"><ShieldCheck size={12}/> Vendedor Verificado</div>
                         </div>
                     </div>
@@ -185,16 +184,15 @@ export default function MarketplaceItemView() {
                             <div className="flex justify-between items-start mb-2">
                                 <div className="flex items-center gap-2">
                                     <div className="w-8 h-8 rounded-full bg-slate-800 overflow-hidden">
-                                        {r.userAvatarUrl ? <img src={r.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="flex items-center justify-center w-full h-full text-xs font-bold text-slate-500">{r.username[0]}</div>}
+                                        {r.userAvatarUrl ? <img src={r.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="flex items-center justify-center w-full h-full text-xs font-bold text-slate-500">{r.username?.[0] || '?'}</div>}
                                     </div>
                                     <div>
-                                        <div className="text-xs font-bold text-white">{r.username}</div>
+                                        <div className="text-xs font-bold text-white">{r.username || 'Anónimo'}</div>
                                         <div className="flex text-amber-400">
                                             {[1,2,3,4,5].map(s => <Star key={s} size={10} fill={s <= r.rating ? "currentColor" : "none"} className={s <= r.rating ? "" : "text-slate-700"} />)}
                                         </div>
                                     </div>
                                 </div>
-                                {/* Corrected Date display for PHP timestamp (seconds -> ms) */}
                                 <span className="text-[10px] text-slate-600">{new Date(r.timestamp * 1000).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-slate-300 pl-10">{r.comment}</p>

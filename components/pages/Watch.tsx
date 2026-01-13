@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -71,18 +72,14 @@ export default function Watch() {
                     const sortMode = catDef?.sortOrder || 'ALPHA'; 
                     
                     // --- MOTOR DE JERARQUÍA INTELIGENTE Y ANTI-BUCLE ---
-                    // 1. Identificar de dónde venimos para evitar bucles
                     const prevId = sessionStorage.getItem('sp_prev_video_id');
                     
-                    // 2. Ordenar por jerarquía de carpetas
                     related.sort((a, b) => {
-                        // Prioridad por Subcategoría Exacta (v.category)
                         const aSameSub = a.category === v.category;
                         const bSameSub = b.category === v.category;
                         if (aSameSub && !bSameSub) return -1;
                         if (!aSameSub && bSameSub) return 1;
 
-                        // Prioridad por Categoría Padre (v.parent_category)
                         const aSameParent = a.parent_category === v.parent_category;
                         const bSameParent = b.parent_category === v.parent_category;
                         if (aSameParent && !bSameParent) return -1;
@@ -91,23 +88,18 @@ export default function Watch() {
                         return 0;
                     });
 
-                    // 3. LOGICA SECUENCIAL DENTRO DE LA MISMA COLECCIÓN
-                    // Si estamos en la misma subcategoría, queremos que el "siguiente" sea el alfabéticamente posterior
                     const sameSubVideos = related.filter(rv => rv.category === v.category);
                     const otherVideos = related.filter(rv => rv.category !== v.category);
 
                     if (sortMode === 'ALPHA') {
-                        // Separar en posteriores y anteriores al actual
                         const nextInSequence = sameSubVideos.filter(rv => naturalCollator.compare(rv.title, v.title) > 0)
                             .sort((a, b) => naturalCollator.compare(a.title, b.title));
                         
                         const prevInSequence = sameSubVideos.filter(rv => naturalCollator.compare(rv.title, v.title) < 0)
                             .sort((a, b) => naturalCollator.compare(a.title, b.title));
                         
-                        // Reensamblar: [Siguientes capítulos] -> [Capítulos anteriores] -> [Otras categorías]
                         let finalOrder = [...nextInSequence, ...prevInSequence, ...otherVideos];
 
-                        // 4. FILTRO ANTI-BUCLE: Si el video que sigue es exactamente el anterior, moverlo al final
                         if (prevId && finalOrder.length > 1 && finalOrder[0].id === prevId) {
                             const loopingVid = finalOrder.shift();
                             if (loopingVid) finalOrder.push(loopingVid);
@@ -115,7 +107,6 @@ export default function Watch() {
 
                         setRelatedVideos(finalOrder);
                     } else {
-                        // Para otros modos (LATEST/RANDOM), solo aplicamos el filtro anti-bucle básico
                         let finalOrder = [...related];
                         if (prevId && finalOrder.length > 1 && finalOrder[0].id === prevId) {
                             const loopingVid = finalOrder.shift();
@@ -176,8 +167,6 @@ export default function Watch() {
 
     const handleVideoEnded = async () => {
         if (!relatedVideos.length || !user || !video) return;
-        
-        // El orden ya viene pre-calculado y corregido para evitar bucles
         const nextVid = relatedVideos[0] || null;
 
         if (!nextVid) {
@@ -276,10 +265,10 @@ export default function Watch() {
                         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-6">
                             <div className="flex items-center gap-4">
                                 <Link to={`/channel/${video?.creatorId}`} className="w-12 h-12 rounded-full bg-slate-800 border border-white/10 overflow-hidden shadow-lg shrink-0">
-                                    {video?.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-slate-500">{video?.creatorName[0]}</div>}
+                                    {video?.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-slate-500">{video?.creatorName?.[0] || '?'}</div>}
                                 </Link>
                                 <div>
-                                    <Link to={`/channel/${video?.creatorId}`} className="font-black text-white hover:text-indigo-400">@{video?.creatorName}</Link>
+                                    <Link to={`/channel/${video?.creatorId}`} className="font-black text-white hover:text-indigo-400">@{video?.creatorName || 'Usuario'}</Link>
                                     <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                                 </div>
                             </div>
@@ -312,7 +301,7 @@ export default function Watch() {
                             
                             <form onSubmit={handleAddComment} className="flex gap-4">
                                 <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden border border-white/10">
-                                    {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{user?.username[0]}</div>}
+                                    {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{user?.username?.[0] || '?'}</div>}
                                 </div>
                                 <div className="flex-1 relative">
                                     <input 
@@ -330,11 +319,11 @@ export default function Watch() {
                                 {comments.map(c => (
                                     <div key={c.id} className="flex gap-4 animate-in fade-in slide-in-from-bottom-2">
                                         <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
-                                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{c.username[0]}</div>}
+                                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-500">{c.username?.[0] || '?'}</div>}
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-1">
-                                                <span className="text-xs font-black text-white">@{c.username}</span>
+                                                <span className="text-xs font-black text-white">@{c.username || 'Anónimo'}</span>
                                                 <span className="text-[10px] text-slate-500 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
                                             </div>
                                             <p className="text-sm text-slate-400 leading-snug">{c.text}</p>
@@ -370,7 +359,7 @@ export default function Watch() {
                                 </div>
                                 <div className="flex-1 min-w-0 py-1">
                                     <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase tracking-tighter leading-tight group-hover:text-indigo-400">{v.title}</h4>
-                                    <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
+                                    <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName || 'Usuario'}</div>
                                     <div className="text-[8px] text-indigo-400 font-black uppercase mt-0.5 truncate">{v.category}</div>
                                 </div>
                             </Link>
@@ -413,7 +402,7 @@ export default function Watch() {
                                         className="w-full p-3 flex items-center gap-4 hover:bg-indigo-600 rounded-2xl transition-colors group"
                                     >
                                         <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-800 shrink-0">
-                                            {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-white/20">{s.username[0]}</div>}
+                                            {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-white/20">{s.username?.[0] || '?'}</div>}
                                         </div>
                                         <span className="text-sm font-bold text-white group-hover:text-white">@{s.username}</span>
                                         <UserCheck size={16} className="ml-auto opacity-0 group-hover:opacity-100 text-white"/>

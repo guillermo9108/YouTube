@@ -112,7 +112,9 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
             {video.creatorAvatarUrl ? (
                 <img src={video.creatorAvatarUrl} className="w-9 h-9 rounded-full object-cover bg-slate-800 border border-slate-800 group-hover:border-indigo-500/50 transition-colors" alt={video.creatorName} />
             ) : (
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white shadow-inner">{video.creatorName[0]}</div>
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white shadow-inner">
+                    {video.creatorName?.[0] || '?'}
+                </div>
             )}
         </Link>
 
@@ -122,7 +124,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
             </Link>
             <div className="text-[11px] md:text-xs text-slate-400 flex flex-col gap-0.5">
                 <Link to={`/channel/${video.creatorId}`} className="hover:text-slate-200 transition-colors flex items-center gap-1 w-fit">
-                    {video.creatorName}
+                    {video.creatorName || 'Usuario'}
                     <CheckCircle2 size={10} className="text-slate-500 fill-slate-800" />
                 </Link>
                 <div className="flex items-center gap-1">

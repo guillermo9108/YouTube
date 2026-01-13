@@ -52,9 +52,8 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
         setPaused(false);
         el.muted = false; 
         el.play().catch(() => {
-            // Si falla el play con sonido, intentamos muteado (requerido por algunos navegadores)
             el.muted = true;
-            el.play().catch(() => { /* Silenciar error de interrupción */ });
+            el.play().catch(() => {});
         });
         db.incrementView(video.id);
     } else { 
@@ -159,10 +158,12 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
       <div className="absolute bottom-10 left-3 right-16 z-30 text-white flex flex-col gap-3 pointer-events-none pb-safe">
          <div className="flex items-center gap-3 pointer-events-auto">
             <Link to={`/channel/${video.creatorId}`} className="relative shrink-0">
-                <div className="w-11 h-11 rounded-full border-2 border-white overflow-hidden bg-slate-800 shadow-xl">{video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{video.creatorName[0]}</div>}</div>
+                <div className="w-11 h-11 rounded-full border-2 border-white overflow-hidden bg-slate-800 shadow-xl">
+                    {video.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{video.creatorName?.[0] || '?'}</div>}
+                </div>
             </Link>
             <div className="min-w-0">
-                <Link to={`/channel/${video.creatorId}`} className="font-black text-sm drop-shadow-md hover:underline truncate block">@{video.creatorName}</Link>
+                <Link to={`/channel/${video.creatorId}`} className="font-black text-sm drop-shadow-md hover:underline truncate block">@{video.creatorName || 'Usuario'}</Link>
                 <button className="bg-white/10 backdrop-blur-md border border-white/20 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest text-white">Seguir</button>
             </div>
          </div>
@@ -179,7 +180,7 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
                          <div className="w-8 h-8 rounded-full bg-slate-800 shrink-0 border border-white/5 overflow-hidden">
                             {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c?.username?.[0] || '?'}</div>}
                          </div>
-                         <div><div className="flex items-baseline gap-2"><span className="text-xs font-black text-slate-300">@{c.username}</span><span className="text-[8px] text-slate-600 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span></div><p className="text-xs text-slate-400 mt-0.5 leading-snug">{c.text}</p></div>
+                         <div><div className="flex items-baseline gap-2"><span className="text-xs font-black text-slate-300">@{c.username || 'Anónimo'}</span><span className="text-[8px] text-slate-600 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span></div><p className="text-xs text-slate-400 mt-0.5 leading-snug">{c.text}</p></div>
                       </div>
                  ))}
               </div>
@@ -307,7 +308,7 @@ export default function Shorts() {
                                   className="w-full p-3 flex items-center gap-4 hover:bg-indigo-600 rounded-2xl transition-colors group"
                               >
                                   <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-800 shrink-0">
-                                      {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-white/20">{s.username[0]}</div>}
+                                      {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-white/20">{s.username?.[0] || '?'}</div>}
                                   </div>
                                   <span className="text-sm font-bold text-white group-hover:text-white">@{s.username}</span>
                                   <UserCheck size={16} className="ml-auto opacity-0 group-hover:opacity-100 text-white"/>
