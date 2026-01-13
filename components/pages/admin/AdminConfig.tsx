@@ -1,14 +1,14 @@
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, Category, VipPlan, FtpSettings } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
-// Added PlusCircle to imports to fix error on line 200
 import { 
     Save, Tag, Loader2, Trash2, Plus, PlusCircle, Sparkles, 
     CreditCard, ChevronRight, DollarSign, Database,
     Clock, Percent, HardDrive, Crown, X, Info, Smartphone, Wallet, Globe,
     Cpu, Settings2, Shield, Activity, Network, ListPlus, Bug, Watch, Maximize,
-    Zap, Trash
+    Zap, Trash, SortAsc
 } from 'lucide-react';
 
 export default function AdminConfig() {
@@ -24,7 +24,6 @@ export default function AdminConfig() {
         setLoading(true);
         try {
             const s: any = await db.getSystemSettings();
-            // Asegurar que los arrays y objetos anidados existan para evitar errores de renderizado
             if (!s.categories) s.categories = [];
             if (!s.vipPlans) s.vipPlans = [];
             if (!s.libraryPaths) s.libraryPaths = [];
@@ -63,8 +62,6 @@ export default function AdminConfig() {
     const updateValue = (key: keyof SystemSettings, val: any) => {
         setSettings(prev => prev ? { ...prev, [key]: val } : null);
     };
-
-    // --- Helpers para Arrays (VIP, Categorías, Rutas) ---
 
     const addVipPlan = () => {
         const newPlan: VipPlan = { 
@@ -111,7 +108,7 @@ export default function AdminConfig() {
         const currentMethods = { ...(settings.paymentMethods || {}) };
         const methodConfig = { ...(currentMethods[method] || { enabled: false, instructions: '' }) };
         
-        // @ts-ignore - Safe because we control the keys
+        // @ts-ignore
         methodConfig[field] = val;
         currentMethods[method] = methodConfig;
         
@@ -120,7 +117,6 @@ export default function AdminConfig() {
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>;
 
-    // Fix: Properly close arrow function and remove trailing SectionHeader text to avoid redeclaration error
     const SectionHeader = ({ id, label, icon: Icon, color = "text-indigo-400" }: any) => (
         <button 
             onClick={() => setActiveSection(activeSection === id ? null : id)}
@@ -139,8 +135,7 @@ export default function AdminConfig() {
     return (
         <div className="max-w-4xl mx-auto space-y-3 animate-in fade-in pb-32 px-1">
             
-            {/* Header Compacto (Action Bar Slim) */}
-            <div className="bg-slate-900/95 backdrop-blur-md p-3 rounded-[24px] border border-slate-800 shadow-2xl flex items-center justify-between sticky top-[72px] z-40">
+            <div className="bg-slate-900/95 backdrop-blur-md p-3 rounded-[24px] border border-slate-800 shadow-2xl flex items-center justify-between sticky top-2 z-40">
                 <div className="flex items-center gap-3 ml-2">
                     <Settings2 size={18} className="text-indigo-500"/>
                     <div>
@@ -153,7 +148,6 @@ export default function AdminConfig() {
                 </button>
             </div>
 
-            {/* SECTION: ECONOMY & CONVERSION */}
             <SectionHeader id="GENERAL" label="Economía & AI" icon={Shield} color="text-emerald-400" />
             {activeSection === 'GENERAL' && (
                 <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-800 space-y-5 animate-in slide-in-from-top-2">
@@ -194,7 +188,6 @@ export default function AdminConfig() {
                 </div>
             )}
 
-            {/* SECTION: VIP PLANS (MEMBRESÍAS) */}
             <SectionHeader id="VIP" label="Planes & Membresías" icon={Crown} color="text-amber-400" />
             {activeSection === 'VIP' && (
                 <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-800 space-y-4 animate-in slide-in-from-top-2">
@@ -243,7 +236,6 @@ export default function AdminConfig() {
                 </div>
             )}
 
-            {/* SECTION: STORAGE & VOLUMES */}
             <SectionHeader id="SYSTEM" label="Almacenamiento & NAS" icon={Database} color="text-blue-400" />
             {activeSection === 'SYSTEM' && (
                 <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-2">
@@ -288,7 +280,6 @@ export default function AdminConfig() {
                 </div>
             )}
 
-            {/* SECTION: CATEGORIES */}
             <SectionHeader id="CATEGORIES" label="Categorías & Precios" icon={Tag} color="text-pink-400" />
             {activeSection === 'CATEGORIES' && (
                 <div className="bg-slate-900/50 p-4 rounded-3xl border border-slate-800 space-y-3 animate-in slide-in-from-top-2">
@@ -302,23 +293,36 @@ export default function AdminConfig() {
                             <div key={cat.id} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3 relative group shadow-lg">
                                 <button onClick={() => updateValue('categories', settings.categories.filter(c => c.id !== cat.id))} className="absolute top-3 right-3 text-slate-700 hover:text-red-500 transition-colors"><X size={14}/></button>
                                 <input value={cat.name} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, name: e.target.value.toUpperCase()} : c))} className="bg-transparent border-b border-white/5 text-white font-black text-xs w-full p-1 outline-none focus:border-pink-500 transition-all"/>
-                                <div className="flex gap-4 items-center">
-                                    <div className="relative flex-1">
-                                        <DollarSign size={10} className="absolute left-2 top-2.5 text-emerald-500"/>
-                                        <input type="number" step="0.1" value={cat.price} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, price: parseFloat(e.target.value)} : c))} className="w-full bg-slate-900 rounded-lg p-2 pl-6 text-white text-[11px] font-black outline-none border border-white/5 shadow-inner"/>
+                                
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="relative">
+                                        <DollarSign size={10} className="absolute left-2 top-3 text-emerald-500"/>
+                                        <input type="number" step="0.1" value={cat.price} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, price: parseFloat(e.target.value)} : c))} className="w-full bg-slate-900 rounded-lg p-2.5 pl-6 text-white text-[11px] font-black outline-none border border-white/5 shadow-inner"/>
                                     </div>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" checked={cat.autoSub} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, autoSub: e.target.checked} : c))} className="w-4 h-4 rounded accent-pink-500" />
-                                        <span className="text-[9px] text-slate-500 font-black uppercase">Auto-Sub</span>
-                                    </label>
+                                    <div className="relative">
+                                        <SortAsc size={10} className="absolute left-2 top-3 text-indigo-400"/>
+                                        <select 
+                                            value={cat.sortOrder || 'LATEST'} 
+                                            onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, sortOrder: e.target.value as any} : c))} 
+                                            className="w-full bg-slate-900 rounded-lg p-2.5 pl-6 text-slate-300 text-[9px] font-black outline-none border border-white/5 shadow-inner appearance-none cursor-pointer uppercase"
+                                        >
+                                            <option value="LATEST">Recientes</option>
+                                            <option value="ALPHA">A-Z</option>
+                                            <option value="RANDOM">Aleatorio</option>
+                                        </select>
+                                    </div>
                                 </div>
+
+                                <label className="flex items-center gap-2 cursor-pointer pt-1">
+                                    <input type="checkbox" checked={cat.autoSub} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, autoSub: e.target.checked} : c))} className="w-4 h-4 rounded accent-pink-500" />
+                                    <span className="text-[9px] text-slate-500 font-black uppercase">Auto-Subcategorizar carpetas</span>
+                                </label>
                             </div>
                         ))}
                     </div>
                 </div>
             )}
 
-            {/* SECTION: PAYMENTS GESTION */}
             <SectionHeader id="PAYMENTS" label="Gestión de Cobros" icon={CreditCard} color="text-emerald-400" />
             {activeSection === 'PAYMENTS' && (
                 <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-800 space-y-5 animate-in slide-in-from-top-2">

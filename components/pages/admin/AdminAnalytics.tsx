@@ -68,22 +68,20 @@ export default function AdminAnalytics() {
             ]);
 
             setRealStats(rs);
-            const plans = settings.vipPlans || [];
+            const plans: VipPlan[] = settings.vipPlans || [];
             setAllVipPlans(plans);
 
-            if (rs) {
-                const realMix: Record<string, number> = {};
-                plans.filter(p => p.type && p.type.toString().toUpperCase() === 'ACCESS').forEach(p => { 
-                    realMix[p.id] = rs.planMix?.[p.name] || 0; 
-                });
+            const initialMix: Record<string, number> = {};
+            plans.filter(p => p.type && p.type.toString().toUpperCase() === 'ACCESS').forEach(p => { 
+                initialMix[p.id] = rs?.planMix?.[p.name] || 0; 
+            });
 
-                setSim(prev => ({ 
-                    ...prev, 
-                    users: rs.userCount || prev.users,
-                    avgTicket: rs.averages?.arpu || prev.avgTicket,
-                    planMix: realMix
-                }));
-            }
+            setSim(prev => ({ 
+                ...prev, 
+                users: rs?.userCount || prev.users,
+                avgTicket: rs?.averages?.arpu || prev.avgTicket,
+                planMix: initialMix
+            }));
         } catch(e) { console.error(e); } 
         finally { setLoading(false); }
     };

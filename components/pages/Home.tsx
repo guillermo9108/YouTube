@@ -336,14 +336,12 @@ export default function Home() {
   if (loading) return <div className="flex justify-center py-20"><RefreshCw className="animate-spin text-indigo-500" size={32} /></div>;
 
   return (
-    <div className="pb-20 space-y-8 px-2 md:px-0">
+    <div className="pb-20 space-y-6">
       
-      {/* Sticky Top Header: top-0 para móviles sin layout, top-[74px] para escritorio */}
-      <div className="sticky top-0 md:top-[74px] z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
+      {/* Search & Header Bar */}
+      <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
           <div className="flex gap-3 mb-4 items-center w-full">
-              {/* Botón Home/Menú para móviles cuando no hay layout */}
-              <button onClick={() => navigate('/profile')} className="md:hidden p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400">
-                  {/* Fixed UserIcon not found error by importing it from lucide-react */}
+              <button onClick={() => navigate('/profile')} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400 active:scale-95 transition-transform">
                   <UserIcon size={20}/>
               </button>
 
@@ -403,7 +401,7 @@ export default function Home() {
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0" ref={menuRef}>
-                  <Link to="/vip" className="md:hidden p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-amber-400">
+                  <Link to="/vip" className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-amber-400 active:scale-95 transition-transform">
                       <Crown size={20}/>
                   </Link>
                   <button 
@@ -462,7 +460,7 @@ export default function Home() {
 
       {/* --- RENDERIZADO DE RESULTADOS --- */}
       {searchQuery && searchResults ? (
-          <div className="space-y-12 animate-in fade-in duration-500 mt-4 md:mt-0">
+          <div className="space-y-12 animate-in fade-in duration-500">
               
               {searchResults.users && searchResults.users.length > 0 && (
                   <div className="space-y-4">
@@ -538,7 +536,7 @@ export default function Home() {
           </div>
       ) : (
           /* --- MODO EXPLORACIÓN --- */
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 animate-in fade-in duration-500 mt-4 md:mt-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 animate-in fade-in duration-500">
               {currentSubCategories.map(sub => (
                   <SubCategoryCard key={sub.id} name={sub.name} videos={sub.videos} onClick={() => setActiveCategory(sub.name)} />
               ))}

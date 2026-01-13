@@ -4,7 +4,6 @@ import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { VipPlan, SystemSettings } from '../../types';
-// Added Clock to imports to fix error on line 116
 import { 
     Crown, Check, Zap, Loader2, ArrowLeft, Wallet, 
     CreditCard, Coins, TrendingUp, ShieldCheck, 
@@ -55,7 +54,7 @@ export default function VipStore() {
             refreshUser();
             navigate('/profile');
         } catch (e: any) { toast.error(e.message); }
-        finally { setSubmitting(true); }
+        finally { setSubmitting(false); }
     };
 
     const handleTropipayDirect = async (plan: VipPlan) => {
@@ -76,11 +75,14 @@ export default function VipStore() {
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-amber-500" /></div>;
 
-    const activeMethods = settings?.paymentMethods || {};
+    // Enhanced defaults for visibility
+    const activeMethods = settings?.paymentMethods || {
+        manual: { enabled: true, instructions: 'Contacta con soporte.' }
+    };
 
     return (
         <div className="pb-24 pt-6 px-4 max-w-5xl mx-auto animate-in fade-in">
-            <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-slate-400 hover:text-white mb-8">
+            <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-slate-400 hover:text-white mb-8 bg-slate-900 px-4 py-2 rounded-full border border-slate-800 transition-all">
                 <ArrowLeft size={20}/> Volver
             </button>
 
@@ -179,6 +181,9 @@ export default function VipStore() {
                                             <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Solicitud Manual</span>
                                         </button>
                                     )}
+                                    {(!activeMethods.tropipay?.enabled && !activeMethods.card?.enabled && !activeMethods.mobile?.enabled && !activeMethods.manual?.enabled) && (
+                                        <div className="col-span-2 py-10 text-center text-slate-500 uppercase text-[10px] font-black italic tracking-widest">No hay métodos configurados</div>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-6 animate-in slide-in-from-right-4">
@@ -201,7 +206,7 @@ export default function VipStore() {
 
                                     <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex items-start gap-3">
                                         <ShieldCheck size={20} className="text-amber-500 shrink-0"/>
-                                        <p className="text-[11px] text-amber-200 leading-snug">Una vez realizado el pago, envíe el comprobante al administrador para activar su membresía.</p>
+                                        <p className="text-[11px] text-amber-200 leading-snug">Una vez realizado el pago, envíe el comprobante al administrador para activar su membresía o recarga.</p>
                                     </div>
 
                                     <button 
