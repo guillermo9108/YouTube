@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Category, Notification as AppNotification, MarketplaceItem, User } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, Zap, Clock, Film, ShoppingBag, Tag, Users, Star
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, Zap, Clock, Film, ShoppingBag, Tag, Users, Star, Menu, Crown, User as UserIcon
 } from 'lucide-react';
 import { useLocation, useNavigate, Link } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -235,7 +236,6 @@ export default function Home() {
   // --- Lógica de Resultados Dinámicos ---
 
   const searchResults = useMemo((): UnifiedSearchResults | null => {
-      // Fix: Ensure searchQuery is treated as a string to avoid 'unknown' inference issues
       const queryStr = String(searchQuery || '');
       if (!queryStr || queryStr.length < 2) return null;
       
@@ -243,10 +243,8 @@ export default function Home() {
       const filteredMkt = marketItems.filter(i => matchesFragmented(i.title + i.description, queryStr));
       const filteredUsers = allUsers.filter(u => matchesFragmented(u.username, queryStr));
       
-      // Colecciones y Carpetas encontradas
       const matchedSubCats: {id: string, name: string, videos: Video[]}[] = [];
       
-      // 1. Categorías del sistema que coinciden
       categories.forEach(c => {
           if (matchesFragmented(c.name, queryStr)) {
               matchedSubCats.push({
@@ -257,11 +255,9 @@ export default function Home() {
           }
       });
 
-      // 2. Carpetas físicas (Subcategorías de videos) que no son categorías raíz
       const physicalFolders = Array.from(new Set(allVideos.map(v => String(v.category)))) as string[];
       physicalFolders.forEach(folder => {
           if (matchesFragmented(folder, queryStr)) {
-              // Evitar duplicar si ya se agregó desde categories
               if (!matchedSubCats.find(s => s.name === folder)) {
                   matchedSubCats.push({
                       id: folder,
@@ -280,19 +276,15 @@ export default function Home() {
       };
   }, [searchQuery, allVideos, marketItems, allUsers, categories]);
 
-  // Fix: Explicitly type breadcrumbPath useMemo as string[] to resolve 'unknown' type errors
   const breadcrumbPath = useMemo<string[]>(() => {
       if (!activeCategory) return [];
       const active = activeCategory as string;
       const currentVideoSample = allVideos.find(v => v.category === active);
-      // Fix: Cast properties to string and use explicit return to ensure string[] type consistency
       if (currentVideoSample && currentVideoSample.parent_category) return [currentVideoSample.parent_category as string, active];
       return [active];
   }, [activeCategory, allVideos]);
 
-  // Fix: Explicitly type currentSubCategories useMemo to resolve 'unknown' inference issues
   const currentSubCategories = useMemo<{name: string, id: string, videos: Video[]}[]>(() => {
-      // Fix: Cast searchQuery and activeCategory for type safety in useMemo
       const queryStr = String(searchQuery || '');
       const active = activeCategory as string | null;
 
@@ -346,8 +338,15 @@ export default function Home() {
   return (
     <div className="pb-20 space-y-8 px-2 md:px-0">
       
-      <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
+      {/* Sticky Top Header: top-0 para móviles sin layout, top-[74px] para escritorio */}
+      <div className="sticky top-0 md:top-[74px] z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5">
           <div className="flex gap-3 mb-4 items-center w-full">
+              {/* Botón Home/Menú para móviles cuando no hay layout */}
+              <button onClick={() => navigate('/profile')} className="md:hidden p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400">
+                  {/* Fixed UserIcon not found error by importing it from lucide-react */}
+                  <UserIcon size={20}/>
+              </button>
+
               <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
                   <Search className="absolute left-4 top-3 text-slate-500" size={18} />
                   <input 
@@ -355,7 +354,7 @@ export default function Home() {
                     onChange={(e) => handleSearchChange(e.target.value)}
                     onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)}
                     onKeyDown={(e) => e.key === 'Enter' && executeSearch(searchQuery)}
-                    placeholder="Videos, colecciones, artículos o usuarios..." 
+                    placeholder="Buscar contenido..." 
                     className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" 
                   />
                   {searchQuery && (
@@ -403,7 +402,10 @@ export default function Home() {
                   )}
               </div>
 
-              <div className="relative shrink-0" ref={menuRef}>
+              <div className="flex items-center gap-1.5 shrink-0" ref={menuRef}>
+                  <Link to="/vip" className="md:hidden p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-amber-400">
+                      <Crown size={20}/>
+                  </Link>
                   <button 
                       onClick={() => setShowNotifMenu(!showNotifMenu)}
                       className={`p-2.5 rounded-xl border transition-all flex items-center justify-center min-w-[46px] h-[46px] ${showNotifMenu ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
@@ -460,9 +462,8 @@ export default function Home() {
 
       {/* --- RENDERIZADO DE RESULTADOS --- */}
       {searchQuery && searchResults ? (
-          <div className="space-y-12 animate-in fade-in duration-500">
+          <div className="space-y-12 animate-in fade-in duration-500 mt-4 md:mt-0">
               
-              {/* Sección Usuarios Encontrados */}
               {searchResults.users && searchResults.users.length > 0 && (
                   <div className="space-y-4">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-pink-500 pl-3">Canales y Usuarios</h3>
@@ -483,7 +484,6 @@ export default function Home() {
                   </div>
               )}
 
-              {/* Sección Colecciones Encontradas */}
               {searchResults.subcategories && searchResults.subcategories.length > 0 && (
                   <div className="space-y-4">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-amber-500 pl-3">Colecciones y Carpetas</h3>
@@ -495,7 +495,6 @@ export default function Home() {
                   </div>
               )}
 
-              {/* Sección Videos Encontrados */}
               {searchResults.videos && searchResults.videos.length > 0 && (
                   <div className="space-y-4">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-indigo-500 pl-3">Videos</h3>
@@ -507,7 +506,6 @@ export default function Home() {
                   </div>
               )}
 
-              {/* Sección Tienda Encontrada */}
               {searchResults.marketplace && searchResults.marketplace.length > 0 && (
                   <div className="space-y-4">
                       <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2 border-l-2 border-emerald-500 pl-3">Artículos de la Tienda</h3>
@@ -531,7 +529,6 @@ export default function Home() {
                   </div>
               )}
 
-              {/* Estado Sin Resultados */}
               {searchResults && searchResults.videos.length === 0 && searchResults.marketplace.length === 0 && searchResults.users.length === 0 && searchResults.subcategories.length === 0 && (
                   <div className="text-center py-40">
                       <Shuffle className="mx-auto mb-4 text-slate-800" size={64}/>
@@ -540,8 +537,8 @@ export default function Home() {
               )}
           </div>
       ) : (
-          /* --- MODO EXPLORACIÓN (VISTA NORMAL) --- */
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 animate-in fade-in duration-500">
+          /* --- MODO EXPLORACIÓN --- */
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 animate-in fade-in duration-500 mt-4 md:mt-0">
               {currentSubCategories.map(sub => (
                   <SubCategoryCard key={sub.id} name={sub.name} videos={sub.videos} onClick={() => setActiveCategory(sub.name)} />
               ))}

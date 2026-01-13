@@ -4,7 +4,7 @@ import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { VipPlan, SystemSettings } from '../../types';
-import { Crown, Check, Zap, Loader2, ArrowLeft, Wallet, CreditCard, Coins, TrendingUp, ShieldCheck } from 'lucide-react';
+import { Crown, Check, Zap, Loader2, ArrowLeft, Wallet, CreditCard, Coins, TrendingUp, ShieldCheck, AlertCircle } from 'lucide-react';
 import { useNavigate, useLocation } from '../Router';
 
 export default function VipStore() {
@@ -30,7 +30,6 @@ export default function VipStore() {
                     const res = await db.verifyPayment(user.id, reference);
                     toast.success(res.message);
                     refreshUser();
-                    // Limpiar URL para evitar re-verificaciones
                     navigate('/vip', { replace: true });
                 } catch (e: any) {
                     toast.error(e.message || "Fallo en verificación de pago");
@@ -55,21 +54,24 @@ export default function VipStore() {
 
     const handleInstantPurchase = async (plan: VipPlan) => {
         if (!user) return;
+        
+        // Bloqueo adicional por seguridad en el cliente
+        if (plan.type === 'BALANCE') {
+            toast.error("Las recargas de saldo no pueden comprarse con saldo interno.");
+            return;
+        }
+
         if (user.balance < plan.price) {
             toast.error("Saldo insuficiente. Por favor recarga primero.");
             return;
         }
 
-        const confirmMsg = plan.type === 'BALANCE' 
-            ? `¿Canjear ${plan.price} $ por una recarga de ${(plan.price * (1 + (plan.bonusPercent || 0) / 100)).toFixed(2)} $?`
-            : `¿Canjear ${plan.price} $ por ${plan.durationDays} días de acceso VIP?`;
-
-        if (!confirm(confirmMsg)) return;
+        if (!confirm(`¿Confirmas el canje de ${plan.price} $ por ${plan.durationDays} días de acceso VIP?`)) return;
 
         setSubmitting(true);
         try {
             await db.purchaseVipInstant(user.id, plan);
-            toast.success(plan.type === 'BALANCE' ? "¡Saldo acreditado!" : "¡VIP Activado!");
+            toast.success("¡VIP Activado correctamente!");
             refreshUser();
             navigate('/profile');
         } catch (e: any) {
@@ -86,7 +88,6 @@ export default function VipStore() {
             const res = await db.createPayLink(user.id, plan);
             if (res.paymentUrl) {
                 toast.info("Redirigiendo a pasarela segura...");
-                // Pequeño retardo para que el usuario lea el toast
                 setTimeout(() => {
                     window.location.href = res.paymentUrl;
                 }, 1500);
@@ -107,7 +108,7 @@ export default function VipStore() {
                     <ShieldCheck size={40} className="absolute inset-0 m-auto text-indigo-400 animate-pulse" />
                 </div>
                 <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter mb-2">Verificando Pago</h2>
-                <p className="text-slate-400 text-sm max-w-xs mx-auto">Estamos confirmando la transacción con Tropipay. Por favor, no cierres esta ventana.</p>
+                <p className="text-slate-400 text-sm max-w-xs mx-auto">Estamos confirmando la transacción. Por favor, no cierres esta ventana.</p>
             </div>
         );
     }
@@ -119,8 +120,8 @@ export default function VipStore() {
             </button>
 
             <div className="text-center mb-12">
-                <h1 className="text-3xl font-black text-white mb-2 uppercase italic tracking-tighter">Centro de Recarga & VIP</h1>
-                <p className="text-slate-400 text-sm uppercase font-bold tracking-widest">Optimiza tu capital dentro de la plataforma</p>
+                <h1 className="text-3xl font-black text-white mb-2 uppercase italic tracking-tighter">Tienda VIP & Recargas</h1>
+                <p className="text-slate-400 text-sm uppercase font-bold tracking-widest">Optimiza tu cuenta con planes exclusivos</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -134,7 +135,7 @@ export default function VipStore() {
                             
                             <div className="mb-4">
                                 <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${isBalance ? 'bg-emerald-500/20 text-emerald-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
-                                    {isBalance ? 'Plan de Recarga' : 'Pase de Acceso'}
+                                    {isBalance ? 'Recarga de Saldo' : 'Acceso VIP'}
                                 </span>
                             </div>
 
@@ -170,20 +171,27 @@ export default function VipStore() {
                             </ul>
 
                             <div className="space-y-3">
-                                <button 
-                                    onClick={() => handleInstantPurchase(plan)}
-                                    disabled={submitting}
-                                    className={`w-full py-4 ${isBalance ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-amber-500 hover:bg-amber-400'} text-black font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95`}
-                                >
-                                    {submitting ? <Loader2 className="animate-spin"/> : <Wallet size={18}/>}
-                                    Canjear Saldo
-                                </button>
+                                {!isBalance ? (
+                                    <button 
+                                        onClick={() => handleInstantPurchase(plan)}
+                                        disabled={submitting}
+                                        className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95"
+                                    >
+                                        {submitting ? <Loader2 className="animate-spin"/> : <Wallet size={18}/>}
+                                        Canjear Saldo
+                                    </button>
+                                ) : (
+                                    <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 flex items-center gap-2 mb-2">
+                                        <AlertCircle size={14} className="text-slate-500"/>
+                                        <p className="text-[10px] text-slate-500 font-bold uppercase leading-tight">Las recargas requieren pago externo obligatorio</p>
+                                    </div>
+                                )}
                                 <button 
                                     onClick={() => handleExternalPurchase(plan)}
                                     disabled={submitting}
-                                    className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-2xl text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                                    className={`w-full py-3 ${isBalance ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-800 hover:bg-slate-700'} text-white font-bold rounded-2xl text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95`}
                                 >
-                                    <CreditCard size={14}/> Pago Externo (CUP/EUR)
+                                    <CreditCard size={14}/> {isBalance ? 'Recargar Ahora' : 'Pago Externo'}
                                 </button>
                             </div>
                         </div>
@@ -193,7 +201,7 @@ export default function VipStore() {
             
             <div className="mt-12 p-6 bg-slate-900/50 rounded-3xl border border-slate-800 text-center">
                 <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">
-                    ¿Necesitas saldo? Usa la pasarela de pago externa para recargas automáticas o contacta con soporte.
+                    Nota: Los canjes de saldo solo aplican para activar días de membresía VIP. Para inyectar nuevo capital usa los botones de Recarga.
                 </p>
             </div>
         </div>
