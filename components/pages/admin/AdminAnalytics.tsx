@@ -53,12 +53,16 @@ export default function AdminAnalytics() {
         planMix: {} as Record<string, number> 
     });
 
-    // Filtro ultra-robusto para planes de Acceso Total
+    // Filtro ultra-robusto para planes de Acceso Total (Heurística para planes sin campo "type")
     const accessPlans = useMemo(() => {
         if (!allVipPlans || !Array.isArray(allVipPlans)) return [];
         return allVipPlans.filter(p => {
             const pType = String(p.type || '').toUpperCase().trim();
-            return pType === 'ACCESS';
+            // Caso 1: Tiene el tipo explícito
+            if (pType === 'ACCESS') return true;
+            // Caso 2: Es un plan antiguo sin "type" pero con "durationDays" (es de acceso)
+            if (!p.type && p.durationDays && Number(p.durationDays) > 0) return true;
+            return false;
         });
     }, [allVipPlans]);
 
@@ -75,10 +79,7 @@ export default function AdminAnalytics() {
 
             setRealStats(rs);
             
-            // Procesamiento robusto de planes (maneja strings JSON o Arrays nativos)
             let plans: VipPlan[] = [];
-            // Fix: Cast rawVip to any to prevent TypeScript from narrowing it to 'never' during string type check.
-            // This is necessary because settings.vipPlans is typed as VipPlan[] but might be a raw JSON string from the DB.
             const rawVip: any = settings?.vipPlans;
             if (Array.isArray(rawVip)) {
                 plans = rawVip;
@@ -88,13 +89,14 @@ export default function AdminAnalytics() {
 
             setAllVipPlans(plans);
 
-            // Inicializar el Mix de Ventas para el simulador
+            // Inicializar el Mix de Ventas para el simulador usando la misma lógica heurística
             const initialMix: Record<string, number> = {};
-            const accessOnly = plans.filter(p => String(p.type || '').toUpperCase().trim() === 'ACCESS');
+            const accessOnly = plans.filter(p => {
+                const pType = String(p.type || '').toUpperCase().trim();
+                return pType === 'ACCESS' || (!p.type && p.durationDays && Number(p.durationDays) > 0);
+            });
             
             accessOnly.forEach(p => { 
-                // Prioridad 1: Datos reales del servidor (mapeados por nombre)
-                // Prioridad 2: 0 si no hay historial
                 initialMix[p.id] = rs?.planMix?.[p.name] || 0; 
             });
 
@@ -129,7 +131,7 @@ export default function AdminAnalytics() {
         if (accessPlans.length === 0) return;
 
         const newMix: Record<string, number> = {};
-        const totalSalesTarget = 100; // Normalizamos a 100 ventas para calcular el mix
+        const totalSalesTarget = 100;
         const sortedPlans = [...accessPlans].sort((a, b) => a.price - b.price);
         const above = sortedPlans.filter(p => p.price >= targetTicket);
         const below = sortedPlans.filter(p => p.price < targetTicket).reverse();
@@ -171,9 +173,8 @@ export default function AdminAnalytics() {
             }
         });
 
-        // Si no hay ventas en el mix, usamos el ticket medio manual para no romper el gráfico
         if (totalSalesInMix === 0 && sim.avgTicket > 0) {
-            currentMonthlyRevenue = sim.avgTicket * 10; // Simulamos 10 ventas base
+            currentMonthlyRevenue = sim.avgTicket * 10;
             totalSalesInMix = 10;
         }
 
@@ -187,7 +188,6 @@ export default function AdminAnalytics() {
             const growth = currentUsers * (sim.growth / 100) + sim.newUsersPerMonth;
             currentUsers = Math.max(0, currentUsers + growth - losses);
             
-            // Asumimos que el ingreso se mantiene proporcional a la base de usuarios si no hay mix
             const monthlyGross = currentMonthlyRevenue; 
             const netMonthlyProfit = monthlyGross - sim.fixedCosts;
             cumulativeNetProfit += netMonthlyProfit;

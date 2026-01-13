@@ -24,8 +24,34 @@ export default function AdminConfig() {
         setLoading(true);
         try {
             const s: any = await db.getSystemSettings();
+            
+            // --- Normalización de planes VIP (Corrección para datos antiguos) ---
+            let rawVip = s.vipPlans;
+            let plans: VipPlan[] = [];
+            
+            if (Array.isArray(rawVip)) {
+                plans = rawVip;
+            } else if (typeof rawVip === 'string' && rawVip.trim().length > 2) {
+                try { plans = JSON.parse(rawVip); } catch(e) { plans = []; }
+            }
+
+            // Asegurar que cada plan tiene un "type"
+            plans = plans.map(p => {
+                if (!p.type) {
+                    // Heurística: si tiene días de duración, es de acceso total
+                    if (p.durationDays && Number(p.durationDays) > 0) return { ...p, type: 'ACCESS' };
+                    // Si tiene bono y no días, es de saldo
+                    if (p.bonusPercent && Number(p.bonusPercent) > 0) return { ...p, type: 'BALANCE' };
+                    // Por defecto, acceso
+                    return { ...p, type: 'ACCESS' };
+                }
+                return p;
+            });
+
+            s.vipPlans = plans;
+            // ------------------------------------------------------------------
+
             if (!s.categories) s.categories = [];
-            if (!s.vipPlans) s.vipPlans = [];
             if (!s.libraryPaths) s.libraryPaths = [];
             if (!s.paymentMethods) s.paymentMethods = {
                 tropipay: { enabled: false, instructions: '' },
