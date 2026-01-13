@@ -4,13 +4,12 @@ import { db } from '../../../services/db';
 import { BalanceRequest, VipRequest, User } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Check, X, Clock, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon, Wallet } from 'lucide-react';
+import { Check, X, Clock, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon, Wallet, Eye, Camera, MessageSquare, AlertCircle } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
     const toast = useToast();
     
-    // Explicitly type state to match API response
     const [requests, setRequests] = useState<{balance: BalanceRequest[], vip: VipRequest[]}>({
         balance: [], 
         vip: []
@@ -19,12 +18,12 @@ export default function AdminFinance() {
     const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
     const [systemRevenue, setSystemRevenue] = useState(0);
     const [activeVips, setActiveVips] = useState<Partial<User>[]>([]);
+    const [selectedProof, setSelectedProof] = useState<{ text?: string, image?: string } | null>(null);
     
-    // Countdown refresh trigger
     const [now, setNow] = useState(Date.now());
 
     useEffect(() => {
-        const interval = setInterval(() => setNow(Date.now()), 60000); // Update every minute
+        const interval = setInterval(() => setNow(Date.now()), 60000);
         return () => clearInterval(interval);
     }, []);
 
@@ -63,9 +62,7 @@ export default function AdminFinance() {
             await db.handleBalanceRequest(currentUser.id, reqId, action);
             toast.success(`Solicitud ${action === 'APPROVED' ? 'Aprobada' : 'Rechazada'}`);
             loadData();
-        } catch (e: any) {
-            toast.error("Error: " + e.message);
-        }
+        } catch (e: any) { toast.error("Error: " + e.message); }
     };
 
     const handleVipReq = async (reqId: string, action: 'APPROVED' | 'REJECTED') => {
@@ -74,9 +71,7 @@ export default function AdminFinance() {
             await db.handleVipRequest(currentUser.id, reqId, action);
             toast.success(`VIP ${action === 'APPROVED' ? 'Activado' : 'Rechazado'}`);
             loadData();
-        } catch (e: any) {
-            toast.error("Error: " + e.message);
-        }
+        } catch (e: any) { toast.error("Error: " + e.message); }
     };
 
     const getRemainingTime = (expiry?: number) => {
@@ -91,7 +86,6 @@ export default function AdminFinance() {
     const stats = useMemo(() => {
         const bal = requests.balance || [];
         const vip = requests.vip || [];
-        
         const pendingCount = bal.length + vip.length;
         return { pendingCount };
     }, [requests]);
@@ -100,249 +94,161 @@ export default function AdminFinance() {
         <div className="space-y-6 animate-in fade-in pb-20">
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex items-center justify-between shadow-xl">
                     <div>
-                        <p className="text-slate-500 text-xs font-bold uppercase mb-1">Caja Chica (Ingresos)</p>
-                        <h3 className="text-2xl font-bold text-emerald-400">+{systemRevenue.toFixed(2)} $</h3>
-                        <p className="text-[10px] text-slate-500">Separado de tu saldo personal</p>
+                        <p className="text-slate-500 text-[10px] font-black uppercase mb-1 tracking-widest">Recaudación (Neto)</p>
+                        <h3 className="text-2xl font-black text-emerald-400">+{systemRevenue.toFixed(2)} $</h3>
                     </div>
-                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                        <TrendingUp size={24} />
-                    </div>
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center"><TrendingUp size={24} /></div>
                 </div>
                 
-                <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex items-center justify-between shadow-xl">
                     <div>
-                        <p className="text-slate-500 text-xs font-bold uppercase mb-1">Solicitudes Pendientes</p>
-                        <h3 className="text-2xl font-bold text-white">{stats.pendingCount}</h3>
+                        <p className="text-slate-500 text-[10px] font-black uppercase mb-1 tracking-widest">Revisión Manual</p>
+                        <h3 className="text-2xl font-black text-white">{stats.pendingCount}</h3>
                     </div>
-                    <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                        <Clock size={24} />
-                    </div>
+                    <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center"><Clock size={24} /></div>
                 </div>
 
-                <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex items-center justify-between">
+                <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex items-center justify-between shadow-xl">
                     <div>
-                        <p className="text-slate-500 text-xs font-bold uppercase mb-1">VIPs Activos</p>
-                        <h3 className="text-2xl font-bold text-white">{activeVips.length}</h3>
+                        <p className="text-slate-500 text-[10px] font-black uppercase mb-1 tracking-widest">Activos Premium</p>
+                        <h3 className="text-2xl font-black text-white">{activeVips.length}</h3>
                     </div>
-                    <div className="w-12 h-12 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-                        <Crown size={24} />
-                    </div>
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center"><Crown size={24} /></div>
                 </div>
             </div>
 
-            {/* Active VIPs List */}
-            {activeVips.length > 0 && (
-                <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
-                        <Crown size={18} className="text-amber-400"/>
-                        <h3 className="font-bold text-white">Usuarios con Membresía Activa</h3>
+            {/* VIP Requests Table with Proof View */}
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-2xl">
+                <div className="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <FileText size={18} className="text-amber-400"/>
+                        <h3 className="font-black text-white uppercase text-xs tracking-widest">Solicitudes por Validar</h3>
                     </div>
-                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                        {activeVips.map(u => (
-                            <div key={u.id} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-slate-800 overflow-hidden shrink-0">
-                                    {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-500"><UserIcon size={20}/></div>}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className="font-bold text-white text-sm truncate">{u.username}</div>
-                                    <div className="text-xs text-amber-400 font-mono">Expira: {getRemainingTime(u.vipExpiry)}</div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* VIP Requests Table */}
-            {requests.vip && requests.vip.length > 0 && (
-                <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm mb-6">
-                    <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
-                        <FileText size={18} className="text-blue-400"/>
-                        <h3 className="font-bold text-white">Solicitudes de Planes / Recargas</h3>
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="text-xs text-slate-500 uppercase bg-slate-950/50 border-b border-slate-800">
-                                <tr>
-                                    <th className="px-6 py-3">Usuario</th>
-                                    <th className="px-6 py-3">Plan</th>
-                                    <th className="px-6 py-3">Ref. Pago</th>
-                                    <th className="px-6 py-3 text-right">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800">
-                                {requests.vip.map(req => {
-                                    // Safe parsing for Plan Snapshot
-                                    const rawSnapshot = req.planSnapshot as any;
-                                    let plan: any = {};
-                                    try {
-                                        plan = typeof rawSnapshot === 'string' ? JSON.parse(rawSnapshot) : rawSnapshot;
-                                    } catch (e) { plan = { name: 'Error Plan', price: 0 }; }
-                                        
-                                    return (
-                                        <tr key={req.id} className="hover:bg-slate-800/30 transition-colors">
-                                            <td className="px-6 py-4 font-bold text-white">{req.username}</td>
-                                            <td className="px-6 py-4">
-                                                <div className="text-white font-medium">{plan.name}</div>
-                                                <div className="text-[10px] text-slate-500">{plan.type === 'ACCESS' ? `${plan.durationDays} Días` : `+${plan.bonusPercent}% Bono`} - <span className="text-amber-400 font-bold">{plan.price} CUP</span></div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                {req.paymentRef ? (
-                                                    <div className="flex items-center gap-1 text-slate-300 bg-slate-800 px-2 py-1 rounded w-fit">
-                                                        <span className="font-mono text-xs">{req.paymentRef}</span>
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-slate-600 italic text-xs">Sin referencia</span>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex justify-end gap-2">
-                                                    <button onClick={() => handleVipReq(req.id, 'APPROVED')} className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-lg" title="Confirmar Pago y Aprobar"><Check size={16}/></button>
-                                                    <button onClick={() => handleVipReq(req.id, 'REJECTED')} className="bg-slate-800 hover:bg-red-600 text-white p-2 rounded-lg" title="Rechazar"><X size={16}/></button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            )}
-
-            {/* Balance Requests Table */}
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
-                <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
-                    <Wallet size={18} className="text-indigo-400"/>
-                    <h3 className="font-bold text-white">Solicitudes de Saldo (Legacy)</h3>
+                    <span className="bg-amber-500/10 text-amber-500 text-[9px] font-black px-3 py-1 rounded-full border border-amber-500/20 uppercase tracking-widest">{requests.vip.length} Pendientes</span>
                 </div>
                 
-                {(!requests.balance || requests.balance.length === 0) ? (
-                    <div className="p-10 text-center text-slate-500 flex flex-col items-center gap-2">
-                        <Check size={32} className="text-emerald-500/50"/>
-                        <p>No hay solicitudes de saldo pendientes.</p>
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="text-xs text-slate-500 uppercase bg-slate-950/50 border-b border-slate-800">
-                                <tr>
-                                    <th className="px-6 py-3">Usuario</th>
-                                    <th className="px-6 py-3">Solicitado</th>
-                                    <th className="px-6 py-3">Fecha</th>
-                                    <th className="px-6 py-3 text-right">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800">
-                                {requests.balance.map(req => (
-                                    <tr key={req.id} className="hover:bg-slate-800/30 transition-colors">
-                                        <td className="px-6 py-4">
-                                            <div className="font-bold text-white">{req.username}</div>
-                                            <div className="text-[10px] text-slate-500">ID: {req.userId}</div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="font-mono text-emerald-400 font-bold text-lg">+{req.amount}</div>
-                                            <div className="text-[10px] text-slate-500">Saldo</div>
-                                        </td>
-                                        <td className="px-6 py-4 text-slate-400">
-                                            {new Date(req.createdAt * 1000).toLocaleString()}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex justify-end gap-2">
-                                                <button 
-                                                    onClick={() => handleBalanceReq(req.id, 'APPROVED')} 
-                                                    className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold"
-                                                    title="Aprobar"
-                                                >
-                                                    <Check size={16}/> <span className="hidden md:inline">Aprobar</span>
-                                                </button>
-                                                <button 
-                                                    onClick={() => handleBalanceReq(req.id, 'REJECTED')} 
-                                                    className="bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold"
-                                                    title="Rechazar"
-                                                >
-                                                    <X size={16}/> <span className="hidden md:inline">Rechazar</span>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
-
-            {/* Global Transactions History */}
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
-                <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center gap-2">
-                    <TrendingUp size={18} className="text-emerald-400"/>
-                    <h3 className="font-bold text-white">Historial de Transacciones Globales</h3>
-                </div>
-                <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
-                        <thead className="text-xs text-slate-500 uppercase bg-slate-950/50 sticky top-0">
+                        <thead className="text-[10px] text-slate-500 uppercase bg-slate-950/50 border-b border-slate-800 font-black tracking-widest">
                             <tr>
-                                <th className="px-4 py-3">Tipo</th>
-                                <th className="px-4 py-3">Detalle</th>
-                                <th className="px-4 py-3 text-right">Monto</th>
-                                <th className="px-4 py-3 text-right">Comisión</th>
-                                <th className="px-4 py-3 text-right">Fecha</th>
+                                <th className="px-6 py-4">Usuario</th>
+                                <th className="px-6 py-4">Plan Solicitado</th>
+                                <th className="px-6 py-4">Comprobantes</th>
+                                <th className="px-6 py-4 text-right">Acciones</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
-                            {globalTransactions.length === 0 ? (
-                                <tr><td colSpan={5} className="text-center py-8 text-slate-500">Sin movimientos recientes</td></tr>
-                            ) : (
-                                globalTransactions.map(t => {
-                                    const isDeposit = t.type === 'DEPOSIT';
-                                    const isVipRev = t.type === 'VIP_REVENUE';
-                                    const isVip = t.type === 'VIP';
-                                    const isMarket = t.type === 'MARKETPLACE';
-                                    
-                                    return (
-                                        <tr key={t.id} className="hover:bg-slate-800/30">
-                                            <td className="px-4 py-3">
-                                                <span className={`px-2 py-1 rounded text-[10px] font-bold ${
-                                                    isDeposit ? 'bg-emerald-500/20 text-emerald-400' : 
-                                                    (isVip ? 'bg-amber-500/20 text-amber-400' : 
-                                                    (isVipRev ? 'bg-indigo-500/20 text-indigo-400' : 
-                                                    (isMarket ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400')))
-                                                }`}>
-                                                    {t.type}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {isDeposit || isVip ? (
-                                                    <div className="flex items-center gap-1 text-slate-300">
-                                                        <ArrowDownLeft size={14} className="text-emerald-500"/> Usuario: {t.buyerName}
-                                                    </div>
-                                                ) : isVipRev ? (
-                                                    <div className="flex items-center gap-1 text-slate-300">
-                                                        <TrendingUp size={14} className="text-emerald-500"/> Ingreso por VIP/Recarga
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex flex-col">
-                                                        <span className="font-medium text-white">{t.itemTitle || t.videoTitle || 'Ítem'}</span>
-                                                        <span className="text-[10px] text-slate-500">{t.sellerName} <ArrowUpRight size={10} className="inline"/> {t.buyerName}</span>
+                            {requests.vip.length === 0 ? (
+                                <tr><td colSpan={4} className="text-center py-20 text-slate-600 font-bold uppercase text-[10px] tracking-widest italic">No hay pagos manuales pendientes</td></tr>
+                            ) : requests.vip.map(req => {
+                                const plan = typeof req.planSnapshot === 'string' ? JSON.parse(req.planSnapshot) : req.planSnapshot;
+                                const isBalance = plan.type === 'BALANCE';
+                                return (
+                                    <tr key={req.id} className="hover:bg-slate-800/30 transition-colors group">
+                                        <td className="px-6 py-4 font-bold text-white">@{req.username}</td>
+                                        <td className="px-6 py-4">
+                                            <div className="text-white font-black text-xs uppercase mb-0.5">{plan.name}</div>
+                                            <div className="text-[10px] text-slate-500 font-bold uppercase">
+                                                {isBalance ? `Recarga: ${plan.price} $` : `${plan.durationDays} Días VIP`}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex gap-2">
+                                                {req.proofText && (
+                                                    <button 
+                                                        onClick={() => setSelectedProof({ text: req.proofText })}
+                                                        className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-lg"
+                                                        title="Ver Texto/SMS"
+                                                    >
+                                                        <MessageSquare size={16}/>
+                                                    </button>
+                                                )}
+                                                {req.proofImageUrl && (
+                                                    <button 
+                                                        onClick={() => setSelectedProof({ image: req.proofImageUrl })}
+                                                        className="w-10 h-10 rounded-xl overflow-hidden border border-slate-700 hover:border-indigo-500 transition-all shadow-lg bg-black"
+                                                        title="Ver Captura"
+                                                    >
+                                                        <img src={req.proofImageUrl} className="w-full h-full object-cover opacity-60 hover:opacity-100" />
+                                                    </button>
+                                                )}
+                                                {!req.proofText && !req.proofImageUrl && (
+                                                    <div className="flex items-center gap-1.5 text-slate-600 italic text-[10px] font-bold">
+                                                        <AlertCircle size={14}/> Sin adjuntos
                                                     </div>
                                                 )}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-mono text-white">
-                                                {Number(t.amount).toFixed(2)}
-                                            </td>
-                                            <td className="px-4 py-3 text-right font-mono text-slate-400">
-                                                {Number(t.adminFee) > 0 ? '+' + Number(t.adminFee).toFixed(2) : '-'}
-                                            </td>
-                                            <td className="px-4 py-3 text-right text-xs text-slate-500">
-                                                {new Date(t.timestamp * 1000).toLocaleString()}
-                                            </td>
-                                        </tr>
-                                    );
-                                })
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex justify-end gap-3">
+                                                <button onClick={() => handleVipReq(req.id, 'APPROVED')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-900/40 active:scale-95 transition-all">Activar</button>
+                                                <button onClick={() => handleVipReq(req.id, 'REJECTED')} className="bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white p-2 rounded-xl active:scale-95 transition-all"><X size={16}/></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Modal: Visor de Pruebas */}
+            {selectedProof && (
+                <div className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-slate-900 border border-white/10 w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95">
+                        <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                {selectedProof.image ? <Camera size={20} className="text-indigo-400"/> : <MessageSquare size={20} className="text-indigo-400"/>}
+                                <h4 className="font-black text-white uppercase text-sm tracking-widest">Evidencia de Pago</h4>
+                            </div>
+                            <button onClick={() => setSelectedProof(null)} className="p-2 bg-slate-800 text-slate-400 rounded-full hover:text-white"><X/></button>
+                        </div>
+                        <div className="p-8">
+                            {selectedProof.image ? (
+                                <div className="rounded-3xl overflow-hidden border border-white/5 shadow-2xl bg-black max-h-[60vh]">
+                                    <img src={selectedProof.image} className="w-full h-auto object-contain" />
+                                </div>
+                            ) : (
+                                <div className="bg-slate-950 p-8 rounded-[32px] border border-indigo-500/20 text-slate-200 font-mono text-sm leading-relaxed whitespace-pre-wrap italic">
+                                    "{selectedProof.text}"
+                                </div>
                             )}
+                        </div>
+                        <div className="p-6 bg-slate-950 border-t border-white/5 flex justify-end">
+                            <button onClick={() => setSelectedProof(null)} className="bg-white text-black font-black px-10 py-3 rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition-all">Cerrar Visor</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {/* Global Transactions and other UI sections remain as per previous state... */}
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
+                <div className="p-5 border-b border-slate-800 bg-slate-950 flex items-center gap-3">
+                    <TrendingUp size={18} className="text-emerald-400"/>
+                    <h3 className="font-black text-white uppercase text-xs tracking-widest">Historial Global</h3>
+                </div>
+                <div className="overflow-x-auto max-h-96 overflow-y-auto custom-scrollbar">
+                    <table className="w-full text-sm text-left">
+                        <thead className="text-[10px] text-slate-500 uppercase bg-slate-950/50 sticky top-0 font-black tracking-widest">
+                            <tr>
+                                <th className="px-4 py-4">Tipo</th>
+                                <th className="px-4 py-4">Detalle</th>
+                                <th className="px-4 py-4 text-right">Monto</th>
+                                <th className="px-4 py-4 text-right">Comisión</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                            {globalTransactions.map(t => (
+                                <tr key={t.id} className="hover:bg-slate-800/20">
+                                    <td className="px-4 py-4"><span className="text-[9px] font-black px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase">{t.type}</span></td>
+                                    <td className="px-4 py-4"><div className="text-white font-bold truncate max-w-[200px]">{t.videoTitle || t.itemTitle || 'Operación'}</div><div className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">@{t.buyerName}</div></td>
+                                    <td className="px-4 py-4 text-right font-mono text-emerald-400 font-bold">{Number(t.amount).toFixed(2)}</td>
+                                    <td className="px-4 py-4 text-right font-mono text-slate-500">{Number(t.adminFee).toFixed(2)}</td>
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>

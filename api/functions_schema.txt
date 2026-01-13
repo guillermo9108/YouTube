@@ -123,6 +123,8 @@ function getAppSchema() {
                 'userId' => 'VARCHAR(50)',
                 'planSnapshot' => 'JSON',
                 'paymentRef' => 'VARCHAR(100)',
+                'proofText' => 'TEXT DEFAULT NULL',
+                'proofImageUrl' => 'VARCHAR(255) DEFAULT NULL',
                 'status' => "ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING'",
                 'createdAt' => 'BIGINT'
             ]

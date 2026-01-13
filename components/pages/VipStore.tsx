@@ -7,14 +7,13 @@ import { VipPlan, SystemSettings } from '../../types';
 import { 
     Crown, Check, Zap, Loader2, ArrowLeft, Wallet, 
     CreditCard, Coins, TrendingUp, ShieldCheck, 
-    Smartphone, Globe, X, Copy, Info, Clock
+    Smartphone, Globe, X, Copy, Info, Clock, Camera, FileText, Send
 } from 'lucide-react';
 import { useNavigate, useLocation } from '../Router';
 
 export default function VipStore() {
     const { user, refreshUser } = useAuth();
     const navigate = useNavigate();
-    const location = useLocation();
     const toast = useToast();
     
     const [plans, setPlans] = useState<VipPlan[]>([]);
@@ -27,6 +26,11 @@ export default function VipStore() {
     const [selectedPlan, setSelectedPlan] = useState<VipPlan | null>(null);
     const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
 
+    // Proof Form State
+    const [proofText, setProofText] = useState('');
+    const [proofImage, setProofImage] = useState<File | null>(null);
+    const [proofPreview, setProofPreview] = useState<string | null>(null);
+
     useEffect(() => {
         db.getSystemSettings().then((s: SystemSettings) => {
             setSettings(s);
@@ -34,6 +38,38 @@ export default function VipStore() {
             setLoading(false);
         });
     }, []);
+
+    const resetProof = () => {
+        setProofText('');
+        setProofImage(null);
+        setProofPreview(null);
+    };
+
+    const handleProofFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            setProofImage(file);
+            setProofPreview(URL.createObjectURL(file));
+        }
+    };
+
+    const handleSubmitManualRequest = async () => {
+        if (!user || !selectedPlan) return;
+        if (!proofText.trim() && !proofImage) {
+            toast.warning("Por favor adjunta el SMS o una captura del pago.");
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            await db.submitManualVipRequest(user.id, selectedPlan, proofText, proofImage);
+            toast.success("Solicitud enviada. El administrador la revisará pronto.");
+            setShowPaymentModal(false);
+            resetProof();
+            setSelectedMethod(null);
+        } catch (e: any) { toast.error(e.message); }
+        finally { setSubmitting(false); }
+    };
 
     const handleInstantPurchase = async (plan: VipPlan) => {
         if (!user) return;
@@ -75,7 +111,6 @@ export default function VipStore() {
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-amber-500" /></div>;
 
-    // Enhanced defaults for visibility
     const activeMethods = settings?.paymentMethods || {
         manual: { enabled: true, instructions: 'Contacta con soporte.' }
     };
@@ -151,10 +186,10 @@ export default function VipStore() {
                                 <h3 className="font-black text-white uppercase text-sm tracking-widest">Método de Pago</h3>
                                 <p className="text-[10px] text-amber-500 font-bold uppercase">{selectedPlan.name} - {selectedPlan.price} $</p>
                             </div>
-                            <button onClick={() => { setShowPaymentModal(false); setSelectedMethod(null); }} className="p-2 hover:bg-white/10 rounded-full text-slate-500"><X/></button>
+                            <button onClick={() => { setShowPaymentModal(false); setSelectedMethod(null); resetProof(); }} className="p-2 hover:bg-white/10 rounded-full text-slate-500"><X/></button>
                         </div>
 
-                        <div className="p-6 space-y-4">
+                        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar">
                             {!selectedMethod ? (
                                 <div className="grid grid-cols-2 gap-3">
                                     {activeMethods.tropipay?.enabled && (
@@ -181,39 +216,71 @@ export default function VipStore() {
                                             <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Solicitud Manual</span>
                                         </button>
                                     )}
-                                    {(!activeMethods.tropipay?.enabled && !activeMethods.card?.enabled && !activeMethods.mobile?.enabled && !activeMethods.manual?.enabled) && (
-                                        <div className="col-span-2 py-10 text-center text-slate-500 uppercase text-[10px] font-black italic tracking-widest">No hay métodos configurados</div>
-                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-6 animate-in slide-in-from-right-4">
                                     <button onClick={() => setSelectedMethod(null)} className="text-[10px] font-black text-indigo-400 uppercase flex items-center gap-1"><ArrowLeft size={12}/> Cambiar Método</button>
                                     
-                                    <div className="bg-slate-950 p-6 rounded-3xl border border-indigo-500/20 relative">
-                                        <h4 className="text-xs font-black text-white uppercase mb-4 tracking-widest flex items-center gap-2">
+                                    <div className="bg-slate-950 p-5 rounded-3xl border border-indigo-500/20 relative">
+                                        <h4 className="text-xs font-black text-white uppercase mb-3 tracking-widest flex items-center gap-2">
                                             <Info size={14} className="text-indigo-400"/> Instrucciones
                                         </h4>
-                                        <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap italic">
+                                        <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap italic mb-4">
                                             {(activeMethods as any)[selectedMethod]?.instructions || "Consulte con el administrador."}
                                         </p>
-                                        <button 
-                                            onClick={() => handleCopy((activeMethods as any)[selectedMethod]?.instructions)}
-                                            className="absolute top-4 right-4 p-2 bg-slate-900 rounded-xl text-slate-500 hover:text-white"
-                                        >
-                                            <Copy size={16}/>
+                                        <button onClick={() => handleCopy((activeMethods as any)[selectedMethod]?.instructions)} className="absolute top-4 right-4 p-2 bg-slate-900 rounded-xl text-slate-500 hover:text-white">
+                                            <Copy size={14}/>
                                         </button>
                                     </div>
 
-                                    <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex items-start gap-3">
-                                        <ShieldCheck size={20} className="text-amber-500 shrink-0"/>
-                                        <p className="text-[11px] text-amber-200 leading-snug">Una vez realizado el pago, envíe el comprobante al administrador para activar su membresía o recarga.</p>
+                                    {/* Proof Submission Section */}
+                                    <div className="space-y-4">
+                                        <h4 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2 border-l-2 border-amber-500 pl-3">
+                                            Adjuntar Comprobante
+                                        </h4>
+                                        
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
+                                                <FileText size={12}/> Texto del SMS o Referencia
+                                            </label>
+                                            <textarea 
+                                                value={proofText}
+                                                onChange={e => setProofText(e.target.value)}
+                                                placeholder="Pega aquí el contenido del SMS de confirmación..."
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-white focus:border-indigo-500 outline-none transition-all min-h-[100px] resize-none"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
+                                                <Camera size={12}/> Captura de Pantalla (Opcional)
+                                            </label>
+                                            <div className="relative group">
+                                                {proofPreview ? (
+                                                    <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-700 bg-black">
+                                                        <img src={proofPreview} className="w-full h-full object-contain" />
+                                                        <button onClick={() => { setProofImage(null); setProofPreview(null); }} className="absolute top-2 right-2 bg-red-600 text-white p-1.5 rounded-full shadow-lg">
+                                                            <X size={14}/>
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <label className="flex flex-col items-center justify-center aspect-video bg-slate-950 border-2 border-dashed border-slate-800 rounded-2xl cursor-pointer hover:bg-slate-900 hover:border-indigo-500/50 transition-all">
+                                                        <Camera size={24} className="text-slate-600 mb-2" />
+                                                        <span className="text-[9px] font-black text-slate-500 uppercase">Click para subir imagen</span>
+                                                        <input type="file" accept="image/*" onChange={handleProofFileChange} className="hidden" />
+                                                    </label>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <button 
-                                        onClick={() => setShowPaymentModal(false)}
-                                        className="w-full bg-white text-black font-black py-4 rounded-2xl uppercase text-[10px] tracking-[0.2em]"
+                                        onClick={handleSubmitManualRequest}
+                                        disabled={submitting || (!proofText.trim() && !proofImage)}
+                                        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-black py-5 rounded-[24px] shadow-xl transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest active:scale-95"
                                     >
-                                        Entendido
+                                        {submitting ? <Loader2 className="animate-spin" size={20}/> : <Send size={20}/>}
+                                        Enviar para Revisión
                                     </button>
                                 </div>
                             )}

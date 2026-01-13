@@ -1,7 +1,8 @@
+
 <?php
 ob_start(); 
 /**
- * StreamPay - Core Controller V11.42 (Fix Headers & Output Buffer)
+ * StreamPay - Core Controller V11.45 (Enhanced Manual Payments)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -146,6 +147,24 @@ try {
         case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'] ?? '', $_GET['creatorId'] ?? ''); break;
         case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId'] ?? ''); break;
         case 'request_content': interact_request_content($pdo, $input); break;
+
+        // VIP MANUAL PROOF SUBMISSION
+        case 'submit_manual_vip_request': 
+            $uid = $_POST['userId'];
+            $plan = $_POST['planSnapshot'];
+            $text = $_POST['proofText'] ?? null;
+            $img = null;
+            if (isset($_FILES['proofImage']) && $_FILES['proofImage']['error'] === UPLOAD_ERR_OK) {
+                $ext = strtolower(pathinfo($_FILES['proofImage']['name'], PATHINFO_EXTENSION));
+                $name = "proof_" . uniqid() . ".{$ext}";
+                if (!is_dir('uploads/proofs/')) mkdir('uploads/proofs/', 0777, true);
+                move_uploaded_file($_FILES['proofImage']['tmp_name'], 'uploads/proofs/' . $name);
+                $img = 'api/uploads/proofs/' . $name;
+            }
+            $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, proofText, proofImageUrl) VALUES (?, ?, ?, 'PENDING', ?, ?, ?)")
+                ->execute([uniqid('mpr_'), $uid, $plan, time(), $text, $img]);
+            respond(true);
+            break;
 
         // PAYMENTS (TROPIPAY)
         case 'create_pay_link': if(function_exists('payment_create_link')) payment_create_link($pdo, $input); else respond(false, null, "Módulo de pago no disponible"); break;

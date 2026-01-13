@@ -8,7 +8,6 @@ export enum UserRole {
   USER = 'USER'
 }
 
-// Added VideoCategory enum for video classification
 export enum VideoCategory {
   PERSONAL = 'PERSONAL',
   GENERAL = 'GENERAL',
@@ -91,7 +90,6 @@ export interface PaymentMethodConfig {
   instructions: string;
 }
 
-// Added FtpSettings interface for SystemSettings
 export interface FtpSettings {
   host: string;
   port: number;
@@ -130,7 +128,6 @@ export interface SystemSettings {
   };
   is_transcoder_active?: boolean;
   maxResolution?: number;
-  // Added ftpSettings property
   ftpSettings?: FtpSettings;
 }
 
@@ -188,7 +185,6 @@ export interface MarketplaceItem {
     sellerAvatarUrl?: string;
 }
 
-// Added MarketplaceReview interface
 export interface MarketplaceReview {
   id: string;
   userId: string;
@@ -199,13 +195,11 @@ export interface MarketplaceReview {
   timestamp: number;
 }
 
-// Added VideoResult interface
 export interface VideoResult {
   id: string;
   title: string;
 }
 
-// Added SmartCleanerResult interface
 export interface SmartCleanerResult {
   preview: {
     id: string;
@@ -219,7 +213,6 @@ export interface SmartCleanerResult {
   };
 }
 
-// Added FtpFile interface
 export interface FtpFile {
   name: string;
   type: 'dir' | 'file';
@@ -245,7 +238,10 @@ export interface VipRequest {
     username: string;
     planSnapshot: any;
     paymentRef?: string;
+    proofText?: string;
+    proofImageUrl?: string;
     createdAt: number;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
 export interface VipPlan {

@@ -47,15 +47,12 @@ class DBService {
         });
     }
 
-    // --- MÉTODOS CON FALLBACK OFFLINE MEJORADO ---
-
     public async getAllVideos(): Promise<Video[]> { 
         try {
             const vids = await this.request<Video[]>('action=get_videos');
             localStorage.setItem('sp_cache_vids', JSON.stringify(vids));
             return vids;
         } catch (e) {
-            console.warn("Usando cache local de videos (BD offline)");
             const cached = localStorage.getItem('sp_cache_vids');
             return cached ? JSON.parse(cached) : [];
         }
@@ -67,7 +64,6 @@ class DBService {
             localStorage.setItem('sp_cache_market', JSON.stringify(items));
             return items;
         } catch (e) {
-            console.warn("Usando cache local de marketplace (BD offline)");
             const cached = localStorage.getItem('sp_cache_market');
             return cached ? JSON.parse(cached) : [];
         }
@@ -83,8 +79,6 @@ class DBService {
             return cached ? JSON.parse(cached) : { categories: [] } as any;
         }
     }
-
-    // --- MÉTODOS ESTÁNDAR ---
 
     public async saveSearch(term: string): Promise<void> {
         return this.request<void>(`action=save_search`, { method: 'POST', body: JSON.stringify({ term }) });
@@ -237,8 +231,19 @@ class DBService {
     public async getBalanceRequests(): Promise<{balance: BalanceRequest[], vip: VipRequest[], activeVip?: Partial<User>[]}> { return this.request<{balance: BalanceRequest[], vip: VipRequest[], activeVip?: Partial<User>[]}>('action=get_balance_requests'); }
     public async handleBalanceRequest(adminId: string, reqId: string, status: string): Promise<void> { return this.request<void>(`action=handle_balance_request`, { method: 'POST', body: JSON.stringify({ adminId, reqId, status }) }); }
     public async handleVipRequest(adminId: string, reqId: string, status: string): Promise<void> { return this.request<void>(`action=handle_vip_request`, { method: 'POST', body: JSON.stringify({ adminId, reqId, status }) }); }
+    
     public async purchaseVipInstant(userId: string, plan: VipPlan): Promise<void> { return this.request<void>(`action=purchase_vip_instant`, { method: 'POST', body: JSON.stringify({ userId, plan }) }); }
     
+    public async submitManualVipRequest(userId: string, plan: VipPlan, proofText: string, proofImage: File | null): Promise<void> {
+        const fd = new FormData();
+        fd.append('userId', userId);
+        fd.append('planSnapshot', JSON.stringify(plan));
+        fd.append('proofText', proofText);
+        if (proofImage) fd.append('proofImage', proofImage);
+        
+        return this.request<void>(`action=submit_manual_vip_request`, { method: 'POST', body: fd });
+    }
+
     public async createPayLink(userId: string, plan: VipPlan): Promise<{paymentUrl: string}> {
         return this.request<{paymentUrl: string}>(`action=create_pay_link`, { method: 'POST', body: JSON.stringify({ userId, plan }) });
     }
