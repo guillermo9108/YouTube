@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
-import { SystemSettings, Category, VipPlan } from '../../../types';
+import { SystemSettings, Category, VipPlan, FtpSettings } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
 import { 
     Save, Tag, Loader2, Trash2, Plus, Sparkles, 
     CreditCard, ChevronRight, DollarSign, Database,
     Clock, Percent, HardDrive, Crown, X, Info, Smartphone, Wallet, Globe,
-    Cpu, Settings2, Shield, Activity
+    Cpu, Settings2, Shield, Activity, Network, ListPlus
 } from 'lucide-react';
 
 export default function AdminConfig() {
@@ -17,12 +17,13 @@ export default function AdminConfig() {
     const [saving, setSaving] = useState(false);
     
     const [activeSection, setActiveSection] = useState<string | null>('GENERAL');
+    const [newLibPath, setNewLibPath] = useState('');
 
     const loadSettings = async () => {
         setLoading(true);
         try {
             const s: any = await db.getSystemSettings();
-            // Asegurar integridad de objetos anidados
+            // Asegurar integridad de objetos anidados y valores por defecto
             if (!s.categories) s.categories = [];
             if (!s.vipPlans) s.vipPlans = [];
             if (!s.libraryPaths) s.libraryPaths = [];
@@ -32,6 +33,8 @@ export default function AdminConfig() {
                 mobile: { enabled: false, instructions: '' },
                 manual: { enabled: true, instructions: 'Contacta al admin para recargar.' }
             };
+            if (!s.ftpSettings) s.ftpSettings = { host: '', port: 21, user: '', pass: '', rootPath: '/' };
+            
             setSettings(s);
         } catch(e) { toast.error("Error al cargar configuración"); }
         finally { setLoading(false); }
@@ -54,18 +57,41 @@ export default function AdminConfig() {
         setSettings(prev => prev ? { ...prev, [key]: val } : null);
     };
 
-    const updatePaymentMethod = (method: string, field: 'enabled' | 'instructions', val: any) => {
+    // Función de actualización tipada para evitar TS7053
+    const updatePaymentMethod = (
+        method: 'tropipay' | 'card' | 'mobile' | 'manual', 
+        field: 'enabled' | 'instructions', 
+        val: any
+    ) => {
         if (!settings) return;
         const currentMethods = { ...(settings.paymentMethods || {}) };
-        const methodKey = method as keyof typeof currentMethods;
-        const methodConfig = { ...(currentMethods[methodKey] || { enabled: false, instructions: '' }) };
+        const methodConfig = { ...(currentMethods[method] || { enabled: false, instructions: '' }) };
         
-        // @ts-ignore
+        // @ts-ignore - Dynamic field update within safe keys
         methodConfig[field] = val;
-        // @ts-ignore
-        currentMethods[methodKey] = methodConfig;
+        currentMethods[method] = methodConfig;
         
         updateValue('paymentMethods', currentMethods);
+    };
+
+    const addLibraryPath = () => {
+        if (!newLibPath.trim() || !settings) return;
+        const paths = [...(settings.libraryPaths || [])];
+        if (!paths.includes(newLibPath)) {
+            paths.push(newLibPath);
+            updateValue('libraryPaths', paths);
+            setNewLibPath('');
+        }
+    };
+
+    const removeLibraryPath = (path: string) => {
+        if (!settings) return;
+        updateValue('libraryPaths', (settings.libraryPaths || []).filter(p => p !== path));
+    };
+
+    const updateFtp = (field: keyof FtpSettings, val: any) => {
+        if (!settings) return;
+        updateValue('ftpSettings', { ...settings.ftpSettings, [field]: val });
     };
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={32}/></div>;
@@ -88,25 +114,25 @@ export default function AdminConfig() {
     return (
         <div className="max-w-3xl mx-auto space-y-4 animate-in fade-in pb-32 px-2">
             
-            {/* Action Bar */}
+            {/* Top Command Bar */}
             <div className="bg-slate-900 p-6 rounded-[32px] border border-slate-800 shadow-2xl flex flex-col md:flex-row justify-between items-center gap-4 sticky top-[72px] z-40 backdrop-blur-md bg-slate-900/90">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20"><Settings2 size={24}/></div>
                     <div>
-                        <h2 className="text-xl font-black text-white uppercase tracking-tighter italic">Configuración</h2>
-                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Panel de Control Global</p>
+                        <h2 className="text-xl font-black text-white uppercase tracking-tighter italic leading-none">Sistema</h2>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">Core V1.8.2</p>
                     </div>
                 </div>
                 <button onClick={handleSaveConfig} disabled={saving} className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 px-10 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xl shadow-indigo-900/20">
-                    {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar Cambios
+                    {saving ? <Loader2 size={20} className="animate-spin"/> : <Save size={20}/>} Guardar Ajustes
                 </button>
             </div>
 
-            {/* SECTION: GENERAL & ECONOMY */}
+            {/* SECTION: GENERAL ECONOMY */}
             <SectionHeader id="GENERAL" label="Economía & IA" icon={Shield} color="text-emerald-400" />
             {activeSection === 'GENERAL' && (
                 <div className="bg-slate-900/50 p-6 rounded-[32px] border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                         <div className="space-y-2">
                             <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Percent size={12}/> Comisión Video</label>
                             <input type="number" value={settings?.videoCommission} onChange={e => updateValue('videoCommission', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold focus:border-indigo-500 outline-none" />
@@ -122,7 +148,7 @@ export default function AdminConfig() {
                     </div>
                     
                     <div className="space-y-2">
-                        <label className="text-[10px] font-black text-indigo-400 uppercase flex items-center gap-1"><Sparkles size={12}/> Google Gemini API Key</label>
+                        <label className="text-[10px] font-black text-indigo-400 uppercase flex items-center gap-1"><Sparkles size={12}/> Gemini AI API Key</label>
                         <input type="password" value={settings?.geminiKey} onChange={e => updateValue('geminiKey', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-xs focus:border-indigo-500 outline-none" placeholder="AI Key para metadatos..." />
                     </div>
 
@@ -139,34 +165,67 @@ export default function AdminConfig() {
                 </div>
             )}
 
-            {/* SECTION: PATHS & SYSTEM */}
-            <SectionHeader id="SYSTEM" label="Rutas & Servidor" icon={Cpu} color="text-blue-400" />
+            {/* SECTION: STORAGE & VOLUMES */}
+            <SectionHeader id="SYSTEM" label="Rutas & Almacenamiento" icon={Database} color="text-blue-400" />
             {activeSection === 'SYSTEM' && (
+                <div className="bg-slate-900/50 p-6 rounded-[32px] border border-slate-800 space-y-8 animate-in slide-in-from-top-4">
+                    <div className="space-y-4">
+                        <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 ml-1"><HardDrive size={14}/> Gestión de Volúmenes (Librería)</label>
+                        <div className="space-y-3">
+                            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2">
+                                <span className="text-[9px] font-bold text-slate-600 uppercase">Volumen Principal (Root)</span>
+                                <input type="text" value={settings?.localLibraryPath} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-transparent text-white font-mono text-xs outline-none" placeholder="/volume1/videos/..." />
+                            </div>
+                            
+                            {(settings?.libraryPaths || []).map(path => (
+                                <div key={path} className="flex items-center gap-3 bg-slate-950 p-4 rounded-2xl border border-slate-800 group">
+                                    <Database size={16} className="text-slate-600"/>
+                                    <span className="flex-1 text-xs font-mono text-slate-300 truncate">{path}</span>
+                                    <button onClick={() => removeLibraryPath(path)} className="p-2 text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={16}/></button>
+                                </div>
+                            ))}
+
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" value={newLibPath} onChange={e => setNewLibPath(e.target.value)} 
+                                    placeholder="Añadir otro disco (ej: /volumeUSB1/pakete)" 
+                                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs text-white outline-none focus:border-indigo-500"
+                                />
+                                <button onClick={addLibraryPath} className="bg-slate-800 text-white p-3 rounded-xl hover:bg-indigo-600 transition-colors"><ListPlus size={20}/></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Activity size={12}/> FFmpeg Bin</label>
+                            <input type="text" value={settings?.ffmpegPath} onChange={e => updateValue('ffmpegPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-[10px] outline-none" />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Activity size={12}/> YT-DLP Bin</label>
+                            <input type="text" value={settings?.ytDlpPath} onChange={e => updateValue('ytDlpPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-[10px] outline-none" />
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* SECTION: FTP SYNC */}
+            <SectionHeader id="FTP" label="Sincronización FTP" icon={Network} color="text-amber-400" />
+            {activeSection === 'FTP' && (
                 <div className="bg-slate-900/50 p-6 rounded-[32px] border border-slate-800 space-y-6 animate-in slide-in-from-top-4">
                     <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><HardDrive size={12}/> Ruta Base de Librería (Root)</label>
-                        <input type="text" value={settings?.localLibraryPath} onChange={e => updateValue('localLibraryPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-xs focus:border-indigo-500 outline-none" placeholder="/volume1/videos/..." />
+                        <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Host Servidor</label>
+                        <input type="text" value={settings?.ftpSettings?.host} onChange={e => updateFtp('host', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs outline-none" placeholder="192.168.1.100" />
                     </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Activity size={12}/> Ruta FFmpeg</label>
-                            <input type="text" value={settings?.ffmpegPath} onChange={e => updateValue('ffmpegPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-xs focus:border-indigo-500 outline-none" />
+                            <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Usuario</label>
+                            <input type="text" value={settings?.ftpSettings?.user} onChange={e => updateFtp('user', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs outline-none" />
                         </div>
                         <div className="space-y-2">
-                            <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1"><Activity size={12}/> Ruta YT-DLP</label>
-                            <input type="text" value={settings?.ytDlpPath} onChange={e => updateValue('ytDlpPath', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-xs focus:border-indigo-500 outline-none" />
+                            <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Contraseña</label>
+                            <input type="password" value={settings?.ftpSettings?.pass} onChange={e => updateFtp('pass', e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs outline-none" />
                         </div>
-                    </div>
-
-                    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-4">
-                         <div className="flex justify-between items-center">
-                             <span className="text-[10px] font-black text-slate-500 uppercase">Transcodificación Automática</span>
-                             <label className="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" checked={!!settings?.autoTranscode} onChange={e => updateValue('autoTranscode', e.target.checked)} className="sr-only peer"/>
-                                <div className="w-11 h-6 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                            </label>
-                         </div>
                     </div>
                 </div>
             )}
@@ -187,7 +246,7 @@ export default function AdminConfig() {
                                 <input value={cat.name} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, name: e.target.value.toUpperCase()} : c))} className="bg-transparent border-b border-white/5 text-white font-black text-xs w-full p-1 outline-none focus:border-indigo-500 transition-all"/>
                                 <div className="flex gap-4">
                                     <div className="flex-1">
-                                        <label className="text-[8px] text-slate-600 uppercase font-black block mb-1">Precio Base $</label>
+                                        <label className="text-[8px] text-slate-600 uppercase font-black block mb-1">Precio $</label>
                                         <div className="relative">
                                             <DollarSign size={10} className="absolute left-2 top-2.5 text-emerald-500"/>
                                             <input type="number" step="0.1" value={cat.price} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, price: parseFloat(e.target.value)} : c))} className="w-full bg-slate-900 rounded-lg p-2 pl-6 text-white text-[10px] font-bold outline-none"/>
@@ -196,53 +255,6 @@ export default function AdminConfig() {
                                     <div className="flex-1 flex items-center gap-2 mt-4">
                                         <input type="checkbox" checked={cat.autoSub} onChange={e => updateValue('categories', settings.categories.map(c => c.id === cat.id ? {...c, autoSub: e.target.checked} : c))} className="accent-indigo-500" />
                                         <span className="text-[8px] text-slate-500 font-black uppercase">Auto-Sub</span>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* SECTION: VIP PLANS */}
-            <SectionHeader id="VIP" label="Membresías & Recargas" icon={Crown} color="text-amber-400" />
-            {activeSection === 'VIP' && (
-                <div className="bg-slate-900/50 p-4 rounded-[32px] border border-slate-800 space-y-4 animate-in slide-in-from-top-4">
-                    <button onClick={() => {
-                        const newPlan: VipPlan = { id: 'p_' + Date.now(), name: 'Nuevo Plan', price: 10, type: 'ACCESS', durationDays: 30 };
-                        updateValue('vipPlans', [...(settings?.vipPlans || []), newPlan]);
-                    }} className="w-full bg-amber-500/10 hover:bg-amber-500/20 py-4 rounded-2xl flex items-center justify-center gap-2 text-[10px] font-black uppercase text-amber-500 border border-amber-500/20 transition-all"><Plus size={16}/> Crear Plan Comercial</button>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {settings?.vipPlans?.map(plan => (
-                            <div key={plan.id} className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4 relative group">
-                                <button onClick={() => updateValue('vipPlans', settings.vipPlans!.filter(p => p.id !== plan.id))} className="absolute top-2 right-2 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><X size={14}/></button>
-                                
-                                <div className="flex gap-2 items-center">
-                                    <input value={plan.name} onChange={e => updateValue('vipPlans', settings.vipPlans!.map(p => p.id === plan.id ? {...p, name: e.target.value} : p))} className="bg-transparent border-b border-white/5 text-white font-black text-sm flex-1 outline-none focus:border-amber-500 transition-all"/>
-                                    <select value={plan.type} onChange={e => updateValue('vipPlans', settings.vipPlans!.map(p => p.id === plan.id ? {...p, type: e.target.value} : p))} className="bg-slate-900 text-[9px] font-black text-amber-400 uppercase p-1.5 rounded border border-white/5 outline-none">
-                                        <option value="ACCESS">Acceso VIP</option>
-                                        <option value="BALANCE">Recarga Saldo</option>
-                                    </select>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="text-[8px] text-slate-600 uppercase font-black block mb-1">Precio $</label>
-                                        <input type="number" value={plan.price} onChange={e => updateValue('vipPlans', settings.vipPlans!.map(p => p.id === plan.id ? {...p, price: parseFloat(e.target.value)} : p))} className="w-full bg-slate-900 rounded-lg p-2 text-white font-mono text-xs outline-none"/>
-                                    </div>
-                                    <div>
-                                        {plan.type === 'ACCESS' ? (
-                                            <>
-                                                <label className="text-[8px] text-slate-600 uppercase font-black block mb-1">Días</label>
-                                                <input type="number" value={plan.durationDays} onChange={e => updateValue('vipPlans', settings.vipPlans!.map(p => p.id === plan.id ? {...p, durationDays: parseInt(e.target.value)} : p))} className="w-full bg-slate-900 rounded-lg p-2 text-white font-mono text-xs outline-none"/>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <label className="text-[8px] text-slate-600 uppercase font-black block mb-1">Bono %</label>
-                                                <input type="number" value={plan.bonusPercent} onChange={e => updateValue('vipPlans', settings.vipPlans!.map(p => p.id === plan.id ? {...p, bonusPercent: parseInt(e.target.value)} : p))} className="w-full bg-slate-900 rounded-lg p-2 text-white font-mono text-xs outline-none"/>
-                                            </>
-                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -261,7 +273,8 @@ export default function AdminConfig() {
                         { id: 'mobile', label: 'Saldo Móvil / Transfer', icon: Smartphone, color: 'text-pink-400' },
                         { id: 'manual', label: 'Solicitud Soporte', icon: Wallet, color: 'text-amber-400' }
                     ].map(m => {
-                        const config = settings?.paymentMethods?.[m.id as any] || { enabled: false, instructions: '' };
+                        const methodKey = m.id as 'tropipay' | 'card' | 'mobile' | 'manual';
+                        const config = settings?.paymentMethods?.[methodKey] || { enabled: false, instructions: '' };
                         return (
                             <div key={m.id} className="space-y-4 p-5 bg-slate-950 rounded-3xl border border-slate-800 group hover:border-indigo-500/30 transition-all shadow-xl">
                                 <div className="flex justify-between items-center">
@@ -270,7 +283,7 @@ export default function AdminConfig() {
                                         <span className="text-xs font-black text-white uppercase tracking-widest">{m.label}</span>
                                     </div>
                                     <label className="relative inline-flex items-center cursor-pointer">
-                                        <input type="checkbox" checked={config.enabled} onChange={e => updatePaymentMethod(m.id as any, 'enabled', e.target.checked)} className="sr-only peer"/>
+                                        <input type="checkbox" checked={config.enabled} onChange={e => updatePaymentMethod(methodKey, 'enabled', e.target.checked)} className="sr-only peer"/>
                                         <div className="w-12 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 shadow-inner"></div>
                                     </label>
                                 </div>
@@ -278,7 +291,7 @@ export default function AdminConfig() {
                                     <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-1">Información de pago para el usuario:</label>
                                     <textarea 
                                         value={config.instructions} 
-                                        onChange={e => updatePaymentMethod(m.id as any, 'instructions', e.target.value)}
+                                        onChange={e => updatePaymentMethod(methodKey, 'instructions', e.target.value)}
                                         placeholder={`Ej: Transfiere a la tarjeta 1234-5678...`}
                                         className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 min-h-[100px] outline-none focus:border-indigo-500 transition-all font-medium leading-relaxed shadow-inner italic"
                                     />
