@@ -220,7 +220,7 @@ export default function Home() {
     if (user) {
         try { 
             const res = await db.getNotifications(user.id); 
-            setNotifs(res); 
+            setNotifs(res || []); 
         } catch(e) {}
     }
   };

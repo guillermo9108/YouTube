@@ -51,7 +51,7 @@ export default function AdminAnalytics() {
         planMix: {} as Record<string, number> 
     });
 
-    // FIX: Filtramos SOLO planes de ACCESO TOTAL con máxima robustez (case-insensitive + trim)
+    // Filtramos SOLO planes de ACCESO TOTAL con máxima robustez
     const accessPlans = useMemo(() => {
         if (!allVipPlans || !Array.isArray(allVipPlans)) return [];
         return allVipPlans.filter(p => {
@@ -74,7 +74,6 @@ export default function AdminAnalytics() {
 
             setRealStats(rs);
             
-            // Aseguramos que vipPlans sea un array incluso si viene corrupto de la BD
             const rawPlans = settings?.vipPlans;
             let plans: VipPlan[] = [];
             if (Array.isArray(rawPlans)) {
@@ -83,11 +82,11 @@ export default function AdminAnalytics() {
                 try { plans = JSON.parse(rawPlans); } catch(e) { plans = []; }
             }
 
-            setAllVipPlans(plans);
+            setAllVipPlans(plans || []);
 
             // Inicializar Mix con los datos reales si existen
             const initialMix: Record<string, number> = {};
-            plans.filter(p => String(p.type || '').toUpperCase().trim() === 'ACCESS').forEach(p => { 
+            plans.filter(p => (p.type || '').toString().toUpperCase().trim() === 'ACCESS').forEach(p => { 
                 initialMix[p.id] = rs?.planMix?.[p.name] || 0; 
             });
 
@@ -235,19 +234,19 @@ export default function AdminAnalytics() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg">
                             <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Recaudación Periodo</div>
-                            <div className="text-3xl font-black text-emerald-400">{realStats?.totalRevenue?.toFixed(0)} $</div>
+                            <div className="text-3xl font-black text-emerald-400">{(realStats?.totalRevenue || 0).toFixed(0)} $</div>
                         </div>
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg">
                             <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Ticket Medio Real</div>
-                            <div className="text-3xl font-black text-white">{realStats?.averages?.arpu} $</div>
+                            <div className="text-3xl font-black text-white">{(realStats?.averages?.arpu || 0)} $</div>
                         </div>
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg">
                             <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Pagadores</div>
-                            <div className="text-3xl font-black text-indigo-400">{realStats?.activeUsers}</div>
+                            <div className="text-3xl font-black text-indigo-400">{(realStats?.activeUsers || 0)}</div>
                         </div>
                         <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-lg">
                             <div className="text-[10px] font-black text-slate-500 uppercase mb-1">Ventas Totales</div>
-                            <div className="text-3xl font-black text-white">{realStats?.averages?.totalTx}</div>
+                            <div className="text-3xl font-black text-white">{(realStats?.averages?.totalTx || 0)}</div>
                         </div>
                     </div>
                     <div className="bg-slate-900 border border-slate-800 rounded-[40px] p-8 md:p-10 shadow-2xl h-[400px] flex flex-col">
@@ -275,7 +274,7 @@ export default function AdminAnalytics() {
                                     {accessPlans.length === 0 ? (
                                         <div className="flex flex-col items-center justify-center py-20 text-center gap-4">
                                             <Zap className="text-slate-700 animate-pulse" size={48}/>
-                                            <p className="text-[10px] text-slate-600 italic uppercase tracking-widest leading-relaxed">No hay planes de tipo "ACCESS" <br/> configurados en Admin > Config.</p>
+                                            <p className="text-[10px] text-slate-600 italic uppercase tracking-widest leading-relaxed">No hay planes de tipo "ACCESS" <br/> configurados en Admin &gt; Config.</p>
                                         </div>
                                     ) : accessPlans.map(plan => (
                                         <div key={plan.id} className="bg-slate-950 p-4 rounded-3xl border border-white/5 group hover:border-indigo-500/30 transition-all">
@@ -354,12 +353,12 @@ export default function AdminAnalytics() {
                                 </div>
                             </div>
                             <div className="flex-1 w-full bg-slate-950/30 rounded-[32px] p-8 border border-slate-800/50 mb-8 relative">
-                                {projection.netResult < 0 && (
+                                {(projection.netResult < 0) && (
                                     <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-red-600 text-white px-4 py-1.5 rounded-full text-[10px] font-black uppercase animate-pulse">
                                         <AlertTriangle size={14}/> Déficit Operativo
                                     </div>
                                 )}
-                                {renderChart(projection.data, 'profit', projection.netResult >= 0 ? '#10b981' : '#f43f5e')}
+                                {renderChart(projection.data, 'profit', (projection.netResult >= 0) ? '#10b981' : '#f43f5e')}
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-8 border-t border-slate-800/50">
                                 <div className="bg-slate-950/40 p-4 rounded-3xl border border-white/5">

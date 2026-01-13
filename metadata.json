@@ -1,7 +1,7 @@
 
 {
-  "name": "StreamPay OFICIAL 0.0.10.3",
-  "description": "Plataforma móvil Pay-Per-View con Menú Lateral y Analítica Mejorada.",
+  "name": "StreamPay OFICIAL 0.0.10.4",
+  "description": "PWA Pay-Per-View con correcciones de sintaxis TSX y lógica de notificaciones mejorada.",
   "requestFramePermissions": [
     "camera",
     "microphone"
