@@ -1,21 +1,65 @@
+
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V15.0 (Restauración Total & Mix de Ventas)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V16.0 (Persistencia Reforzada & Requests)
  */
 
 function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($settings) {
-        $settings['categoryPrices'] = json_decode($settings['categoryPrices'] ?? '{}', true);
-        $settings['customCategories'] = json_decode($settings['customCategories'] ?? '[]', true);
-        $settings['categories'] = json_decode($settings['categories'] ?? '[]', true);
-        $settings['libraryPaths'] = json_decode($settings['libraryPaths'] ?? '[]', true);
-        $settings['vipPlans'] = json_decode($settings['vipPlans'] ?? '[]', true);
-        $settings['ftpSettings'] = json_decode($settings['ftpSettings'] ?? '{}', true);
+        $jsonFields = ['categories', 'libraryPaths', 'vipPlans', 'ftpSettings', 'paymentMethods', 'categoryPrices', 'customCategories', 'categoryHierarchy'];
+        foreach ($jsonFields as $field) {
+            if (isset($settings[$field])) {
+                if (is_string($settings[$field]) && !empty($settings[$field])) {
+                    $decoded = json_decode($settings[$field], true);
+                    $settings[$field] = $decoded !== null ? $decoded : ($field === 'ftpSettings' || $field === 'paymentMethods' ? new stdClass() : []);
+                } elseif (empty($settings[$field])) {
+                    $settings[$field] = ($field === 'ftpSettings' || $field === 'paymentMethods' ? new stdClass() : []);
+                }
+            }
+        }
         respond(true, $settings);
     }
     respond(false, null, "No se pudo cargar la configuración");
+}
+
+function admin_update_settings($pdo, $input) {
+    $allowed = [
+        'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
+        'maxDuration', 'maxResolution', 'ytDlpPath', 'ffmpegPath', 'enableYoutube', 
+        'categoryPrices', 'customCategories', 'localLibraryPath', 'libraryPaths', 
+        'videoCommission', 'marketCommission', 'transferFee', 'vipPlans', 
+        'paymentInstructions', 'currencyConversion', 'enableDebugLog', 
+        'autoTranscode', 'transcodePreset', 'proxyUrl', 'ftpSettings', 
+        'categories', 'is_transcoder_active', 'tropipayClientId', 'tropipayClientSecret', 
+        'geminiKey', 'paymentMethods'
+    ];
+    $fields = []; $params = [];
+    foreach ($input as $key => $val) {
+        if (in_array($key, $allowed)) {
+            $fields[] = "`$key` = ?";
+            $params[] = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
+        }
+    }
+    if (empty($fields)) respond(true);
+    $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    respond(true);
+}
+
+function admin_get_requests($pdo, $status = 'ALL') {
+    $sql = "SELECT r.*, u.username FROM requests r JOIN users u ON r.userId = u.id";
+    $params = [];
+    if ($status !== 'ALL') {
+        $sql .= " WHERE r.status = ?";
+        $params[] = $status;
+    }
+    $sql .= " ORDER BY r.createdAt DESC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
 function get_real_stats($pdo) {
@@ -82,29 +126,6 @@ function get_real_stats($pdo) {
     ]);
 }
 
-function admin_update_settings($pdo, $input) {
-    $allowed = [
-        'downloadStartTime', 'downloadEndTime', 'isQueuePaused', 'batchSize', 
-        'maxDuration', 'maxResolution', 'ytDlpPath', 'ffmpegPath', 'enableYoutube', 
-        'categoryPrices', 'customCategories', 'localLibraryPath', 'libraryPaths', 
-        'videoCommission', 'marketCommission', 'transferFee', 'vipPlans', 
-        'paymentInstructions', 'currencyConversion', 'enableDebugLog', 
-        'autoTranscode', 'transcodePreset', 'proxyUrl', 'ftpSettings', 
-        'categories', 'is_transcoder_active', 'tropipayClientId', 'tropipayClientSecret', 'geminiKey'
-    ];
-    $fields = []; $params = [];
-    foreach ($input as $key => $val) {
-        if (in_array($key, $allowed)) {
-            $fields[] = "`$key` = ?";
-            $params[] = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
-        }
-    }
-    if (empty($fields)) respond(true);
-    $sql = "UPDATE system_settings SET " . implode(', ', $fields) . " WHERE id = 1";
-    $pdo->prepare($sql)->execute($params);
-    respond(true);
-}
-
 function admin_add_balance($pdo, $input) {
     $targetId = $input['userId'] ?? null;
     $amount = floatval($input['amount'] ?? 0);
@@ -138,7 +159,6 @@ function admin_process_next_transcode($pdo) {
     if (!is_dir($outFolder)) mkdir($outFolder, 0777, true);
     $outputPath = $outFolder . $video['id'] . '.mp4';
     
-    // Comando universal optimizado
     $profileArgs = "-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 1280x720 -aspect 16:9 -r 30 -b:v 1500k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100 -ab 128k";
     $cmd = escapeshellarg($ffmpegPath) . " -i " . escapeshellarg($inputPath) . " -y " . $profileArgs . " " . escapeshellarg($outputPath) . " 2>&1";
     
