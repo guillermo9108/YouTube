@@ -121,7 +121,7 @@ export default function Profile() {
   if (!user) return null;
 
   return (
-    <div className="space-y-6 pb-24 max-w-4xl mx-auto px-2 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="space-y-6 pb-24 px-2 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
       
       {/* Neo-Banking Wallet Header */}
       <div className="bg-gradient-to-br from-indigo-600 via-indigo-700 to-purple-800 p-8 rounded-[40px] shadow-2xl relative overflow-hidden">
@@ -130,7 +130,7 @@ export default function Profile() {
               <div className="text-center md:text-left flex flex-col md:flex-row items-center gap-6">
                   <div className="relative group">
                       <div className="w-24 h-24 rounded-full border-4 border-white/20 overflow-hidden bg-slate-800 shadow-2xl">
-                          {avatarPreview ? <img src={avatarPreview} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-3xl font-black text-white/20">{user.username[0]}</div>}
+                          {avatarPreview ? <img src={avatarPreview} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-3xl font-black text-white/20">{user?.username?.[0] || '?'}</div>}
                       </div>
                   </div>
                   <div>
@@ -200,7 +200,7 @@ export default function Profile() {
                                             className="w-full p-3 flex items-center gap-3 hover:bg-indigo-600 transition-colors border-b border-white/5 last:border-0"
                                         >
                                             <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-900 shrink-0">
-                                                {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-white/20">{s.username[0]}</div>}
+                                                {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-white/20">{s.username?.[0] || '?'}</div>}
                                             </div>
                                             <span className="text-sm font-bold text-white">@{s.username}</span>
                                             <UserCheck size={14} className="ml-auto opacity-30"/>

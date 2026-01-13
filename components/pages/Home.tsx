@@ -33,17 +33,17 @@ const Sidebar = ({ isOpen, onClose, user, isAdmin, logout }: { isOpen: boolean, 
                     
                     <div className="flex items-center gap-4 mb-6">
                         <div className="w-14 h-14 rounded-2xl bg-indigo-600 border-2 border-white/10 overflow-hidden shadow-lg">
-                            {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white text-xl">{user?.username[0]}</div>}
+                            {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white text-xl">{user?.username?.[0] || '?'}</div>}
                         </div>
                         <div className="min-w-0">
-                            <div className="font-black text-white truncate">@{user?.username}</div>
+                            <div className="font-black text-white truncate">@{user?.username || 'Usuario'}</div>
                             <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">{user?.role}</div>
                         </div>
                     </div>
 
                     <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                         <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Tu Saldo</p>
-                        <div className="text-xl font-black text-emerald-400">{Number(user?.balance).toFixed(2)} $</div>
+                        <div className="text-xl font-black text-emerald-400">{Number(user?.balance || 0).toFixed(2)} $</div>
                     </div>
                 </div>
 
@@ -551,7 +551,7 @@ export default function Home() {
                           {searchResults.users.map(u => (
                               <Link key={u.id} to={`/channel/${u.id}`} className="bg-slate-900 border border-slate-800 p-4 rounded-3xl flex items-center gap-4 shrink-0 hover:bg-slate-800 transition-all shadow-lg min-w-[240px]">
                                   <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-800 border-2 border-indigo-500/30">
-                                      {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{u.username[0]}</div>}
+                                      {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{u.username?.[0] || '?'}</div>}
                                   </div>
                                   <div className="flex-1 min-w-0">
                                       <div className="font-black text-white text-sm truncate">@{u.username}</div>

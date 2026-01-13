@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../../../services/db';
 import { User } from '../../../types';
@@ -166,7 +167,7 @@ export default function AdminUsers() {
                                         <td className="px-4 py-4">
                                             <div className="flex items-center gap-3">
                                                 <div className="w-9 h-9 rounded-full bg-slate-800 overflow-hidden shrink-0 border border-white/5">
-                                                    {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-600">{u.username[0]}</div>}
+                                                    {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-bold text-slate-600">{u?.username?.[0] || '?'}</div>}
                                                 </div>
                                                 <div className="min-w-0">
                                                     <div className="text-sm font-bold text-white truncate">@{u.username}</div>
@@ -237,7 +238,7 @@ export default function AdminUsers() {
                                                 className="w-full p-3 flex items-center gap-3 hover:bg-indigo-600 transition-colors border-b border-white/5 last:border-0"
                                             >
                                                 <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-900 shrink-0">
-                                                    {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-white/20">{s.username[0]}</div>}
+                                                    {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-white/20">{s?.username?.[0] || '?'}</div>}
                                                 </div>
                                                 <div className="text-left flex-1">
                                                     <div className="text-sm font-bold text-white">@{s.username}</div>
