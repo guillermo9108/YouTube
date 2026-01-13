@@ -82,14 +82,12 @@ const SetupGuard = ({ children }: { children?: React.ReactNode }) => {
     // Verificación robusta del estado de instalación
     db.checkInstallation()
       .then((res) => {
-         // Con el db.ts arreglado, res es solo { status: 'installed'|'not_installed' }
          if (res && res.status === 'not_installed') {
              setNeedsSetup(true);
          }
          setCheckDone(true);
       })
       .catch((err) => {
-         // Si hay un error de conexión, no forzamos setup a menos que sea explícito
          console.warn("Verificación de instalación ignorada por error de red", err);
          setCheckDone(true);
       });
@@ -140,7 +138,21 @@ export default function App() {
                                 <Route path="/vip" element={<SetupGuard><ProtectedRoute><VipStore /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/marketplace/edit/:id" element={<SetupGuard><ProtectedRoute><MarketplaceEdit /></ProtectedRoute></SetupGuard>} />
                                 <Route path="/marketplace/:id" element={<SetupGuard><ProtectedRoute><MarketplaceItem /></ProtectedRoute></SetupGuard>} />
+                                
+                                {/* Admin Routes Independientes */}
                                 <Route path="/admin" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/users" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/finance" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/market" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/requests" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/library" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/transcoder" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/portability" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/files" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/ftp" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/analytics" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/config" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
+                                <Route path="/admin/maintenance" element={<SetupGuard><AdminRoute><Admin /></AdminRoute></SetupGuard>} />
                             </Route>
 
                             <Route path="*" element={<Navigate to="/" />} />
