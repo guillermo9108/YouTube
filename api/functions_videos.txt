@@ -7,12 +7,10 @@ function video_process_rows(&$rows) {
     if (!$rows) return;
     foreach ($rows as &$v) {
         $v['rawPath'] = $v['videoUrl'];
-        // Detección mejorada de video que requiere streaming por proxy
         $isLocal = (isset($v['isLocal']) && ($v['isLocal'] == 1 || $v['isLocal'] === "1" || $v['isLocal'] === true));
         $isUploaded = (strpos($v['videoUrl'] ?? '', 'uploads/videos/') !== false);
         
         if ($isLocal || $isUploaded) {
-            // Siempre usar el proxy de stream para archivos que están en el disco del servidor
             $v['videoUrl'] = "api/index.php?action=stream&id=" . $v['id'];
             $v['isLocal'] = true;
         }
@@ -276,4 +274,3 @@ function video_delete($pdo, $input) {
     $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
     respond(true);
 }
-?>

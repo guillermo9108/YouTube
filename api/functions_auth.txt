@@ -1,4 +1,3 @@
-
 <?php
 
 function getBearerToken() {
@@ -99,7 +98,7 @@ function auth_update_user($pdo, $input) {
     if (!empty($data['newPassword'])) { $fields[] = "password_hash = ?"; $params[] = password_hash($data['newPassword'], PASSWORD_DEFAULT); }
     if (!empty($data['toggleWatchLater'])) {
         $vid = $data['toggleWatchLater'];
-        $curr = json_decode($pdo->query("SELECT watchLater FROM users id = '$uid'")->fetchColumn() ?: '[]', true);
+        $curr = json_decode($pdo->query("SELECT watchLater FROM users WHERE id = '$uid'")->fetchColumn() ?: '[]', true);
         if (in_array($vid, $curr)) $curr = array_values(array_diff($curr, [$vid])); else $curr[] = $vid;
         $fields[] = "watchLater = ?"; $params[] = json_encode($curr);
     }
@@ -109,4 +108,3 @@ function auth_update_user($pdo, $input) {
     $params[] = $uid; $stmt = $pdo->prepare("UPDATE users SET " . implode(', ', $fields) . " WHERE id = ?"); $stmt->execute($params);
     respond(true);
 }
-?>

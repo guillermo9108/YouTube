@@ -27,25 +27,21 @@ function interact_get_search_suggestions($pdo, $q) {
     
     $suggestions = [];
 
-    // 1. Usuarios (Canales)
     $whereUser = build_multi_word_where($words, 'username');
     $stmtU = $pdo->prepare("SELECT username as label, 'USER' as type, id FROM users WHERE $whereUser LIMIT 3");
     $stmtU->execute();
     $suggestions = array_merge($suggestions, $stmtU->fetchAll());
 
-    // 2. Colecciones y Carpetas (DISTINCT en categorías de videos)
     $whereCat = build_multi_word_where($words, 'category');
     $stmtC = $pdo->prepare("SELECT DISTINCT category as label, 'CATEGORY' as type, category as id FROM videos WHERE $whereCat AND category NOT IN ('PENDING', 'PROCESSING', 'GENERAL') LIMIT 5");
     $stmtC->execute();
     $suggestions = array_merge($suggestions, $stmtC->fetchAll());
 
-    // 3. Videos
     $whereVid = build_multi_word_where($words, 'title');
     $stmtV = $pdo->prepare("SELECT title as label, 'VIDEO' as type, id FROM videos WHERE $whereVid AND category NOT IN ('PENDING', 'PROCESSING') LIMIT 5");
     $stmtV->execute();
     $suggestions = array_merge($suggestions, $stmtV->fetchAll());
 
-    // 4. Marketplace
     $whereMkt = build_multi_word_where($words, 'title');
     $stmtM = $pdo->prepare("SELECT title as label, 'MARKET' as type, id FROM marketplace_items WHERE $whereMkt AND status = 'ACTIVO' LIMIT 5");
     $stmtM->execute();
@@ -61,7 +57,6 @@ function interact_request_content($pdo, $input) {
     if (empty($query)) respond(false, null, "Consulta vacía");
     
     $id = 'req_' . uniqid();
-    // CORRECCIÓN: Usar la tabla 'requests' y no 'balance_requests'
     $stmt = $pdo->prepare("INSERT INTO requests (id, userId, query, status, createdAt, isVip) VALUES (?, ?, ?, 'PENDING', ?, ?)");
     $stmt->execute([$id, $uid, $query, time(), $isVip]);
         
@@ -193,7 +188,6 @@ function interact_rate($pdo, $input) {
         
         $pdo->prepare("INSERT INTO interactions (userId, videoId, liked, disliked) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE liked=VALUES(liked), disliked=VALUES(disliked)")->execute([$userId, $videoId, $liked, $disliked]);
         
-        // SINCRONIZACIÓN: Actualizar la tabla videos con el conteo real
         $newLikeCount = (int)$pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId = '$videoId' AND liked = 1")->fetchColumn();
         $newDislikeCount = (int)$pdo->query("SELECT COUNT(*) FROM interactions WHERE videoId = '$videoId' AND disliked = 1")->fetchColumn();
         
@@ -266,5 +260,4 @@ function interact_mark_all_notifications_read($pdo, $input) {
     respond(true);
 }
 
-function interact_get_transactions($pdo, $userId) { $stmt = $pdo->prepare("SELECT * FROM transactions WHERE buyerId = ? OR creatorId = ? ORDER BY timestamp DESC"); $stmt->execute([$userId, $userId]); respond(true, $stmt->fetchAll(PDO::FETCH_ASSOC)); }
-?>
+function interact_get_transactions($pdo, $userId) { $stmt = $pdo->prepare("SELECT * FROM transactions WHERE buyerId = ? OR creatorId = ? ORDER BY timestamp DESC"); $stmt->execute([$userId, $userId]); respond(true, $stmt->fetchAll(PDO::FETCH_COLUMN)); }

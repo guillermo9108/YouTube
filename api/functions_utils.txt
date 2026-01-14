@@ -83,7 +83,6 @@ function fix_url($url) {
     if (strpos($url, 'data:') === 0) return $url;
     $clean = ltrim($url, '/');
     if (strpos($clean, 'api/') === 0) return $clean;
-    // Si la ruta empieza con uploads/, añadir api/ delante
     if (strpos($clean, 'uploads/') === 0) return 'api/' . $clean;
     return 'api/' . $clean;
 }
@@ -121,10 +120,8 @@ function streamVideo($id, $pdo) {
     
     while (!feof($fp)) {
         echo fread($fp, 1024 * 128);
-        flush();
         if (connection_aborted()) break;
     }
     fclose($fp);
     exit;
 }
-?>

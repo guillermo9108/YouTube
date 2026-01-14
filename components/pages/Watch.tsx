@@ -131,7 +131,9 @@ export default function Watch() {
 
     const handlePurchase = async () => {
         if (!user || !video || isPurchasing) return;
-        if (user.balance < video.price) {
+        
+        // Re-verificar saldo localmente antes de llamar a la API
+        if (Number(user.balance) < Number(video.price)) {
             toast.error("Saldo insuficiente para comprar este video.");
             navigate('/vip');
             return;
@@ -197,25 +199,32 @@ export default function Watch() {
         const hasAccess = user.role?.trim().toUpperCase() === 'ADMIN' || user.id === nextVid.creatorId || isVipTotal;
         
         if (hasAccess) { navigateToNext(nextVid); return; }
+        
         const purchased = await db.hasPurchased(user.id, nextVid.id);
         if (purchased) { navigateToNext(nextVid); return; }
 
         const price = Number(nextVid.price);
         const limit = Number(user.autoPurchaseLimit || 0);
         
-        // --- LOGICA DE COMPRA AUTOMÁTICA REFORZADA ---
+        // --- LOGICA DE AUTOCOMPRA REFORZADA ---
         if (price <= limit && Number(user.balance) >= price) {
             try {
+                toast.info(`Autocomprando: ${nextVid.title}...`);
                 await db.purchaseVideo(user.id, nextVid.id);
-                toast.success(`Autocompra de seguridad: ${nextVid.title}`);
-                refreshUser(); // Actualizar saldo después de autocompra
+                toast.success(`Desbloqueado automáticamente: ${nextVid.title}`);
+                refreshUser(); 
                 navigateToNext(nextVid);
             } catch (e) { 
-                toast.error("Error en autocompra automática."); 
+                toast.error("Fallo en autocompra automática. Saldo insuficiente o error de red."); 
+                navigateToNext(nextVid);
             }
         } else {
-            toast.warning("El próximo contenido requiere compra manual (excede límite o saldo insuficiente).");
-            navigateToNext(nextVid); // Navegar de todos modos, se mostrará bloqueado
+            if (price > limit) {
+                toast.warning("El siguiente video excede tu límite de autocompra.");
+            } else {
+                toast.warning("Saldo insuficiente para autocompra.");
+            }
+            navigateToNext(nextVid); 
         }
     };
 
@@ -249,9 +258,9 @@ export default function Watch() {
     const streamUrl = useMemo(() => {
         if (!video) return '';
         const token = localStorage.getItem('sp_session_token') || '';
-        // CORRECCIÓN: Usar ruta relativa para evitar problemas en subdirectorios de NAS
+        // CORRECCIÓN: Usar URL absoluta para el stream
         const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
-        return `${base}&token=${token}`;
+        return `${base}&token=${token}&cb=${Date.now()}`;
     }, [video?.id]);
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
@@ -284,7 +293,7 @@ export default function Watch() {
                                     <button 
                                         onClick={handlePurchase}
                                         disabled={isPurchasing}
-                                        className="w-full px-8 py-5 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-2xl text-lg flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all"
+                                        className={`w-full px-8 py-5 text-black font-black rounded-2xl text-lg flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all ${user && Number(user.balance) >= Number(video?.price) ? 'bg-amber-500 hover:bg-amber-400' : 'bg-slate-700 cursor-not-allowed text-slate-400'}`}
                                     >
                                         {isPurchasing ? <Loader2 className="animate-spin"/> : <ShoppingCart size={24}/>}
                                         {isPurchasing ? 'PROCESANDO...' : `COMPRAR POR ${video?.price} $`}
@@ -293,14 +302,16 @@ export default function Watch() {
                                         onClick={() => navigate('/vip')}
                                         className="w-full py-4 bg-white/10 hover:bg-white/20 text-white font-black rounded-2xl text-xs uppercase tracking-widest transition-all"
                                     >
-                                        VER PLANES VIP
+                                        RECARGAR SALDO / VIP
                                     </button>
                                 </div>
                                 
                                 {user && (
-                                    <div className="mt-8 flex items-center gap-2 bg-black/40 px-4 py-2 rounded-full border border-white/10">
-                                        <Wallet size={14} className="text-emerald-400"/>
-                                        <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Tu Saldo: {Number(user.balance).toFixed(2)} $</span>
+                                    <div className={`mt-8 flex items-center gap-2 bg-black/40 px-4 py-2 rounded-full border ${Number(user.balance) < Number(video?.price) ? 'border-red-500/50' : 'border-white/10'}`}>
+                                        <Wallet size={14} className={Number(user.balance) < Number(video?.price) ? 'text-red-500' : 'text-emerald-400'}/>
+                                        <span className={`text-[10px] font-black uppercase tracking-widest ${Number(user.balance) < Number(video?.price) ? 'text-red-400' : 'text-slate-300'}`}>
+                                            Tu Saldo: {Number(user.balance).toFixed(2)} $
+                                        </span>
                                     </div>
                                 )}
                             </div>
