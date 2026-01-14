@@ -136,6 +136,7 @@ export interface Transaction {
   type: 'PURCHASE' | 'DEPOSIT' | 'MARKETPLACE' | 'VIP' | 'TRANSFER_SENT' | 'TRANSFER_RECV';
   amount: number | string;
   buyerId?: string;
+  buyerName?: string;
   videoTitle?: string;
   timestamp: number;
   recipientName?: string;

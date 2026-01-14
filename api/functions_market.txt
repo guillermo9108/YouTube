@@ -1,3 +1,4 @@
+
 <?php
 define('MARKET_DIR', 'uploads/market/');
 
@@ -178,7 +179,9 @@ function market_checkout($pdo, $input) {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$sellerPart, $real['sellerId']]);
             if ($adminId) $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$fee, $adminId]);
             $pdo->prepare("UPDATE marketplace_items SET stock = stock - ? WHERE id = ?")->execute([$qty, $item['id']]);
-            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, marketplaceItemId, amount, adminFee, timestamp, type, shippingData) VALUES (?, ?, ?, ?, ?, ?, ?, 'MARKETPLACE', ?)")
+            
+            // IMPORTANTE: isExternal = 0 (Circulación interna)
+            $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, marketplaceItemId, amount, adminFee, timestamp, type, shippingData, isExternal) VALUES (?, ?, ?, ?, ?, ?, ?, 'MARKETPLACE', ?, 0)")
                 ->execute([uniqid('txm_'), $userId, $real['sellerId'], $item['id'], $total, $fee, time(), json_encode($shipping)]);
         }
         $pdo->commit(); respond(true);
