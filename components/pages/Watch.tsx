@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -132,7 +133,6 @@ export default function Watch() {
     const handlePurchase = async () => {
         if (!user || !video || isPurchasing) return;
         
-        // Re-verificar saldo localmente antes de llamar a la API
         if (Number(user.balance) < Number(video.price)) {
             toast.error("Saldo insuficiente para comprar este video.");
             navigate('/vip');
@@ -206,7 +206,6 @@ export default function Watch() {
         const price = Number(nextVid.price);
         const limit = Number(user.autoPurchaseLimit || 0);
         
-        // --- LOGICA DE AUTOCOMPRA REFORZADA ---
         if (price <= limit && Number(user.balance) >= price) {
             try {
                 toast.info(`Autocomprando: ${nextVid.title}...`);
@@ -215,15 +214,10 @@ export default function Watch() {
                 refreshUser(); 
                 navigateToNext(nextVid);
             } catch (e) { 
-                toast.error("Fallo en autocompra automática. Saldo insuficiente o error de red."); 
+                toast.error("Fallo en autocompra automática."); 
                 navigateToNext(nextVid);
             }
         } else {
-            if (price > limit) {
-                toast.warning("El siguiente video excede tu límite de autocompra.");
-            } else {
-                toast.warning("Saldo insuficiente para autocompra.");
-            }
             navigateToNext(nextVid); 
         }
     };
@@ -258,7 +252,6 @@ export default function Watch() {
     const streamUrl = useMemo(() => {
         if (!video) return '';
         const token = localStorage.getItem('sp_session_token') || '';
-        // CORRECCIÓN: Usar URL absoluta para el stream
         const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
         return `${base}&token=${token}&cb=${Date.now()}`;
     }, [video?.id]);
@@ -282,35 +275,40 @@ export default function Watch() {
                             crossOrigin="anonymous"
                         />
                     ) : (
-                        <div className="absolute inset-0 group overflow-hidden">
-                            {video && <img src={video.thumbnailUrl} className="w-full h-full object-cover blur-2xl opacity-40 scale-110"/>}
-                            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-center p-6">
-                                <div className="p-5 bg-white/5 backdrop-blur-3xl border border-white/10 rounded-full mb-6 shadow-2xl"><Lock size={48} className="text-amber-500 animate-pulse"/></div>
-                                <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter mb-2">Contenido Premium</h2>
-                                <p className="text-slate-400 text-sm mb-8 uppercase font-bold tracking-widest">Desbloquea el acceso permanente a este video</p>
+                        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+                            {video && <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover blur-3xl opacity-30 scale-110"/>}
+                            
+                            <div className="relative z-10 bg-slate-900/60 backdrop-blur-xl border border-white/10 p-5 md:p-8 rounded-[32px] md:rounded-[48px] shadow-2xl flex flex-col items-center text-center max-w-[90%] md:max-w-md animate-in zoom-in-95 duration-500">
+                                <div className="w-12 h-12 md:w-16 md:h-16 bg-amber-500/10 rounded-3xl flex items-center justify-center mb-3 md:mb-4 border border-amber-500/20">
+                                    <Lock size={24} className="text-amber-500"/>
+                                </div>
                                 
-                                <div className="flex flex-col gap-3 w-full max-w-xs">
+                                <h2 className="text-lg md:text-xl font-black text-white uppercase tracking-tighter mb-1 leading-none">Contenido Premium</h2>
+                                <p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase tracking-widest mb-6 px-4">Desbloquea para siempre este contenido</p>
+                                
+                                <div className="flex flex-col gap-2 w-full">
                                     <button 
                                         onClick={handlePurchase}
                                         disabled={isPurchasing}
-                                        className={`w-full px-8 py-5 text-black font-black rounded-2xl text-lg flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all ${user && Number(user.balance) >= Number(video?.price) ? 'bg-amber-500 hover:bg-amber-400' : 'bg-slate-700 cursor-not-allowed text-slate-400'}`}
+                                        className={`w-full py-3.5 md:py-4 px-6 rounded-2xl md:rounded-3xl font-black text-sm flex items-center justify-center gap-3 transition-all active:scale-95 shadow-xl ${user && Number(user.balance) >= Number(video?.price) ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-amber-500/10' : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-white/5'}`}
                                     >
-                                        {isPurchasing ? <Loader2 className="animate-spin"/> : <ShoppingCart size={24}/>}
+                                        {isPurchasing ? <Loader2 className="animate-spin" size={18}/> : <ShoppingCart size={18}/>}
                                         {isPurchasing ? 'PROCESANDO...' : `COMPRAR POR ${video?.price} $`}
                                     </button>
+                                    
                                     <button 
                                         onClick={() => navigate('/vip')}
-                                        className="w-full py-4 bg-white/10 hover:bg-white/20 text-white font-black rounded-2xl text-xs uppercase tracking-widest transition-all"
+                                        className="w-full py-2.5 md:py-3 text-[10px] md:text-[11px] font-black text-slate-300 uppercase tracking-[0.2em] hover:text-white transition-colors"
                                     >
-                                        RECARGAR SALDO / VIP
+                                        Recargar Saldo
                                     </button>
                                 </div>
                                 
                                 {user && (
-                                    <div className={`mt-8 flex items-center gap-2 bg-black/40 px-4 py-2 rounded-full border ${Number(user.balance) < Number(video?.price) ? 'border-red-500/50' : 'border-white/10'}`}>
-                                        <Wallet size={14} className={Number(user.balance) < Number(video?.price) ? 'text-red-500' : 'text-emerald-400'}/>
-                                        <span className={`text-[10px] font-black uppercase tracking-widest ${Number(user.balance) < Number(video?.price) ? 'text-red-400' : 'text-slate-300'}`}>
-                                            Tu Saldo: {Number(user.balance).toFixed(2)} $
+                                    <div className={`mt-4 flex items-center gap-2 px-3 py-1.5 rounded-full border ${Number(user.balance) < Number(video?.price) ? 'bg-red-500/5 border-red-500/20' : 'bg-white/5 border-white/10'}`}>
+                                        <Wallet size={12} className={Number(user.balance) < Number(video?.price) ? 'text-red-400' : 'text-emerald-400'}/>
+                                        <span className={`text-[9px] font-black uppercase tracking-widest ${Number(user.balance) < Number(video?.price) ? 'text-red-400' : 'text-slate-400'}`}>
+                                            Mi Saldo: {Number(user.balance).toFixed(2)} $
                                         </span>
                                     </div>
                                 )}
