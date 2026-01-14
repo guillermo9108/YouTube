@@ -1,3 +1,4 @@
+
 <?php
 
 // --- TROPIPAY INTEGRATION ---
@@ -20,7 +21,7 @@ function getTropipayToken($clientId, $clientSecret) {
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
         CURLOPT_CUSTOMREQUEST => "POST",
         CURLOPT_POSTFIELDS => $data,
-        CURLOPT_SSL_VERIFYPEER => false, // Solución para error de CAfile en Termux/Local
+        CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => false,
         CURLOPT_HTTPHEADER => [
             "Content-Type: application/json"
@@ -37,84 +38,6 @@ function getTropipayToken($clientId, $clientSecret) {
     if (!isset($json['access_token'])) throw new Exception("Tropipay Auth Failed: " . ($json['error'] ?? 'Unknown'));
     
     return $json['access_token'];
-}
-
-function payment_create_link($pdo, $input) {
-    $userId = $input['userId'];
-    $plan = $input['plan']; // VipPlan object
-    
-    // 1. Get Settings
-    $stmt = $pdo->query("SELECT tropipayClientId, tropipayClientSecret, currencyConversion FROM system_settings LIMIT 1");
-    $s = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (empty($s['tropipayClientId']) || empty($s['tropipayClientSecret'])) {
-        respond(false, null, 'Tropipay no configurado en el Admin Panel');
-    }
-
-    $rate = floatval($s['currencyConversion']) ?: 1; 
-    $amountEUR = round($plan['price'] / $rate, 2);
-    if ($amountEUR < 1) $amountEUR = 1;
-
-    try {
-        $token = getTropipayToken($s['tropipayClientId'], $s['tropipayClientSecret']);
-        
-        // 3. Create Pay Link
-        $reference = "VP-" . $userId . "-" . $plan['id'] . "-" . time();
-        
-        $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https://" : "http://";
-        $host = $_SERVER['HTTP_HOST'];
-        $baseUrl = $protocol . $host . dirname(dirname($_SERVER['PHP_SELF'])); 
-        $baseUrl = str_replace('/api', '', $baseUrl);
-        $baseUrl = rtrim($baseUrl, '/');
-        
-        $successUrl = $baseUrl . "/#/vip?status=success&ref=" . $reference;
-        $cancelUrl = $baseUrl . "/#/vip?status=cancel";
-
-        $payload = json_encode([
-            "reference" => $reference,
-            "concept" => "StreamPay VIP: " . $plan['name'],
-            "description" => "Plan VIP para usuario " . $userId,
-            "amount" => $amountEUR * 100, 
-            "currency" => "EUR",
-            "lang" => "es",
-            "urlSuccess" => $successUrl,
-            "urlFailed" => $cancelUrl,
-            "directPayment" => true,
-            "serviceDate" => date('Y-m-d')
-        ]);
-
-        $curl = curl_init();
-        curl_setopt_array($curl, [
-            CURLOPT_URL => "https://tropipay.com/api/v2/paymentcards",
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CUSTOMREQUEST => "POST",
-            CURLOPT_POSTFIELDS => $payload,
-            CURLOPT_SSL_VERIFYPEER => false, // Solución para error de CAfile
-            CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_HTTPHEADER => [
-                "Content-Type: application/json",
-                "Authorization: Bearer " . $token
-            ],
-        ]);
-
-        $response = curl_exec($curl);
-        $err = curl_error($curl);
-        curl_close($curl);
-
-        if ($err) throw new Exception("Tropipay Error: " . $err);
-        
-        $json = json_decode($response, true);
-        if (empty($json['paymentUrl'])) throw new Exception("No Payment URL returned: " . $response);
-
-        // 4. Save Pending Request
-        $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, paymentRef) VALUES (?, ?, ?, 'PENDING', ?, ?)")
-            ->execute([uniqid('pp_'), $userId, json_encode($plan), time(), $reference]);
-
-        respond(true, ['paymentUrl' => $json['paymentUrl']]);
-
-    } catch (Exception $e) {
-        respond(false, null, $e->getMessage());
-    }
 }
 
 function payment_verify($pdo, $input) {
@@ -137,7 +60,7 @@ function payment_verify($pdo, $input) {
         curl_setopt_array($curl, [
             CURLOPT_URL => "https://tropipay.com/api/v2/movements?reference=" . $ref,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_SSL_VERIFYPEER => false, // Solución para error de CAfile
+            CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER => ["Authorization: Bearer " . $token],
         ]);
@@ -169,8 +92,9 @@ function payment_verify($pdo, $input) {
                 $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $userId]);
                 
                 $tid = uniqid('tx_vip_auto_');
-                $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP')")
-                    ->execute([$tid, $userId, $total, time()]);
+                // IMPORTANTE: isExternal = 1 (Efectivo Real)
+                $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type, videoTitle, isExternal) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP', ?, 1)")
+                    ->execute([$tid, $userId, $total, time(), $plan['name']]);
                     
             } else {
                 $days = intval($plan['durationDays']);
@@ -182,6 +106,11 @@ function payment_verify($pdo, $input) {
                 $newStart = ($currentExpiry > $now) ? $currentExpiry : $now;
                 $newExpiry = $newStart + $seconds;
                 $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
+                
+                $tid = uniqid('tx_vip_direct_');
+                // IMPORTANTE: isExternal = 1 (Efectivo Real)
+                $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type, videoTitle, isExternal) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP', ?, 1)")
+                    ->execute([$tid, $userId, $plan['price'], time(), $plan['name']]);
             }
             
             $nid = uniqid('n_');

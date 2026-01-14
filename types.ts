@@ -141,6 +141,8 @@ export interface Transaction {
   recipientName?: string;
   senderName?: string;
   creatorId?: string;
+  adminFee?: number | string;
+  isExternal?: boolean | number;
 }
 
 export interface Notification {

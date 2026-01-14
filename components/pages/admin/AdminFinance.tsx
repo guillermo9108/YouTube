@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
-import { BalanceRequest, VipRequest, User } from '../../../types';
+import { BalanceRequest, VipRequest, User, Transaction } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Check, X, Clock, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon, Wallet, Eye, Camera, MessageSquare, AlertCircle } from 'lucide-react';
+import { Check, X, Clock, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon, Wallet, Eye, Camera, MessageSquare, AlertCircle, Zap } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
@@ -15,7 +15,7 @@ export default function AdminFinance() {
         vip: []
     });
     
-    const [globalTransactions, setGlobalTransactions] = useState<any[]>([]);
+    const [globalTransactions, setGlobalTransactions] = useState<Transaction[]>([]);
     const [systemRevenue, setSystemRevenue] = useState(0);
     const [activeVips, setActiveVips] = useState<Partial<User>[]>([]);
     const [selectedProof, setSelectedProof] = useState<{ text?: string, image?: string } | null>(null);
@@ -56,15 +56,6 @@ export default function AdminFinance() {
         loadData();
     }, []);
 
-    const handleBalanceReq = async (reqId: string, action: 'APPROVED' | 'REJECTED') => {
-        if (!currentUser) return;
-        try {
-            await db.handleBalanceRequest(currentUser.id, reqId, action);
-            toast.success(`Solicitud ${action === 'APPROVED' ? 'Aprobada' : 'Rechazada'}`);
-            loadData();
-        } catch (e: any) { toast.error("Error: " + e.message); }
-    };
-
     const handleVipReq = async (reqId: string, action: 'APPROVED' | 'REJECTED') => {
         if (!currentUser) return;
         try {
@@ -72,15 +63,6 @@ export default function AdminFinance() {
             toast.success(`VIP ${action === 'APPROVED' ? 'Activado' : 'Rechazado'}`);
             loadData();
         } catch (e: any) { toast.error("Error: " + e.message); }
-    };
-
-    const getRemainingTime = (expiry?: number) => {
-        if (!expiry) return "N/A";
-        const diff = expiry * 1000 - now;
-        if (diff <= 0) return "Expirado";
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        return `${days}d ${hours}h`;
     };
 
     const stats = useMemo(() => {
@@ -91,7 +73,7 @@ export default function AdminFinance() {
     }, [requests]);
 
     return (
-        <div className="space-y-6 animate-in fade-in pb-20">
+        <div className="space-y-6 animate-in fade-in pb-20 px-1">
             {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 flex items-center justify-between shadow-xl">
@@ -119,7 +101,7 @@ export default function AdminFinance() {
                 </div>
             </div>
 
-            {/* VIP Requests Table with Proof View */}
+            {/* VIP Requests Table */}
             <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-2xl">
                 <div className="p-5 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
                     <div className="flex items-center gap-3">
@@ -157,27 +139,10 @@ export default function AdminFinance() {
                                         <td className="px-6 py-4">
                                             <div className="flex gap-2">
                                                 {req.proofText && (
-                                                    <button 
-                                                        onClick={() => setSelectedProof({ text: req.proofText })}
-                                                        className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-lg"
-                                                        title="Ver Texto/SMS"
-                                                    >
-                                                        <MessageSquare size={16}/>
-                                                    </button>
+                                                    <button onClick={() => setSelectedProof({ text: req.proofText })} className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-lg"><MessageSquare size={16}/></button>
                                                 )}
                                                 {req.proofImageUrl && (
-                                                    <button 
-                                                        onClick={() => setSelectedProof({ image: req.proofImageUrl })}
-                                                        className="w-10 h-10 rounded-xl overflow-hidden border border-slate-700 hover:border-indigo-500 transition-all shadow-lg bg-black"
-                                                        title="Ver Captura"
-                                                    >
-                                                        <img src={req.proofImageUrl} className="w-full h-full object-cover opacity-60 hover:opacity-100" />
-                                                    </button>
-                                                )}
-                                                {!req.proofText && !req.proofImageUrl && (
-                                                    <div className="flex items-center gap-1.5 text-slate-600 italic text-[10px] font-bold">
-                                                        <AlertCircle size={14}/> Sin adjuntos
-                                                    </div>
+                                                    <button onClick={() => setSelectedProof({ image: req.proofImageUrl })} className="w-10 h-10 rounded-xl overflow-hidden border border-slate-700 hover:border-indigo-500 transition-all shadow-lg bg-black"><img src={req.proofImageUrl} className="w-full h-full object-cover opacity-60 hover:opacity-100" /></button>
                                                 )}
                                             </div>
                                         </td>
@@ -195,64 +160,86 @@ export default function AdminFinance() {
                 </div>
             </div>
 
-            {/* Modal: Visor de Pruebas */}
-            {selectedProof && (
-                <div className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-slate-900 border border-white/10 w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95">
-                        <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                                {selectedProof.image ? <Camera size={20} className="text-indigo-400"/> : <MessageSquare size={20} className="text-indigo-400"/>}
-                                <h4 className="font-black text-white uppercase text-sm tracking-widest">Evidencia de Pago</h4>
-                            </div>
-                            <button onClick={() => setSelectedProof(null)} className="p-2 bg-slate-800 text-slate-400 rounded-full hover:text-white"><X/></button>
-                        </div>
-                        <div className="p-8">
-                            {selectedProof.image ? (
-                                <div className="rounded-3xl overflow-hidden border border-white/5 shadow-2xl bg-black max-h-[60vh]">
-                                    <img src={selectedProof.image} className="w-full h-auto object-contain" />
-                                </div>
-                            ) : (
-                                <div className="bg-slate-950 p-8 rounded-[32px] border border-indigo-500/20 text-slate-200 font-mono text-sm leading-relaxed whitespace-pre-wrap italic">
-                                    "{selectedProof.text}"
-                                </div>
-                            )}
-                        </div>
-                        <div className="p-6 bg-slate-950 border-t border-white/5 flex justify-end">
-                            <button onClick={() => setSelectedProof(null)} className="bg-white text-black font-black px-10 py-3 rounded-2xl uppercase text-[10px] tracking-widest active:scale-95 transition-all">Cerrar Visor</button>
-                        </div>
+            {/* Global Transactions Audit Table */}
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
+                <div className="p-5 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <TrendingUp size={18} className="text-emerald-400"/>
+                        <h3 className="font-black text-white uppercase text-xs tracking-widest">Historial Global & Auditoría</h3>
+                    </div>
+                    <div className="flex gap-4">
+                        <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span><span className="text-[8px] font-black text-slate-500 uppercase">Dinero Externo</span></div>
+                        <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-indigo-500"></span><span className="text-[8px] font-black text-slate-500 uppercase">Circulación Interna</span></div>
                     </div>
                 </div>
-            )}
-            
-            {/* Global Transactions and other UI sections remain as per previous state... */}
-            <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
-                <div className="p-5 border-b border-slate-800 bg-slate-950 flex items-center gap-3">
-                    <TrendingUp size={18} className="text-emerald-400"/>
-                    <h3 className="font-black text-white uppercase text-xs tracking-widest">Historial Global</h3>
-                </div>
-                <div className="overflow-x-auto max-h-96 overflow-y-auto custom-scrollbar">
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
                     <table className="w-full text-sm text-left">
-                        <thead className="text-[10px] text-slate-500 uppercase bg-slate-950/50 sticky top-0 font-black tracking-widest">
+                        <thead className="text-[10px] text-slate-500 uppercase bg-slate-950/50 sticky top-0 font-black tracking-widest z-10">
                             <tr>
+                                <th className="px-4 py-4">Origen</th>
                                 <th className="px-4 py-4">Tipo</th>
                                 <th className="px-4 py-4">Detalle</th>
                                 <th className="px-4 py-4 text-right">Monto</th>
-                                <th className="px-4 py-4 text-right">Comisión</th>
+                                <th className="px-4 py-4 text-right">Fee</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
-                            {globalTransactions.map(t => (
-                                <tr key={t.id} className="hover:bg-slate-800/20">
-                                    <td className="px-4 py-4"><span className="text-[9px] font-black px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase">{t.type}</span></td>
-                                    <td className="px-4 py-4"><div className="text-white font-bold truncate max-w-[200px]">{t.videoTitle || t.itemTitle || 'Operación'}</div><div className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">@{t.buyerName}</div></td>
-                                    <td className="px-4 py-4 text-right font-mono text-emerald-400 font-bold">{Number(t.amount).toFixed(2)}</td>
-                                    <td className="px-4 py-4 text-right font-mono text-slate-500">{Number(t.adminFee).toFixed(2)}</td>
-                                </tr>
-                            ))}
+                            {globalTransactions.map(t => {
+                                const isRealCash = Number(t.isExternal) === 1;
+                                return (
+                                    <tr key={t.id} className={`hover:bg-slate-800/20 transition-colors ${isRealCash ? 'bg-emerald-500/[0.02]' : ''}`}>
+                                        <td className="px-4 py-4">
+                                            {isRealCash ? (
+                                                <span className="flex items-center gap-1 text-[9px] font-black text-emerald-400 uppercase tracking-tighter bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                                                    <Zap size={10} fill="currentColor"/> Inflow
+                                                </span>
+                                            ) : (
+                                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter bg-slate-800 px-2 py-0.5 rounded-full">
+                                                    Interno
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">{t.type}</span>
+                                        </td>
+                                        <td className="px-4 py-4">
+                                            <div className="text-white font-bold truncate max-w-[180px] text-xs">{t.videoTitle || 'Operación'}</div>
+                                            <div className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">@{t.buyerName || 'Anónimo'}</div>
+                                        </td>
+                                        <td className="px-4 py-4 text-right">
+                                            <span className={`font-mono font-bold text-sm ${isRealCash ? 'text-emerald-400' : 'text-white'}`}>
+                                                {Number(t.amount).toFixed(2)}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-4 text-right font-mono text-slate-600 text-xs">
+                                            {Number(t.adminFee || 0).toFixed(2)}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
             </div>
+
+            {/* Proof Modal Viewer */}
+            {selectedProof && (
+                <div className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in" onClick={() => setSelectedProof(null)}>
+                    <div className="bg-slate-900 border border-white/10 w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                            <h4 className="font-black text-white uppercase text-sm tracking-widest">Evidencia de Pago</h4>
+                            <button onClick={() => setSelectedProof(null)} className="p-2 bg-slate-800 text-slate-400 rounded-full hover:text-white"><X/></button>
+                        </div>
+                        <div className="p-8">
+                            {selectedProof.image ? (
+                                <div className="rounded-3xl overflow-hidden border border-white/5 shadow-2xl bg-black max-h-[60vh]"><img src={selectedProof.image} className="w-full h-auto object-contain" /></div>
+                            ) : (
+                                <div className="bg-slate-950 p-8 rounded-[32px] border border-indigo-500/20 text-slate-200 font-mono text-sm leading-relaxed whitespace-pre-wrap italic">"{selectedProof.text}"</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
