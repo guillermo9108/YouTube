@@ -1,7 +1,6 @@
-
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V17.5 (Full Restore + Cash Accounting)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V17.6 (Harden Execution + Restore Fix)
  */
 
 function admin_get_settings($pdo) {
@@ -331,10 +330,24 @@ function admin_smart_cleaner_preview($pdo, $input) {
     $days = intval($input['minDays'] ?? 30);
     $views = intval($input['maxViews'] ?? 5);
     $limit = intval($input['maxDeleteLimit'] ?? 100);
+    $category = $input['category'] ?? 'ALL';
     $ts = time() - ($days * 86400);
     
-    $stmt = $pdo->prepare("SELECT id, title, views, videoUrl FROM videos WHERE createdAt < ? AND views <= ? LIMIT ?");
-    $stmt->execute([$ts, $views, $limit]);
+    $sql = "SELECT id, title, views, videoUrl FROM videos WHERE createdAt < :ts AND views <= :views";
+    $params = [':ts' => $ts, ':views' => $views];
+    
+    if ($category !== 'ALL') {
+        $sql .= " AND (category = :cat OR parent_category = :cat)";
+        $params[':cat'] = $category;
+    }
+    
+    // Hardened LIMIT to prevent any injection if logic changes elsewhere
+    $limitVal = (int)$limit;
+    if ($limitVal <= 0) $limitVal = 100;
+    $sql .= " LIMIT " . $limitVal; 
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     $vids = $stmt->fetchAll();
     
     $totalBytes = 0;
@@ -352,7 +365,9 @@ function admin_smart_cleaner_execute($pdo, $input) {
     $ids = $input['videoIds'] ?? [];
     $deleted = 0;
     foreach ($ids as $id) {
-        $v = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = '$id'")->fetch();
+        $stmtV = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?");
+        $stmtV->execute([$id]);
+        $v = $stmtV->fetch();
         if ($v) {
             if (file_exists($v['videoUrl'])) @unlink($v['videoUrl']);
             if (file_exists($v['thumbnailUrl'])) @unlink($v['thumbnailUrl']);

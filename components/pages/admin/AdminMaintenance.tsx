@@ -28,6 +28,7 @@ export default function AdminMaintenance() {
     const [cleanerPreview, setCleanerPreview] = useState<SmartCleanerResult | null>(null);
     const [logs, setLogs] = useState<string[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
+    const [categories, setCategories] = useState<any[]>([]);
     
     // Configuración Janitor V7 (Extreme)
     const [config, setConfig] = useState({
@@ -53,6 +54,10 @@ export default function AdminMaintenance() {
 
     useEffect(() => {
         fetchLogs();
+        // Cargar categorías dinámicas
+        db.getSystemSettings().then(s => {
+            if (s.categories) setCategories(s.categories);
+        });
     }, []);
 
     const handleCleanupOrphans = async () => {
@@ -134,7 +139,11 @@ export default function AdminMaintenance() {
                                 <label className="text-[10px] uppercase font-bold text-slate-500 block mb-2">Categoría a Analizar</label>
                                 <select value={config.category} onChange={e => setConfig({...config, category: e.target.value})} className="w-full bg-slate-950 border border-slate-800 text-white text-sm rounded-xl p-3 outline-none">
                                     <option value="ALL">Toda la Librería</option>
-                                    {(Object.values(VideoCategory) as string[]).map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+                                    {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                                    {/* Fallback para compatibilidad con enum original */}
+                                    {(Object.values(VideoCategory) as string[]).map(c => (
+                                        !categories.find(cat => cat.name === c) && <option key={c} value={c}>{c.replace('_', ' ')}</option>
+                                    ))}
                                 </select>
                             </div>
 
