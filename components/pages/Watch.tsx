@@ -121,7 +121,13 @@ export default function Watch() {
                             db.hasPurchased(user.id, v.id), 
                             db.getInteraction(user.id, v.id)
                         ]);
-                        setIsUnlocked(access || user.role?.trim().toUpperCase() === 'ADMIN' || user.id === v.creatorId);
+                        
+                        // VERIFICACIÓN VIP: El usuario VIP desbloquea todo el contenido automáticamente
+                        const isVip = user.vipExpiry && user.vipExpiry > Date.now() / 1000;
+                        const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
+                        const isCreator = user.id === v.creatorId;
+                        
+                        setIsUnlocked(access || isAdmin || isCreator || isVip);
                         setInteraction(interact);
                     }
                 }

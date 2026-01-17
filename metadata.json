@@ -1,5 +1,5 @@
 {
-  "name": "StreamPay OFICIAL 0.0.10.7",
+  "name": "StreamPay OFICIAL 0.0.10.8",
   "description": "PWA Pay-Per-View con correcciones de sintaxis TSX y lógica de notificaciones mejorada.",
   "requestFramePermissions": [
     "camera",
