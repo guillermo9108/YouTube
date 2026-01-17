@@ -1,6 +1,7 @@
+
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V17.6 (Harden Execution + Restore Fix)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V17.7 (Accounting Fix for Real Inflow)
  */
 
 function admin_get_settings($pdo) {
@@ -134,6 +135,7 @@ function admin_handle_balance_request($pdo, $input) {
         if (!$req || $req['status'] !== 'PENDING') throw new Exception("Solicitud no válida");
         if ($status === 'APPROVED') {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
+            // El dinero que entra por recarga manual es siempre Externo (Cash)
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, 'Recarga Solicitada', 1)")->execute([uniqid('dep_'), $req['userId'], $req['amount'], time()]);
         }
         $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
@@ -152,15 +154,31 @@ function admin_handle_vip_request($pdo, $input) {
             $plan = json_decode($req['planSnapshot'], true); $userId = $req['userId'];
             $now = time();
             if ($plan['type'] === 'BALANCE') {
-                $bonus = floatval($plan['bonusPercent'] ?? 0); $total = $plan['price'] + ($plan['price'] * ($bonus / 100));
-                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $userId]);
-                $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 1)")->execute([uniqid('tx_b_'), $userId, $total, $now, $plan['name']]);
+                // LÓGICA DE CONTABILIDAD LIMPIA:
+                $priceBase = floatval($plan['price']);
+                $bonusPercent = floatval($plan['bonusPercent'] ?? 0);
+                $bonusAmount = $priceBase * ($bonusPercent / 100);
+                $totalCredit = $priceBase + $bonusAmount;
+
+                // 1. Actualizar saldo total al usuario
+                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$totalCredit, $userId]);
+                
+                // 2. Registrar el Dinero Real (isExternal = 1)
+                $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 1)")
+                    ->execute([uniqid('tx_cash_'), $userId, $priceBase, $now, $plan['name']]);
+                
+                // 3. Registrar el Bono (Regalo del sistema, isExternal = 0) si existe
+                if ($bonusAmount > 0) {
+                    $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 0)")
+                        ->execute([uniqid('tx_bonus_'), $userId, $bonusAmount, $now, "Bono: " . $plan['name']]);
+                }
             } else {
                 $days = intval($plan['durationDays'] ?? 30);
                 $stmtU = $pdo->prepare("SELECT vipExpiry FROM users WHERE id = ?"); $stmtU->execute([$userId]);
                 $current = intval($stmtU->fetchColumn());
                 $newExpiry = max($current, $now) + ($days * 86400);
                 $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
+                // Compra de días VIP es 100% externo
                 $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'VIP', ?, ?, 1)")->execute([uniqid('tx_v_'), $userId, $plan['price'], $now, $plan['name']]);
             }
         }
@@ -406,6 +424,7 @@ function admin_add_balance($pdo, $input) {
     $pdo->beginTransaction();
     try {
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
+        // Recargas manuales directas del admin son Externas (Cash)
         $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, 'Recarga Admin', 1)")->execute([uniqid('dep_'), $targetId, $amount, time()]);
         $pdo->commit();
         respond(true);

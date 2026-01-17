@@ -7,7 +7,7 @@ import { VipPlan, SystemSettings } from '../../types';
 import { 
     Crown, Check, Zap, Loader2, ArrowLeft, Wallet, 
     CreditCard, Coins, TrendingUp, ShieldCheck, 
-    Smartphone, Globe, X, Copy, Info, Clock, Camera, FileText, Send
+    Smartphone, Globe, X, Copy, Info, Clock, Camera, FileText, Send, Calendar
 } from 'lucide-react';
 import { useNavigate, useLocation } from '../Router';
 
@@ -115,6 +115,8 @@ export default function VipStore() {
         manual: { enabled: true, instructions: 'Contacta con soporte.' }
     };
 
+    const isVip = user && user.vipExpiry && Number(user.vipExpiry) > (Date.now() / 1000);
+
     return (
         <div className="pb-24 pt-6 px-4 max-w-5xl mx-auto animate-in fade-in">
             <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-slate-400 hover:text-white mb-8 bg-slate-900 px-4 py-2 rounded-full border border-slate-800 transition-all">
@@ -125,6 +127,29 @@ export default function VipStore() {
                 <h1 className="text-3xl font-black text-white mb-2 uppercase italic tracking-tighter">VIP & Recargas</h1>
                 <p className="text-slate-400 text-sm uppercase font-bold tracking-widest">Mejora tu experiencia en StreamPay</p>
             </div>
+
+            {/* Current VIP Banner */}
+            {isVip && (
+                <div className="mb-10 bg-gradient-to-r from-amber-600/20 to-indigo-600/20 border border-amber-500/30 rounded-[32px] p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-2xl backdrop-blur-sm">
+                    <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 rounded-2xl bg-amber-500 flex items-center justify-center text-black shadow-lg shadow-amber-500/20">
+                            <Crown size={32} />
+                        </div>
+                        <div>
+                            <h2 className="text-white font-black uppercase text-sm tracking-widest">Suscripción VIP Activa</h2>
+                            <p className="text-amber-400 text-xs font-bold mt-1">
+                                Vence el: {new Date(Number(user.vipExpiry) * 1000).toLocaleDateString(undefined, { day:'2-digit', month:'long', year:'numeric' })}
+                            </p>
+                        </div>
+                    </div>
+                    <div className="bg-black/40 px-4 py-2 rounded-2xl border border-white/5 flex items-center gap-3">
+                        <Info size={16} className="text-indigo-400"/>
+                        <span className="text-[10px] text-slate-300 font-bold uppercase leading-tight">
+                            Comprar un plan nuevo<br/>acumula tiempo al actual
+                        </span>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {plans.map(plan => {

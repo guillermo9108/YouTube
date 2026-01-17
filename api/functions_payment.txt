@@ -86,15 +86,23 @@ function payment_verify($pdo, $input) {
             $pdo->prepare("UPDATE vip_requests SET status = 'APPROVED' WHERE id = ?")->execute([$req['id']]);
             
             if ($plan['type'] === 'BALANCE') {
-                $baseAmount = floatval($plan['price']);
-                $bonus = floatval($plan['bonusPercent'] ?? 0);
-                $total = $baseAmount + ($baseAmount * ($bonus / 100));
-                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$total, $userId]);
+                $priceBase = floatval($plan['price']);
+                $bonusPercent = floatval($plan['bonusPercent'] ?? 0);
+                $bonusAmount = $priceBase * ($bonusPercent / 100);
+                $totalCredit = $priceBase + $bonusAmount;
+
+                // 1. Acreditar saldo total al usuario
+                $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$totalCredit, $userId]);
                 
-                $tid = uniqid('tx_vip_auto_');
-                // IMPORTANTE: isExternal = 1 (Efectivo Real)
-                $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type, videoTitle, isExternal) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP', ?, 1)")
-                    ->execute([$tid, $userId, $total, time(), $plan['name']]);
+                // 2. Registrar el Dinero Real (isExternal = 1)
+                $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 1)")
+                    ->execute([uniqid('tx_cash_auto_'), $userId, $priceBase, time(), $plan['name']]);
+                
+                // 3. Registrar el Bono (isExternal = 0)
+                if ($bonusAmount > 0) {
+                    $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 0)")
+                        ->execute([uniqid('tx_bonus_auto_'), $userId, $bonusAmount, time(), "Bono: " . $plan['name']]);
+                }
                     
             } else {
                 $days = intval($plan['durationDays']);
@@ -107,10 +115,9 @@ function payment_verify($pdo, $input) {
                 $newExpiry = $newStart + $seconds;
                 $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
                 
-                $tid = uniqid('tx_vip_direct_');
-                // IMPORTANTE: isExternal = 1 (Efectivo Real)
-                $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, timestamp, type, videoTitle, isExternal) VALUES (?, ?, NULL, NULL, ?, ?, 'VIP', ?, 1)")
-                    ->execute([$tid, $userId, $plan['price'], time(), $plan['name']]);
+                // Membresía de Acceso es 100% externo
+                $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type, videoTitle, isExternal) VALUES (?, ?, ?, ?, 'VIP', ?, 1)")
+                    ->execute([uniqid('tx_vip_auto_'), $userId, $plan['price'], time(), $plan['name']]);
             }
             
             $nid = uniqid('n_');

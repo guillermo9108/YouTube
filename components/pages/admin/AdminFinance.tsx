@@ -4,7 +4,7 @@ import { db } from '../../../services/db';
 import { BalanceRequest, VipRequest, User, Transaction } from '../../../types';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import { Check, X, Clock, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon, Wallet, Eye, Camera, MessageSquare, AlertCircle, Zap } from 'lucide-react';
+import { Check, X, Clock, TrendingUp, ArrowDownLeft, ArrowUpRight, Crown, FileText, User as UserIcon, Wallet, Eye, Camera, MessageSquare, AlertCircle, Zap, Calendar } from 'lucide-react';
 
 export default function AdminFinance() {
     const { user: currentUser } = useAuth();
@@ -20,10 +20,10 @@ export default function AdminFinance() {
     const [activeVips, setActiveVips] = useState<Partial<User>[]>([]);
     const [selectedProof, setSelectedProof] = useState<{ text?: string, image?: string } | null>(null);
     
-    const [now, setNow] = useState(Date.now());
+    const [now, setNow] = useState(Math.floor(Date.now() / 1000));
 
     useEffect(() => {
-        const interval = setInterval(() => setNow(Date.now()), 60000);
+        const interval = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 60000);
         return () => clearInterval(interval);
     }, []);
 
@@ -71,6 +71,16 @@ export default function AdminFinance() {
         const pendingCount = bal.length + vip.length;
         return { pendingCount };
     }, [requests]);
+
+    // Formateador de tiempo relativo para Admin
+    const getTimeRemaining = (expiry: number) => {
+        const diff = expiry - now;
+        if (diff <= 0) return 'Expirado';
+        const days = Math.floor(diff / 86400);
+        if (days > 0) return `${days} días`;
+        const hours = Math.floor(diff / 3600);
+        return `${hours} horas`;
+    };
 
     return (
         <div className="space-y-6 animate-in fade-in pb-20 px-1">
@@ -151,6 +161,49 @@ export default function AdminFinance() {
                                                 <button onClick={() => handleVipReq(req.id, 'APPROVED')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-900/40 active:scale-95 transition-all">Activar</button>
                                                 <button onClick={() => handleVipReq(req.id, 'REJECTED')} className="bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white p-2 rounded-xl active:scale-95 transition-all"><X size={16}/></button>
                                             </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Active VIPs List */}
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
+                <div className="p-5 border-b border-slate-800 bg-slate-950 flex items-center gap-3">
+                    <Crown size={18} className="text-indigo-400"/>
+                    <h3 className="font-black text-white uppercase text-xs tracking-widest">Activos Premium (Tiempo Real)</h3>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                        <thead className="text-[10px] text-slate-500 uppercase bg-slate-950/50 border-b border-slate-800 font-black tracking-widest">
+                            <tr>
+                                <th className="px-6 py-4">Usuario</th>
+                                <th className="px-6 py-4">Expira el</th>
+                                <th className="px-6 py-4 text-right">Tiempo Restante</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                            {activeVips.length === 0 ? (
+                                <tr><td colSpan={3} className="text-center py-10 text-slate-600">No hay usuarios VIP actualmente</td></tr>
+                            ) : activeVips.map(v => {
+                                const expiry = Number(v.vipExpiry);
+                                const diff = expiry - now;
+                                return (
+                                    <tr key={v.id} className="hover:bg-slate-800/20">
+                                        <td className="px-6 py-4 font-bold text-white flex items-center gap-2">
+                                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                            @{v.username}
+                                        </td>
+                                        <td className="px-6 py-4 text-slate-400 font-mono text-xs">
+                                            {new Date(expiry * 1000).toLocaleDateString()}
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase ${diff < 86400 ? 'bg-red-500/20 text-red-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
+                                                {getTimeRemaining(expiry)}
+                                            </span>
                                         </td>
                                     </tr>
                                 );

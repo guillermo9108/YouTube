@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Transaction, Notification as AppNotification } from '../../types';
-import { Wallet, Send, ArrowDownLeft, ArrowUpRight, History, Shield, LogOut, ChevronRight, User as UserIcon, RefreshCw, Smartphone, Loader2, Settings, Save, Zap, Heart, Truck, Camera, Lock, Eye, EyeOff, UserCheck, Bell, MessageSquare, Trash2, CheckCircle2, Crown } from 'lucide-react';
+import { Wallet, Send, ArrowDownLeft, ArrowUpRight, History, Shield, LogOut, ChevronRight, User as UserIcon, RefreshCw, Smartphone, Loader2, Settings, Save, Zap, Heart, Truck, Camera, Lock, Eye, EyeOff, UserCheck, Bell, MessageSquare, Trash2, CheckCircle2, Crown, Calendar, Clock as ClockIcon } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { useNavigate } from '../Router';
 
@@ -19,10 +19,8 @@ export default function Profile() {
   const [userSuggestions, setUserSuggestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // FIX: Comparación numérica estricta porque el servidor devuelve strings de la BD
   const hasUnread = useMemo(() => notifications.some(n => Number(n.isRead) === 0), [notifications]);
 
-  // User Settings State
   const [settings, setSettings] = useState({
       autoPurchaseLimit: user?.autoPurchaseLimit || 1.00,
       newPassword: '',
@@ -44,17 +42,11 @@ export default function Profile() {
     }
   }, [user]);
 
-  // Manejador de búsqueda de usuarios (Debounced)
   const searchTimeout = useRef<any>(null);
   const handleTargetChange = (val: string) => {
       setTransferData({...transferData, target: val});
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
-      
-      if (val.length < 2) {
-          setUserSuggestions([]);
-          return;
-      }
-
+      if (val.length < 2) { setUserSuggestions([]); return; }
       searchTimeout.current = setTimeout(async () => {
           if (!user) return;
           const hits = await db.searchUsers(user.id, val);
@@ -79,12 +71,10 @@ export default function Profile() {
 
   const handleSaveSettings = async () => {
       if (!user) return;
-      
       if (settings.newPassword && settings.newPassword !== settings.confirmPassword) {
           toast.error("Las contraseñas no coinciden");
           return;
       }
-
       setLoading(true);
       try {
           await db.updateUserProfile(user.id, {
@@ -118,7 +108,24 @@ export default function Profile() {
       navigate(n.link);
   };
 
+  // Helper para tiempo restante VIP
+  const getVipTimeLeft = (expiry: number) => {
+      const now = Math.floor(Date.now() / 1000);
+      const diff = expiry - now;
+      if (diff <= 0) return null;
+
+      const days = Math.floor(diff / 86400);
+      const hours = Math.floor((diff % 86400) / 3600);
+      const mins = Math.floor((diff % 3600) / 60);
+
+      if (days > 0) return `${days}d ${hours}h restantes`;
+      if (hours > 0) return `${hours}h ${mins}m restantes`;
+      return `${mins}m restantes`;
+  };
+
   if (!user) return null;
+
+  const vipTimeLeft = user.vipExpiry ? getVipTimeLeft(Number(user.vipExpiry)) : null;
 
   return (
     <div className="space-y-6 pb-24 px-2 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -126,7 +133,7 @@ export default function Profile() {
       {/* Neo-Banking Wallet Header */}
       <div className="bg-gradient-to-br from-indigo-600 via-indigo-700 to-purple-800 p-8 rounded-[40px] shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10"><Wallet size={120}/></div>
-          <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="relative z-10 flex flex-col md:row justify-between items-center gap-6">
               <div className="text-center md:text-left flex flex-col md:flex-row items-center gap-6">
                   <div className="relative group">
                       <div className="w-24 h-24 rounded-full border-4 border-white/20 overflow-hidden bg-slate-800 shadow-2xl">
@@ -142,10 +149,12 @@ export default function Profile() {
                         <span className="bg-white/10 px-3 py-1 rounded-full text-[10px] font-bold text-white flex items-center gap-1.5">
                             <UserIcon size={10}/> @{user.username}
                         </span>
-                        {user.vipExpiry && user.vipExpiry > Date.now()/1000 && (
-                            <span className="bg-gradient-to-tr from-amber-500 to-yellow-300 text-black px-4 py-1.5 rounded-full text-[10px] font-black uppercase shadow-[0_0_15px_rgba(245,158,11,0.5)] border border-amber-300 flex items-center gap-1">
-                                <Crown size={12}/> VIP
-                            </span>
+                        {vipTimeLeft && (
+                            <div className="flex flex-col gap-1 items-start">
+                                <span className="bg-gradient-to-tr from-amber-500 to-yellow-300 text-black px-4 py-1.5 rounded-full text-[10px] font-black uppercase shadow-[0_0_15px_rgba(245,158,11,0.5)] border border-amber-300 flex items-center gap-1">
+                                    <Crown size={12}/> VIP ACTIVO
+                                </span>
+                            </div>
                         )}
                     </div>
                   </div>
@@ -160,6 +169,33 @@ export default function Profile() {
               </div>
           </div>
       </div>
+
+      {/* VIP Status Card (Solo si es VIP) */}
+      {vipTimeLeft && (
+          <div className="bg-slate-900 border border-amber-500/20 rounded-[32px] p-6 shadow-xl animate-in slide-in-from-top-4 duration-500 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform"><Crown size={80} className="text-amber-500" /></div>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500 border border-amber-500/20 shadow-lg shadow-amber-500/5">
+                          <ClockIcon size={24}/>
+                      </div>
+                      <div>
+                          <h4 className="text-white font-black text-sm uppercase tracking-widest">Estatus de Membresía</h4>
+                          <p className="text-amber-400 text-xs font-bold uppercase">{vipTimeLeft}</p>
+                      </div>
+                  </div>
+                  <div className="bg-slate-950/50 px-4 py-3 rounded-2xl border border-white/5">
+                      <div className="flex items-center gap-2 text-slate-500 mb-1">
+                          <Calendar size={12}/>
+                          <span className="text-[9px] font-black uppercase">Fecha de Expiración</span>
+                      </div>
+                      <div className="text-white font-mono text-xs font-bold">
+                          {new Date(Number(user.vipExpiry) * 1000).toLocaleString([], { day:'2-digit', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' })}
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {/* Sub Navigation */}
       <div className="flex gap-1 p-1 bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto scrollbar-hide">
