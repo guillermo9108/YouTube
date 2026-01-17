@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Transaction, Notification as AppNotification } from '../../types';
-import { Wallet, Send, ArrowDownLeft, ArrowUpRight, History, Shield, LogOut, ChevronRight, User as UserIcon, RefreshCw, Smartphone, Loader2, Settings, Save, Zap, Heart, Truck, Camera, Lock, Eye, EyeOff, UserCheck, Bell, MessageSquare, Trash2, CheckCircle2 } from 'lucide-react';
+import { Wallet, Send, ArrowDownLeft, ArrowUpRight, History, Shield, LogOut, ChevronRight, User as UserIcon, RefreshCw, Smartphone, Loader2, Settings, Save, Zap, Heart, Truck, Camera, Lock, Eye, EyeOff, UserCheck, Bell, MessageSquare, Trash2, CheckCircle2, Crown } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { useNavigate } from '../Router';
 
@@ -143,7 +143,9 @@ export default function Profile() {
                             <UserIcon size={10}/> @{user.username}
                         </span>
                         {user.vipExpiry && user.vipExpiry > Date.now()/1000 && (
-                            <span className="bg-amber-400 text-black px-3 py-1 rounded-full text-[10px] font-black uppercase shadow-lg shadow-amber-500/20">VIP</span>
+                            <span className="bg-gradient-to-tr from-amber-500 to-yellow-300 text-black px-4 py-1.5 rounded-full text-[10px] font-black uppercase shadow-[0_0_15px_rgba(245,158,11,0.5)] border border-amber-300 flex items-center gap-1">
+                                <Crown size={12}/> VIP
+                            </span>
                         )}
                     </div>
                   </div>

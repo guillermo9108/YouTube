@@ -123,11 +123,11 @@ export default function Watch() {
                         ]);
                         
                         // VERIFICACIÓN VIP: El usuario VIP desbloquea todo el contenido automáticamente
-                        const isVip = user.vipExpiry && user.vipExpiry > Date.now() / 1000;
+                        const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
                         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
                         const isCreator = user.id === v.creatorId;
                         
-                        setIsUnlocked(access || isAdmin || isCreator || isVip);
+                        setIsUnlocked(Boolean(access || isAdmin || isCreator || isVip));
                         setInteraction(interact);
                     }
                 }
@@ -201,7 +201,7 @@ export default function Watch() {
             return;
         }
 
-        const isVipTotal = user.vipExpiry && user.vipExpiry > Date.now() / 1000;
+        const isVipTotal = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
         const hasAccess = user.role?.trim().toUpperCase() === 'ADMIN' || user.id === nextVid.creatorId || isVipTotal;
         
         if (hasAccess) { navigateToNext(nextVid); return; }
