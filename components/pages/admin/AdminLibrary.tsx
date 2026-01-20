@@ -6,7 +6,7 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, 
     CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers, 
-    HardDrive, List, Play, ChevronRight, XCircle, Zap, FolderOpen
+    HardDrive, List, Play, ChevronRight, XCircle, Zap, FolderOpen, Lock
 } from 'lucide-react';
 
 interface ScannerPlayerProps {
@@ -110,7 +110,10 @@ export default function AdminLibrary() {
     const [scanLog, setScanLog] = useState<string[]>([]);
     const [scanQueue, setScanQueue] = useState<Video[]>([]);
     const [currentScanIndex, setCurrentScanIndex] = useState(0);
-    const [stats, setStats] = useState({ pending: 0, processing: 0, public: 0, broken: 0, general: 0, total: 0 });
+    const [stats, setStats] = useState({ 
+        pending: 0, locked: 0, available: 0, 
+        processing: 0, public: 0, broken: 0, failed: 0, total: 0 
+    });
 
     const loadSettings = async () => {
         try {
@@ -122,19 +125,17 @@ export default function AdminLibrary() {
 
     const loadStats = async () => {
         try {
-            const all = await db.getAllVideos();
-            const unprocessed = await db.getUnprocessedVideos(9999, 'normal');
-            const procCount = all.filter(v => v.category === 'PROCESSING').length;
-            const brokenCount = all.filter(v => Number(v.duration) <= 0 || v.thumbnailUrl.includes('default.jpg')).length;
-            const generalCount = all.filter(v => v.category === 'GENERAL').length;
-            
-            setStats({ 
-                pending: unprocessed.length, 
-                processing: procCount,
-                public: all.filter(v => !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category)).length,
-                broken: brokenCount,
-                general: generalCount,
-                total: all.length + unprocessed.length
+            const adminStats = await db.getAdminLibraryStats();
+            // Estimamos el conteo de públicos sumando todo lo que no es pendiente/proceso/fallido
+            setStats({
+                pending: adminStats.pending,
+                locked: adminStats.locked,
+                available: adminStats.available,
+                processing: adminStats.processing,
+                public: adminStats.total - (adminStats.pending + adminStats.processing + adminStats.failed),
+                broken: adminStats.broken,
+                failed: adminStats.failed,
+                total: adminStats.total
             });
         } catch(e) {}
     };
@@ -142,6 +143,9 @@ export default function AdminLibrary() {
     useEffect(() => { 
         loadSettings();
         loadStats();
+        // Auto-refresh stats cada 10s para ver el motor automático trabajar
+        const intv = setInterval(loadStats, 10000);
+        return () => clearInterval(intv);
     }, []);
 
     const addToLog = (msg: string) => { setScanLog(prev => [`> ${msg}`, ...prev].slice(0, 100)); };
@@ -152,7 +156,6 @@ export default function AdminLibrary() {
         setIndexProgress({ current: 0, total: 0, label: 'Iniciando descubrimiento...' });
         
         try {
-            // Guardar configuración si el usuario escribió algo
             if (localPath.trim()) {
                 await db.updateSystemSettings({ localLibraryPath: localPath });
             }
@@ -252,11 +255,9 @@ export default function AdminLibrary() {
         } catch (e) { console.error(e); }
         
         if (currentScanIndex + 1 >= scanQueue.length) {
-            // Lote terminado, buscamos el siguiente lote automáticamente
             addToLog("Lote completado. Solicitando nuevo lote...");
             loadStats();
             setScanQueue([]);
-            // Reiniciamos con un pequeño delay para dejar respirar al navegador
             setTimeout(() => {
                 handleStep2();
             }, 500);
@@ -321,9 +322,16 @@ export default function AdminLibrary() {
             </h2>
             
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
+                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg group relative">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P1: Registro</div>
-                    <div className="text-xl font-black text-amber-500 flex items-center justify-center gap-1"><Clock size={16}/> {stats.pending}</div>
+                    <div className="text-xl font-black text-amber-500 flex items-center justify-center gap-1">
+                        <Clock size={16}/> {stats.pending}
+                    </div>
+                    {stats.locked > 0 && (
+                        <div className="absolute -top-2 -right-1 bg-red-600 text-[8px] font-black text-white px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow-lg animate-bounce">
+                            <Lock size={8}/> {stats.locked} ocupado
+                        </div>
+                    )}
                 </div>
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P2: Extracción</div>
@@ -335,7 +343,7 @@ export default function AdminLibrary() {
                 </div>
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P4: Mantenimiento</div>
-                    <div className="text-xl font-black text-red-500 flex items-center justify-center gap-1"><ShieldAlert size={16}/> {stats.broken + stats.general}</div>
+                    <div className="text-xl font-black text-red-500 flex items-center justify-center gap-1"><ShieldAlert size={16}/> {stats.broken + stats.failed}</div>
                 </div>
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">TOTAL DB</div>
@@ -419,9 +427,9 @@ export default function AdminLibrary() {
                             <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">2</div>
                             <h3 className="font-black text-white text-xs uppercase tracking-widest">Extracción Automática</h3>
                         </div>
-                        <button onClick={handleStep2} disabled={activeScan || stats.pending === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
+                        <button onClick={handleStep2} disabled={activeScan || stats.available === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
                             {activeScan ? <Zap size={18} className="animate-pulse text-yellow-300" /> : <Film size={18}/>} 
-                            {activeScan ? 'PROCESANDO EN BUCLE...' : `INICIAR MOTOR AUTOMÁTICO (${stats.pending})`}
+                            {activeScan ? 'PROCESANDO EN BUCLE...' : `INICIAR MOTOR AUTOMÁTICO (${stats.available})`}
                         </button>
                         <p className="text-[9px] text-slate-500 font-bold uppercase text-center">EL PROCESO CONTINUARÁ HASTA TERMINAR TODA LA LIBRERÍA</p>
                     </div>
@@ -438,7 +446,7 @@ export default function AdminLibrary() {
                 </div>
 
                 <div className="pt-4 border-t border-slate-800 grid grid-cols-2 gap-4">
-                    <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.general === 0)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] text-slate-400 flex items-center justify-center gap-2">
+                    <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.failed === 0)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] text-slate-400 flex items-center justify-center gap-2">
                         {isFixing ? <RefreshCw className="animate-spin" size={14}/> : <ShieldAlert size={14}/>} Mantenimiento ({stats.broken})
                     </button>
                     <button onClick={handleStep5} disabled={isReorganizingAll || stats.total === 0} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] text-slate-400 flex items-center justify-center gap-2">

@@ -29,6 +29,40 @@ function video_get_all($pdo) {
 }
 
 /**
+ * ESTADÍSTICAS REALES PARA ADMINISTRADOR
+ * Cuenta todos los archivos sin censura de categoría.
+ */
+function video_get_admin_stats($pdo) {
+    $now = time();
+    $timeout = $now - 300; // Umbral de bloqueo del GridProcessor
+
+    // Conteos generales por categoría
+    $stmt = $pdo->query("SELECT category, COUNT(*) as count FROM videos GROUP BY category");
+    $counts = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    // Conteo específico de bloqueados
+    $stmtLocked = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE category = 'PENDING' AND locked_at > ?");
+    $stmtLocked->execute([$timeout]);
+    $lockedCount = $stmtLocked->fetchColumn();
+
+    // Conteo de rotos/inválidos
+    $stmtBroken = $pdo->query("SELECT COUNT(*) FROM videos WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg') AND category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')");
+    $brokenCount = $stmtBroken->fetchColumn();
+
+    $stats = [
+        'pending' => intval($counts['PENDING'] ?? 0),
+        'locked' => intval($lockedCount),
+        'available' => intval(($counts['PENDING'] ?? 0) - $lockedCount),
+        'processing' => intval($counts['PROCESSING'] ?? 0),
+        'failed' => intval($counts['FAILED_METADATA'] ?? 0),
+        'broken' => intval($brokenCount),
+        'total' => array_sum($counts)
+    ];
+
+    respond(true, $stats);
+}
+
+/**
  * DESCUBRIMIENTO DE RAMAS (Carpetas de primer nivel)
  * Para evitar timeouts, primero obtenemos las carpetas y luego escaneamos cada una.
  */

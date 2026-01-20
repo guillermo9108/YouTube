@@ -58,6 +58,10 @@ class DBService {
         }
     }
 
+    public async getAdminLibraryStats(): Promise<any> {
+        return this.request<any>('action=get_admin_library_stats');
+    }
+
     public async getMarketplaceItems(): Promise<MarketplaceItem[]> { 
         try {
             const items = await this.request<MarketplaceItem[]>('action=get_marketplace_items');
