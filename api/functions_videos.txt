@@ -30,22 +30,18 @@ function video_get_all($pdo) {
 
 /**
  * ESTADÍSTICAS REALES PARA ADMINISTRADOR
- * Cuenta todos los archivos sin censura de categoría.
  */
 function video_get_admin_stats($pdo) {
     $now = time();
-    $timeout = $now - 300; // Umbral de bloqueo del GridProcessor
+    $timeout = $now - 300; 
 
-    // Conteos generales por categoría
     $stmt = $pdo->query("SELECT category, COUNT(*) as count FROM videos GROUP BY category");
     $counts = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-    // Conteo específico de bloqueados
     $stmtLocked = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE category = 'PENDING' AND locked_at > ?");
     $stmtLocked->execute([$timeout]);
     $lockedCount = $stmtLocked->fetchColumn();
 
-    // Conteo de rotos/inválidos
     $stmtBroken = $pdo->query("SELECT COUNT(*) FROM videos WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg') AND category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')");
     $brokenCount = $stmtBroken->fetchColumn();
 
@@ -63,8 +59,7 @@ function video_get_admin_stats($pdo) {
 }
 
 /**
- * DESCUBRIMIENTO DE RAMAS (Carpetas de primer nivel)
- * Para evitar timeouts, primero obtenemos las carpetas y luego escaneamos cada una.
+ * DESCUBRIMIENTO DE RAMAS
  */
 function video_get_scan_folders($pdo) {
     $stmt = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
@@ -79,11 +74,7 @@ function video_get_scan_folders($pdo) {
     foreach ($roots as $r) {
         $r = trim($r);
         if (!is_dir($r)) continue;
-        
-        // Incluir la propia raíz
         $queue[] = ['path' => $r, 'name' => basename($r) ?: $r];
-
-        // Obtener carpetas de primer nivel
         $dirs = @scandir($r);
         if ($dirs) {
             foreach ($dirs as $d) {
@@ -125,7 +116,7 @@ function video_scan_local($pdo, $input) {
         $rootPath = trim($rootPath);
         if (!is_dir($rootPath)) { $errors[] = "Ruta no encontrada: $rootPath"; continue; }
 
-        // 1. Detección de Categorías por carpetas de primer nivel
+        // 1. Detección de Categorías Principales (solo nivel 1 de la ruta configurada)
         try {
             $dirEntries = @scandir($rootPath);
             if ($dirEntries) {
@@ -241,19 +232,17 @@ function video_get_unprocessed($pdo) {
 
     $mode = $_GET['mode'] ?? 'normal';
     $now = time();
-    $timeout = $now - 300; // 5 minutos de bloqueo
+    $timeout = $now - 300; 
 
-    // Seleccionamos videos PENDING que no estén bloqueados recientemente
-    $orderBy = ($mode === 'random') ? 'RAND()' : 'category ASC, title ASC';
+    // PRIORIDAD ALFABÉTICA: Por defecto usamos title ASC
+    $orderBy = ($mode === 'random') ? 'RAND()' : 'title ASC';
     
-    // FIX: MariaDB no acepta comillas en el LIMIT cuando se pasa vía execute(). 
-    // Como $limit es forzado a entero por intval(), es seguro concatenarlo directamente.
+    // FIX: LIMIT $limit concatenado es seguro porque $limit es intval()
     $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? ORDER BY $orderBy LIMIT $limit");
     $stmt->execute([$timeout]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (count($videos) > 0) {
-        // Bloqueamos los videos seleccionados para que otros clientes no los tomen
         $ids = array_column($videos, 'id');
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $stmtLock = $pdo->prepare("UPDATE videos SET locked_at = ? WHERE id IN ($placeholders)");

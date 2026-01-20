@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video, SystemSettings } from '../../../types';
@@ -126,7 +125,6 @@ export default function AdminLibrary() {
     const loadStats = async () => {
         try {
             const adminStats = await db.getAdminLibraryStats();
-            // Estimamos el conteo de públicos sumando todo lo que no es pendiente/proceso/fallido
             setStats({
                 pending: adminStats.pending,
                 locked: adminStats.locked,
@@ -143,7 +141,6 @@ export default function AdminLibrary() {
     useEffect(() => { 
         loadSettings();
         loadStats();
-        // Auto-refresh stats cada 10s para ver el motor automático trabajar
         const intv = setInterval(loadStats, 10000);
         return () => clearInterval(intv);
     }, []);
@@ -221,8 +218,9 @@ export default function AdminLibrary() {
         return path.split(/[\\/]/).pop() || path;
     };
 
-    const handleStep2 = async () => {
-        if (activeScan) return;
+    const handleStep2 = async (force: boolean = false) => {
+        if (activeScan && !force) return;
+        
         addToLog("Buscando lote de videos PENDING...");
         try {
             const pending = await db.getUnprocessedVideos(50, 'normal');
@@ -258,8 +256,9 @@ export default function AdminLibrary() {
             addToLog("Lote completado. Solicitando nuevo lote...");
             loadStats();
             setScanQueue([]);
+            // Iniciar siguiente lote automáticamente
             setTimeout(() => {
-                handleStep2();
+                handleStep2(true);
             }, 500);
         } else {
             setCurrentScanIndex(prev => prev + 1);
@@ -339,7 +338,7 @@ export default function AdminLibrary() {
                 </div>
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P3: Listos</div>
-                    <div className="text-xl font-black text-emerald-500 flex items-center justify-center gap-1"><CheckCircle2 size={16}/> {stats.public}</div>
+                    <div className="text-xl font-black text-emerald-400 flex items-center justify-center gap-1"><CheckCircle2 size={16}/> {stats.public}</div>
                 </div>
                 <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-center shadow-lg">
                     <div className="text-slate-500 text-[10px] font-black uppercase mb-1">P4: Mantenimiento</div>
@@ -427,7 +426,7 @@ export default function AdminLibrary() {
                             <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">2</div>
                             <h3 className="font-black text-white text-xs uppercase tracking-widest">Extracción Automática</h3>
                         </div>
-                        <button onClick={handleStep2} disabled={activeScan || stats.available === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
+                        <button onClick={() => handleStep2()} disabled={activeScan || stats.available === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
                             {activeScan ? <Zap size={18} className="animate-pulse text-yellow-300" /> : <Film size={18}/>} 
                             {activeScan ? 'PROCESANDO EN BUCLE...' : `INICIAR MOTOR AUTOMÁTICO (${stats.available})`}
                         </button>
