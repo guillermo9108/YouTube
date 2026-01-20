@@ -6,7 +6,7 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, 
     CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers, 
-    HardDrive, List, Play, ChevronRight, XCircle, Zap
+    HardDrive, List, Play, ChevronRight, XCircle, Zap, FolderOpen
 } from 'lucide-react';
 
 interface ScannerPlayerProps {
@@ -102,6 +102,7 @@ export default function AdminLibrary() {
     const [localPath, setLocalPath] = useState('');
     const [libraryPaths, setLibraryPaths] = useState<string[]>([]);
     const [isIndexing, setIsIndexing] = useState(false);
+    const [indexProgress, setIndexProgress] = useState({ current: 0, total: 0, label: '' });
     const [activeScan, setActiveScan] = useState(false);
     const [isOrganizing, setIsOrganizing] = useState(false);
     const [isReorganizingAll, setIsReorganizingAll] = useState(false);
@@ -146,25 +147,75 @@ export default function AdminLibrary() {
     const addToLog = (msg: string) => { setScanLog(prev => [`> ${msg}`, ...prev].slice(0, 100)); };
 
     const handleStep1 = async (useGlobalPaths: boolean = false) => {
+        if (isIndexing) return;
         setIsIndexing(true);
-        addToLog(useGlobalPaths ? 'Iniciando escaneo MULTI-VOLUMEN...' : `Escaneando ruta: ${localPath}`);
+        setIndexProgress({ current: 0, total: 0, label: 'Iniciando descubrimiento...' });
         
         try {
+            // Guardar configuración si el usuario escribió algo
             if (localPath.trim()) {
                 await db.updateSystemSettings({ localLibraryPath: localPath });
             }
 
-            const res = await db.scanLocalLibrary(useGlobalPaths ? '' : localPath);
+            let foldersToScan: any[] = [];
             
-            if (res.errors && res.errors.length > 0) {
-                res.errors.forEach((err: string) => addToLog(`ERROR: ${err}`));
+            if (useGlobalPaths) {
+                addToLog("Solicitando descubrimiento de ramas...");
+                const branches: any = await db.request('action=get_scan_folders');
+                foldersToScan = Array.isArray(branches) ? branches : [];
+            } else {
+                foldersToScan = [{ path: localPath, name: basename(localPath) }];
             }
 
-            addToLog(`Escaneo completado. Encontrados: ${res.totalFound}. Nuevos: ${res.newToImport}`);
-            toast.success("Paso 1 Finalizado");
+            if (foldersToScan.length === 0) {
+                addToLog("No se encontraron carpetas válidas para escanear.");
+                setIsIndexing(false);
+                return;
+            }
+
+            addToLog(`Cola de escaneo lista: ${foldersToScan.length} ramas detectadas.`);
+            setIndexProgress({ current: 0, total: foldersToScan.length, label: 'Preparando motor...' });
+
+            let totalImported = 0;
+            let totalFound = 0;
+
+            for (let i = 0; i < foldersToScan.length; i++) {
+                const folder = foldersToScan[i];
+                setIndexProgress({ 
+                    current: i + 1, 
+                    total: foldersToScan.length, 
+                    label: `Escaneando: ${folder.name}` 
+                });
+                
+                addToLog(`[RAMA ${i+1}/${foldersToScan.length}] Procesando ${folder.path}...`);
+                
+                try {
+                    const res: any = await db.scanLocalLibrary(folder.path);
+                    totalFound += (res.totalFound || 0);
+                    totalImported += (res.newToImport || 0);
+                    
+                    if (res.errors && res.errors.length > 0) {
+                        res.errors.forEach((err: string) => addToLog(`WARN: ${err}`));
+                    }
+                } catch (folderErr: any) {
+                    addToLog(`ERROR en rama: ${folderErr.message}`);
+                }
+            }
+
+            addToLog(`Escaneo completo. Total Encontrados: ${totalFound}. Total Nuevos: ${totalImported}`);
+            toast.success("Indexación masiva terminada");
             loadStats();
-        } catch (e: any) { addToLog(`ERROR CRÍTICO: ${e.message}`); }
-        finally { setIsIndexing(false); }
+        } catch (e: any) { 
+            addToLog(`ERROR CRÍTICO: ${e.message}`); 
+            toast.error("Fallo el escaneo por lotes");
+        } finally { 
+            setIsIndexing(false); 
+            setIndexProgress({ current: 0, total: 0, label: '' });
+        }
+    };
+
+    const basename = (path: string) => {
+        return path.split(/[\\/]/).pop() || path;
     };
 
     const handleStep2 = async () => {
@@ -299,7 +350,7 @@ export default function AdminLibrary() {
                         <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-black">1</div>
                         <div>
                             <h3 className="font-black text-white text-sm uppercase tracking-widest leading-none">Registro Físico Multi-Disco</h3>
-                            <p className="text-[10px] text-slate-500 uppercase font-bold mt-1">Sincroniza archivos desde todos tus volúmenes</p>
+                            <p className="text-[10px] text-slate-500 uppercase font-bold mt-1">Sincroniza archivos mediante escaneo por lotes (Batch Mode)</p>
                         </div>
                     </div>
 
@@ -341,9 +392,24 @@ export default function AdminLibrary() {
                                 className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 py-3 md:px-8 rounded-xl text-xs font-black uppercase tracking-widest text-white transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/20 active:scale-95"
                             >
                                 {isIndexing ? <RefreshCw className="animate-spin" size={16}/> : <Layers size={16}/>} 
-                                Escanear Todos los Discos
+                                Escanear en Bucle (Evita Timeouts)
                             </button>
                         </div>
+
+                        {isIndexing && indexProgress.total > 0 && (
+                            <div className="pt-2 animate-in fade-in zoom-in-95">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                        <FolderOpen size={12} className="text-indigo-400 animate-pulse"/>
+                                        {indexProgress.label}
+                                    </span>
+                                    <span className="text-[10px] font-mono text-indigo-400">{indexProgress.current} / {indexProgress.total}</span>
+                                </div>
+                                <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-white/5">
+                                    <div className="h-full bg-indigo-500 transition-all duration-500 shadow-[0_0_10px_rgba(79,70,229,0.5)]" style={{ width: `${(indexProgress.current / indexProgress.total) * 100}%` }}></div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -393,7 +459,7 @@ export default function AdminLibrary() {
                 </div>
                 <div className="flex-1 overflow-y-auto font-mono text-[10px] space-y-1.5 custom-scrollbar pr-2">
                     {scanLog.map((l, i) => (
-                        <div key={i} className={`py-1 border-b border-white/5 last:border-0 ${l.includes('ERROR') ? 'text-red-400 font-bold' : (l.includes('[OK]') ? 'text-emerald-400' : (l.includes('SOLICITANDO') ? 'text-indigo-400' : 'text-slate-400'))}`}>
+                        <div key={i} className={`py-1 border-b border-white/5 last:border-0 ${l.includes('ERROR') ? 'text-red-400 font-bold' : (l.includes('[OK]') ? 'text-emerald-400' : (l.includes('[RAMA') ? 'text-indigo-400 font-bold' : 'text-slate-400'))}`}>
                             <span className="opacity-20 mr-2 shrink-0">[{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}]</span>
                             <span className="break-words">{l}</span>
                         </div>

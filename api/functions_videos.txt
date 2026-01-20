@@ -1,4 +1,3 @@
-
 <?php
 
 /**
@@ -29,6 +28,42 @@ function video_get_all($pdo) {
     respond(true, $videos);
 }
 
+/**
+ * DESCUBRIMIENTO DE RAMAS (Carpetas de primer nivel)
+ * Para evitar timeouts, primero obtenemos las carpetas y luego escaneamos cada una.
+ */
+function video_get_scan_folders($pdo) {
+    $stmt = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
+    $sets = $stmt->fetch();
+    $roots = json_decode($sets['libraryPaths'] ?: '[]', true);
+    if (!empty($sets['localLibraryPath'])) $roots[] = $sets['localLibraryPath'];
+    $roots = array_unique(array_filter($roots));
+
+    $queue = [];
+    $blacklist = ['#recycle', '@eaDir', '$RECYCLE.BIN', 'System Volume Information', '.Thumbnails', '.DS_Store', 'lost+found'];
+
+    foreach ($roots as $r) {
+        $r = trim($r);
+        if (!is_dir($r)) continue;
+        
+        // Incluir la propia raíz
+        $queue[] = ['path' => $r, 'name' => basename($r) ?: $r];
+
+        // Obtener carpetas de primer nivel
+        $dirs = @scandir($r);
+        if ($dirs) {
+            foreach ($dirs as $d) {
+                if ($d === '.' || $d === '..' || in_array($d, $blacklist) || strpos($d, '.') === 0) continue;
+                $full = $r . DIRECTORY_SEPARATOR . $d;
+                if (is_dir($full)) {
+                    $queue[] = ['path' => $full, 'name' => $d];
+                }
+            }
+        }
+    }
+    respond(true, $queue);
+}
+
 function video_scan_local($pdo, $input) {
     $paths = [];
     if (!empty($input['path'])) {
@@ -55,8 +90,8 @@ function video_scan_local($pdo, $input) {
     foreach ($paths as $rootPath) {
         $rootPath = trim($rootPath);
         if (!is_dir($rootPath)) { $errors[] = "Ruta no encontrada: $rootPath"; continue; }
-        if (!is_readable($rootPath)) { $errors[] = "Sin permiso de lectura en raíz: $rootPath"; continue; }
 
+        // 1. Detección de Categorías por carpetas de primer nivel
         try {
             $dirEntries = @scandir($rootPath);
             if ($dirEntries) {
@@ -81,6 +116,7 @@ function video_scan_local($pdo, $input) {
             }
         } catch (Exception $e) {}
 
+        // 2. Escaneo recursivo de archivos de video
         try {
             $directory = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
             $filter = new RecursiveCallbackFilterIterator($directory, function ($current, $key, $iterator) use ($blacklist) {
@@ -98,10 +134,12 @@ function video_scan_local($pdo, $input) {
                     $found++;
                     $fullPath = $file->getRealPath();
                     if (!$fullPath) continue;
-                    $stmt = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl = ? OR id = ?");
+                    
                     $vidId = 'loc_' . md5($fullPath);
-                    $stmt->execute([$fullPath, $vidId]);
-                    if ($stmt->fetchColumn() == 0) {
+                    $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE id = ?");
+                    $stmtCheck->execute([$vidId]);
+                    
+                    if ($stmtCheck->fetchColumn() == 0) {
                         $title = pathinfo($fullPath, PATHINFO_FILENAME);
                         $title = trim(str_replace(['.', '_', '-'], ' ', $title));
                         $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, 'api/uploads/thumbnails/default.jpg')");
