@@ -44,7 +44,8 @@ function getAppSchema() {
                 'needs_transcode' => 'TINYINT(1) DEFAULT 0',
                 'transcode_status' => "ENUM('NONE', 'WAITING', 'PROCESSING', 'DONE', 'FAILED') DEFAULT 'NONE'",
                 'transcode_progress' => 'INT DEFAULT 0',
-                'reason' => 'TEXT DEFAULT NULL'
+                'reason' => 'TEXT DEFAULT NULL',
+                'locked_at' => 'BIGINT DEFAULT 0'
             ]
         ],
         'requests' => [

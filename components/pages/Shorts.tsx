@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, ThumbsDown, Send, X, Loader2, ArrowLeft, Pause, Search, UserCheck } from 'lucide-react';
 import { db } from '../../services/db';
@@ -11,16 +10,15 @@ interface ShortItemProps {
   video: Video;
   isActive: boolean;
   isNear: boolean;
-  hasFullAccess: boolean; 
   onOpenShare: (v: Video) => void;
 }
 
-const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: ShortItemProps) => {
+const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const clickTimerRef = useRef<number | null>(null);
   
-  const [isUnlocked, setIsUnlocked] = useState(hasFullAccess);
+  const [isUnlocked, setIsUnlocked] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   const [paused, setPaused] = useState(false);
   
@@ -33,17 +31,36 @@ const ShortItem = ({ video, isActive, isNear, hasFullAccess, onOpenShare }: Shor
   const [dislikeCount, setDislikeCount] = useState(Number(video.dislikes || 0));
   const [dataLoaded, setDataLoaded] = useState(false);
 
+  // Validación de Acceso Inteligente
+  useEffect(() => {
+    if (!user) return;
+    
+    const checkAccess = async () => {
+        const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
+        const isCreator = user.id === video.creatorId;
+        const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
+        const hasVipAccess = isVipActive && video.creatorRole === 'ADMIN';
+
+        if (isAdmin || isCreator || hasVipAccess) {
+            setIsUnlocked(true);
+        } else {
+            const purchased = await db.hasPurchased(user.id, video.id);
+            setIsUnlocked(purchased);
+        }
+    };
+    checkAccess();
+  }, [user, video.id, video.creatorId, video.creatorRole]);
+
   useEffect(() => {
     setLikeCount(Number(video.likes || 0));
     setDislikeCount(Number(video.dislikes || 0));
     
     if (user && isNear && !dataLoaded) {
       db.getInteraction(user.id, video.id).then(setInteraction);
-      if (!hasFullAccess) db.hasPurchased(user.id, video.id).then(setIsUnlocked);
       db.getComments(video.id).then(setComments);
       setDataLoaded(true);
     }
-  }, [user, video.id, isNear, hasFullAccess, video.likes, video.dislikes]);
+  }, [user, video.id, isNear, video.likes, video.dislikes]);
 
   useEffect(() => {
     const el = videoRef.current; if (!el) return;
@@ -259,13 +276,6 @@ export default function Shorts() {
       } catch (e: any) { toast.error(e.message); }
   };
 
-  const hasFullAccess = useMemo(() => {
-      if (!user) return false;
-      const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-      const isVipActive = user.vipExpiry && user.vipExpiry > (Date.now() / 1000);
-      return Boolean(isAdmin || isVipActive);
-  }, [user]);
-
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative">
       <div className="fixed top-4 left-4 z-50"><Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link></div>
@@ -277,7 +287,6 @@ export default function Shorts() {
                 video={video} 
                 isActive={idx === activeIndex} 
                 isNear={Math.abs(idx - activeIndex) <= 2}
-                hasFullAccess={hasFullAccess} 
                 onOpenShare={(v) => setVideoToShare(v)}
              />
         </div>

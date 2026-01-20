@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -122,12 +121,14 @@ export default function Watch() {
                             db.getInteraction(user.id, v.id)
                         ]);
                         
-                        // VERIFICACIÓN VIP: El usuario VIP desbloquea todo el contenido automáticamente
-                        const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
                         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
                         const isCreator = user.id === v.creatorId;
                         
-                        setIsUnlocked(Boolean(access || isAdmin || isCreator || isVip));
+                        // RESTRICCIÓN VIP: Solo tiene acceso automático al contenido del ADMIN
+                        const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
+                        const hasVipAccess = isVipActive && v.creatorRole === 'ADMIN';
+                        
+                        setIsUnlocked(Boolean(access || isAdmin || isCreator || hasVipAccess));
                         setInteraction(interact);
                     }
                 }
@@ -201,8 +202,11 @@ export default function Watch() {
             return;
         }
 
-        const isVipTotal = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-        const hasAccess = user.role?.trim().toUpperCase() === 'ADMIN' || user.id === nextVid.creatorId || isVipTotal;
+        const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
+        const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
+        const hasVipAccess = isVipActive && nextVid.creatorRole === 'ADMIN';
+        
+        const hasAccess = isAdmin || user.id === nextVid.creatorId || hasVipAccess;
         
         if (hasAccess) { navigateToNext(nextVid); return; }
         

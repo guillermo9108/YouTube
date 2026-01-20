@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video, SystemSettings } from '../../../types';
@@ -5,7 +6,7 @@ import { useToast } from '../../../context/ToastContext';
 import { 
     FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, 
     CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers, 
-    HardDrive, List, Play, ChevronRight, XCircle
+    HardDrive, List, Play, ChevronRight, XCircle, Zap
 } from 'lucide-react';
 
 interface ScannerPlayerProps {
@@ -167,11 +168,13 @@ export default function AdminLibrary() {
     };
 
     const handleStep2 = async () => {
-        addToLog("Buscando videos PENDING...");
+        if (activeScan) return;
+        addToLog("Buscando lote de videos PENDING...");
         try {
             const pending = await db.getUnprocessedVideos(50, 'normal');
             if (pending.length === 0) {
-                addToLog("No hay videos PENDING.");
+                addToLog("Cola vacía. Proceso finalizado.");
+                setActiveScan(false);
                 return;
             }
             setScanQueue(pending);
@@ -198,9 +201,14 @@ export default function AdminLibrary() {
         } catch (e) { console.error(e); }
         
         if (currentScanIndex + 1 >= scanQueue.length) {
-            setActiveScan(false);
-            toast.success("Lote procesado");
+            // Lote terminado, buscamos el siguiente lote automáticamente
+            addToLog("Lote completado. Solicitando nuevo lote...");
             loadStats();
+            setScanQueue([]);
+            // Reiniciamos con un pequeño delay para dejar respirar al navegador
+            setTimeout(() => {
+                handleStep2();
+            }, 500);
         } else {
             setCurrentScanIndex(prev => prev + 1);
         }
@@ -343,11 +351,13 @@ export default function AdminLibrary() {
                     <div className="space-y-3">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">2</div>
-                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Extracción de Medios</h3>
+                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Extracción Automática</h3>
                         </div>
                         <button onClick={handleStep2} disabled={activeScan || stats.pending === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
-                            <Film size={18}/> Iniciar Extracción ({stats.pending})
+                            {activeScan ? <Zap size={18} className="animate-pulse text-yellow-300" /> : <Film size={18}/>} 
+                            {activeScan ? 'PROCESANDO EN BUCLE...' : `INICIAR MOTOR AUTOMÁTICO (${stats.pending})`}
                         </button>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase text-center">EL PROCESO CONTINUARÁ HASTA TERMINAR TODA LA LIBRERÍA</p>
                     </div>
 
                     <div className="space-y-3">
@@ -383,7 +393,7 @@ export default function AdminLibrary() {
                 </div>
                 <div className="flex-1 overflow-y-auto font-mono text-[10px] space-y-1.5 custom-scrollbar pr-2">
                     {scanLog.map((l, i) => (
-                        <div key={i} className={`py-1 border-b border-white/5 last:border-0 ${l.includes('ERROR') ? 'text-red-400 font-bold' : (l.includes('[OK]') ? 'text-emerald-400' : (l.includes('MULTI') ? 'text-indigo-400' : 'text-slate-400'))}`}>
+                        <div key={i} className={`py-1 border-b border-white/5 last:border-0 ${l.includes('ERROR') ? 'text-red-400 font-bold' : (l.includes('[OK]') ? 'text-emerald-400' : (l.includes('SOLICITANDO') ? 'text-indigo-400' : 'text-slate-400'))}`}>
                             <span className="opacity-20 mr-2 shrink-0">[{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}]</span>
                             <span className="break-words">{l}</span>
                         </div>
@@ -392,7 +402,7 @@ export default function AdminLibrary() {
                 </div>
             </div>
 
-            {activeScan && (
+            {activeScan && scanQueue.length > 0 && (
                 <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300">
                     <div className="bg-slate-900 p-8 rounded-[40px] border border-slate-700 w-full max-w-md text-center shadow-2xl relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1.5 bg-slate-800">
@@ -404,10 +414,10 @@ export default function AdminLibrary() {
                                 <Film size={32}/>
                             </div>
                             <h4 className="font-black text-white uppercase tracking-tighter text-xl leading-none">
-                                Procesando Archivo
+                                Motor de Extracción
                             </h4>
                             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mt-2">
-                                {currentScanIndex + 1} de {scanQueue.length}
+                                Procesando {currentScanIndex + 1} de {scanQueue.length}
                             </p>
                         </div>
 
@@ -417,7 +427,7 @@ export default function AdminLibrary() {
                         
                         <ScannerPlayer key={scanQueue[currentScanIndex].id} video={scanQueue[currentScanIndex]} onComplete={handleVideoProcessed} />
                         
-                        <button onClick={() => setActiveScan(false)} className="mt-8 w-full bg-red-950/20 hover:bg-red-900/40 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] py-4 rounded-2xl border border-red-900/30 transition-all active:scale-95">Detener Escáner</button>
+                        <button onClick={() => setActiveScan(false)} className="mt-8 w-full bg-red-950/20 hover:bg-red-900/40 text-red-500 text-[10px] font-black uppercase tracking-[0.2em] py-4 rounded-2xl border border-red-900/30 transition-all active:scale-95">Detener Ciclo</button>
                     </div>
                 </div>
             )}

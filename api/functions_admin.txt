@@ -1,7 +1,7 @@
 
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V17.7 (Accounting Fix for Real Inflow)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V17.8 (Path Resolution Fix)
  */
 
 function admin_get_settings($pdo) {
@@ -205,8 +205,10 @@ function admin_cleanup_files($pdo) {
     $videos = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos")->fetchAll();
     $dbFiles = [];
     foreach ($videos as $v) {
-        if (strpos($v['videoUrl'], 'uploads/') !== false) $dbFiles[] = realpath($v['videoUrl']);
-        if (strpos($v['thumbnailUrl'], 'uploads/') !== false) $dbFiles[] = realpath($v['thumbnailUrl']);
+        $realVideo = resolve_video_path($v['videoUrl']);
+        $realThumb = resolve_video_path($v['thumbnailUrl']);
+        if ($realVideo) $dbFiles[] = $realVideo;
+        if ($realThumb) $dbFiles[] = $realThumb;
     }
     $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market'];
     $deleted = 0;
@@ -217,7 +219,7 @@ function admin_cleanup_files($pdo) {
         foreach ($files as $f) {
             if ($f === '.' || $f === '..') continue;
             $full = realpath($path . '/' . $f);
-            if (!in_array($full, $dbFiles) && is_file($full)) { @unlink($full); $deleted++; }
+            if ($full && !in_array($full, $dbFiles) && is_file($full)) { @unlink($full); $deleted++; }
         }
     }
     respond(true, ['videos' => $deleted]);
@@ -359,7 +361,6 @@ function admin_smart_cleaner_preview($pdo, $input) {
         $params[':cat'] = $category;
     }
     
-    // Hardened LIMIT to prevent any injection if logic changes elsewhere
     $limitVal = (int)$limit;
     if ($limitVal <= 0) $limitVal = 100;
     $sql .= " LIMIT " . $limitVal; 
@@ -370,13 +371,14 @@ function admin_smart_cleaner_preview($pdo, $input) {
     
     $totalBytes = 0;
     foreach ($vids as &$v) {
-        $size = file_exists($v['videoUrl']) ? filesize($v['videoUrl']) : 0;
+        $realPath = resolve_video_path($v['videoUrl']);
+        $size = ($realPath && file_exists($realPath)) ? filesize($realPath) : 0;
         $totalBytes += $size;
-        $v['size_fmt'] = round($size / 1048576, 1) . 'MB';
+        $v['size_fmt'] = round($size / 1048576, 1) . ' MB';
         $v['reason'] = "Bajo ROI ({$v['views']} vistas)";
     }
     
-    respond(true, ['preview' => $vids, 'stats' => ['spaceReclaimed' => round($totalBytes / 1073741824, 2) . 'GB']]);
+    respond(true, ['preview' => $vids, 'stats' => ['spaceReclaimed' => round($totalBytes / 1073741824, 2) . ' GB']]);
 }
 
 function admin_smart_cleaner_execute($pdo, $input) {
@@ -387,8 +389,12 @@ function admin_smart_cleaner_execute($pdo, $input) {
         $stmtV->execute([$id]);
         $v = $stmtV->fetch();
         if ($v) {
-            if (file_exists($v['videoUrl'])) @unlink($v['videoUrl']);
-            if (file_exists($v['thumbnailUrl'])) @unlink($v['thumbnailUrl']);
+            $realVideo = resolve_video_path($v['videoUrl']);
+            $realThumb = resolve_video_path($v['thumbnailUrl']);
+            
+            if ($realVideo && file_exists($realVideo)) @unlink($realVideo);
+            if ($realThumb && file_exists($realThumb)) @unlink($realThumb);
+            
             $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
             $deleted++;
         }
@@ -400,7 +406,13 @@ function admin_file_cleanup_preview($pdo, $type) {
     $vids = [];
     if ($type === 'ORPHAN_DB') {
         $all = $pdo->query("SELECT id, title, videoUrl, views FROM videos")->fetchAll();
-        foreach ($all as $v) { if (!file_exists($v['videoUrl'])) { $v['reason'] = 'Archivo No Encontrado (404)'; $vids[] = $v; } }
+        foreach ($all as $v) { 
+            $realPath = resolve_video_path($v['videoUrl']);
+            if (!$realPath || !file_exists($realPath)) { 
+                $v['reason'] = 'Archivo No Encontrado (404)'; 
+                $vids[] = $v; 
+            } 
+        }
     } elseif ($type === 'LOW_ROI') {
         $vids = $pdo->query("SELECT id, title, videoUrl, views FROM videos WHERE views < 2 AND createdAt < UNIX_TIMESTAMP() - 2592000 LIMIT 100")->fetchAll();
         foreach ($vids as &$v) { $v['reason'] = 'Inactividad prolongada'; }

@@ -56,6 +56,7 @@ export interface Video {
   videoUrl: string;
   creatorId: string;
   creatorName: string;
+  creatorRole?: string; // Nuevo campo para validar acceso VIP
   creatorAvatarUrl?: string;
   createdAt: number;
   views: number;
