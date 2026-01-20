@@ -237,14 +237,19 @@ function video_get_related($pdo, $videoId) {
 
 function video_get_unprocessed($pdo) {
     $limit = intval($_GET['limit'] ?? 50);
+    if ($limit <= 0) $limit = 50;
+
     $mode = $_GET['mode'] ?? 'normal';
     $now = time();
     $timeout = $now - 300; // 5 minutos de bloqueo
 
     // Seleccionamos videos PENDING que no estén bloqueados recientemente
     $orderBy = ($mode === 'random') ? 'RAND()' : 'category ASC, title ASC';
-    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? ORDER BY $orderBy LIMIT ?");
-    $stmt->execute([$timeout, $limit]);
+    
+    // FIX: MariaDB no acepta comillas en el LIMIT cuando se pasa vía execute(). 
+    // Como $limit es forzado a entero por intval(), es seguro concatenarlo directamente.
+    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? ORDER BY $orderBy LIMIT $limit");
+    $stmt->execute([$timeout]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (count($videos) > 0) {
