@@ -1,3 +1,5 @@
+// @ts-ignore
+import jsmediatags from 'jsmediatags';
 
 // Helper to calculate image brightness
 const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -16,11 +18,58 @@ const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: num
     return Math.floor(colorSum / (width * height));
 };
 
+/**
+ * Extract Album Art from Audio using jsmediatags
+ */
+const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null> => {
+    return new Promise((resolve) => {
+        try {
+            jsmediatags.read(fileOrUrl, {
+                onSuccess: (tag: any) => {
+                    const { data, format } = tag.tags.picture || {};
+                    if (data && format) {
+                        let base64String = "";
+                        for (let i = 0; i < data.length; i++) {
+                            base64String += String.fromCharCode(data[i]);
+                        }
+                        const contentType = format;
+                        const byteCharacters = base64String;
+                        const byteArrays = [];
+                        for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+                            const slice = byteCharacters.slice(offset, offset + 512);
+                            const byteNumbers = new Array(slice.length);
+                            for (let i = 0; i < slice.length; i++) {
+                                byteNumbers[i] = slice.charCodeAt(i);
+                            }
+                            const byteArray = new Uint8Array(byteNumbers);
+                            byteArrays.push(byteArray);
+                        }
+                        const blob = new Blob(byteArrays, { type: contentType });
+                        const file = new File([blob], "cover.jpg", { type: contentType });
+                        resolve(file);
+                    } else {
+                        resolve(null);
+                    }
+                },
+                onError: () => resolve(null)
+            });
+        } catch (e) {
+            resolve(null);
+        }
+    });
+};
+
 // Robust Video/Audio Thumbnail Generator
 export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thumbnail: File | null, duration: number }> => {
   const isFile = typeof fileOrUrl !== 'string';
   const videoUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
-  const isAudio = isFile ? (fileOrUrl as File).type.startsWith('audio') : false;
+  const isAudio = isFile ? (fileOrUrl as File).type.startsWith('audio') : (videoUrl.toLowerCase().endsWith('.mp3'));
+
+  // Stage 0: Audio specific extraction
+  let audioThumbnail: File | null = null;
+  if (isAudio) {
+      audioThumbnail = await extractAudioCover(fileOrUrl);
+  }
 
   return new Promise((resolve, reject) => {
       const media = document.createElement('video');
@@ -64,7 +113,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       const timeout = setTimeout(() => {
           console.warn("Media generator timed out for:", isFile ? (fileOrUrl as File).name : 'url');
           const fallbackDur = (media.duration && isFinite(media.duration)) ? media.duration : 0;
-          finish(null, fallbackDur);
+          finish(audioThumbnail, fallbackDur);
       }, 15000);
 
       // --- STAGE 1: Metadata Loaded (Get Duration) ---
@@ -75,8 +124,8 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               media.currentTime = 1; 
           } else {
               if (isAudio || media.videoWidth === 0) {
-                  // If it's audio or no video stream, just finish with duration
-                  finish(null, duration);
+                  // If it's audio or no video stream, just finish with duration and the audio cover if found
+                  finish(audioThumbnail, duration);
               } else {
                   // Seek to 20% or 2s to avoid black intro
                   let seekTime = Math.min(2, duration / 5); 
@@ -105,18 +154,18 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
                       finish(file, duration);
                   }, 'image/jpeg', 0.75);
               } else {
-                  finish(null, media.duration || 0);
+                  finish(audioThumbnail, media.duration || 0);
               }
           } catch (e) {
               console.error("Frame capture error", e);
-              finish(null, media.duration || 0);
+              finish(audioThumbnail, media.duration || 0);
           }
       };
 
       // Error Handling
       media.onerror = (e) => {
           console.warn("Media load error:", e);
-          finish(null, 0);
+          finish(audioThumbnail, 0);
       };
 
       // Start loading

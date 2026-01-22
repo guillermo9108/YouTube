@@ -2,10 +2,11 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video, SystemSettings } from '../../../types';
 import { useToast } from '../../../context/ToastContext';
+import { generateThumbnail } from '../../../utils/videoGenerator';
 import { 
     FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, 
     CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers, 
-    HardDrive, List, Play, ChevronRight, XCircle, Zap, FolderOpen, Lock
+    HardDrive, List, Play, ChevronRight, XCircle, Zap, FolderOpen, Lock, Music
 } from 'lucide-react';
 
 interface ScannerPlayerProps {
@@ -14,47 +15,79 @@ interface ScannerPlayerProps {
 }
 
 const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
-    const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState('Iniciando...');
+    const [isAudio, setIsAudio] = useState(false);
     const processedRef = useRef(false);
-    const timeoutRef = useRef<number | null>(null);
 
     useEffect(() => {
+        const checkType = () => {
+            const ext = video.videoUrl.split('.').pop()?.toLowerCase();
+            const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
+            if (ext && audioExts.includes(ext)) {
+                setIsAudio(true);
+                processMedia();
+            }
+        };
+        checkType();
+    }, [video.id]);
+
+    const processMedia = async () => {
+        if (processedRef.current) return;
+        setStatus('Extrayendo metadatos...');
+        
+        try {
+            const streamUrl = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
+            const result = await generateThumbnail(streamUrl);
+            
+            if (!processedRef.current) {
+                processedRef.current = true;
+                setStatus(result.thumbnail ? 'Carátula extraída' : 'Sin carátula detectada');
+                onComplete(result.duration, result.thumbnail, result.duration > 0, false);
+            }
+        } catch (e) {
+            if (!processedRef.current) {
+                processedRef.current = true;
+                setStatus('Error en extracción');
+                onComplete(0, null, false, true);
+            }
+        }
+    };
+
+    // Si no es audio detectado inmediatamente, el video tag se encarga
+    const videoRef = useRef<HTMLVideoElement>(null);
+    useEffect(() => {
+        if (isAudio) return; // Ya lo maneja processMedia asíncronamente
+
         const vid = videoRef.current;
         if (!vid) return;
         vid.src = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
         vid.muted = true;
         
-        timeoutRef.current = window.setTimeout(() => {
+        const timeout = window.setTimeout(() => {
             if (!processedRef.current) {
                 const dur = (vid.duration && isFinite(vid.duration)) ? vid.duration : 0;
                 onComplete(dur, null, dur > 0, true);
                 processedRef.current = true;
             }
-        }, 10000);
+        }, 15000);
 
-        vid.play().catch((e) => {
-            setStatus('Codec no soportado o pausa de sistema');
-            console.warn("AdminLibrary: play() interrumpido", e.name);
-        });
+        vid.play().catch(() => setStatus('Interrumpido'));
 
-        return () => {
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        };
-    }, [video]);
+        return () => clearTimeout(timeout);
+    }, [video, isAudio]);
 
     const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
         if (vid.videoWidth === 0 && vid.duration > 0) {
-            processedRef.current = true;
-            setStatus('Incompatible (Audio Mode)');
-            onComplete(vid.duration, null, true, true);
+            // Probablemente audio cargado en tag de video
+            setIsAudio(true);
+            processMedia();
         }
     };
 
     const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
-        if (processedRef.current) return;
+        if (processedRef.current || isAudio) return;
 
         if (vid.currentTime > 1.2 && vid.videoWidth > 0) {
             processedRef.current = true;
@@ -75,18 +108,25 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
     return (
         <div className="bg-black rounded-lg overflow-hidden aspect-video relative border border-slate-800 shadow-2xl">
-            <video 
-                ref={videoRef} 
-                className="w-full h-full object-contain" 
-                onLoadedMetadata={handleLoadedMetadata}
-                onTimeUpdate={handleTimeUpdate} 
-                onError={() => {
-                    if (!processedRef.current) {
-                        onComplete(0, null, false, true);
-                        processedRef.current = true;
-                    }
-                }} 
-            />
+            {isAudio ? (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-indigo-400">
+                    <Music size={48} className="animate-pulse mb-2"/>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Procesando Audio</span>
+                </div>
+            ) : (
+                <video 
+                    ref={videoRef} 
+                    className="w-full h-full object-contain" 
+                    onLoadedMetadata={handleLoadedMetadata}
+                    onTimeUpdate={handleTimeUpdate} 
+                    onError={() => {
+                        if (!processedRef.current) {
+                            onComplete(0, null, false, true);
+                            processedRef.current = true;
+                        }
+                    }} 
+                />
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none"></div>
             <div className="absolute bottom-2 left-2 flex items-center gap-2">
                 <span className="bg-indigo-600 px-2 py-0.5 rounded text-[9px] text-white font-black uppercase animate-pulse">Scanner</span>
