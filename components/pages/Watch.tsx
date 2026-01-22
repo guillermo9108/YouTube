@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -5,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart
+    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart, Music
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -141,7 +142,7 @@ export default function Watch() {
         if (!user || !video || isPurchasing) return;
         
         if (Number(user.balance) < Number(video.price)) {
-            toast.error("Saldo insuficiente para comprar este video.");
+            toast.error("Saldo insuficiente para comprar este contenido.");
             navigate('/vip');
             return;
         }
@@ -150,7 +151,7 @@ export default function Watch() {
         try {
             await db.purchaseVideo(user.id, video.id);
             setIsUnlocked(true);
-            toast.success("¡Video desbloqueado con éxito!");
+            toast.success("¡Desbloqueado con éxito!");
             refreshUser();
         } catch (e: any) {
             toast.error("Error al procesar la compra: " + e.message);
@@ -252,7 +253,7 @@ export default function Watch() {
                 method: 'POST',
                 body: JSON.stringify({ videoId: video.id, senderId: user.id, targetUsername })
             });
-            toast.success(`Video enviado a @${targetUsername}`);
+            toast.success(`Enlace enviado a @${targetUsername}`);
             setShowShareModal(false);
             setShareSearch('');
             setShareSuggestions([]);
@@ -266,24 +267,51 @@ export default function Watch() {
         return `${base}&token=${token}&cb=${Date.now()}`;
     }, [video?.id]);
 
+    const isAudio = (video as any)?.isAudio || video?.videoUrl?.toLowerCase().endsWith('.mp3');
+
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
     return (
         <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in">
             <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-white/5">
-                <div className="relative aspect-video max-w-[1600px] mx-auto bg-black">
+                <div className="relative aspect-video max-w-[1600px] mx-auto bg-black overflow-hidden">
                     {isUnlocked ? (
-                        <video 
-                            ref={videoRef} 
-                            src={streamUrl} 
-                            controls 
-                            autoPlay 
-                            playsInline 
-                            className="w-full h-full object-contain" 
-                            onTimeUpdate={handleVideoTimeUpdate}
-                            onEnded={handleVideoEnded}
-                            crossOrigin="anonymous"
-                        />
+                        <>
+                            {isAudio && video?.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') && (
+                                <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover blur-xl opacity-40 scale-110" />
+                            )}
+                            <div className={`relative z-10 w-full h-full flex flex-col items-center justify-center ${isAudio ? 'bg-slate-900/40 backdrop-blur-md' : ''}`}>
+                                {isAudio && (
+                                    <div className="absolute top-4 left-4 flex items-center gap-2 bg-indigo-600/90 px-3 py-1 rounded-full border border-white/10 shadow-xl">
+                                        <Music size={14} className="text-white"/>
+                                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Audio Track</span>
+                                    </div>
+                                )}
+                                
+                                {isAudio && video?.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? (
+                                    <div className="w-48 h-48 md:w-64 md:h-64 rounded-[40px] overflow-hidden shadow-2xl border-4 border-white/10 mb-4 animate-in zoom-in-95 duration-700">
+                                        <img src={video.thumbnailUrl} className="w-full h-full object-cover" />
+                                    </div>
+                                ) : isAudio ? (
+                                    <div className="w-48 h-48 md:w-64 md:h-64 rounded-[40px] bg-slate-800 flex items-center justify-center text-indigo-400/20 mb-4 shadow-2xl">
+                                        <Music size={100} />
+                                    </div>
+                                ) : null}
+
+                                <video 
+                                    ref={videoRef} 
+                                    src={streamUrl} 
+                                    controls 
+                                    autoPlay 
+                                    poster={isAudio ? '' : video?.thumbnailUrl}
+                                    playsInline 
+                                    className={`w-full h-full object-contain ${isAudio ? 'max-h-[80px] mt-4' : ''}`} 
+                                    onTimeUpdate={handleVideoTimeUpdate}
+                                    onEnded={handleVideoEnded}
+                                    crossOrigin="anonymous"
+                                />
+                            </div>
+                        </>
                     ) : (
                         <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
                             {video && <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover blur-3xl opacity-30 scale-110"/>}
@@ -331,7 +359,10 @@ export default function Watch() {
             <div className="max-w-7xl mx-auto w-full p-4 lg:p-8 flex flex-col lg:flex-row gap-8">
                 <div className="flex-1 space-y-6">
                     <div>
-                        <h1 className="text-2xl md:text-3xl font-black text-white leading-tight uppercase italic mb-4">{video?.title}</h1>
+                        <div className="flex items-center gap-2 mb-2">
+                            {isAudio && <Music size={16} className="text-indigo-400"/>}
+                            <h1 className="text-2xl md:text-3xl font-black text-white leading-tight uppercase italic">{video?.title}</h1>
+                        </div>
                         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/5 pb-6">
                             <div className="flex items-center gap-4">
                                 <Link to={`/channel/${video?.creatorId}`} className="w-12 h-12 rounded-full bg-slate-800 border border-white/10 overflow-hidden shadow-lg shrink-0">
@@ -339,7 +370,7 @@ export default function Watch() {
                                 </Link>
                                 <div>
                                     <Link to={`/channel/${video?.creatorId}`} className="font-black text-white hover:text-indigo-400">@{video?.creatorName || 'Usuario'}</Link>
-                                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
+                                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{video?.views} {isAudio ? 'oyentes' : 'vistas'} • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                                 </div>
                             </div>
                             
@@ -431,6 +462,11 @@ export default function Watch() {
                                             <CheckCircle2 size={10} className="text-white"/>
                                         </div>
                                     )}
+                                    {(v as any).isAudio && (
+                                        <div className="absolute bottom-1 left-1 bg-black/60 p-1 rounded-md border border-white/10">
+                                            <Music size={10} className="text-indigo-400"/>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="flex-1 min-w-0 py-1">
                                     <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase tracking-tighter leading-tight group-hover:text-indigo-400">{v.title}</h4>
@@ -456,7 +492,7 @@ export default function Watch() {
                 <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
                     <div className="bg-slate-900 border border-slate-800 rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
                         <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
-                            <h3 className="font-black text-white uppercase tracking-widest text-sm flex items-center gap-2"><Share2 size={18} className="text-indigo-400"/> Compartir con Usuario</h3>
+                            <h3 className="font-black text-white uppercase tracking-widest text-sm flex items-center gap-2"><Share2 size={18} className="text-indigo-400"/> Compartir</h3>
                             <button onClick={() => setShowShareModal(false)} className="text-slate-500 hover:text-white"><X/></button>
                         </div>
                         <div className="p-6 space-y-4">

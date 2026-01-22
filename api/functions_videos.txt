@@ -18,6 +18,10 @@ function video_process_rows(&$rows) {
         if (isset($v['thumbnailUrl'])) { $v['thumbnailUrl'] = fix_url($v['thumbnailUrl']); }
         if (isset($v['creatorAvatarUrl'])) { $v['creatorAvatarUrl'] = fix_url($v['creatorAvatarUrl']); }
         if (!isset($v['transcode_status'])) $v['transcode_status'] = 'NONE';
+        
+        // Detectar si es audio para la interfaz
+        $ext = strtolower(pathinfo($v['rawPath'], PATHINFO_EXTENSION));
+        $v['isAudio'] = ($ext === 'mp3' || $ext === 'wav' || $ext === 'aac');
     }
 }
 
@@ -141,7 +145,7 @@ function video_scan_local($pdo, $input) {
             }
         } catch (Exception $e) {}
 
-        // 2. Escaneo recursivo de archivos de video
+        // 2. Escaneo recursivo de archivos de video y audio
         try {
             $directory = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
             $filter = new RecursiveCallbackFilterIterator($directory, function ($current, $key, $iterator) use ($blacklist) {
@@ -155,7 +159,8 @@ function video_scan_local($pdo, $input) {
             foreach ($it as $file) {
                 if ($file->isDir()) continue;
                 $ext = strtolower($file->getExtension());
-                if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm', 'ts'])) {
+                // Agregado soporte para mp3
+                if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm', 'ts', 'mp3'])) {
                     $found++;
                     $fullPath = $file->getRealPath();
                     if (!$fullPath) continue;
@@ -271,8 +276,8 @@ function video_upload($pdo, $post, $files) {
     $thumbUrl = "uploads/thumbnails/default.jpg";
     if (isset($files['thumbnail'])) {
         if (!is_dir('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
-        $thumbUrl = "uploads/thumbnails/{$id}.jpg";
-        move_uploaded_file($files['thumbnail']['tmp_name'], $thumbUrl);
+        $thumbPath = "uploads/thumbnails/{$id}.jpg";
+        move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
     }
     $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
     $stmt->execute([$id, $title, $desc, $price, $thumbUrl, $videoUrl, $userId, time(), $cat, $dur]);

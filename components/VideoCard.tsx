@@ -1,7 +1,8 @@
+
 import React, { useState } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
-import { CheckCircle2, Clock, MoreVertical, ImageOff, Play } from 'lucide-react';
+import { CheckCircle2, Clock, MoreVertical, ImageOff, Play, Music } from 'lucide-react';
 import { db } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -58,6 +59,9 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       } catch (e) {}
   };
 
+  // Determinar si es audio por la propiedad isAudio enviada por el backend (o extension si no viene)
+  const isAudio = (video as any).isAudio || video.videoUrl?.toLowerCase().endsWith('.mp3');
+
   return (
     <div className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
       <Link 
@@ -65,7 +69,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         onClick={handleClick} 
         className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 shadow-sm hover:shadow-2xl hover:shadow-indigo-500/20 hover:scale-[1.03] transition-all duration-500 block ring-1 ring-white/5 hover:ring-indigo-500/40"
       >
-        {!imgError ? (
+        {!imgError && video.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? (
             <img 
               src={video.thumbnailUrl} 
               alt={video.title} 
@@ -75,16 +79,22 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
             />
         ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-800 p-4">
-                <Play size={48} className="opacity-20 mb-2"/>
+                {isAudio ? <Music size={48} className="opacity-20 mb-2" /> : <Play size={48} className="opacity-20 mb-2"/>}
                 <span className="text-[8px] font-black uppercase tracking-widest opacity-20 text-center">{video.title}</span>
             </div>
         )}
         
+        {isAudio && (
+            <div className="absolute top-2 left-2 bg-indigo-600/90 text-white text-[8px] font-black px-2 py-0.5 rounded-lg backdrop-blur-md border border-white/10 shadow-lg uppercase tracking-widest flex items-center gap-1">
+                <Music size={10}/> AUDIO
+            </div>
+        )}
+
         <div className="absolute bottom-2 right-2 bg-black/80 text-white text-[10px] font-black px-2 py-0.5 rounded-lg backdrop-blur-md border border-white/5">
            {formatDuration(video.duration)}
         </div>
 
-        {isNew && !isWatched && (
+        {isNew && !isWatched && !isAudio && (
             <div className="absolute top-2 left-2 bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-lg shadow-red-900/40 animate-pulse uppercase tracking-widest">NUEVO</div>
         )}
 
@@ -98,7 +108,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         {isWatched && (
              <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[2px]">
                  <div className="flex items-center gap-2 text-slate-200 bg-indigo-600/80 px-3 py-1 rounded-full backdrop-blur-md border border-white/10 shadow-xl">
-                    <CheckCircle2 size={14} /> <span className="text-[10px] font-black tracking-widest uppercase">VISTO</span>
+                    <CheckCircle2 size={14} /> <span className="text-[10px] font-black tracking-widest uppercase">OÍDO</span>
                  </div>
              </div>
         )}
@@ -131,7 +141,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
                     <CheckCircle2 size={10} className="text-indigo-500" />
                 </Link>
                 <div className="flex items-center gap-2 font-bold">
-                    <span>{video.views} vistas</span>
+                    <span>{video.views} {isAudio ? 'reprods' : 'vistas'}</span>
                     <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
                     <span>{formatTimeAgo(video.createdAt)}</span>
                 </div>

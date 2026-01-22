@@ -16,37 +16,38 @@ const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: num
     return Math.floor(colorSum / (width * height));
 };
 
-// Robust Video Thumbnail Generator
+// Robust Video/Audio Thumbnail Generator
 export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thumbnail: File | null, duration: number }> => {
   const isFile = typeof fileOrUrl !== 'string';
   const videoUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
+  const isAudio = isFile ? (fileOrUrl as File).type.startsWith('audio') : false;
 
   return new Promise((resolve, reject) => {
-      const video = document.createElement('video');
+      const media = document.createElement('video');
       
       // Critical settings for background processing
-      video.preload = "metadata"; // Priority 1: Get metadata first
-      video.muted = true;
-      video.playsInline = true;
-      video.crossOrigin = "anonymous";
+      media.preload = "metadata"; 
+      media.muted = true;
+      media.playsInline = true;
+      media.crossOrigin = "anonymous";
       
       // Hidden element
-      video.style.position = 'fixed';
-      video.style.top = '-9999px';
-      video.style.left = '-9999px';
-      video.style.width = '640px';
-      video.style.height = '360px';
-      video.style.opacity = '0';
-      document.body.appendChild(video);
+      media.style.position = 'fixed';
+      media.style.top = '-9999px';
+      media.style.left = '-9999px';
+      media.style.width = '640px';
+      media.style.height = '360px';
+      media.style.opacity = '0';
+      document.body.appendChild(media);
 
       let isResolved = false;
 
       const cleanup = () => {
           try {
-              video.pause();
-              video.removeAttribute('src');
-              video.load();
-              video.remove();
+              media.pause();
+              media.removeAttribute('src');
+              media.load();
+              media.remove();
               if (isFile) URL.revokeObjectURL(videoUrl);
           } catch(e) {}
       };
@@ -59,64 +60,66 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           resolve({ thumbnail: thumb, duration: Math.floor(dur) });
       };
 
-      // Safety timeout (15s) - Reduced to prevent UI hanging too long
+      // Safety timeout (15s)
       const timeout = setTimeout(() => {
-          console.warn("Video generator timed out for:", isFile ? (fileOrUrl as File).name : 'url');
-          // Try to return at least duration if we got it
-          const fallbackDur = (video.duration && isFinite(video.duration)) ? video.duration : 0;
+          console.warn("Media generator timed out for:", isFile ? (fileOrUrl as File).name : 'url');
+          const fallbackDur = (media.duration && isFinite(media.duration)) ? media.duration : 0;
           finish(null, fallbackDur);
       }, 15000);
 
       // --- STAGE 1: Metadata Loaded (Get Duration) ---
-      video.onloadedmetadata = () => {
-          const duration = video.duration;
+      media.onloadedmetadata = () => {
+          const duration = media.duration;
           
           if (!isFinite(duration)) {
-              // Streaming or corrupt duration
-              video.currentTime = 1; // Try to force a seek to trigger loading
+              media.currentTime = 1; 
           } else {
-              // We have duration, now try to get thumbnail
-              // Seek to 20% or 2s to avoid black intro
-              let seekTime = Math.min(2, duration / 5); 
-              if (duration > 60) seekTime = 5; 
-              video.currentTime = seekTime;
+              if (isAudio || media.videoWidth === 0) {
+                  // If it's audio or no video stream, just finish with duration
+                  finish(null, duration);
+              } else {
+                  // Seek to 20% or 2s to avoid black intro
+                  let seekTime = Math.min(2, duration / 5); 
+                  if (duration > 60) seekTime = 5; 
+                  media.currentTime = seekTime;
+              }
           }
       };
 
       // --- STAGE 2: Frame Ready (Capture Thumbnail) ---
-      video.onseeked = () => {
+      media.onseeked = () => {
           try {
-              if (isResolved) return;
+              if (isResolved || isAudio || media.videoWidth === 0) return;
 
               const canvas = document.createElement('canvas');
-              canvas.width = video.videoWidth || 640;
-              canvas.height = video.videoHeight || 360;
+              canvas.width = media.videoWidth || 640;
+              canvas.height = media.videoHeight || 360;
               const ctx = canvas.getContext('2d');
               
               if (ctx) {
-                  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                  ctx.drawImage(media, 0, 0, canvas.width, canvas.height);
                   
                   canvas.toBlob(blob => {
                       const file = blob ? new File([blob], "thumbnail.jpg", { type: "image/jpeg" }) : null;
-                      const duration = (video.duration && isFinite(video.duration)) ? video.duration : 0;
+                      const duration = (media.duration && isFinite(media.duration)) ? media.duration : 0;
                       finish(file, duration);
-                  }, 'image/jpeg', 0.75); // Slightly lower quality for speed
+                  }, 'image/jpeg', 0.75);
               } else {
-                  finish(null, video.duration || 0);
+                  finish(null, media.duration || 0);
               }
           } catch (e) {
               console.error("Frame capture error", e);
-              finish(null, video.duration || 0);
+              finish(null, media.duration || 0);
           }
       };
 
-      // Error Handling (e.g., codec not supported by browser)
-      video.onerror = (e) => {
-          console.warn("Video load error (Codec likely unsupported):", e);
-          finish(null, 0); // Return 0 duration so user can manually edit
+      // Error Handling
+      media.onerror = (e) => {
+          console.warn("Media load error:", e);
+          finish(null, 0);
       };
 
       // Start loading
-      video.src = videoUrl;
+      media.src = videoUrl;
   });
 };

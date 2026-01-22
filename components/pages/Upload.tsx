@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2, Clock, Sparkles } from 'lucide-react';
+import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2, Clock, Sparkles, Music } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useUpload } from '../../context/UploadContext';
 import { useNavigate } from '../Router';
@@ -150,7 +150,8 @@ export default function Upload() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
            <div className={`relative border-2 border-dashed border-slate-700 rounded-3xl p-6 text-center hover:bg-slate-800/50 transition-all group cursor-pointer h-44 flex flex-col items-center justify-center bg-slate-900/50 ${isProcessingQueue ? 'pointer-events-none opacity-50' : ''}`}>
-            <input type="file" accept="video/*" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" disabled={isProcessingQueue} />
+            {/* Cambiado para aceptar video y audio */}
+            <input type="file" accept="video/*,audio/mp3,audio/mpeg" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" disabled={isProcessingQueue} />
             <div className="flex flex-col items-center justify-center gap-2 pointer-events-none">
                 {isProcessingQueue ? (
                     <>
@@ -161,7 +162,7 @@ export default function Upload() {
                 ) : (
                     <>
                         <div className="w-14 h-14 rounded-2xl bg-slate-800 flex items-center justify-center group-hover:scale-110 group-hover:rotate-3 transition-all shadow-2xl border border-white/5"><Plus size={28} className="text-indigo-400" /></div>
-                        <span className="text-slate-400 text-xs font-black uppercase tracking-widest mt-2">Seleccionar Videos</span>
+                        <span className="text-slate-400 text-xs font-black uppercase tracking-widest mt-2">Seleccionar Archivos</span>
                     </>
                 )}
             </div>
@@ -198,7 +199,11 @@ export default function Upload() {
                   files.map((f, idx) => (
                     <div key={`${f.name}-${idx}`} className="flex flex-col md:flex-row gap-4 bg-slate-900 p-4 rounded-2xl border border-slate-800 items-start md:items-center group hover:border-slate-600 transition-all animate-in slide-in-from-right-4">
                        <div className="w-full md:w-32 aspect-video rounded-xl bg-black shrink-0 overflow-hidden relative border border-slate-700 shadow-inner">
-                         {thumbnails[idx] ? <ThumbnailPreview file={thumbnails[idx]!} /> : <div className="w-full h-full flex items-center justify-center"><Loader2 className="w-5 h-5 text-indigo-500 animate-spin" /></div>}
+                         {thumbnails[idx] ? <ThumbnailPreview file={thumbnails[idx]!} /> : (
+                             <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-800">
+                                {f.type.startsWith('audio') ? <Music size={32} className="opacity-20"/> : <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />}
+                             </div>
+                         )}
                          <div className="absolute bottom-1 right-1 bg-black/80 backdrop-blur-md text-[9px] px-2 py-0.5 rounded-md text-white font-mono font-bold border border-white/10">{Math.floor((durations[idx]||0)/60)}:{((durations[idx]||0)%60).toFixed(0).padStart(2,'0')}</div>
                        </div>
                        <div className="flex-1 min-w-0 w-full space-y-3">
@@ -216,7 +221,7 @@ export default function Upload() {
               </div>
               <div className="p-5 bg-slate-900 border-t border-slate-800">
                 <button type="submit" disabled={isProcessingQueue || files.length === 0} className={`w-full py-4 rounded-2xl font-black text-sm text-white shadow-2xl transition-all flex justify-center items-center gap-3 uppercase tracking-widest ${isProcessingQueue || files.length === 0 ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-500 active:scale-95 shadow-indigo-500/20'}`}>
-                  {isProcessingQueue ? <><Loader2 className="animate-spin" size={20} /> Procesando...</> : <><UploadIcon size={20}/> Publicar {files.length} Videos</>}
+                  {isProcessingQueue ? <><Loader2 className="animate-spin" size={20} /> Procesando...</> : <><UploadIcon size={20}/> Publicar {files.length} Archivos</>}
                 </button>
               </div>
            </form>
