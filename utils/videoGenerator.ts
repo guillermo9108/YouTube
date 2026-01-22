@@ -1,4 +1,3 @@
-// @ts-ignore
 import jsmediatags from 'jsmediatags';
 
 // Helper to calculate image brightness
@@ -24,7 +23,8 @@ const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: num
 const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null> => {
     return new Promise((resolve) => {
         try {
-            jsmediatags.read(fileOrUrl, {
+            const reader = (jsmediatags as any).read || jsmediatags;
+            reader(fileOrUrl, {
                 onSuccess: (tag: any) => {
                     const { data, format } = tag.tags.picture || {};
                     if (data && format) {
@@ -111,7 +111,6 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
 
       // Safety timeout (15s)
       const timeout = setTimeout(() => {
-          console.warn("Media generator timed out for:", isFile ? (fileOrUrl as File).name : 'url');
           const fallbackDur = (media.duration && isFinite(media.duration)) ? media.duration : 0;
           finish(audioThumbnail, fallbackDur);
       }, 15000);
@@ -124,10 +123,8 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               media.currentTime = 1; 
           } else {
               if (isAudio || media.videoWidth === 0) {
-                  // If it's audio or no video stream, just finish with duration and the audio cover if found
                   finish(audioThumbnail, duration);
               } else {
-                  // Seek to 20% or 2s to avoid black intro
                   let seekTime = Math.min(2, duration / 5); 
                   if (duration > 60) seekTime = 5; 
                   media.currentTime = seekTime;
@@ -157,14 +154,12 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
                   finish(audioThumbnail, media.duration || 0);
               }
           } catch (e) {
-              console.error("Frame capture error", e);
               finish(audioThumbnail, media.duration || 0);
           }
       };
 
       // Error Handling
-      media.onerror = (e) => {
-          console.warn("Media load error:", e);
+      media.onerror = () => {
           finish(audioThumbnail, 0);
       };
 

@@ -9,14 +9,24 @@ const __dirname = path.dirname(__filename)
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: './', // CRITICAL: Allows app to run in subfolders on NAS/Localhost
+  base: './', // CRÍTICO: Permite que la app funcione en subcarpetas de un NAS o servidor local
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './'),
+      // Forzar a Vite a usar la versión distribuida de jsmediatags para evitar errores de bundling CommonJS
+      'jsmediatags': 'jsmediatags/dist/jsmediatags.min.js'
     },
   },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'lucide-react'],
+          ai: ['@google/genai']
+        }
+      }
+    }
   }
 })
