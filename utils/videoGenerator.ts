@@ -1,3 +1,4 @@
+// @ts-ignore
 import jsmediatags from 'jsmediatags';
 
 // Helper to calculate image brightness
