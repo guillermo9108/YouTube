@@ -1,4 +1,3 @@
-
 import { 
     User, Video, Transaction, VipPlan, Comment, UserInteraction, 
     Notification as AppNotification, VideoResult, ContentRequest, 
@@ -39,8 +38,9 @@ class DBService {
             try { 
                 json = JSON.parse(rawText); 
             } catch (e) {
-                this.logRemote(`Malformed JSON from ${endpoint}: ${rawText.substring(0, 100)}`, 'ERROR');
-                throw new Error(`Respuesta inválida del servidor.`);
+                // FIX: Loguear fragmento más largo para diagnosticar HTML de error del servidor
+                this.logRemote(`Malformed JSON from ${endpoint}: ${rawText.substring(0, 250)}`, 'ERROR');
+                throw new Error(`Respuesta inválida del servidor. Revisa los logs de administración.`);
             }
             if (json.success === false) throw new Error(json.error || 'Error desconocido');
             return json.data as T;
@@ -50,8 +50,10 @@ class DBService {
     public async getAllVideos(): Promise<Video[]> { 
         try {
             const vids = await this.request<Video[]>('action=get_videos');
-            localStorage.setItem('sp_cache_vids', JSON.stringify(vids));
-            return vids;
+            // Asegurar que siempre sea un array
+            const safeVids = Array.isArray(vids) ? vids : [];
+            localStorage.setItem('sp_cache_vids', JSON.stringify(safeVids));
+            return safeVids;
         } catch (e) {
             const cached = localStorage.getItem('sp_cache_vids');
             return cached ? JSON.parse(cached) : [];
@@ -65,8 +67,8 @@ class DBService {
     public async getMarketplaceItems(): Promise<MarketplaceItem[]> { 
         try {
             const items = await this.request<MarketplaceItem[]>('action=get_marketplace_items');
-            localStorage.setItem('sp_cache_market', JSON.stringify(items));
-            return items;
+            localStorage.setItem('sp_cache_market', JSON.stringify(items || []));
+            return items || [];
         } catch (e) {
             const cached = localStorage.getItem('sp_cache_market');
             return cached ? JSON.parse(cached) : [];

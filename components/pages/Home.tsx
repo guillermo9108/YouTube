@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
@@ -118,9 +117,9 @@ interface SubCategoryCardProps {
 
 const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick }) => {
     const randomThumb = useMemo(() => {
-        if (videos.length === 0) return null;
+        if (!videos || videos.length === 0) return null;
         const randomIndex = Math.floor(Math.random() * videos.length);
-        return videos[randomIndex].thumbnailUrl;
+        return videos[randomIndex]?.thumbnailUrl;
     }, [videos]);
 
     return (
@@ -152,7 +151,7 @@ const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick
                     {name}
                 </h3>
                 <div className="mt-2 bg-black/40 backdrop-blur-md px-3 py-0.5 rounded-full border border-white/5">
-                    <span className="text-[10px] text-slate-300 font-black uppercase tracking-widest">{videos.length} Elementos</span>
+                    <span className="text-[10px] text-slate-300 font-black uppercase tracking-widest">{videos?.length || 0} Elementos</span>
                 </div>
             </div>
         </button>
@@ -242,15 +241,17 @@ export default function Home() {
                 db.getSystemSettings()
             ]);
             
-            setAllVideos(vids.filter(v => !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category)));
-            setMarketItems(mkt);
-            setAllUsers(usersRes);
-            setCategories(sets.categories || []);
-            setIsAiConfigured(!!sets.geminiKey && sets.geminiKey.trim().length > 5);
+            // Programación Defensiva: Filtrar nulls y asegurar que la propiedad category exista
+            const validVids = (vids || []).filter(v => v && v.category && !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category));
+            setAllVideos(validVids);
+            setMarketItems(mkt || []);
+            setAllUsers(usersRes || []);
+            setCategories(sets?.categories || []);
+            setIsAiConfigured(!!sets?.geminiKey && sets.geminiKey.trim().length > 5);
             
             if (user) {
                 const act = await db.getUserActivity(user.id);
-                setWatchedIds(act.watched || []);
+                setWatchedIds(act?.watched || []);
             }
         } catch (e) {} finally { setLoading(false); }
     };
@@ -274,8 +275,8 @@ export default function Home() {
       searchTimeout.current = setTimeout(async () => {
           try {
               const res = await db.getSearchSuggestions(val);
-              setSuggestions(res);
-              setShowSuggestions(res.length > 0);
+              setSuggestions(res || []);
+              setShowSuggestions(res?.length > 0);
           } catch(e) {}
       }, 300);
   };
@@ -397,7 +398,7 @@ export default function Home() {
 
   const filteredList = useMemo(() => {
       if (searchQuery) return []; 
-      let list = allVideos.filter(v => {
+      let list = [...allVideos].filter(v => {
           if (!activeCategory) return true;
           return v.category === activeCategory || v.parent_category === activeCategory;
       });
@@ -405,9 +406,10 @@ export default function Home() {
       const currentCatSettings = categories.find(c => c.name === activeCategory || c.name === list[0]?.parent_category);
       const sortMode = currentCatSettings?.sortOrder || 'LATEST';
 
-      if (sortMode === 'ALPHA') list.sort((a, b) => naturalCollator.compare(a.title, b.title));
+      if (sortMode === 'ALPHA') list.sort((a, b) => naturalCollator.compare(a.title || '', b.title || ''));
       else if (sortMode === 'RANDOM') list.sort(() => (Math.random() - 0.5)); 
-      else list.sort((a,b) => b.createdAt - a.createdAt);
+      // FIX: Ordenación robusta contra nulos
+      else list.sort((a,b) => (Number(b?.createdAt) || 0) - (Number(a?.createdAt) || 0));
 
       return list;
   }, [allVideos, activeCategory, categories, searchQuery]);
@@ -526,7 +528,7 @@ export default function Home() {
                                               {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-slate-600"><Bell size={16}/></div>}
                                           </div>
                                           <div className="flex-1 min-w-0">
-                                              <p className="text-[11px] text-slate-200 leading-snug line-clamp-2 pr-6 font-bold">{n.text}</p>
+                                              <p className="text-[11px] text-slate-200 font-bold leading-snug line-clamp-2 pr-6">{n.text}</p>
                                               <span className="text-[9px] text-slate-500 font-bold uppercase mt-1 block">{new Date(n.timestamp * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                                           </div>
                                       </div>

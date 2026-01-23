@@ -1,7 +1,6 @@
-
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V17.8 (Path Resolution Fix)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V17.9.1 (Cleanup Protection Fix)
  */
 
 function admin_get_settings($pdo) {
@@ -202,15 +201,43 @@ function admin_repair_db($pdo, $input) {
 }
 
 function admin_cleanup_files($pdo) {
-    $videos = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos")->fetchAll();
     $dbFiles = [];
+
+    // 1. Proteger archivos de Videos (Videos + Miniaturas)
+    $videos = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos")->fetchAll();
     foreach ($videos as $v) {
-        $realVideo = resolve_video_path($v['videoUrl']);
-        $realThumb = resolve_video_path($v['thumbnailUrl']);
-        if ($realVideo) $dbFiles[] = $realVideo;
-        if ($realThumb) $dbFiles[] = $realThumb;
+        if ($p1 = resolve_video_path($v['videoUrl'])) $dbFiles[] = $p1;
+        if ($p2 = resolve_video_path($v['thumbnailUrl'])) $dbFiles[] = $p2;
     }
-    $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market'];
+
+    // 2. Proteger Avatares de Usuarios (Prevenir borrado de perfiles)
+    $avatars = $pdo->query("SELECT avatarUrl FROM users WHERE avatarUrl IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($avatars as $url) {
+        if ($p = resolve_video_path($url)) $dbFiles[] = $p;
+    }
+
+    // 3. Proteger imágenes del Marketplace (Prevenir borrado de tienda)
+    $market = $pdo->query("SELECT images FROM marketplace_items")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($market as $json) {
+        $imgs = json_decode($json, true);
+        if (is_array($imgs)) {
+            foreach ($imgs as $url) {
+                if ($p = resolve_video_path($url)) $dbFiles[] = $p;
+            }
+        }
+    }
+
+    // 4. Proteger comprobantes VIP
+    $proofs = $pdo->query("SELECT proofImageUrl FROM vip_requests WHERE proofImageUrl IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($proofs as $url) {
+        if ($p = resolve_video_path($url)) $dbFiles[] = $p;
+    }
+
+    // Normalizar lista de protegidos
+    $dbFiles = array_unique($dbFiles);
+
+    // 5. Barrido de carpetas
+    $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market', 'uploads/proofs'];
     $deleted = 0;
     foreach ($dirs as $d) {
         $path = __DIR__ . '/' . $d;
@@ -219,7 +246,10 @@ function admin_cleanup_files($pdo) {
         foreach ($files as $f) {
             if ($f === '.' || $f === '..') continue;
             $full = realpath($path . '/' . $f);
-            if ($full && !in_array($full, $dbFiles) && is_file($full)) { @unlink($full); $deleted++; }
+            if ($full && is_file($full) && !in_array($full, $dbFiles)) { 
+                @unlink($full); 
+                $deleted++; 
+            }
         }
     }
     respond(true, ['videos' => $deleted]);
@@ -321,6 +351,12 @@ function admin_process_next_transcode($pdo) {
     $v = $stmt->fetch();
     if (!$v) respond(false, null, "No hay videos en espera");
     
+    // FIX: Verificar existencia de la función exec para evitar fallos HTML/Fatal
+    if (!function_exists('exec')) {
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Función exec() deshabilitada en PHP' WHERE id = ?")->execute([$v['id']]);
+        respond(false, null, "Función exec deshabilitada en el servidor");
+    }
+
     $ext = strtolower(pathinfo($v['videoUrl'], PATHINFO_EXTENSION));
     $profile = $pdo->query("SELECT * FROM transcode_profiles WHERE extension = '$ext'")->fetch();
     if (!$profile) $profile = ['command_args' => '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 1280x720 -aspect 16:9 -r 30 -b:v 1500k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100 -ab 128k'];
