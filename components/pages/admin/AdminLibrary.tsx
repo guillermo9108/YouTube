@@ -18,6 +18,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const [status, setStatus] = useState('Iniciando...');
     const [isAudio, setIsAudio] = useState(false);
     const processedRef = useRef(false);
+    const videoRef = useRef<HTMLVideoElement>(null);
 
     useEffect(() => {
         const checkType = () => {
@@ -33,7 +34,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
     const processMedia = async () => {
         if (processedRef.current) return;
-        setStatus('Extrayendo metadatos...');
+        setStatus('Extrayendo ID3...');
         
         try {
             const streamUrl = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
@@ -41,27 +42,26 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
             
             if (!processedRef.current) {
                 processedRef.current = true;
-                setStatus(result.thumbnail ? 'Carátula extraída' : 'Sin carátula detectada');
+                setStatus(result.thumbnail ? 'Carátula OK' : 'Sin carátula');
                 onComplete(result.duration, result.thumbnail, result.duration > 0, false);
             }
         } catch (e) {
             if (!processedRef.current) {
                 processedRef.current = true;
-                setStatus('Error en extracción');
+                setStatus('Error extracción');
                 onComplete(0, null, false, true);
             }
         }
     };
 
-    // Si no es audio detectado inmediatamente, el video tag se encarga
-    const videoRef = useRef<HTMLVideoElement>(null);
     useEffect(() => {
-        if (isAudio) return; // Ya lo maneja processMedia asíncronamente
+        if (isAudio) return;
 
         const vid = videoRef.current;
         if (!vid) return;
         vid.src = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
         vid.muted = true;
+        vid.crossOrigin = "anonymous";
         
         const timeout = window.setTimeout(() => {
             if (!processedRef.current) {
@@ -79,7 +79,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
         if (vid.videoWidth === 0 && vid.duration > 0) {
-            // Probablemente audio cargado en tag de video
             setIsAudio(true);
             processMedia();
         }
@@ -91,7 +90,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
         if (vid.currentTime > 1.2 && vid.videoWidth > 0) {
             processedRef.current = true;
-            setStatus('Capturando...');
+            setStatus('Capturando frame...');
             const canvas = document.createElement('canvas');
             canvas.width = vid.videoWidth;
             canvas.height = vid.videoHeight;
@@ -107,11 +106,11 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
     };
 
     return (
-        <div className="bg-black rounded-lg overflow-hidden aspect-video relative border border-slate-800 shadow-2xl">
+        <div className="bg-black rounded-lg overflow-hidden aspect-video relative border border-slate-800 shadow-2xl flex items-center justify-center">
             {isAudio ? (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-indigo-400">
                     <Music size={48} className="animate-pulse mb-2"/>
-                    <span className="text-[10px] font-black uppercase tracking-widest">Procesando Audio</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Audio Processing</span>
                 </div>
             ) : (
                 <video 
@@ -261,7 +260,7 @@ export default function AdminLibrary() {
     const handleStep2 = async (force: boolean = false) => {
         if (activeScan && !force) return;
         
-        addToLog("Buscando lote de videos PENDING...");
+        addToLog("Buscando lote de registros PENDING...");
         try {
             const pending = await db.getUnprocessedVideos(50, 'normal');
             if (pending.length === 0) {
@@ -296,7 +295,6 @@ export default function AdminLibrary() {
             addToLog("Lote completado. Solicitando nuevo lote...");
             loadStats();
             setScanQueue([]);
-            // Iniciar siguiente lote automáticamente
             setTimeout(() => {
                 handleStep2(true);
             }, 500);
@@ -468,7 +466,7 @@ export default function AdminLibrary() {
                         </div>
                         <button onClick={() => handleStep2()} disabled={activeScan || stats.available === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
                             {activeScan ? <Zap size={18} className="animate-pulse text-yellow-300" /> : <Film size={18}/>} 
-                            {activeScan ? 'PROCESANDO EN BUCLE...' : `INICIAR MOTOR AUTOMÁTICO (${stats.available})`}
+                            {activeScan ? 'MOTOR ACTIVO...' : `INICIAR MOTOR AUTOMÁTICO (${stats.available})`}
                         </button>
                         <p className="text-[9px] text-slate-500 font-bold uppercase text-center">EL PROCESO CONTINUARÁ HASTA TERMINAR TODA LA LIBRERÍA</p>
                     </div>

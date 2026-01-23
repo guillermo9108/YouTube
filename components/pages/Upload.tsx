@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload as UploadIcon, FileVideo, X, Plus, Image as ImageIcon, Tag, Layers, Loader2, DollarSign, Settings, Save, Edit3, Wand2, Clock, Sparkles, Music } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -31,7 +30,6 @@ export default function Upload() {
   const [durations, setDurations] = useState<number[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [prices, setPrices] = useState<number[]>([]); 
-  const [isAiLoading, setIsAiLoading] = useState(false);
   
   const [bulkDesc, setBulkDesc] = useState('');
   const [bulkCategory, setBulkCategory] = useState<string>(VideoCategory.PERSONAL);
@@ -97,19 +95,39 @@ export default function Upload() {
 
   const processQueue = async () => {
       if (!isMounted.current) return;
-      if (queueRef.current.length === 0) { processingRef.current = false; setIsProcessingQueue(false); return; }
-      processingRef.current = true; setIsProcessingQueue(true);
+      if (queueRef.current.length === 0) { 
+          processingRef.current = false; 
+          setIsProcessingQueue(false); 
+          setQueueProgress({ current: 0, total: 0 });
+          return; 
+      }
+      
+      processingRef.current = true; 
+      setIsProcessingQueue(true);
       const task = queueRef.current.shift(); 
+      
       if (task) {
           setQueueProgress(prev => ({ ...prev, current: prev.current + 1 }));
           try {
               const res = await generateThumbnail(task.file);
               if (isMounted.current) {
-                  setThumbnails(prev => { const n = [...prev]; if (n.length > task.index) n[task.index] = res.thumbnail; return n; });
-                  setDurations(prev => { const n = [...prev]; if (n.length > task.index) n[task.index] = res.duration || 0; return n; });
+                  setThumbnails(prev => { 
+                      const n = [...prev]; 
+                      if (n.length > task.index) n[task.index] = res.thumbnail; 
+                      return n; 
+                  });
+                  setDurations(prev => { 
+                      const n = [...prev]; 
+                      if (n.length > task.index) n[task.index] = res.duration || 0; 
+                      return n; 
+                  });
               }
-          } catch (e) {}
-          await new Promise(r => setTimeout(r, 100)); processQueue();
+          } catch (e) {
+              console.error("Error procesando archivo en cola:", e);
+          }
+          // Pequeña pausa para no bloquear el hilo principal
+          await new Promise(r => setTimeout(r, 50)); 
+          processQueue();
       }
   };
 
@@ -137,8 +155,20 @@ export default function Upload() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || files.length === 0) return;
-    const queue = files.map((f, i) => ({ title: titles[i], description: bulkDesc, price: prices[i], category: categories[i] as any, duration: durations[i] || 0, file: f, thumbnail: thumbnails[i] }));
-    addToQueue(queue, user); toast.success("Añadido a cola de subida"); navigate('/'); 
+    
+    const queue = files.map((f, i) => ({ 
+        title: titles[i], 
+        description: bulkDesc, 
+        price: prices[i], 
+        category: categories[i] as any, 
+        duration: durations[i] || 0, 
+        file: f, 
+        thumbnail: thumbnails[i] 
+    }));
+    
+    addToQueue(queue, user); 
+    toast.success("Añadido a cola de subida"); 
+    navigate('/'); 
   };
 
   return (
@@ -150,8 +180,7 @@ export default function Upload() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
            <div className={`relative border-2 border-dashed border-slate-700 rounded-3xl p-6 text-center hover:bg-slate-800/50 transition-all group cursor-pointer h-44 flex flex-col items-center justify-center bg-slate-900/50 ${isProcessingQueue ? 'pointer-events-none opacity-50' : ''}`}>
-            {/* Cambiado para aceptar video y audio */}
-            <input type="file" accept="video/*,audio/mp3,audio/mpeg" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" disabled={isProcessingQueue} />
+            <input type="file" accept="video/*,audio/*" multiple onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" disabled={isProcessingQueue} />
             <div className="flex flex-col items-center justify-center gap-2 pointer-events-none">
                 {isProcessingQueue ? (
                     <>
@@ -201,13 +230,16 @@ export default function Upload() {
                        <div className="w-full md:w-32 aspect-video rounded-xl bg-black shrink-0 overflow-hidden relative border border-slate-700 shadow-inner">
                          {thumbnails[idx] ? <ThumbnailPreview file={thumbnails[idx]!} /> : (
                              <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-800">
-                                {f.type.startsWith('audio') ? <Music size={32} className="opacity-20"/> : <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />}
+                                {f.type.startsWith('audio') ? <Music size={32} className="opacity-20 animate-pulse"/> : <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />}
                              </div>
                          )}
                          <div className="absolute bottom-1 right-1 bg-black/80 backdrop-blur-md text-[9px] px-2 py-0.5 rounded-md text-white font-mono font-bold border border-white/10">{Math.floor((durations[idx]||0)/60)}:{((durations[idx]||0)%60).toFixed(0).padStart(2,'0')}</div>
                        </div>
                        <div className="flex-1 min-w-0 w-full space-y-3">
-                          <div className="flex items-center gap-2"><input type="text" value={titles[idx]} onChange={(e) => updateTitle(idx, e.target.value)} className="flex-1 bg-transparent border-b border-white/5 focus:border-indigo-500 outline-none text-sm font-black text-white p-1 transition-all placeholder:text-slate-700" placeholder="Título" required /><button type="button" onClick={() => aiService.suggestMetadata(f.name).then(s => s && updateTitle(idx, s.title))} className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-xl active:scale-90 transition-all"><Sparkles size={16}/></button></div>
+                          <div className="flex items-center gap-2">
+                              <input type="text" value={titles[idx]} onChange={(e) => updateTitle(idx, e.target.value)} className="flex-1 bg-transparent border-b border-white/5 focus:border-indigo-500 outline-none text-sm font-black text-white p-1 transition-all placeholder:text-slate-700" placeholder="Título" required />
+                              <button type="button" onClick={() => aiService.suggestMetadata(f.name).then(s => s && updateTitle(idx, s.title))} className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-xl active:scale-90 transition-all"><Sparkles size={16}/></button>
+                          </div>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               <div className="relative"><Tag size={12} className="absolute left-3 top-3 text-slate-500"/><select value={categories[idx]} onChange={(e) => updateCategory(idx, e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl text-[11px] text-slate-300 py-2.5 pl-9 pr-3 outline-none focus:border-indigo-500 uppercase font-black appearance-none cursor-pointer">{availableCategories.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}</select></div>
                               <div className="relative"><DollarSign size={12} className="absolute left-3 top-3 text-amber-500"/><input type="number" min="0" step="0.1" value={prices[idx]} onChange={(e) => updatePrice(idx, parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl text-[11px] text-amber-400 font-black py-2.5 pl-9 pr-3 outline-none focus:border-indigo-500 shadow-inner" /></div>

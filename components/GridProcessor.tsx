@@ -1,13 +1,14 @@
-
 import React, { useRef, useEffect, useState } from 'react';
 import { useGrid } from '../context/GridContext';
-import { Loader2, Check, X, Sparkles, AlertCircle } from 'lucide-react';
+import { Loader2, Check, X, Sparkles, AlertCircle, Music } from 'lucide-react';
 import { db } from '../services/db';
+import { generateThumbnail } from '../utils/videoGenerator';
 
 export default function GridProcessor() {
     const { activeTask, completeTask, skipTask } = useGrid();
     const videoRef = useRef<HTMLVideoElement>(null);
     const [status, setStatus] = useState<'INIT' | 'CAPTURING' | 'DONE' | 'ERROR'>('INIT');
+    const [isAudioMode, setIsAudioMode] = useState(false);
     const processedRef = useRef(false);
     const safetyTimeoutRef = useRef<number | null>(null);
 
@@ -15,6 +16,11 @@ export default function GridProcessor() {
         if (activeTask) {
             setStatus('INIT');
             processedRef.current = false;
+            
+            // Detectar si es audio por extensión
+            const ext = activeTask.videoUrl.split('.').pop()?.toLowerCase();
+            const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
+            setIsAudioMode(ext ? audioExts.includes(ext) : false);
         }
     }, [activeTask]);
 
@@ -29,12 +35,17 @@ export default function GridProcessor() {
             streamSrc = streamSrc.includes('action=stream') ? `${streamSrc}&t=${Date.now()}` : `api/index.php?action=stream&id=${activeTask.id}&t=${Date.now()}`;
         }
 
+        // Si ya sabemos que es audio, usamos la utilidad directa para ID3
+        if (isAudioMode) {
+            processAudioMetadata(streamSrc);
+            return;
+        }
+
         vid.src = streamSrc;
         vid.currentTime = 0;
         vid.muted = true; 
         vid.crossOrigin = "anonymous"; 
         
-        // Manejo asíncrono seguro
         const playPromise = vid.play();
         if (playPromise !== undefined) {
             playPromise
@@ -55,12 +66,36 @@ export default function GridProcessor() {
 
         return () => {
             if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
-            // Limpieza agresiva del objeto de video para liberar memoria y detener procesos
             vid.pause();
             vid.removeAttribute('src');
             vid.load();
         };
-    }, [activeTask]);
+    }, [activeTask, isAudioMode]);
+
+    const processAudioMetadata = async (url: string) => {
+        if (processedRef.current || !activeTask) return;
+        setStatus('CAPTURING');
+        
+        try {
+            const res = await generateThumbnail(url);
+            if (!processedRef.current && activeTask) {
+                processedRef.current = true;
+                setStatus('DONE');
+                
+                const fd = new FormData();
+                fd.append('id', activeTask.id);
+                fd.append('duration', String(res.duration));
+                fd.append('success', '1');
+                fd.append('clientIncompatible', '0');
+                if (res.thumbnail) fd.append('thumbnail', res.thumbnail);
+                
+                await db.request(`action=update_video_metadata`, { method: 'POST', body: fd });
+                completeTask(res.duration, null);
+            }
+        } catch (e) {
+            handleForceComplete(0, true);
+        }
+    };
 
     const handleForceComplete = async (duration: number, isIncompatible: boolean) => {
         if (processedRef.current || !activeTask) return;
@@ -83,10 +118,11 @@ export default function GridProcessor() {
 
     const handleTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const vid = e.currentTarget;
-        if (!activeTask || processedRef.current) return;
+        if (!activeTask || processedRef.current || isAudioMode) return;
 
+        // Detección reactiva de audio (videoWidth 0 en tag de video)
         if (vid.readyState >= 1 && vid.videoWidth === 0 && vid.duration > 0) {
-            handleForceComplete(vid.duration, true);
+            setIsAudioMode(true);
             return;
         }
 
@@ -129,17 +165,21 @@ export default function GridProcessor() {
         <div className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-[60] animate-in slide-in-from-right fade-in duration-500">
             <div className={`bg-slate-900/95 backdrop-blur-md border ${status === 'ERROR' ? 'border-red-500/50' : 'border-slate-700'} rounded-2xl shadow-2xl flex items-center p-2.5 gap-3 w-72 overflow-hidden relative group`}>
                 <button onClick={skipTask} className="absolute top-1.5 right-1.5 text-slate-500 hover:text-white bg-slate-800 rounded-full p-1 z-20 opacity-0 group-hover:opacity-100 transition-opacity"><X size={12} /></button>
-                <div className="w-20 h-12 bg-black rounded-lg overflow-hidden shrink-0 border border-slate-800 relative">
-                    <video ref={videoRef} className={`w-full h-full object-cover ${status === 'DONE' ? 'opacity-30' : 'opacity-100'}`} muted playsInline crossOrigin="anonymous" onTimeUpdate={handleTimeUpdate} onError={() => handleForceComplete(0, true)} />
-                    {status === 'DONE' && <div className="absolute inset-0 flex items-center justify-center"><Check size={20} className="text-emerald-400" /></div>}
+                <div className="w-20 h-12 bg-black rounded-lg overflow-hidden shrink-0 border border-slate-800 relative flex items-center justify-center">
+                    {isAudioMode ? (
+                        <Music size={24} className="text-indigo-500 animate-pulse" />
+                    ) : (
+                        <video ref={videoRef} className={`w-full h-full object-cover ${status === 'DONE' ? 'opacity-30' : 'opacity-100'}`} muted playsInline crossOrigin="anonymous" onTimeUpdate={handleTimeUpdate} onError={() => handleForceComplete(0, true)} />
+                    )}
+                    {status === 'DONE' && <div className="absolute inset-0 flex items-center justify-center bg-black/40"><Check size={20} className="text-emerald-400" /></div>}
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
                         <Sparkles size={10} className="text-indigo-400" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{status === 'DONE' ? 'LISTO' : 'ANALIZANDO'}</span>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{status === 'DONE' ? 'LISTO' : (isAudioMode ? 'ID3 AUDIO' : 'ANALIZANDO')}</span>
                     </div>
                     <div className="text-[11px] font-bold text-white truncate" title={activeTask.title}>{activeTask.title}</div>
-                    {status === 'CAPTURING' && <div className="w-full h-1 bg-slate-800 rounded-full mt-1.5 overflow-hidden"><div className="h-full bg-indigo-500 animate-pulse"></div></div>}
+                    {(status === 'CAPTURING' || status === 'INIT') && <div className="w-full h-1 bg-slate-800 rounded-full mt-1.5 overflow-hidden"><div className="h-full bg-indigo-500 animate-pulse"></div></div>}
                 </div>
             </div>
         </div>

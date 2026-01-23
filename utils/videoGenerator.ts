@@ -1,25 +1,9 @@
 // @ts-ignore
 import jsmediatags from 'jsmediatags';
 
-// Helper to calculate image brightness
-const getBrightness = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    let colorSum = 0;
-
-    for (let x = 0, len = data.length; x < len; x += 4) {
-        const r = data[x];
-        const g = data[x + 1];
-        const b = data[x + 2];
-        const avg = Math.floor((r + g + b) / 3);
-        colorSum += avg;
-    }
-
-    return Math.floor(colorSum / (width * height));
-};
-
 /**
- * Extract Album Art from Audio using jsmediatags
+ * Extrae la carátula de un archivo de audio (MP3, etc.) usando jsmediatags.
+ * Soporta tanto objetos File como URLs de streaming.
  */
 const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null> => {
     return new Promise((resolve) => {
@@ -27,13 +11,14 @@ const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null>
             const reader = (jsmediatags as any).read || jsmediatags;
             reader(fileOrUrl, {
                 onSuccess: (tag: any) => {
-                    const { data, format } = tag.tags.picture || {};
-                    if (data && format) {
+                    const picture = tag.tags.picture;
+                    if (picture) {
+                        const { data, format } = picture;
                         let base64String = "";
                         for (let i = 0; i < data.length; i++) {
                             base64String += String.fromCharCode(data[i]);
                         }
-                        const contentType = format;
+                        const contentType = format || "image/jpeg";
                         const byteCharacters = base64String;
                         const byteArrays = [];
                         for (let offset = 0; offset < byteCharacters.length; offset += 512) {
@@ -52,41 +37,49 @@ const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null>
                         resolve(null);
                     }
                 },
-                onError: () => resolve(null)
+                onError: (error: any) => {
+                    console.warn("jsmediatags error:", error);
+                    resolve(null);
+                }
             });
         } catch (e) {
+            console.error("Error en extractAudioCover:", e);
             resolve(null);
         }
     });
 };
 
-// Robust Video/Audio Thumbnail Generator
+/**
+ * Generador robusto de miniaturas para Video y Audio.
+ * Si es video, captura un frame. Si es audio, extrae metadatos ID3.
+ */
 export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thumbnail: File | null, duration: number }> => {
   const isFile = typeof fileOrUrl !== 'string';
-  const videoUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
-  const isAudio = isFile ? (fileOrUrl as File).type.startsWith('audio') : (videoUrl.toLowerCase().endsWith('.mp3'));
+  const mediaUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
+  
+  // Detección de tipo
+  const isAudio = isFile 
+    ? (fileOrUrl as File).type.startsWith('audio') 
+    : (mediaUrl.toLowerCase().split('?')[0].endsWith('.mp3'));
 
-  // Stage 0: Audio specific extraction
-  let audioThumbnail: File | null = null;
+  let extractedThumbnail: File | null = null;
+  
+  // Si es audio, intentamos ID3 primero
   if (isAudio) {
-      audioThumbnail = await extractAudioCover(fileOrUrl);
+      extractedThumbnail = await extractAudioCover(fileOrUrl);
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
       const media = document.createElement('video');
       
-      // Critical settings for background processing
       media.preload = "metadata"; 
       media.muted = true;
       media.playsInline = true;
       media.crossOrigin = "anonymous";
       
-      // Hidden element
       media.style.position = 'fixed';
       media.style.top = '-9999px';
       media.style.left = '-9999px';
-      media.style.width = '640px';
-      media.style.height = '360px';
       media.style.opacity = '0';
       document.body.appendChild(media);
 
@@ -98,7 +91,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               media.removeAttribute('src');
               media.load();
               media.remove();
-              if (isFile) URL.revokeObjectURL(videoUrl);
+              if (isFile) URL.revokeObjectURL(mediaUrl);
           } catch(e) {}
       };
 
@@ -110,22 +103,23 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           resolve({ thumbnail: thumb, duration: Math.floor(dur) });
       };
 
-      // Safety timeout (15s)
+      // Timeout de seguridad (15s)
       const timeout = setTimeout(() => {
           const fallbackDur = (media.duration && isFinite(media.duration)) ? media.duration : 0;
-          finish(audioThumbnail, fallbackDur);
+          finish(extractedThumbnail, fallbackDur);
       }, 15000);
 
-      // --- STAGE 1: Metadata Loaded (Get Duration) ---
       media.onloadedmetadata = () => {
           const duration = media.duration;
           
           if (!isFinite(duration)) {
               media.currentTime = 1; 
           } else {
+              // Si es audio o no tiene dimensiones de video, terminamos con lo que tengamos de ID3
               if (isAudio || media.videoWidth === 0) {
-                  finish(audioThumbnail, duration);
+                  finish(extractedThumbnail, duration);
               } else {
+                  // Si es video, buscamos un frame
                   let seekTime = Math.min(2, duration / 5); 
                   if (duration > 60) seekTime = 5; 
                   media.currentTime = seekTime;
@@ -133,11 +127,10 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           }
       };
 
-      // --- STAGE 2: Frame Ready (Capture Thumbnail) ---
       media.onseeked = () => {
-          try {
-              if (isResolved || isAudio || media.videoWidth === 0) return;
+          if (isResolved || isAudio || media.videoWidth === 0) return;
 
+          try {
               const canvas = document.createElement('canvas');
               canvas.width = media.videoWidth || 640;
               canvas.height = media.videoHeight || 360;
@@ -145,26 +138,22 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
               
               if (ctx) {
                   ctx.drawImage(media, 0, 0, canvas.width, canvas.height);
-                  
                   canvas.toBlob(blob => {
                       const file = blob ? new File([blob], "thumbnail.jpg", { type: "image/jpeg" }) : null;
-                      const duration = (media.duration && isFinite(media.duration)) ? media.duration : 0;
-                      finish(file, duration);
-                  }, 'image/jpeg', 0.75);
+                      finish(file, media.duration || 0);
+                  }, 'image/jpeg', 0.85);
               } else {
-                  finish(audioThumbnail, media.duration || 0);
+                  finish(extractedThumbnail, media.duration || 0);
               }
           } catch (e) {
-              finish(audioThumbnail, media.duration || 0);
+              finish(extractedThumbnail, media.duration || 0);
           }
       };
 
-      // Error Handling
       media.onerror = () => {
-          finish(audioThumbnail, 0);
+          finish(extractedThumbnail, 0);
       };
 
-      // Start loading
-      media.src = videoUrl;
+      media.src = mediaUrl;
   });
 };
