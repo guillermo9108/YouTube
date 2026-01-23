@@ -24,7 +24,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const checkType = () => {
             const ext = video.videoUrl.split('.').pop()?.toLowerCase();
             const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
-            if (ext && audioExts.includes(ext)) {
+            if ((ext && audioExts.includes(ext)) || (video as any).isAudio) {
                 setIsAudio(true);
                 processMedia();
             }

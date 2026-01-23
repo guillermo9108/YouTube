@@ -17,16 +17,17 @@ export default function GridProcessor() {
             setStatus('INIT');
             processedRef.current = false;
             
-            // Detectar si es audio por extensión
+            // Detectar si es audio por extensión o si el servidor lo marcó
             const ext = activeTask.videoUrl.split('.').pop()?.toLowerCase();
             const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
-            setIsAudioMode(ext ? audioExts.includes(ext) : false);
+            const audioDetected = (ext ? audioExts.includes(ext) : false) || (activeTask as any).isAudio;
+            setIsAudioMode(audioDetected);
         }
     }, [activeTask]);
 
     useEffect(() => {
         const vid = videoRef.current;
-        if (!activeTask || !vid) return;
+        if (!activeTask) return;
 
         let streamSrc = activeTask.videoUrl;
         const isLocal = Boolean(activeTask.isLocal) || (activeTask as any).isLocal === 1 || (activeTask as any).isLocal === "1";
@@ -35,11 +36,13 @@ export default function GridProcessor() {
             streamSrc = streamSrc.includes('action=stream') ? `${streamSrc}&t=${Date.now()}` : `api/index.php?action=stream&id=${activeTask.id}&t=${Date.now()}`;
         }
 
-        // Si ya sabemos que es audio, usamos la utilidad directa para ID3
+        // Si ya sabemos que es audio, usamos la utilidad directa para ID3 y NO esperamos eventos de video
         if (isAudioMode) {
             processAudioMetadata(streamSrc);
             return;
         }
+
+        if (!vid) return;
 
         vid.src = streamSrc;
         vid.currentTime = 0;
@@ -66,9 +69,11 @@ export default function GridProcessor() {
 
         return () => {
             if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
-            vid.pause();
-            vid.removeAttribute('src');
-            vid.load();
+            if (vid) {
+                vid.pause();
+                vid.removeAttribute('src');
+                vid.load();
+            }
         };
     }, [activeTask, isAudioMode]);
 

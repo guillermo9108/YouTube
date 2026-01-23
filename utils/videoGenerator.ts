@@ -14,24 +14,13 @@ const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null>
                     const picture = tag.tags.picture;
                     if (picture) {
                         const { data, format } = picture;
-                        let base64String = "";
-                        for (let i = 0; i < data.length; i++) {
-                            base64String += String.fromCharCode(data[i]);
-                        }
+                        // Uso de Uint8Array nativo para evitar bucles lentos y errores de codificación
+                        const byteArray = new Uint8Array(data);
                         const contentType = format || "image/jpeg";
-                        const byteCharacters = base64String;
-                        const byteArrays = [];
-                        for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-                            const slice = byteCharacters.slice(offset, offset + 512);
-                            const byteNumbers = new Array(slice.length);
-                            for (let i = 0; i < slice.length; i++) {
-                                byteNumbers[i] = slice.charCodeAt(i);
-                            }
-                            const byteArray = new Uint8Array(byteNumbers);
-                            byteArrays.push(byteArray);
-                        }
-                        const blob = new Blob(byteArrays, { type: contentType });
-                        const file = new File([blob], "cover.jpg", { type: contentType });
+                        
+                        const blob = new Blob([byteArray], { type: contentType });
+                        const extension = contentType.includes('png') ? 'png' : 'jpg';
+                        const file = new File([blob], `cover.${extension}`, { type: contentType });
                         resolve(file);
                     } else {
                         resolve(null);
@@ -60,7 +49,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
   // Detección de tipo
   const isAudio = isFile 
     ? (fileOrUrl as File).type.startsWith('audio') 
-    : (mediaUrl.toLowerCase().split('?')[0].endsWith('.mp3'));
+    : (mediaUrl.toLowerCase().split('?')[0].split('&')[0].endsWith('.mp3'));
 
   let extractedThumbnail: File | null = null;
   
