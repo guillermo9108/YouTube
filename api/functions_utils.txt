@@ -101,10 +101,20 @@ function streamVideo($id, $pdo) {
     $fileSize = filesize($realPath);
     $fp = fopen($realPath, 'rb');
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
-    $mime = ($ext === 'mkv') ? 'video/x-matroska' : (($ext === 'webm') ? 'video/webm' : 'video/mp4');
+    
+    // Detección de MIME Correcta para Audio/Video
+    if ($ext === 'mp3') $mime = 'audio/mpeg';
+    else if ($ext === 'wav') $mime = 'audio/wav';
+    else if ($ext === 'm4a') $mime = 'audio/mp4';
+    else if ($ext === 'aac') $mime = 'audio/aac';
+    else if ($ext === 'mkv') $mime = 'video/x-matroska';
+    else if ($ext === 'webm') $mime = 'video/webm';
+    else $mime = 'video/mp4';
     
     header("Content-Type: $mime");
     header("Accept-Ranges: bytes");
+    header("Access-Control-Allow-Origin: *");
+    header("Access-Control-Expose-Headers: Content-Length, Content-Range");
     
     if (isset($_SERVER['HTTP_RANGE'])) {
         preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);

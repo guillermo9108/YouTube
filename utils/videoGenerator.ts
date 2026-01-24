@@ -46,14 +46,19 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
   const isFile = typeof fileOrUrl !== 'string';
   const mediaUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
   
-  // Detección de tipo
+  // Detección de tipo mejorada para URLs de API
   const isAudio = isFile 
     ? (fileOrUrl as File).type.startsWith('audio') 
-    : (mediaUrl.toLowerCase().split('?')[0].split('&')[0].endsWith('.mp3'));
+    : (
+        mediaUrl.toLowerCase().includes('.mp3') || 
+        mediaUrl.toLowerCase().includes('.m4a') || 
+        mediaUrl.toLowerCase().includes('.aac') ||
+        mediaUrl.toLowerCase().includes('action=stream') // Asumimos audio si no hay otra pista y falla el video
+      );
 
   let extractedThumbnail: File | null = null;
   
-  // Si es audio, intentamos ID3 primero
+  // Si es audio o parece audio por URL, intentamos ID3 primero
   if (isAudio) {
       extractedThumbnail = await extractAudioCover(fileOrUrl);
   }
@@ -104,7 +109,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
           if (!isFinite(duration)) {
               media.currentTime = 1; 
           } else {
-              // Si es audio o no tiene dimensiones de video, terminamos con lo que tengamos de ID3
+              // Detección reactiva: si el video no tiene dimensiones físicas es un audio
               if (isAudio || media.videoWidth === 0) {
                   finish(extractedThumbnail, duration);
               } else {
@@ -117,6 +122,7 @@ export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thu
       };
 
       media.onseeked = () => {
+          // Si es audio, ya resolvimos en onloadedmetadata
           if (isResolved || isAudio || media.videoWidth === 0) return;
 
           try {

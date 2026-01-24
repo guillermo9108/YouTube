@@ -17,11 +17,11 @@ export default function GridProcessor() {
             setStatus('INIT');
             processedRef.current = false;
             
-            // Detectar si es audio por extensión o si el servidor lo marcó
+            // Detectar si es audio por extensión o si el servidor lo marcó explícitamente
             const ext = activeTask.videoUrl.split('.').pop()?.toLowerCase();
             const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
-            const audioDetected = (ext ? audioExts.includes(ext) : false) || (activeTask as any).isAudio;
-            setIsAudioMode(audioDetected);
+            const audioDetected = (ext ? audioExts.includes(ext) : false) || (activeTask as any).isAudio || activeTask.videoUrl.includes('.mp3');
+            setIsAudioMode(Boolean(audioDetected));
         }
     }, [activeTask]);
 
