@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
-import { CheckCircle2, Clock, MoreVertical, ImageOff, Play, Music } from 'lucide-react';
+import { CheckCircle2, Clock, MoreVertical, ImageOff, Play, Music, Sparkles, RefreshCw } from 'lucide-react';
 import { db } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { generateThumbnail } from '../utils/videoGenerator';
 
 interface VideoCardProps {
   video: Video;
@@ -39,8 +40,86 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   const { user, refreshUser } = useAuth();
   const toast = useToast();
   const isNew = (Date.now() / 1000 - video.createdAt) < 86400;
+  
   const [imgError, setImgError] = useState(false);
+  const [localThumb, setLocalThumb] = useState<string | null>(null);
   const [inWatchLater, setInWatchLater] = useState(user?.watchLater?.includes(video.id) || false);
+  
+  // Optimizaciones de estado y visibilidad
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const isAudio = Boolean(video.is_audio);
+  const hasDefaultThumb = !video.thumbnailUrl || video.thumbnailUrl.includes('default.jpg');
+
+  // 1. Observer: Detectar cuando la tarjeta entra en el viewport
+  useEffect(() => {
+      if (!isAudio || !hasDefaultThumb) return;
+
+      const observer = new IntersectionObserver((entries) => {
+          if (entries[0].isIntersecting) {
+              setIsVisible(true);
+              observer.disconnect(); // Solo nos interesa la primera vez
+          }
+      }, { threshold: 0.1, rootMargin: '100px' });
+
+      if (cardRef.current) observer.observe(cardRef.current);
+      return () => observer.disconnect();
+  }, [video.id, isAudio, hasDefaultThumb]);
+
+  // 2. AUTO-EXTRACCIÓN: Reparación silenciosa con gestión de memoria
+  useEffect(() => {
+      let isMounted = true;
+
+      if (isAudio && hasDefaultThumb && isVisible && !isProcessing && !localThumb) {
+          setIsProcessing(true);
+          
+          // Pequeño retardo aleatorio para escalonar peticiones al NAS
+          const delay = Math.random() * 2000 + 500;
+          
+          const timeout = setTimeout(async () => {
+              try {
+                  const streamUrl = video.videoUrl.includes('action=stream') 
+                    ? video.videoUrl 
+                    : `api/index.php?action=stream&id=${video.id}`;
+                  
+                  const result = await generateThumbnail(streamUrl, true);
+                  
+                  if (result.thumbnail && isMounted) {
+                      const objectUrl = URL.createObjectURL(result.thumbnail);
+                      setLocalThumb(objectUrl);
+                      
+                      const fd = new FormData();
+                      fd.append('id', video.id);
+                      fd.append('duration', String(result.duration || video.duration));
+                      fd.append('success', '1');
+                      fd.append('thumbnail', result.thumbnail);
+                      if (user) fd.append('requesterId', user.id);
+                      
+                      await db.request('action=update_video_metadata', { method: 'POST', body: fd });
+                      db.setHomeDirty();
+                  }
+              } catch (e) {
+                  console.warn(`Auto-reparación fallida para: ${video.title}`);
+              } finally {
+                  if (isMounted) setIsProcessing(false);
+              }
+          }, delay);
+
+          return () => {
+              isMounted = false;
+              clearTimeout(timeout);
+          };
+      }
+  }, [video.id, isAudio, hasDefaultThumb, isVisible, isProcessing, localThumb]);
+
+  // 3. Cleanup: Liberar memoria de Blobs al desmontar
+  useEffect(() => {
+      return () => {
+          if (localThumb) URL.revokeObjectURL(localThumb);
+      };
+  }, [localThumb]);
 
   const handleClick = () => {
       if (context && context.query) sessionStorage.setItem('sp_nav_context', JSON.stringify(context));
@@ -58,35 +137,41 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       } catch (e) {}
   };
 
-  const isAudio = Boolean(video.is_audio);
+  const displayThumb = localThumb || (!imgError && video.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? video.thumbnailUrl : null);
 
   return (
-    <div className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
+    <div ref={cardRef} className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
       <Link 
         to={`/watch/${video.id}`} 
         onClick={handleClick} 
         className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 shadow-sm hover:shadow-2xl hover:shadow-indigo-500/20 hover:scale-[1.03] transition-all duration-500 block ring-1 ring-white/5 hover:ring-indigo-500/40"
       >
-        {!imgError && video.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? (
+        {displayThumb ? (
             <img 
-              src={video.thumbnailUrl} 
+              src={displayThumb} 
               alt={video.title} 
               className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
               loading="lazy" 
               decoding="async"
-              fetchPriority="low"
               onError={() => setImgError(true)}
             />
         ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-800 p-4">
-                {isAudio ? <Music size={48} className="opacity-20 mb-2" /> : <Play size={48} className="opacity-20 mb-2"/>}
+                <div className="relative">
+                    {isAudio ? <Music size={48} className="opacity-20 mb-2" /> : <Play size={48} className="opacity-20 mb-2"/>}
+                    {isProcessing && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <RefreshCw size={24} className="text-indigo-500 animate-spin opacity-60" />
+                        </div>
+                    )}
+                </div>
                 <span className="text-[8px] font-black uppercase tracking-widest opacity-20 text-center">{video.title}</span>
             </div>
         )}
         
         {isAudio && (
             <div className="absolute top-2 left-2 bg-indigo-600/90 text-white text-[8px] font-black px-2 py-0.5 rounded-lg backdrop-blur-md border border-white/10 shadow-lg uppercase tracking-widest flex items-center gap-1">
-                <Music size={10}/> AUDIO
+                {localThumb ? <Sparkles size={10} className="animate-pulse" /> : <Music size={10}/>} AUDIO
             </div>
         )}
 

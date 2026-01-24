@@ -14,13 +14,12 @@ const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null>
                     const picture = tag.tags.picture;
                     if (picture) {
                         const { data, format } = picture;
-                        // Uso de Uint8Array nativo para evitar bucles lentos y errores de codificación
                         const byteArray = new Uint8Array(data);
                         const contentType = format || "image/jpeg";
                         
                         const blob = new Blob([byteArray], { type: contentType });
-                        const extension = contentType.includes('png') ? 'png' : 'jpg';
-                        const file = new File([blob], `cover.${extension}`, { type: contentType });
+                        // Intentamos convertir a WebP para consistencia, de lo contrario JPG
+                        const file = new File([blob], `cover.jpg`, { type: contentType });
                         resolve(file);
                     } else {
                         resolve(null);
@@ -40,14 +39,13 @@ const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null>
 
 /**
  * Generador robusto de miniaturas para Video y Audio.
- * Si es video, captura un frame. Si es audio, extrae metadatos ID3.
+ * Si es video, captura un frame en formato WebP (optimizado). 
+ * Si es audio, extrae metadatos ID3.
  */
 export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: boolean): Promise<{ thumbnail: File | null, duration: number }> => {
   const isFile = typeof fileOrUrl !== 'string';
   const mediaUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
   
-  // Detección de tipo: forceAudio tiene prioridad absoluta
-  // Si no se provee, intentamos adivinar por MIME o extensión (falla en URLs de API)
   const isAudio = forceAudio ?? (isFile 
     ? (fileOrUrl as File).type.startsWith('audio') 
     : (
@@ -58,7 +56,6 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
 
   let extractedThumbnail: File | null = null;
   
-  // Si es audio forzado o detectado, intentamos ID3 primero
   if (isAudio) {
       extractedThumbnail = await extractAudioCover(fileOrUrl);
   }
@@ -109,11 +106,9 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
           if (!isFinite(duration)) {
               media.currentTime = 1; 
           } else {
-              // Detección reactiva: si el video no tiene dimensiones físicas es un audio
               if (isAudio || media.videoWidth === 0) {
                   finish(extractedThumbnail, duration);
               } else {
-                  // Si es video, buscamos un frame
                   let seekTime = Math.min(2, duration / 5); 
                   if (duration > 60) seekTime = 5; 
                   media.currentTime = seekTime;
@@ -122,21 +117,23 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
       };
 
       media.onseeked = () => {
-          // Si es audio, ya resolvimos en onloadedmetadata
           if (isResolved || isAudio || media.videoWidth === 0) return;
 
           try {
               const canvas = document.createElement('canvas');
-              canvas.width = media.videoWidth || 640;
-              canvas.height = media.videoHeight || 360;
-              const ctx = canvas.getContext('2d');
+              // Limitamos resolución de miniatura para ahorrar espacio en servidor
+              const scale = Math.min(1, 640 / media.videoWidth);
+              canvas.width = media.videoWidth * scale;
+              canvas.height = media.videoHeight * scale;
               
+              const ctx = canvas.getContext('2d');
               if (ctx) {
                   ctx.drawImage(media, 0, 0, canvas.width, canvas.height);
+                  // PRIORIDAD: WebP para máximo ahorro. Fallback a JPEG.
                   canvas.toBlob(blob => {
-                      const file = blob ? new File([blob], "thumbnail.jpg", { type: "image/jpeg" }) : null;
+                      const file = blob ? new File([blob], "thumbnail.webp", { type: "image/webp" }) : null;
                       finish(file, media.duration || 0);
-                  }, 'image/jpeg', 0.85);
+                  }, 'image/webp', 0.7);
               } else {
                   finish(extractedThumbnail, media.duration || 0);
               }
