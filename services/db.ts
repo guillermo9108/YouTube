@@ -38,7 +38,6 @@ class DBService {
             try { 
                 json = JSON.parse(rawText); 
             } catch (e) {
-                // FIX: Loguear fragmento más largo para diagnosticar HTML de error del servidor
                 this.logRemote(`Malformed JSON from ${endpoint}: ${rawText.substring(0, 250)}`, 'ERROR');
                 throw new Error(`Respuesta inválida del servidor. Revisa los logs de administración.`);
             }
@@ -47,12 +46,27 @@ class DBService {
         });
     }
 
+    /**
+     * Obtiene videos con patron Stale-While-Revalidate para maxima fluidez
+     */
     public async getAllVideos(): Promise<Video[]> { 
+        // 1. Devolver cache inmediatamente si existe
+        const cached = localStorage.getItem('sp_cache_vids');
+        if (cached && !this.homeDirty) {
+            // Disparamos fetch en segundo plano para actualizar
+            this.syncVideosInBackground();
+            return JSON.parse(cached);
+        }
+
+        return this.syncVideosInBackground();
+    }
+
+    private async syncVideosInBackground(): Promise<Video[]> {
         try {
             const vids = await this.request<Video[]>('action=get_videos');
-            // Asegurar que siempre sea un array
             const safeVids = Array.isArray(vids) ? vids : [];
             localStorage.setItem('sp_cache_vids', JSON.stringify(safeVids));
+            this.homeDirty = false;
             return safeVids;
         } catch (e) {
             const cached = localStorage.getItem('sp_cache_vids');
@@ -65,6 +79,15 @@ class DBService {
     }
 
     public async getMarketplaceItems(): Promise<MarketplaceItem[]> { 
+        const cached = localStorage.getItem('sp_cache_market');
+        if (cached) {
+            this.syncMarketInBackground();
+            return JSON.parse(cached);
+        }
+        return this.syncMarketInBackground();
+    }
+
+    private async syncMarketInBackground(): Promise<MarketplaceItem[]> {
         try {
             const items = await this.request<MarketplaceItem[]>('action=get_marketplace_items');
             localStorage.setItem('sp_cache_market', JSON.stringify(items || []));
@@ -76,6 +99,15 @@ class DBService {
     }
 
     public async getSystemSettings(): Promise<SystemSettings> { 
+        const cached = localStorage.getItem('sp_cache_settings');
+        if (cached) {
+            this.syncSettingsInBackground();
+            return JSON.parse(cached);
+        }
+        return this.syncSettingsInBackground();
+    }
+
+    private async syncSettingsInBackground(): Promise<SystemSettings> {
         try {
             const s = await this.request<SystemSettings>('action=get_system_settings');
             localStorage.setItem('sp_cache_settings', JSON.stringify(s));
@@ -284,7 +316,10 @@ class DBService {
     public async fixLibraryMetadata(): Promise<any> { return this.request<any>(`action=fix_library_metadata`, { method: 'POST' }); }
     public async adminCleanupSystemFiles(): Promise<any> { return this.request<any>(`action=admin_cleanup_files`, { method: 'POST' }); }
     public async adminRepairDb(): Promise<any> { return this.request<any>(`action=admin_repair_db`, { method: 'POST' }); }
-    public invalidateCache(key?: string) {}
+    public invalidateCache(key?: string) {
+        if (!key || key.includes('get_videos')) localStorage.removeItem('sp_cache_vids');
+        if (!key || key.includes('marketplace')) localStorage.removeItem('sp_cache_market');
+    }
     public setHomeDirty() { this.homeDirty = true; }
     public async getNotifications(userId: string): Promise<AppNotification[]> { return this.request<AppNotification[]>(`action=get_notifications&userId=${userId}`); }
     public async markNotificationRead(id: string): Promise<void> { return this.request<void>(`action=mark_notification_read`, { method: 'POST', body: JSON.stringify({ id }) }); }

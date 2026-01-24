@@ -17,7 +17,6 @@ export default function GridProcessor() {
             setStatus('INIT');
             processedRef.current = false;
             
-            // Detectar si es audio por extensión o si el servidor lo marcó explícitamente
             const ext = activeTask.videoUrl.split('.').pop()?.toLowerCase();
             const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
             const audioDetected = (ext ? audioExts.includes(ext) : false) || (activeTask as any).isAudio || activeTask.videoUrl.includes('.mp3');
@@ -36,7 +35,6 @@ export default function GridProcessor() {
             streamSrc = streamSrc.includes('action=stream') ? `${streamSrc}&t=${Date.now()}` : `api/index.php?action=stream&id=${activeTask.id}&t=${Date.now()}`;
         }
 
-        // Si ya sabemos que es audio, usamos la utilidad directa para ID3 y NO esperamos eventos de video
         if (isAudioMode) {
             processAudioMetadata(streamSrc);
             return;
@@ -55,9 +53,7 @@ export default function GridProcessor() {
                 .then(() => {
                     if (videoRef.current) setStatus('CAPTURING');
                 })
-                .catch(() => {
-                    // Ignorar errores de reproducción interrumpida
-                });
+                .catch(() => {});
         }
 
         safetyTimeoutRef.current = window.setTimeout(() => {
@@ -125,7 +121,6 @@ export default function GridProcessor() {
         const vid = e.currentTarget;
         if (!activeTask || processedRef.current || isAudioMode) return;
 
-        // Detección reactiva de audio (videoWidth 0 en tag de video)
         if (vid.readyState >= 1 && vid.videoWidth === 0 && vid.duration > 0) {
             setIsAudioMode(true);
             return;
@@ -140,10 +135,11 @@ export default function GridProcessor() {
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0);
+                    // CAMBIO CRÍTICO: Uso de WebP para aliviar el servidor DDR2
                     canvas.toBlob(async (blob) => {
                         if (!activeTask) return;
                         setStatus('DONE');
-                        const file = blob ? new File([blob], "thumb.jpg", { type: "image/jpeg" }) : null;
+                        const file = blob ? new File([blob], "thumb.webp", { type: "image/webp" }) : null;
                         
                         const fd = new FormData();
                         fd.append('id', activeTask.id);
@@ -154,7 +150,7 @@ export default function GridProcessor() {
                         
                         await db.request(`action=update_video_metadata`, { method: 'POST', body: fd });
                         completeTask(vid.duration, null);
-                    }, 'image/jpeg', 0.7);
+                    }, 'image/webp', 0.6);
                 } else {
                     handleForceComplete(vid.duration, false);
                 }

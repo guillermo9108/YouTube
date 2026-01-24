@@ -1,4 +1,3 @@
-
 <?php
 // DEFINICIÓN DEL ESQUEMA MAESTRO
 function getAppSchema() {
@@ -46,6 +45,12 @@ function getAppSchema() {
                 'transcode_progress' => 'INT DEFAULT 0',
                 'reason' => 'TEXT DEFAULT NULL',
                 'locked_at' => 'BIGINT DEFAULT 0'
+            ],
+            'indices' => [
+                'idx_category' => 'category',
+                'idx_parent_category' => 'parent_category',
+                'idx_created_at' => 'createdAt',
+                'idx_creator_id' => 'creatorId'
             ]
         ],
         'requests' => [
@@ -193,6 +198,11 @@ function getAppSchema() {
                 'recipientName' => 'VARCHAR(50) DEFAULT NULL',
                 'senderName' => 'VARCHAR(50) DEFAULT NULL',
                 'isExternal' => 'TINYINT(1) DEFAULT 0'
+            ],
+            'indices' => [
+                'idx_tx_buyer' => 'buyerId',
+                'idx_tx_time' => 'timestamp',
+                'idx_tx_type' => 'type'
             ]
         ],
         'interactions' => [
@@ -216,6 +226,10 @@ function getAppSchema() {
                 'timestamp' => 'BIGINT',
                 'avatarUrl' => 'VARCHAR(255) DEFAULT NULL',
                 'metadata' => 'JSON DEFAULT NULL'
+            ],
+            'indices' => [
+                'idx_notif_user' => 'userId',
+                'idx_notif_time' => 'timestamp'
             ]
         ]
     ];
@@ -247,6 +261,18 @@ function syncTable($pdo, $tableName, $def) {
                         $modifyDef = str_ireplace("PRIMARY KEY", "", $colDef);
                         $pdo->exec("ALTER TABLE $tableName MODIFY COLUMN $colName $modifyDef");
                     }
+                }
+            }
+        }
+        
+        // Sincronización de Índices
+        if (isset($def['indices'])) {
+            $existingIndices = $pdo->query("SHOW INDEX FROM $tableName")->fetchAll(PDO::FETCH_COLUMN, 2);
+            foreach ($def['indices'] as $idxName => $col) {
+                if (!in_array($idxName, $existingIndices)) {
+                    try {
+                        $pdo->exec("CREATE INDEX $idxName ON $tableName ($col)");
+                    } catch (Exception $e) {}
                 }
             }
         }

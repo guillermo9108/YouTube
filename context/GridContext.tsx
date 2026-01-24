@@ -8,6 +8,7 @@ interface GridContextType {
     completeTask: (duration: number, thumbnail: File | null) => Promise<void>;
     skipTask: () => void;
     isIdle: boolean;
+    setThrottled: (isThrottled: boolean) => void;
 }
 
 const GridContext = createContext<GridContextType | null>(null);
@@ -24,16 +25,17 @@ export const GridProvider = ({ children }: { children?: React.ReactNode }) => {
     const { user } = useAuth();
     const [activeTask, setActiveTask] = useState<Video | null>(null);
     const [isIdle, setIsIdle] = useState(true);
+    const [isThrottled, setIsThrottled] = useState(false);
     
     const intervalRef = useRef<number | null>(null);
     const processingRef = useRef(false);
     const nextFetchTimeRef = useRef<number>(0);
 
     const fetchNextTask = async () => {
-        if (activeTask || processingRef.current || Date.now() < nextFetchTimeRef.current) return;
+        // No buscar tareas si estamos en modo throttle (viendo un video) o ya hay una activa
+        if (isThrottled || activeTask || processingRef.current || Date.now() < nextFetchTimeRef.current) return;
         
         try {
-            // COLABORACIÓN ALFABÉTICA: Usamos modo 'normal' (title ASC)
             const pending = await db.getUnprocessedVideos(1, 'normal');
             
             if (pending && pending.length > 0) {
@@ -73,10 +75,19 @@ export const GridProvider = ({ children }: { children?: React.ReactNode }) => {
         setIsIdle(true);
     };
 
+    const setThrottled = (val: boolean) => {
+        setIsThrottled(val);
+        if (val) {
+            // Si entramos en throttle, limpiamos la tarea activa para liberar recursos inmediatos
+            setActiveTask(null);
+            processingRef.current = false;
+        }
+    };
+
     useEffect(() => {
         if (user) {
             intervalRef.current = window.setInterval(() => {
-                if (!document.hidden && !activeTask) {
+                if (!document.hidden && !activeTask && !isThrottled) {
                     fetchNextTask();
                 }
             }, 5000); 
@@ -85,10 +96,10 @@ export const GridProvider = ({ children }: { children?: React.ReactNode }) => {
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
         };
-    }, [user, activeTask]);
+    }, [user, activeTask, isThrottled]);
 
     return (
-        <GridContext.Provider value={{ activeTask, completeTask, skipTask, isIdle }}>
+        <GridContext.Provider value={{ activeTask, completeTask, skipTask, isIdle, setThrottled }}>
             {children}
         </GridContext.Provider>
     );

@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -10,12 +9,14 @@ import {
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
+import { useGrid } from '../../context/GridContext';
 
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 export default function Watch() {
     const { id } = useParams();
     const { user, refreshUser } = useAuth();
+    const { setThrottled } = useGrid();
     const navigate = useNavigate();
     const toast = useToast();
     
@@ -49,6 +50,14 @@ export default function Watch() {
         viewMarkedRef.current = false;
         setShowComments(false);
         setVisibleRelatedCount(15);
+
+        // Al entrar a la página de ver, pausamos el procesador de fondo por precaución
+        setThrottled(true);
+
+        return () => {
+            // Al salir, liberamos el throttle
+            setThrottled(false);
+        };
     }, [id]);
 
     useEffect(() => {
@@ -309,6 +318,8 @@ export default function Watch() {
                                     onTimeUpdate={handleVideoTimeUpdate}
                                     onEnded={handleVideoEnded}
                                     crossOrigin="anonymous"
+                                    onPlay={() => setThrottled(true)}
+                                    onPause={() => setThrottled(false)}
                                 />
                             </div>
                         </>

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
@@ -59,7 +58,6 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       } catch (e) {}
   };
 
-  // Determinar si es audio por la propiedad isAudio enviada por el backend (o extension si no viene)
   const isAudio = (video as any).isAudio || video.videoUrl?.toLowerCase().endsWith('.mp3');
 
   return (
@@ -74,7 +72,9 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
               src={video.thumbnailUrl} 
               alt={video.title} 
               className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
-              loading="lazy" decoding="async" 
+              loading="lazy" 
+              decoding="async"
+              fetchPriority="low"
               onError={() => setImgError(true)}
             />
         ) : (
@@ -123,7 +123,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       <div className="flex gap-3 px-1">
         <Link to={`/channel/${video.creatorId}`} className="shrink-0 mt-1">
             {video.creatorAvatarUrl ? (
-                <img src={video.creatorAvatarUrl} className="w-10 h-10 rounded-2xl object-cover bg-slate-900 border border-white/5 group-hover:border-indigo-500 transition-colors shadow-md" alt={video.creatorName} />
+                <img src={video.creatorAvatarUrl} className="w-10 h-10 rounded-2xl object-cover bg-slate-900 border border-white/5 group-hover:border-indigo-500 transition-colors shadow-md" alt={video.creatorName} loading="lazy" decoding="async" />
             ) : (
                 <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-sm font-black text-white shadow-inner uppercase">
                     {video.creatorName?.[0] || '?'}

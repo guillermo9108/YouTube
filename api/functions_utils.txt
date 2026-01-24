@@ -99,10 +99,9 @@ function streamVideo($id, $pdo) {
     if (!$realPath || !file_exists($realPath)) { header("HTTP/1.1 404 Not Found"); exit; }
     
     $fileSize = filesize($realPath);
-    $fp = fopen($realPath, 'rb');
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     
-    // Detección de MIME Correcta para Audio/Video
+    // Mime detection
     if ($ext === 'mp3') $mime = 'audio/mpeg';
     else if ($ext === 'wav') $mime = 'audio/wav';
     else if ($ext === 'm4a') $mime = 'audio/mp4';
@@ -110,12 +109,31 @@ function streamVideo($id, $pdo) {
     else if ($ext === 'mkv') $mime = 'video/x-matroska';
     else if ($ext === 'webm') $mime = 'video/webm';
     else $mime = 'video/mp4';
-    
+
+    // X-Sendfile para Apache (si está activo el módulo)
+    if (function_exists('apache_get_modules') && in_array('mod_xsendfile', apache_get_modules())) {
+       header("X-Sendfile: $realPath");
+       header("Content-Type: $mime");
+       exit;
+    }
+    // X-Accel-Redirect para Nginx
+    if (isset($_SERVER['SERVER_SOFTWARE']) && strpos($_SERVER['SERVER_SOFTWARE'], 'nginx') !== false) {
+        // Asume que el servidor tiene un alias configurado
+        // header("X-Accel-Redirect: /protected_videos/" . basename($realPath));
+        // header("Content-Type: $mime");
+        // exit;
+    }
+
     header("Content-Type: $mime");
     header("Accept-Ranges: bytes");
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Expose-Headers: Content-Length, Content-Range");
     
+    $fp = @fopen($realPath, 'rb');
+    if (!$fp) { header("HTTP/1.1 403 Forbidden"); exit; }
+    
+    set_time_limit(0); 
+
     if (isset($_SERVER['HTTP_RANGE'])) {
         preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
         $offset = intval($matches[1]);
@@ -128,8 +146,11 @@ function streamVideo($id, $pdo) {
         header("Content-Length: $fileSize");
     }
     
+    // Buffer optimizado para no agotar la RAM DDR2
+    $bufferSize = 1024 * 512; 
     while (!feof($fp)) {
-        echo fread($fp, 1024 * 128);
+        echo fread($fp, $bufferSize);
+        flush();
         if (connection_aborted()) break;
     }
     fclose($fp);
