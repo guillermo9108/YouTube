@@ -19,9 +19,14 @@ function video_process_rows(&$rows) {
         if (isset($v['creatorAvatarUrl'])) { $v['creatorAvatarUrl'] = fix_url($v['creatorAvatarUrl']); }
         if (!isset($v['transcode_status'])) $v['transcode_status'] = 'NONE';
         
-        // Detectar si es audio para la interfaz
-        $ext = strtolower(pathinfo($v['rawPath'], PATHINFO_EXTENSION));
-        $v['isAudio'] = ($ext === 'mp3' || $ext === 'wav' || $ext === 'aac' || $ext === 'm4a');
+        // Priorizar columna de base de datos para is_audio
+        if (isset($v['is_audio'])) {
+            $v['is_audio'] = (bool)$v['is_audio'];
+        } else {
+            // Fallback para registros legacy
+            $ext = strtolower(pathinfo($v['rawPath'], PATHINFO_EXTENSION));
+            $v['is_audio'] = ($ext === 'mp3' || $ext === 'wav' || $ext === 'aac' || $ext === 'm4a');
+        }
     }
 }
 
@@ -172,8 +177,11 @@ function video_scan_local($pdo, $input) {
                     if ($stmtCheck->fetchColumn() == 0) {
                         $title = pathinfo($fullPath, PATHINFO_FILENAME);
                         $title = trim(str_replace(['.', '_', '-'], ' ', $title));
-                        $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, 'api/uploads/thumbnails/default.jpg')");
-                        $stmt->execute([$vidId, $title, $fullPath, $adminId, time()]);
+                        
+                        $isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a']) ? 1 : 0;
+                        
+                        $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, is_audio, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, ?, 'api/uploads/thumbnails/default.jpg')");
+                        $stmt->execute([$vidId, $title, $fullPath, $adminId, time(), $isAudio]);
                         $added++;
                     }
                 }
@@ -267,11 +275,17 @@ function video_upload($pdo, $post, $files) {
     $cat = $post['category'];
     $dur = intval($post['duration']);
     $videoUrl = "";
+    $isAudio = 0;
+    
     if (isset($files['video'])) {
-        $ext = pathinfo($files['video']['name'], PATHINFO_EXTENSION);
+        $ext = strtolower(pathinfo($files['video']['name'], PATHINFO_EXTENSION));
         if (!is_dir('uploads/videos')) mkdir('uploads/videos', 0777, true);
         $videoUrl = "uploads/videos/{$id}.{$ext}";
         move_uploaded_file($files['video']['tmp_name'], $videoUrl);
+        
+        if (in_array($ext, ['mp3', 'wav', 'aac', 'm4a'])) {
+            $isAudio = 1;
+        }
     }
     
     $thumbUrl = "uploads/thumbnails/default.jpg";
@@ -283,8 +297,8 @@ function video_upload($pdo, $post, $files) {
         }
     }
     
-    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)");
-    $stmt->execute([$id, $title, $desc, $price, $thumbUrl, $videoUrl, $userId, time(), $cat, $dur]);
+    $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, duration, isLocal, is_audio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)");
+    $stmt->execute([$id, $title, $desc, $price, $thumbUrl, $videoUrl, $userId, time(), $cat, $dur, $isAudio]);
     respond(true);
 }
 

@@ -276,7 +276,7 @@ export default function Watch() {
         return `${base}&token=${token}&cb=${Date.now()}`;
     }, [video?.id]);
 
-    const isAudio = (video as any)?.isAudio || video?.videoUrl?.toLowerCase().endsWith('.mp3');
+    const isAudio = Boolean(video?.is_audio);
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
@@ -473,7 +473,7 @@ export default function Watch() {
                                             <CheckCircle2 size={10} className="text-white"/>
                                         </div>
                                     )}
-                                    {(v as any).isAudio && (
+                                    {Boolean(v.is_audio) && (
                                         <div className="absolute bottom-1 left-1 bg-black/60 p-1 rounded-md border border-white/10">
                                             <Music size={10} className="text-indigo-400"/>
                                         </div>

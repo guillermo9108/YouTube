@@ -58,7 +58,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       } catch (e) {}
   };
 
-  const isAudio = (video as any).isAudio || video.videoUrl?.toLowerCase().endsWith('.mp3');
+  const isAudio = Boolean(video.is_audio);
 
   return (
     <div className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>

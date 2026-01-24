@@ -1,4 +1,3 @@
-
 /**
  * Global Type Definitions for StreamPay
  */
@@ -63,6 +62,7 @@ export interface Video {
   likes: number;
   dislikes: number;
   isLocal?: boolean | number | string;
+  is_audio?: boolean | number;
   transcode_status?: 'NONE' | 'WAITING' | 'PROCESSING' | 'FAILED' | 'DONE';
   reason?: string;
   transcode_progress?: number;

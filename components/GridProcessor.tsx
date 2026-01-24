@@ -19,8 +19,8 @@ export default function GridProcessor() {
             
             const ext = activeTask.videoUrl.split('.').pop()?.toLowerCase();
             const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
-            const audioDetected = (ext ? audioExts.includes(ext) : false) || (activeTask as any).isAudio || activeTask.videoUrl.includes('.mp3');
-            setIsAudioMode(Boolean(audioDetected));
+            const audioDetected = Boolean(activeTask.is_audio) || (ext ? audioExts.includes(ext) : false) || activeTask.videoUrl.includes('.mp3');
+            setIsAudioMode(audioDetected);
         }
     }, [activeTask]);
 
