@@ -42,23 +42,23 @@ const extractAudioCover = async (fileOrUrl: File | string): Promise<File | null>
  * Generador robusto de miniaturas para Video y Audio.
  * Si es video, captura un frame. Si es audio, extrae metadatos ID3.
  */
-export const generateThumbnail = async (fileOrUrl: File | string): Promise<{ thumbnail: File | null, duration: number }> => {
+export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: boolean): Promise<{ thumbnail: File | null, duration: number }> => {
   const isFile = typeof fileOrUrl !== 'string';
   const mediaUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
   
-  // Detección de tipo mejorada para URLs de API
-  const isAudio = isFile 
+  // Detección de tipo: forceAudio tiene prioridad absoluta
+  // Si no se provee, intentamos adivinar por MIME o extensión (falla en URLs de API)
+  const isAudio = forceAudio ?? (isFile 
     ? (fileOrUrl as File).type.startsWith('audio') 
     : (
         mediaUrl.toLowerCase().includes('.mp3') || 
         mediaUrl.toLowerCase().includes('.m4a') || 
-        mediaUrl.toLowerCase().includes('.aac') ||
-        mediaUrl.toLowerCase().includes('action=stream') // Asumimos audio si no hay otra pista y falla el video
-      );
+        mediaUrl.toLowerCase().includes('.aac')
+      ));
 
   let extractedThumbnail: File | null = null;
   
-  // Si es audio o parece audio por URL, intentamos ID3 primero
+  // Si es audio forzado o detectado, intentamos ID3 primero
   if (isAudio) {
       extractedThumbnail = await extractAudioCover(fileOrUrl);
   }

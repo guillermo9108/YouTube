@@ -24,21 +24,23 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const checkType = () => {
             const ext = video.videoUrl.split('.').pop()?.toLowerCase();
             const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
-            if ((ext && audioExts.includes(ext)) || (video as any).isAudio || video.videoUrl.includes('.mp3')) {
+            // CORRECCIÓN: is_audio con guion bajo es como viene de MariaDB
+            const audioDetected = Boolean(video.is_audio) || (ext && audioExts.includes(ext)) || video.videoUrl.includes('.mp3');
+            if (audioDetected) {
                 setIsAudio(true);
-                processMedia();
+                processMedia(true);
             }
         };
         checkType();
     }, [video.id]);
 
-    const processMedia = async () => {
+    const processMedia = async (force: boolean) => {
         if (processedRef.current) return;
         setStatus('Extrayendo ID3...');
         
         try {
             const streamUrl = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
-            const result = await generateThumbnail(streamUrl);
+            const result = await generateThumbnail(streamUrl, force);
             
             if (!processedRef.current) {
                 processedRef.current = true;
@@ -80,7 +82,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const vid = e.currentTarget;
         if (vid.videoWidth === 0 && vid.duration > 0) {
             setIsAudio(true);
-            processMedia();
+            processMedia(true);
         }
     };
 

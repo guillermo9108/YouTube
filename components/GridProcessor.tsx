@@ -78,7 +78,8 @@ export default function GridProcessor() {
         setStatus('CAPTURING');
         
         try {
-            const res = await generateThumbnail(url);
+            // CORRECCIÓN: Pasar true para forzar el modo audio basado en el metadato is_audio del task
+            const res = await generateThumbnail(url, true);
             if (!processedRef.current && activeTask) {
                 processedRef.current = true;
                 setStatus('DONE');
