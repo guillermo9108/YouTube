@@ -60,11 +60,101 @@ function video_get_admin_stats($pdo) {
         'available' => intval(($counts['PENDING'] ?? 0) - $lockedCount),
         'processing' => intval($counts['PROCESSING'] ?? 0),
         'failed' => intval($counts['FAILED_METADATA'] ?? 0),
-        'broken' => intval($brokenCount),
+        'broken' => intval($counts['broken'] ?? $brokenCount),
         'total' => intval(array_sum($counts))
     ];
 
     respond(true, $stats);
+}
+
+/**
+ * PROCESADOR NATIVO DEL SERVIDOR (FFMPEG)
+ * Esta función permite extraer metadatos sin intervención del navegador.
+ */
+function video_server_process_metadata($pdo) {
+    set_time_limit(0); 
+    $limit = intval($_GET['limit'] ?? 1); // Procesar de 1 en 1 por defecto para no saturar CPU
+    
+    $settings = $pdo->query("SELECT ffmpegPath, localLibraryPath, categories FROM system_settings WHERE id = 1")->fetch();
+    $ffmpeg = $settings['ffmpegPath'] ?: 'ffmpeg';
+    $ffprobe = str_replace('ffmpeg', 'ffprobe', $ffmpeg);
+    
+    if (!function_exists('exec')) {
+        respond(false, null, "Función exec() deshabilitada en el servidor. El procesamiento automático requiere exec().");
+    }
+
+    $now = time();
+    $timeout = $now - 300;
+    
+    // Obtener videos pendientes que no estén bloqueados
+    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? LIMIT $limit");
+    $stmt->execute([$timeout]);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    if (empty($videos)) {
+        respond(true, ['processed' => 0, 'message' => 'No hay videos pendientes']);
+    }
+
+    $processed = 0;
+    $errors = [];
+
+    foreach ($videos as $v) {
+        $id = $v['id'];
+        $videoPath = $v['videoUrl'];
+        
+        // Bloquear video para que otros procesos no lo toquen
+        $pdo->prepare("UPDATE videos SET locked_at = ? WHERE id = ?")->execute([time(), $id]);
+        
+        if (!file_exists($videoPath)) {
+            $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = 'Archivo no encontrado físicamente' WHERE id = ?")->execute([$id]);
+            $errors[] = "Video $id: No encontrado en $videoPath";
+            continue;
+        }
+
+        // 1. Obtener Duración via ffprobe
+        $cmdDur = "$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($videoPath);
+        $duration = floatval(shell_exec($cmdDur));
+
+        if ($duration <= 0) {
+            $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, locked_at = 0 WHERE id = ?")->execute([$id]);
+            $errors[] = "Video $id: Error al extraer duración";
+            continue;
+        }
+
+        // 2. Capturar Miniatura via ffmpeg (si no es audio)
+        $isAudio = (bool)$v['is_audio'];
+        $thumbUrl = $v['thumbnailUrl'];
+
+        if (!$isAudio) {
+            $thumbDir = 'uploads/thumbnails/';
+            if (!is_dir($thumbDir)) mkdir($thumbDir, 0777, true);
+            $thumbFile = $thumbDir . $id . '.jpg';
+            $seek = min(5, $duration / 2); // Capturar al segundo 5 o a la mitad
+            
+            $cmdThumb = "$ffmpeg -y -ss $seek -i " . escapeshellarg($videoPath) . " -vframes 1 -q:v 2 " . escapeshellarg($thumbFile) . " 2>&1";
+            exec($cmdThumb, $out, $ret);
+            
+            if ($ret === 0) {
+                $thumbUrl = $thumbFile;
+            }
+        }
+
+        // 3. Actualizar registro y pasar a Paso 3 (PROCESSING)
+        $pdo->prepare("UPDATE videos SET duration = ?, thumbnailUrl = ?, category = 'PROCESSING', processing_attempts = 0, locked_at = 0 WHERE id = ?")
+            ->execute([intval($duration), $thumbUrl, $id]);
+        
+        // 4. Aplicar Organización Inteligente Inmediata (Paso 3 Auto)
+        video_organize_single($pdo, $id, $settings);
+        
+        $processed++;
+        write_log("Procesado Servidor: " . $v['title'] . " (ID: $id)");
+    }
+
+    respond(true, [
+        'processed' => $processed, 
+        'errors' => $errors,
+        'completed' => true
+    ]);
 }
 
 /**
@@ -247,7 +337,7 @@ function video_get_by_creator($pdo, $userId) {
 
 function video_get_related($pdo, $videoId) {
     $stmt = $pdo->prepare("SELECT category, parent_category, collection FROM videos WHERE id = ?");
-    $stmt->execute([videoId]);
+    $stmt->execute([$videoId]);
     $current = $stmt->fetch();
     if (!$current) respond(true, []);
     
@@ -370,7 +460,7 @@ function video_update_metadata($pdo, $post, $files) {
     $stmt = $pdo->prepare("UPDATE videos SET " . implode(', ', $fields) . " WHERE id = ?");
     $stmt->execute($params);
     
-    if ($video['category'] === 'PENDING') {
+    if ($video['category'] === 'PENDING' || $video['category'] === 'PROCESSING') {
         $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
         video_organize_single($pdo, $id, $settings);
     }

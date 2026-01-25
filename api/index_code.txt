@@ -1,6 +1,6 @@
 <?php ob_start();
 /**
- * StreamPay - Core Controller V11.48 (Admin Stats Support)
+ * StreamPay - Core Controller V11.49 (Server-Side Processor Support)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -103,6 +103,7 @@ try {
         case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
         case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;
         case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
+        case 'run_server_processor': video_server_process_metadata($pdo); break;
         case 'delete_video': video_delete($pdo, $input); break;
         case 'get_scan_folders': video_get_scan_folders($pdo); break;
         case 'get_admin_library_stats': video_get_admin_stats($pdo); break;
