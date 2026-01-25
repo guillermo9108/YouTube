@@ -7,6 +7,9 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { generateThumbnail } from '../utils/videoGenerator';
 
+// Blacklist local para no re-intentar archivos que fallaron en esta sesión
+const failedExtractions = new Set<string>();
+
 interface VideoCardProps {
   video: Video;
   isUnlocked: boolean;
@@ -55,12 +58,12 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
 
   // 1. Observer: Detectar cuando la tarjeta entra en el viewport
   useEffect(() => {
-      if (!isAudio || !hasDefaultThumb) return;
+      if (!isAudio || !hasDefaultThumb || failedExtractions.has(video.id)) return;
 
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
               setIsVisible(true);
-              observer.disconnect(); // Solo nos interesa la primera vez
+              observer.disconnect(); 
           }
       }, { threshold: 0.1, rootMargin: '100px' });
 
@@ -72,11 +75,12 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   useEffect(() => {
       let isMounted = true;
 
-      if (isAudio && hasDefaultThumb && isVisible && !isProcessing && !localThumb) {
+      const canProcess = isAudio && hasDefaultThumb && isVisible && !isProcessing && !localThumb && !failedExtractions.has(video.id);
+
+      if (canProcess) {
           setIsProcessing(true);
           
-          // Pequeño retardo aleatorio para escalonar peticiones al NAS
-          const delay = Math.random() * 2000 + 500;
+          const delay = Math.random() * 1500 + 500;
           
           const timeout = setTimeout(async () => {
               try {
@@ -86,22 +90,31 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
                   
                   const result = await generateThumbnail(streamUrl, true);
                   
-                  if (result.thumbnail && isMounted) {
-                      const objectUrl = URL.createObjectURL(result.thumbnail);
-                      setLocalThumb(objectUrl);
-                      
+                  if (!isMounted) return;
+
+                  if (result.duration > 0 || result.thumbnail) {
                       const fd = new FormData();
                       fd.append('id', video.id);
                       fd.append('duration', String(result.duration || video.duration));
                       fd.append('success', '1');
-                      fd.append('thumbnail', result.thumbnail);
+                      
+                      if (result.thumbnail) {
+                          const objectUrl = URL.createObjectURL(result.thumbnail);
+                          setLocalThumb(objectUrl);
+                          fd.append('thumbnail', result.thumbnail);
+                      }
+                      
                       if (user) fd.append('requesterId', user.id);
                       
                       await db.request('action=update_video_metadata', { method: 'POST', body: fd });
                       db.setHomeDirty();
+                  } else {
+                      // Marcar como fallido para esta sesión
+                      failedExtractions.add(video.id);
                   }
               } catch (e) {
                   console.warn(`Auto-reparación fallida para: ${video.title}`);
+                  failedExtractions.add(video.id);
               } finally {
                   if (isMounted) setIsProcessing(false);
               }
@@ -117,7 +130,9 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   // 3. Cleanup: Liberar memoria de Blobs al desmontar
   useEffect(() => {
       return () => {
-          if (localThumb) URL.revokeObjectURL(localThumb);
+          if (localThumb) {
+              URL.revokeObjectURL(localThumb);
+          }
       };
   }, [localThumb]);
 
