@@ -69,8 +69,9 @@ function video_process_batch($pdo) {
     $now = time();
     $timeout = $now - 300;
     
-    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND locked_at < ? LIMIT ?");
-    $stmt->execute([$timeout, $limit]);
+    // Fix: Interpolamos el límite para evitar error de sintaxis MariaDB con parámetros emulados
+    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND locked_at < ? LIMIT $limit");
+    $stmt->execute([$timeout]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     if (empty($videos)) respond(true, ['completed' => true, 'processed' => [], 'remaining' => 0]);
@@ -227,8 +228,9 @@ function video_get_related($pdo, $videoId) {
 
 function video_get_unprocessed($pdo) {
     $limit = intval($_GET['limit'] ?? 10);
-    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND locked_at < UNIX_TIMESTAMP() - 300 LIMIT ?");
-    $stmt->execute([$limit]);
+    // Fix: MariaDB 10+ no acepta parámetros preparados emulados (strings) en LIMIT. Forzamos interpolación segura tras intval.
+    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND locked_at < UNIX_TIMESTAMP() - 300 LIMIT $limit");
+    $stmt->execute();
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
