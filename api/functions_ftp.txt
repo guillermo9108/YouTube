@@ -1,46 +1,53 @@
 <?php
 /**
- * StreamPay - FTP Module V1.0
+ * StreamPay - FTP Module V1.1
  */
 
-function listFtpFiles($pdo, $path = '/') {
+function getFtpConn($pdo) {
     $stmt = $pdo->query("SELECT ftpSettings FROM system_settings WHERE id = 1");
     $settings = json_decode($stmt->fetchColumn() ?: '{}', true);
 
-    if (empty($settings['host'])) respond(false, null, "FTP no configurado");
+    if (empty($settings['host'])) throw new Exception("FTP no configurado");
 
-    $conn = ftp_connect($settings['host'], $settings['port'] ?: 21, 15);
-    if (!$conn) respond(false, null, "No se pudo conectar al host FTP");
+    $conn = ftp_connect($settings['host'], $settings['port'] ?: 21, 20);
+    if (!$conn) throw new Exception("No se pudo conectar al host FTP");
 
     if (!@ftp_login($conn, $settings['user'], $settings['pass'])) {
         ftp_close($conn);
-        respond(false, null, "Credenciales FTP inválidas");
+        throw new Exception("Credenciales FTP inválidas");
     }
 
     ftp_pasv($conn, true);
-    $rawList = ftp_rawlist($conn, $path);
-    $items = [];
+    return $conn;
+}
 
-    if ($rawList) {
-        foreach ($rawList as $line) {
-            $parts = preg_split('/\s+/', $line, 9);
-            if (count($parts) < 9) continue;
-            
-            $isDir = $parts[0][0] === 'd';
-            $name = $parts[8];
-            if ($name === '.' || $name === '..') continue;
+function listFtpFiles($pdo, $path = '/') {
+    try {
+        $conn = getFtpConn($pdo);
+        $rawList = ftp_rawlist($conn, $path);
+        $items = [];
 
-            $items[] = [
-                'name' => $name,
-                'path' => rtrim($path, '/') . '/' . $name,
-                'type' => $isDir ? 'dir' : 'file',
-                'size' => $isDir ? '-' : round($parts[4] / 1024 / 1024, 2) . ' MB'
-            ];
+        if ($rawList) {
+            foreach ($rawList as $line) {
+                $parts = preg_split('/\s+/', $line, 9);
+                if (count($parts) < 9) continue;
+                
+                $isDir = $parts[0][0] === 'd';
+                $name = $parts[8];
+                if ($name === '.' || $name === '..') continue;
+
+                $items[] = [
+                    'name' => $name,
+                    'path' => rtrim($path, '/') . '/' . $name,
+                    'type' => $isDir ? 'dir' : 'file',
+                    'size' => $isDir ? '-' : round($parts[4] / 1024 / 1024, 2) . ' MB'
+                ];
+            }
         }
-    }
 
-    ftp_close($conn);
-    respond(true, $items);
+        ftp_close($conn);
+        respond(true, $items);
+    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 
 function importFtpFile($pdo, $input) {
@@ -62,7 +69,56 @@ function importFtpFile($pdo, $input) {
 }
 
 function scanFtpRecursive($pdo, $input) {
-    // Implementación básica de escaneo recursivo para FTP
-    respond(true, ['scanned' => 0, 'added' => 0]);
+    $rootPath = $input['path'] ?? '/';
+    $foundCount = 0;
+    $addedCount = 0;
+    
+    try {
+        $conn = getFtpConn($pdo);
+        $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+        
+        $stack = [$rootPath];
+        $extensions = ['mp4', 'mkv', 'avi', 'mp3', 'wav', 'mov', 'webm'];
+
+        while (count($stack) > 0) {
+            $currentPath = array_pop($stack);
+            $rawList = ftp_rawlist($conn, $currentPath);
+            
+            if (!$rawList) continue;
+
+            foreach ($rawList as $line) {
+                $parts = preg_split('/\s+/', $line, 9);
+                if (count($parts) < 9) continue;
+                
+                $isDir = $parts[0][0] === 'd';
+                $name = $parts[8];
+                if ($name === '.' || $name === '..') continue;
+                
+                $fullPath = rtrim($currentPath, '/') . '/' . $name;
+                
+                if ($isDir) {
+                    $stack[] = $fullPath;
+                } else {
+                    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+                    if (in_array($ext, $extensions)) {
+                        $foundCount++;
+                        $vidId = 'ftp_' . md5($fullPath);
+                        $check = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE id = ?");
+                        $check->execute([$vidId]);
+                        
+                        if ($check->fetchColumn() == 0) {
+                            $isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a']);
+                            $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, is_audio) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, ?)");
+                            $stmt->execute([$vidId, pathinfo($name, PATHINFO_FILENAME), $fullPath, $adminId, time(), $isAudio ? 1 : 0]);
+                            $addedCount++;
+                        }
+                    }
+                }
+            }
+        }
+
+        ftp_close($conn);
+        respond(true, ['scanned' => $foundCount, 'added' => $addedCount]);
+    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
 }
 ?>
