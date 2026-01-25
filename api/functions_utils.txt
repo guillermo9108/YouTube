@@ -2,12 +2,13 @@
 
 /**
  * Parsea el nombre de archivo y su ruta para extraer metadatos jerárquicos.
- * El objetivo es que funcione como un explorador de archivos.
+ * Funciona como un hilo de carpetas normales.
  */
 function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
     
+    // Calcular ruta relativa desde el root configurado
     if ($scanRoot) {
         $scanRootNormalized = rtrim(str_replace('\\', '/', $scanRoot), '/');
         $relativePath = str_replace($scanRootNormalized, '', $fullPathNormalized);
@@ -16,8 +17,8 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
     }
 
     $relativePath = ltrim($relativePath, '/');
-    $parts = explode('/', $relativePath); // Ej: ["PELICULAS", "ACCION", "Peli.mp4"]
-    $fileItem = array_pop($parts); // Quita el nombre del archivo: "Peli.mp4"
+    $parts = explode('/', $relativePath); 
+    array_pop($parts); // Eliminar el nombre del archivo de la ruta de carpetas
     
     $cleanText = function($txt) {
         $junk = [
@@ -31,7 +32,8 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
 
     $cleanName = $cleanText($filename);
 
-    // Lógica de carpetas (Hilo)
+    // Lógica de Carpetas:
+    // Si parts = ["PELICULAS", "ACCION"] -> Categoría = ACCION, Padre = PELICULAS
     $count = count($parts);
     if ($count === 0) {
         $detectedCat = 'GENERAL';
@@ -40,9 +42,7 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
         $detectedCat = strtoupper($cleanText($parts[0]));
         $detectedParent = null;
     } else {
-        // El video pertenece a la última carpeta
         $detectedCat = strtoupper($cleanText($parts[$count - 1]));
-        // Su padre es la carpeta anterior
         $detectedParent = strtoupper($cleanText($parts[$count - 2]));
     }
 
@@ -69,7 +69,6 @@ function getPriceForCategory($catName, $settings, $parentCatName = null) {
             if (isset($cat['name']) && strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
         }
     }
-    
     return 1.00; 
 }
 
@@ -114,7 +113,7 @@ function streamVideo($id, $pdo) {
     
     $fileSize = filesize($realPath);
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
-    $mime = ($ext === 'mp3') ? 'audio/mpeg' : 'video/mp4';
+    $mime = (in_array($ext, ['mp3', 'wav', 'm4a', 'aac'])) ? 'audio/mpeg' : 'video/mp4';
 
     header("Access-Control-Allow-Origin: *");
     header("Accept-Ranges: bytes");

@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
-import { Video, Category, Notification as AppNotification, User } from '../../types';
+import { Video, User } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Folder, Menu, ShieldCheck, LogOut
 } from 'lucide-react';
-import { useLocation, useNavigate } from '../Router';
+import { useNavigate } from '../Router';
 import AIConcierge from '../AIConcierge';
 
 const Sidebar = ({ isOpen, onClose, user, isAdmin, logout }: { isOpen: boolean, onClose: () => void, user: User | null, isAdmin: boolean, logout: () => void }) => {
@@ -66,8 +66,6 @@ const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (index:
 
 export default function Home() {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
-  
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [path, setPath] = useState<string[]>([]);
@@ -87,10 +85,10 @@ export default function Home() {
 
   const currentFolder = path.length > 0 ? path[path.length - 1] : null;
 
-  // Filtro de Carpetas (Subcategorías)
+  // Filtro de Carpetas (Breadth-first)
   const subfolders = useMemo(() => {
     if (searchQuery) return [];
-    // Buscamos videos cuyo padre sea la carpeta actual y extraemos sus categorías únicas
+    // Buscamos videos cuyo padre sea la carpeta actual
     const children = allVideos.filter(v => (v.parent_category || null) === currentFolder);
     const uniqueFolderNames: string[] = Array.from(new Set(children.map(v => v.category)));
     
@@ -100,14 +98,13 @@ export default function Home() {
     })).sort((a, b) => a.name.localeCompare(b.name));
   }, [allVideos, currentFolder, searchQuery]);
 
-  // Filtro de Videos (Los que están exactamente en este nivel)
+  // Filtro de Videos (Nivel actual)
   const levelVideos = useMemo(() => {
     if (searchQuery) {
         const q = searchQuery.toLowerCase();
         return allVideos.filter(v => v.title.toLowerCase().includes(q));
     }
-    // Mostramos videos que pertenecen a la carpeta actual
-    // Si estamos en la raíz (null), buscamos videos de categoría 'GENERAL' o sin padre
+    // Si estamos en la raíz (null), mostramos videos de categoría 'GENERAL' o sin padre
     if (currentFolder === null) {
         return allVideos.filter(v => v.parent_category === null && v.category === 'GENERAL');
     }
@@ -135,7 +132,7 @@ export default function Home() {
                   <input 
                     type="text" value={searchQuery} 
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Buscar contenido..." 
+                    placeholder="Buscar en el catálogo..." 
                     className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:border-indigo-500 outline-none" 
                   />
                   {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-500 hover:text-white"><X size={16}/></button>}
@@ -168,7 +165,7 @@ export default function Home() {
 
       {levelVideos.length === 0 && subfolders.length === 0 && (
           <div className="py-20 text-center text-slate-600 italic uppercase text-xs font-black tracking-widest">
-              Esta carpeta está vacía
+              No hay contenido en esta ubicación
           </div>
       )}
       
