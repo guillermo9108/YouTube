@@ -36,7 +36,7 @@ export default function AdminMaintenance() {
         minDays: 30,
         maxViews: 5,
         minDuration: 0,
-        maxGbLimit: 10, // Límite de GB
+        maxGbLimit: 10, 
         maxDeleteLimit: 100
     });
 
@@ -54,7 +54,6 @@ export default function AdminMaintenance() {
 
     useEffect(() => {
         fetchLogs();
-        // Cargar categorías dinámicas
         db.getSystemSettings().then(s => {
             if (s.categories) setCategories(s.categories);
         });
@@ -140,10 +139,6 @@ export default function AdminMaintenance() {
                                 <select value={config.category} onChange={e => setConfig({...config, category: e.target.value})} className="w-full bg-slate-950 border border-slate-800 text-white text-sm rounded-xl p-3 outline-none">
                                     <option value="ALL">Toda la Librería</option>
                                     {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                                    {/* Fallback para compatibilidad con enum original */}
-                                    {(Object.values(VideoCategory) as string[]).map(c => (
-                                        !categories.find(cat => cat.name === c) && <option key={c} value={c}>{c.replace('_', ' ')}</option>
-                                    ))}
                                 </select>
                             </div>
 
@@ -151,17 +146,17 @@ export default function AdminMaintenance() {
                                 <div>
                                     <div className="flex justify-between mb-1">
                                         <label className="text-[10px] font-bold text-slate-500 uppercase">Antigüedad</label>
-                                        <span className="text-[10px] font-bold text-indigo-400">{config.minDays} días</span>
+                                        <span className="text-[10px] font-bold text-indigo-400">{config.minDays} d</span>
                                     </div>
                                     <input type="range" min="1" max="365" value={config.minDays} onChange={e => setConfig({...config, minDays: parseInt(e.target.value)})} className="w-full accent-indigo-500 h-1 bg-slate-800 rounded-full appearance-none" />
                                 </div>
 
                                 <div>
                                     <div className="flex justify-between mb-1">
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase">Límite Purga GB</label>
-                                        <span className="text-[10px] font-bold text-red-400">{config.maxGbLimit} GB</span>
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase">ROI (Vistas Máx)</label>
+                                        <span className="text-[10px] font-bold text-red-400">{config.maxViews}</span>
                                     </div>
-                                    <input type="range" min="1" max="500" step="5" value={config.maxGbLimit} onChange={e => setConfig({...config, maxGbLimit: parseInt(e.target.value)})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none" />
+                                    <input type="range" min="0" max="100" value={config.maxViews} onChange={e => setConfig({...config, maxViews: parseInt(e.target.value)})} className="w-full accent-red-500 h-1 bg-slate-800 rounded-full appearance-none" />
                                 </div>
                             </div>
 

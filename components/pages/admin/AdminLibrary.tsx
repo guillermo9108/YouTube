@@ -6,7 +6,7 @@ import { generateThumbnail } from '../../../utils/videoGenerator';
 import { 
     FolderSearch, Loader2, Terminal, Film, Wand2, Database, RefreshCw, 
     CheckCircle2, Clock, AlertTriangle, ShieldAlert, Sparkles, Layers, 
-    HardDrive, List, Play, ChevronRight, XCircle, Zap, FolderOpen, Lock, Music, Server, Info, Settings
+    HardDrive, List, Play, ChevronRight, XCircle, Zap, FolderOpen, Lock, Music
 } from 'lucide-react';
 
 interface ScannerPlayerProps {
@@ -39,6 +39,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         
         try {
             const streamUrl = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
+            // Agilizado en Admin: skipImage=true
             const result = await generateThumbnail(streamUrl, force, true);
             
             if (!processedRef.current) {
@@ -143,7 +144,6 @@ export default function AdminLibrary() {
     const [isIndexing, setIsIndexing] = useState(false);
     const [indexProgress, setIndexProgress] = useState({ current: 0, total: 0, label: '' });
     const [activeScan, setActiveScan] = useState(false);
-    const [isServerProcessing, setIsServerProcessing] = useState(false);
     const [isOrganizing, setIsOrganizing] = useState(false);
     const [isReorganizingAll, setIsReorganizingAll] = useState(false);
     const [isFixing, setIsFixing] = useState(false);
@@ -274,27 +274,6 @@ export default function AdminLibrary() {
             setCurrentScanIndex(0);
             setActiveScan(true);
         } catch (e: any) { addToLog(`Error: ${e.message}`); }
-    };
-
-    const handleRunServerProcessor = async () => {
-        if (isServerProcessing) return;
-        setIsServerProcessing(true);
-        addToLog("Disparando procesador FFmpeg en servidor...");
-        
-        try {
-            const res: any = await db.request('action=run_server_processor&limit=10');
-            addToLog(`[SERVIDOR] Tarea terminada. Procesados: ${res.processed}`);
-            if (res.errors && res.errors.length > 0) {
-                res.errors.forEach((e: string) => addToLog(`[ERR] ${e}`));
-            }
-            loadStats();
-            toast.success("Lote procesado en servidor");
-        } catch (e: any) {
-            addToLog(`[ERR SERVIDOR] ${e.message}`);
-            toast.error("El servidor no pudo procesar: Revisa configuración FFmpeg");
-        } finally {
-            setIsServerProcessing(false);
-        }
     };
 
     const handleVideoProcessed = async (duration: number, thumbnail: File | null, success: boolean, clientIncompatible: boolean = false) => {
@@ -485,42 +464,23 @@ export default function AdminLibrary() {
                     <div className="space-y-3">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">2</div>
-                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Paso 2: Extracción de Metadatos</h3>
+                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Extracción Automática</h3>
                         </div>
-                        
-                        <div className="flex flex-col gap-2">
-                            <button onClick={() => handleStep2()} disabled={activeScan || stats.available === 0} className="w-full bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 py-3 rounded-xl font-bold text-[10px] uppercase tracking-widest text-slate-400 transition-all flex items-center justify-center gap-2 border border-slate-700">
-                                {activeScan ? <Zap size={14} className="animate-pulse text-yellow-300" /> : <Play size={14}/>} 
-                                {activeScan ? 'ESCÁNER NAV. ACTIVO' : `MODO NAVEGADOR (${stats.available})`}
-                            </button>
-
-                            <button onClick={handleRunServerProcessor} disabled={isServerProcessing || stats.available === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-xs uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
-                                {isServerProcessing ? <Loader2 className="animate-spin" size={18}/> : <Server size={18}/>} 
-                                {isServerProcessing ? 'PROCESANDO EN SERVIDOR...' : `MODO SERVIDOR FFmpeg (${stats.available})`}
-                            </button>
-                        </div>
-
-                        <div className="bg-slate-950/50 p-4 rounded-2xl border border-white/5 flex items-start gap-3">
-                            <Info size={16} className="text-indigo-400 shrink-0 mt-1"/>
-                            <div className="text-[9px] text-slate-400 leading-relaxed font-bold uppercase">
-                                <span className="text-white">CONSEJO DE AUTOMATIZACIÓN:</span><br/>
-                                PUEDES PROGRAMAR ESTA TAREA EN TU NAS USANDO EL COMANDO:<br/>
-                                <code className="bg-black p-1 rounded text-emerald-400 block mt-1 font-mono text-[8px] lowercase">
-                                    curl "https://tu-web.com/api/index.php?action=run_server_processor&limit=20"
-                                </code>
-                            </div>
-                        </div>
+                        <button onClick={() => handleStep2()} disabled={activeScan || stats.available === 0} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
+                            {activeScan ? <Zap size={18} className="animate-pulse text-yellow-300" /> : <Film size={18}/>} 
+                            {activeScan ? 'MOTOR ACTIVO...' : `INICIAR MOTOR AUTOMÁTICO (${stats.available})`}
+                        </button>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase text-center">EL PROCESO CONTINUARÁ HASTA TERMINAR TODA LA LIBRERÍA</p>
                     </div>
 
                     <div className="space-y-3">
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-black">3</div>
-                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Paso 3: Organización Final</h3>
+                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Organización IA</h3>
                         </div>
-                        <button onClick={handleStep3} disabled={isOrganizing || stats.processing === 0} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-xs uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
-                            {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} PUBLICAR / ORGANIZAR ({stats.processing})
+                        <button onClick={handleStep3} disabled={isOrganizing || stats.processing === 0} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
+                            {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} Publicar ({stats.processing})
                         </button>
-                        <p className="text-[9px] text-slate-500 font-bold uppercase text-center">EL PASO 2 EN SERVIDOR YA INCLUYE ESTE PASO AUTOMÁTICAMENTE</p>
                     </div>
                 </div>
 
@@ -546,7 +506,7 @@ export default function AdminLibrary() {
                 </div>
                 <div className="flex-1 overflow-y-auto font-mono text-[10px] space-y-1.5 custom-scrollbar pr-2">
                     {scanLog.map((l, i) => (
-                        <div key={i} className={`py-1 border-b border-white/5 last:border-0 ${l.includes('ERROR') || l.includes('[ERR]') ? 'text-red-400 font-bold' : (l.includes('[OK]') || l.includes('[SERVIDOR]') ? 'text-emerald-400' : (l.includes('[RAMA') ? 'text-indigo-400 font-bold' : 'text-slate-400'))}`}>
+                        <div key={i} className={`py-1 border-b border-white/5 last:border-0 ${l.includes('ERROR') ? 'text-red-400 font-bold' : (l.includes('[OK]') ? 'text-emerald-400' : (l.includes('[RAMA') ? 'text-indigo-400 font-bold' : 'text-slate-400'))}`}>
                             <span className="opacity-20 mr-2 shrink-0">[{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}]</span>
                             <span className="break-words">{l}</span>
                         </div>

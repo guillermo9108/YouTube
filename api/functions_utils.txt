@@ -1,72 +1,83 @@
 <?php
 
 /**
- * Parsea el nombre de archivo y su ruta para extraer metadatos jerárquicos.
- * Funciona como un hilo de carpetas normales.
+ * Smart Path Parser V7 - Janitor Logic
+ * Analiza jerarquía de carpetas y limpia metadatos de archivos multimedia.
  */
-function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
+function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
+    // Eliminar partes vacías y normalizar
+    $pathParts = array_values(array_filter(explode('/', $fullPathNormalized)));
     
-    // Calcular ruta relativa desde el root configurado
-    if ($scanRoot) {
-        $scanRootNormalized = rtrim(str_replace('\\', '/', $scanRoot), '/');
-        $relativePath = str_replace($scanRootNormalized, '', $fullPathNormalized);
-    } else {
-        $relativePath = $fullPathNormalized;
-    }
-
-    $relativePath = ltrim($relativePath, '/');
-    $parts = explode('/', $relativePath); 
-    array_pop($parts); // Eliminar el nombre del archivo de la ruta de carpetas
-    
+    // Función de limpieza de ruido (Tags de ripeo, calidad, etc.)
     $cleanText = function($txt) {
         $junk = [
-            '/\b(1080p|720p|4k|x264|h264|bluray|web-dl|mkv|mp4|avi|mov|wmv|mpg|mpeg|ts|webm)\b/i', 
-            '/\./', '/_/', '/-/'
+            '/\b(1080p|720p|4k|2160p|x264|h264|x265|h265|hevc|bluray|web-dl|webrip|brrip|dvdrip|multi|latino|español|castellano|aac|dts|dd5\.1)\b/i',
+            '/\./', 
+            '/_/',
+            '/\b(Dual|Audio|H[DQ]|TrueHD|WEB)\b/i',
+            '/\[.*?\]/', // Eliminar contenido entre corchetes
+            '/\(.*?\)/'  // Eliminar contenido entre paréntesis
         ];
         $t = $txt;
         foreach ($junk as $p) { $t = preg_replace($p, ' ', $t); }
+        // Eliminar espacios dobles y recortar
         return trim(preg_replace('/\s+/', ' ', $t));
     };
 
     $cleanName = $cleanText($filename);
 
-    // Lógica de Carpetas:
-    // Si parts = ["PELICULAS", "ACCION"] -> Categoría = ACCION, Padre = PELICULAS
-    $count = count($parts);
-    if ($count === 0) {
-        $detectedCat = 'GENERAL';
-        $detectedParent = null;
-    } else if ($count === 1) {
-        $detectedCat = strtoupper($cleanText($parts[0]));
-        $detectedParent = null;
-    } else {
-        $detectedCat = strtoupper($cleanText($parts[$count - 1]));
-        $detectedParent = strtoupper($cleanText($parts[$count - 2]));
+    $detectedCat = 'GENERAL';
+    $detectedParent = null;
+    $detectedCollection = null;
+
+    // Lógica Jerárquica: Buscamos carpetas de atrás hacia adelante
+    // Ej: /Media/Series/Breaking Bad/Season 1/S01E01.mkv
+    $partsCount = count($pathParts);
+    
+    // El archivo es la última parte, empezamos desde la penúltima (la carpeta que lo contiene)
+    for ($i = $partsCount - 2; $i >= 0; $i--) {
+        $segment = trim($pathParts[$i]);
+        if (empty($segment)) continue;
+
+        // Comprobar si el segmento coincide con una categoría definida por el admin
+        $foundMatch = false;
+        foreach ($hierarchy as $cat) {
+            if (strcasecmp($segment, $cat['name']) === 0) {
+                $detectedCat = $cat['name'];
+                
+                // Si la categoría tiene auto-subcategorización activada,
+                // la carpeta inmediatamente inferior es la Colección/Serie
+                if (!empty($cat['autoSub'])) {
+                    if (isset($pathParts[$i + 1]) && $pathParts[$i + 1] !== basename($fullPath)) {
+                        $detectedParent = $cat['name'];
+                        $detectedCat = $pathParts[$i + 1]; // Ej: Breaking Bad
+                    }
+                }
+                $foundMatch = true;
+                break 2; // Encontrado categoría raíz, salir de ambos bucles
+            }
+        }
     }
 
+    // Si no se detectó categoría por jerarquía, usamos el nombre limpio del archivo
     return [
         'title' => substr(ucwords(strtolower($cleanName)), 0, 250), 
         'category' => substr($detectedCat, 0, 95),
         'parent_category' => $detectedParent ? substr($detectedParent, 0, 95) : null,
-        'collection' => null
+        'collection' => $detectedCollection ? substr($detectedCollection, 0, 95) : null
     ];
 }
 
 function getPriceForCategory($catName, $settings, $parentCatName = null) {
-    $rawCats = $settings['categories'] ?? '[]';
-    $categories = is_array($rawCats) ? $rawCats : (json_decode($rawCats, true) ?: []);
-    
-    if (!is_array($categories)) return 1.00;
-
+    $categories = is_array($settings['categories']) ? $settings['categories'] : json_decode($settings['categories'] ?? '[]', true);
     foreach ($categories as $cat) {
-        if (isset($cat['name']) && strcasecmp($cat['name'], $catName) === 0) return floatval($cat['price']);
+        if (strcasecmp($cat['name'], $catName) === 0) return floatval($cat['price']);
     }
-    
     if ($parentCatName) {
         foreach ($categories as $cat) {
-            if (isset($cat['name']) && strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
+            if (strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
         }
     }
     return 1.00; 
@@ -91,8 +102,6 @@ function resolve_video_path($pathOrUrl) {
 
 function fix_url($url) {
     if (empty($url)) return "api/uploads/thumbnails/default.jpg"; 
-    if (strpos($url, 'default.jpg') !== false) return "api/uploads/thumbnails/default.jpg";
-    if (strpos($url, 'defaultaudio.jpg') !== false) return "api/uploads/thumbnails/defaultaudio.jpg";
     if (strpos($url, 'http') === 0) return $url;
     if (strpos($url, 'data:') === 0) return $url;
     $clean = ltrim($url, '/');
@@ -103,6 +112,7 @@ function fix_url($url) {
 
 function streamVideo($id, $pdo) {
     while (ob_get_level()) ob_end_clean();
+    
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $videoUrl = $stmt->fetchColumn();
@@ -113,9 +123,19 @@ function streamVideo($id, $pdo) {
     
     $fileSize = filesize($realPath);
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
-    $mime = (in_array($ext, ['mp3', 'wav', 'm4a', 'aac'])) ? 'audio/mpeg' : 'video/mp4';
+    
+    if ($ext === 'mp3') $mime = 'audio/mpeg';
+    else if ($ext === 'wav') $mime = 'audio/wav';
+    else if ($ext === 'm4a') $mime = 'audio/mp4';
+    else if ($ext === 'aac') $mime = 'audio/aac';
+    else if ($ext === 'mkv') $mime = 'video/x-matroska';
+    else if ($ext === 'webm') $mime = 'video/webm';
+    else $mime = 'video/mp4';
 
     header("Access-Control-Allow-Origin: *");
+    header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
+    header("Access-Control-Allow-Headers: Range, Authorization, Content-Type");
+    header("Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges");
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
 
@@ -126,6 +146,7 @@ function streamVideo($id, $pdo) {
 
     $fp = @fopen($realPath, 'rb');
     if (!$fp) { header("HTTP/1.1 403 Forbidden"); exit; }
+    
     set_time_limit(0); 
 
     if (isset($_SERVER['HTTP_RANGE'])) {

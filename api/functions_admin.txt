@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V17.9.3 (JSON Consistency Patch)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V17.9.1 (Cleanup Protection Fix)
  */
 
 function admin_get_settings($pdo) {
@@ -12,14 +12,10 @@ function admin_get_settings($pdo) {
             if (isset($settings[$field])) {
                 if (is_string($settings[$field]) && !empty($settings[$field])) {
                     $decoded = json_decode($settings[$field], true);
-                    // GARANTÍA: Si decodifica a nulo pero el string no estaba vacío, forzar estructura por defecto
                     $settings[$field] = $decoded !== null ? $decoded : ($field === 'ftpSettings' || $field === 'paymentMethods' ? new stdClass() : []);
-                } else {
-                    // Si el campo está vacío en DB, devolver estructura vacía según tipo
+                } elseif (empty($settings[$field])) {
                     $settings[$field] = ($field === 'ftpSettings' || $field === 'paymentMethods' ? new stdClass() : []);
                 }
-            } else {
-                $settings[$field] = ($field === 'ftpSettings' || $field === 'paymentMethods' ? new stdClass() : []);
             }
         }
         respond(true, $settings);
@@ -58,6 +54,7 @@ function get_real_stats($pdo) {
 
     $userCount = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn() ?: 1;
     
+    // 1. Efectivo Real (Inflow): Solo transacciones marcadas como externas
     $stmtInflow = $pdo->prepare("
         SELECT 
             SUM(amount) as total_cash_in,
@@ -68,6 +65,7 @@ function get_real_stats($pdo) {
     $stmtInflow->execute([$from, $to]);
     $inflow = $stmtInflow->fetch();
 
+    // 2. Volumen Interno (Circulación)
     $stmtVolume = $pdo->prepare("
         SELECT 
             SUM(amount) as total_volume,
@@ -78,6 +76,7 @@ function get_real_stats($pdo) {
     $stmtVolume->execute([$from, $to]);
     $volume = $stmtVolume->fetch();
 
+    // 3. Mix de Ventas de Membresías (Solo por Efectivo Real)
     $stmtMix = $pdo->prepare("
         SELECT videoTitle as planName, COUNT(*) as qty 
         FROM transactions 
@@ -87,6 +86,7 @@ function get_real_stats($pdo) {
     $stmtMix->execute([$from, $to]);
     $planMix = $stmtMix->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
 
+    // 4. Historial Diario
     $stmtD = $pdo->prepare("
         SELECT FROM_UNIXTIME(timestamp, '%Y-%m-%d') as date, 
                SUM(CASE WHEN isExternal = 1 THEN amount ELSE 0 END) as cash_in,
@@ -134,6 +134,7 @@ function admin_handle_balance_request($pdo, $input) {
         if (!$req || $req['status'] !== 'PENDING') throw new Exception("Solicitud no válida");
         if ($status === 'APPROVED') {
             $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$req['amount'], $req['userId']]);
+            // El dinero que entra por recarga manual es siempre Externo (Cash)
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, 'Recarga Solicitada', 1)")->execute([uniqid('dep_'), $req['userId'], $req['amount'], time()]);
         }
         $pdo->prepare("UPDATE balance_requests SET status = ? WHERE id = ?")->execute([$status, $reqId]);
@@ -152,13 +153,20 @@ function admin_handle_vip_request($pdo, $input) {
             $plan = json_decode($req['planSnapshot'], true); $userId = $req['userId'];
             $now = time();
             if ($plan['type'] === 'BALANCE') {
+                // LÓGICA DE CONTABILIDAD LIMPIA:
                 $priceBase = floatval($plan['price']);
                 $bonusPercent = floatval($plan['bonusPercent'] ?? 0);
                 $bonusAmount = $priceBase * ($bonusPercent / 100);
                 $totalCredit = $priceBase + $bonusAmount;
+
+                // 1. Actualizar saldo total al usuario
                 $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$totalCredit, $userId]);
+                
+                // 2. Registrar el Dinero Real (isExternal = 1)
                 $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 1)")
                     ->execute([uniqid('tx_cash_'), $userId, $priceBase, $now, $plan['name']]);
+                
+                // 3. Registrar el Bono (Regalo del sistema, isExternal = 0) si existe
                 if ($bonusAmount > 0) {
                     $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 0)")
                         ->execute([uniqid('tx_bonus_'), $userId, $bonusAmount, $now, "Bono: " . $plan['name']]);
@@ -169,6 +177,7 @@ function admin_handle_vip_request($pdo, $input) {
                 $current = intval($stmtU->fetchColumn());
                 $newExpiry = max($current, $now) + ($days * 86400);
                 $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
+                // Compra de días VIP es 100% externo
                 $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'VIP', ?, ?, 1)")->execute([uniqid('tx_v_'), $userId, $plan['price'], $now, $plan['name']]);
             }
         }
@@ -193,37 +202,41 @@ function admin_repair_db($pdo, $input) {
 
 function admin_cleanup_files($pdo) {
     $dbFiles = [];
-    $whitelistFilenames = ['default.jpg', 'defaultaudio.jpg', 'default_avatar.png', 'logo.png', '.htaccess', 'index.php'];
-    
-    foreach ($whitelistFilenames as $wf) {
-        $possiblePaths = [
-            __DIR__ . '/uploads/thumbnails/' . $wf,
-            __DIR__ . '/uploads/avatars/' . $wf,
-            __DIR__ . '/uploads/videos/' . $wf
-        ];
-        foreach ($possiblePaths as $pp) {
-            if (file_exists($pp)) { $dbFiles[] = realpath($pp); }
-        }
-    }
 
+    // 1. Proteger archivos de Videos (Videos + Miniaturas)
     $videos = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos")->fetchAll();
     foreach ($videos as $v) {
         if ($p1 = resolve_video_path($v['videoUrl'])) $dbFiles[] = $p1;
         if ($p2 = resolve_video_path($v['thumbnailUrl'])) $dbFiles[] = $p2;
     }
 
+    // 2. Proteger Avatares de Usuarios (Prevenir borrado de perfiles)
     $avatars = $pdo->query("SELECT avatarUrl FROM users WHERE avatarUrl IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
-    foreach ($avatars as $url) { if ($p = resolve_video_path($url)) $dbFiles[] = $p; }
+    foreach ($avatars as $url) {
+        if ($p = resolve_video_path($url)) $dbFiles[] = $p;
+    }
 
+    // 3. Proteger imágenes del Marketplace (Prevenir borrado de tienda)
     $market = $pdo->query("SELECT images FROM marketplace_items")->fetchAll(PDO::FETCH_COLUMN);
     foreach ($market as $json) {
         $imgs = json_decode($json, true);
         if (is_array($imgs)) {
-            foreach ($imgs as $url) { if ($p = resolve_video_path($url)) $dbFiles[] = $p; }
+            foreach ($imgs as $url) {
+                if ($p = resolve_video_path($url)) $dbFiles[] = $p;
+            }
         }
     }
 
-    $dbFiles = array_unique(array_filter($dbFiles));
+    // 4. Proteger comprobantes VIP
+    $proofs = $pdo->query("SELECT proofImageUrl FROM vip_requests WHERE proofImageUrl IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($proofs as $url) {
+        if ($p = resolve_video_path($url)) $dbFiles[] = $p;
+    }
+
+    // Normalizar lista de protegidos
+    $dbFiles = array_unique($dbFiles);
+
+    // 5. Barrido de carpetas
     $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market', 'uploads/proofs'];
     $deleted = 0;
     foreach ($dirs as $d) {
@@ -234,8 +247,8 @@ function admin_cleanup_files($pdo) {
             if ($f === '.' || $f === '..') continue;
             $full = realpath($path . '/' . $f);
             if ($full && is_file($full) && !in_array($full, $dbFiles)) { 
-                if (in_array(basename($full), $whitelistFilenames)) continue;
-                @unlink($full); $deleted++; 
+                @unlink($full); 
+                $deleted++; 
             }
         }
     }
@@ -245,7 +258,7 @@ function admin_cleanup_files($pdo) {
 function admin_get_local_stats($pdo) {
     $stmt = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
     $sets = $stmt->fetch();
-    $paths = json_decode($sets['libraryPaths'] ?? '[]', true) ?: [];
+    $paths = json_decode($sets['libraryPaths'] ?: '[]', true);
     if ($sets['localLibraryPath']) $paths[] = $sets['localLibraryPath'];
     $volumes = [];
     foreach (array_unique($paths) as $p) {
@@ -338,6 +351,7 @@ function admin_process_next_transcode($pdo) {
     $v = $stmt->fetch();
     if (!$v) respond(false, null, "No hay videos en espera");
     
+    // FIX: Verificar existencia de la función exec para evitar fallos HTML/Fatal
     if (!function_exists('exec')) {
         $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Función exec() deshabilitada en PHP' WHERE id = ?")->execute([$v['id']]);
         respond(false, null, "Función exec deshabilitada en el servidor");
@@ -415,9 +429,8 @@ function admin_smart_cleaner_execute($pdo, $input) {
             $realThumb = resolve_video_path($v['thumbnailUrl']);
             
             if ($realVideo && file_exists($realVideo)) @unlink($realVideo);
-            if (strpos($v['thumbnailUrl'], 'default.jpg') === false && strpos($v['thumbnailUrl'], 'defaultaudio.jpg') === false) {
-                if ($realThumb && file_exists($realThumb)) @unlink($realThumb);
-            }
+            if ($realThumb && file_exists($realThumb)) @unlink($realThumb);
+            
             $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
             $deleted++;
         }
@@ -459,6 +472,7 @@ function admin_add_balance($pdo, $input) {
     $pdo->beginTransaction();
     try {
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $targetId]);
+        // Recargas manuales directas del admin son Externas (Cash)
         $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, 'Recarga Admin', 1)")->execute([uniqid('dep_'), $targetId, $amount, time()]);
         $pdo->commit();
         respond(true);
