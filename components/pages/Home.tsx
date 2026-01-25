@@ -39,7 +39,9 @@ const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: s
 const SubCategoryCard: React.FC<{ name: string, videos: Video[], onClick: () => void }> = ({ name, videos, onClick }) => {
     const randomThumb = useMemo(() => {
         if (!videos || videos.length === 0) return null;
-        return videos[Math.floor(Math.random() * videos.length)]?.thumbnailUrl;
+        const withThumb = videos.filter(v => v.thumbnailUrl && !v.thumbnailUrl.includes('default.jpg'));
+        const source = withThumb.length > 0 ? withThumb : videos;
+        return source[Math.floor(Math.random() * source.length)]?.thumbnailUrl;
     }, [videos]);
 
     return (
@@ -86,7 +88,7 @@ export default function Home() {
   
   const [watchedIds, setWatchedIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [visibleCount, setVisibleCount] = useState(12);
+  const [visibleCount, setVisibleCount] = useState(24);
 
   useEffect(() => {
     const loadData = async () => {
@@ -99,8 +101,8 @@ export default function Home() {
                 db.getSystemSettings()
             ]);
             
-            // Filtrar estados internos de procesamiento para la Home
-            const validVids = (vids || []).filter(v => !['PENDING', 'FAILED_METADATA'].includes(v.category));
+            // Solo videos procesados o en proceso (excluir PENDING que no tienen categoría real aún)
+            const validVids = (vids || []).filter(v => v.category !== 'PENDING' && v.category !== 'FAILED_METADATA');
             setAllVideos(validVids);
             setMarketItems(mkt || []);
             setAllUsers(usersRes || []);
@@ -133,26 +135,30 @@ export default function Home() {
   const { currentSubCategories, levelVideos, breadcrumbPath } = useMemo(() => {
     if (searchQuery) return { currentSubCategories: [], levelVideos: [], breadcrumbPath: [] };
 
-    // Filtro inteligente de jerarquía física
-    const levelVids = allVideos.filter(v => {
-        if (!activeCategory) return !v.parent_category; // Estamos en la raíz
-        return v.parent_category === activeCategory; // Estamos dentro de una carpeta padre
-    });
-    
-    // Detectar carpetas únicas en este nivel
-    const uniqueFolders = Array.from(new Set(levelVids.map(v => v.category as string)));
-    const subCats = (uniqueFolders as string[])
-        .filter(name => name !== activeCategory)
-        .map((name: string) => ({
-            name,
-            id: name,
-            videos: allVideos.filter(v => v.category === name || v.parent_category === name)
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
+    // 1. Determinar sub-carpetas a mostrar
+    // Una "carpeta" es cualquier categoría cuyo parent_category sea el actual
+    // Fix: Cast subCatNames result to string[] to avoid 'unknown' type error in localeCompare on line 150
+    const subCatNames = Array.from(new Set(
+        allVideos
+            .filter(v => v.parent_category === (activeCategory || null) && v.category !== activeCategory)
+            .map(v => v.category as string)
+    )) as string[];
 
-    // Videos que son archivos directos de este nivel y no sub-carpetas
-    // (Por defecto en Janitor V7, si tiene parent_category y category igual al parent, es el archivo en la raíz de esa carpeta)
-    const filteredVids = levelVids.filter(v => v.category === activeCategory || !uniqueFolders.includes(v.category));
+    const subCats = subCatNames.map(name => ({
+        name,
+        id: name,
+        videos: allVideos.filter(v => v.category === name || v.parent_category === name)
+    })).sort((a, b) => a.name.localeCompare(b.name));
+
+    // 2. Determinar videos a mostrar en este nivel
+    let filteredVids: Video[] = [];
+    if (activeCategory) {
+        // Estamos dentro de una carpeta: mostrar videos que pertenecen a esta categoría EXACTA
+        filteredVids = allVideos.filter(v => v.category === activeCategory);
+    } else {
+        // Estamos en la raíz: mostrar videos que no tienen padre Y cuya categoría no es una de las carpetas mostradas
+        filteredVids = allVideos.filter(v => !v.parent_category && !subCatNames.includes(v.category));
+    }
 
     return { 
         currentSubCategories: subCats, 
@@ -202,7 +208,7 @@ export default function Home() {
                           {searchResults.users.map(u => (
                               <Link key={u.id} to={`/channel/${u.id}`} className="bg-slate-900 border border-slate-800 p-4 rounded-3xl flex items-center gap-4 shrink-0 hover:border-indigo-500/30 transition-all min-w-[200px] shadow-lg">
                                   <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-800 border border-white/5">
-                                      {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover" alt={u.username}/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{u.username?.[0]}</div>}
+                                      {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover" alt={u.username}/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{u.username?.[0] || '?'}</div>}
                                   </div>
                                   <span className="font-black text-white text-xs truncate">@{u.username}</span>
                               </Link>
@@ -232,31 +238,6 @@ export default function Home() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-12">
                           {searchResults.videos.map(v => (
                               <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)} />
-                          ))}
-                      </div>
-                  </div>
-              )}
-
-              {searchResults.marketplace.length > 0 && (
-                  <div className="space-y-4">
-                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] border-l-2 border-emerald-500 pl-3 flex items-center gap-2">
-                        <ShoppingBag size={14}/> Tienda
-                      </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                          {searchResults.marketplace.map(item => (
-                              <Link key={item.id} to={`/marketplace/${item.id}`} className="group bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-emerald-500/50 transition-all flex flex-col shadow-lg">
-                                  <div className="aspect-[3/4] overflow-hidden relative bg-black">
-                                      {item.images?.[0] ? <img src={item.images[0]} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/> : <div className="w-full h-full flex items-center justify-center text-slate-800"><ShoppingBag size={32}/></div>}
-                                      <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-black text-emerald-400 border border-emerald-500/30">{item.price} $</div>
-                                  </div>
-                                  <div className="p-3 flex-1 flex flex-col">
-                                      <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight mb-1">{item.title}</h4>
-                                      <div className="mt-auto flex items-center gap-1">
-                                          <Star size={10} className="text-amber-500" fill="currentColor"/>
-                                          <span className="text-[9px] font-bold text-slate-500">{(item.rating || 0).toFixed(1)}</span>
-                                      </div>
-                                  </div>
-                              </Link>
                           ))}
                       </div>
                   </div>

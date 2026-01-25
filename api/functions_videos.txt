@@ -17,8 +17,8 @@ function video_process_rows(&$rows) {
 }
 
 function video_get_all($pdo) {
-    // CAMBIO: Permitimos ver videos en estado PROCESSING para que el usuario sepa que hay contenido nuevo llegando.
-    // Excluimos explícitamente PENDING (aún no analizados) y FAILED_METADATA.
+    // CAMBIO: Se devuelven videos en estado PROCESSING para permitir visibilidad inmediata.
+    // Solo se excluyen PENDING (sin categoría asignada) y FAILED.
     $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'FAILED_METADATA') ORDER BY v.createdAt DESC");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
@@ -71,7 +71,7 @@ function video_process_batch($pdo) {
     
     // Fix: Interpolamos el límite para evitar error de sintaxis MariaDB con parámetros emulados
     $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND locked_at < ? LIMIT $limit");
-    $stmt->execute([$timeout]);
+    $stmt->execute([($timeout)]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     if (empty($videos)) respond(true, ['completed' => true, 'processed' => [], 'remaining' => 0]);
