@@ -2,13 +2,12 @@
 
 /**
  * Parsea el nombre de archivo y su ruta para extraer metadatos jerárquicos.
- * Lógica mejorada para Raíz Dinámica.
+ * El objetivo es que funcione como un explorador de archivos.
  */
 function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
     
-    // Si tenemos un root, calculamos la ruta relativa real
     if ($scanRoot) {
         $scanRootNormalized = rtrim(str_replace('\\', '/', $scanRoot), '/');
         $relativePath = str_replace($scanRootNormalized, '', $fullPathNormalized);
@@ -17,15 +16,13 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
     }
 
     $relativePath = ltrim($relativePath, '/');
-    $parts = explode('/', $relativePath);
+    $parts = explode('/', $relativePath); // Ej: ["PELICULAS", "ACCION", "Peli.mp4"]
+    $fileItem = array_pop($parts); // Quita el nombre del archivo: "Peli.mp4"
     
     $cleanText = function($txt) {
-        // Eliminar extensiones, tags de calidad y caracteres de unión
         $junk = [
             '/\b(1080p|720p|4k|x264|h264|bluray|web-dl|mkv|mp4|avi|mov|wmv|mpg|mpeg|ts|webm)\b/i', 
-            '/\./', 
-            '/_/', 
-            '/-/'
+            '/\./', '/_/', '/-/'
         ];
         $t = $txt;
         foreach ($junk as $p) { $t = preg_replace($p, ' ', $t); }
@@ -34,54 +31,45 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
 
     $cleanName = $cleanText($filename);
 
-    // Valores por defecto
-    $detectedCat = 'GENERAL';
-    $detectedParent = null;
-    $detectedCollection = null;
-
-    // Lógica Jerárquica: Si el archivo está en subcarpetas dentro del ROOT
-    if (count($parts) >= 2) {
-        // La primera carpeta después del root es la Categoría Principal
+    // Lógica de carpetas (Hilo)
+    $count = count($parts);
+    if ($count === 0) {
+        $detectedCat = 'GENERAL';
+        $detectedParent = null;
+    } else if ($count === 1) {
         $detectedCat = strtoupper($cleanText($parts[0]));
-        
-        // Si hay una segunda carpeta, es la Subcategoría
-        if (count($parts) >= 3) {
-            $detectedParent = $detectedCat;
-            $detectedCat = strtoupper($cleanText($parts[1]));
-            
-            // Si hay una tercera carpeta, el nivel 2 es la Colección
-            if (count($parts) >= 4) {
-                $detectedCollection = $detectedCat;
-            }
-        }
+        $detectedParent = null;
+    } else {
+        // El video pertenece a la última carpeta
+        $detectedCat = strtoupper($cleanText($parts[$count - 1]));
+        // Su padre es la carpeta anterior
+        $detectedParent = strtoupper($cleanText($parts[$count - 2]));
     }
 
     return [
         'title' => substr(ucwords(strtolower($cleanName)), 0, 250), 
         'category' => substr($detectedCat, 0, 95),
         'parent_category' => $detectedParent ? substr($detectedParent, 0, 95) : null,
-        'collection' => $detectedCollection ? substr($detectedCollection, 0, 95) : null
+        'collection' => null
     ];
 }
 
 function getPriceForCategory($catName, $settings, $parentCatName = null) {
-    // CORRECCIÓN: Garantizar que $categories sea siempre un array
     $rawCats = $settings['categories'] ?? '[]';
     $categories = is_array($rawCats) ? $rawCats : (json_decode($rawCats, true) ?: []);
     
-    // Buscar coincidencia exacta por nombre
+    if (!is_array($categories)) return 1.00;
+
     foreach ($categories as $cat) {
         if (isset($cat['name']) && strcasecmp($cat['name'], $catName) === 0) return floatval($cat['price']);
     }
     
-    // Si no hay precio para la categoría hija, buscar en la madre
     if ($parentCatName) {
         foreach ($categories as $cat) {
             if (isset($cat['name']) && strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
         }
     }
     
-    // Precio base por defecto si nada coincide
     return 1.00; 
 }
 
@@ -106,7 +94,6 @@ function fix_url($url) {
     if (empty($url)) return "api/uploads/thumbnails/default.jpg"; 
     if (strpos($url, 'default.jpg') !== false) return "api/uploads/thumbnails/default.jpg";
     if (strpos($url, 'defaultaudio.jpg') !== false) return "api/uploads/thumbnails/defaultaudio.jpg";
-
     if (strpos($url, 'http') === 0) return $url;
     if (strpos($url, 'data:') === 0) return $url;
     $clean = ltrim($url, '/');
@@ -117,7 +104,6 @@ function fix_url($url) {
 
 function streamVideo($id, $pdo) {
     while (ob_get_level()) ob_end_clean();
-    
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $videoUrl = $stmt->fetchColumn();
@@ -128,19 +114,9 @@ function streamVideo($id, $pdo) {
     
     $fileSize = filesize($realPath);
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
-    
-    if ($ext === 'mp3') $mime = 'audio/mpeg';
-    else if ($ext === 'wav') $mime = 'audio/wav';
-    else if ($ext === 'm4a') $mime = 'audio/mp4';
-    else if ($ext === 'aac') $mime = 'audio/aac';
-    else if ($ext === 'mkv') $mime = 'video/x-matroska';
-    else if ($ext === 'webm') $mime = 'video/webm';
-    else $mime = 'video/mp4';
+    $mime = ($ext === 'mp3') ? 'audio/mpeg' : 'video/mp4';
 
     header("Access-Control-Allow-Origin: *");
-    header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
-    header("Access-Control-Allow-Headers: Range, Authorization, Content-Type");
-    header("Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges");
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
 
@@ -151,7 +127,6 @@ function streamVideo($id, $pdo) {
 
     $fp = @fopen($realPath, 'rb');
     if (!$fp) { header("HTTP/1.1 403 Forbidden"); exit; }
-    
     set_time_limit(0); 
 
     if (isset($_SERVER['HTTP_RANGE'])) {
