@@ -2,18 +2,15 @@
 
 /**
  * Parsea el nombre de archivo y su ruta para extraer metadatos jerárquicos.
- * Lógica:
- * Nivel 1 (Carpeta raíz del escaneo) -> Categoría
- * Nivel 2 (Subcarpeta) -> Subcategoría
- * Archivos en niveles superiores heredan la estructura.
+ * Lógica mejorada para Raíz Dinámica.
  */
 function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
     
-    // Si no se pasa el root, intentamos adivinarlo o usamos la lógica antigua simplificada
+    // Si tenemos un root, calculamos la ruta relativa real
     if ($scanRoot) {
-        $scanRootNormalized = str_replace('\\', '/', $scanRoot);
+        $scanRootNormalized = rtrim(str_replace('\\', '/', $scanRoot), '/');
         $relativePath = str_replace($scanRootNormalized, '', $fullPathNormalized);
     } else {
         $relativePath = $fullPathNormalized;
@@ -23,8 +20,13 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
     $parts = explode('/', $relativePath);
     
     $cleanText = function($txt) {
-        // Eliminar tags comunes de piratería/calidad
-        $junk = ['/\b(1080p|720p|4k|x264|h264|bluray|web-dl|mkv|mp4|avi|mov|wmv|mpg|mpeg)\b/i', '/\./', '/_/'];
+        // Eliminar extensiones, tags de calidad y caracteres de unión
+        $junk = [
+            '/\b(1080p|720p|4k|x264|h264|bluray|web-dl|mkv|mp4|avi|mov|wmv|mpg|mpeg|ts|webm)\b/i', 
+            '/\./', 
+            '/_/', 
+            '/-/'
+        ];
         $t = $txt;
         foreach ($junk as $p) { $t = preg_replace($p, ' ', $t); }
         return trim(preg_replace('/\s+/', ' ', $t));
@@ -37,18 +39,18 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
     $detectedParent = null;
     $detectedCollection = null;
 
-    // Lógica Jerárquica Estricta
+    // Lógica Jerárquica: Si el archivo está en subcarpetas dentro del ROOT
     if (count($parts) >= 2) {
-        // El primer elemento es siempre la Categoría (Nivel 1)
+        // La primera carpeta después del root es la Categoría Principal
         $detectedCat = strtoupper($cleanText($parts[0]));
         
-        // Si hay un segundo elemento y no es el archivo mismo, es la Subcategoría (Nivel 2)
-        if (count($parts) > 2 || (count($parts) == 2 && !is_file($fullPath))) {
+        // Si hay una segunda carpeta, es la Subcategoría
+        if (count($parts) >= 3) {
             $detectedParent = $detectedCat;
             $detectedCat = strtoupper($cleanText($parts[1]));
             
-            // Si el archivo está en un Nivel 3 o más profundo, el Nivel 2 actúa como "Colección"
-            if (count($parts) > 2) {
+            // Si hay una tercera carpeta, el nivel 2 es la Colección
+            if (count($parts) >= 4) {
                 $detectedCollection = $detectedCat;
             }
         }
@@ -64,14 +66,20 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
 
 function getPriceForCategory($catName, $settings, $parentCatName = null) {
     $categories = is_array($settings['categories']) ? $settings['categories'] : json_decode($settings['categories'] ?? '[]', true);
+    
+    // Buscar coincidencia exacta por nombre
     foreach ($categories as $cat) {
         if (strcasecmp($cat['name'], $catName) === 0) return floatval($cat['price']);
     }
+    
+    // Si no hay precio para la categoría hija, buscar en la madre
     if ($parentCatName) {
         foreach ($categories as $cat) {
             if (strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
         }
     }
+    
+    // Precio base por defecto si nada coincide
     return 1.00; 
 }
 
@@ -93,7 +101,6 @@ function resolve_video_path($pathOrUrl) {
 }
 
 function fix_url($url) {
-    // Whitelist de imágenes por defecto para evitar que desaparezcan del UI si el janitor las toca (aunque ahora están protegidas)
     if (empty($url)) return "api/uploads/thumbnails/default.jpg"; 
     if (strpos($url, 'default.jpg') !== false) return "api/uploads/thumbnails/default.jpg";
     if (strpos($url, 'defaultaudio.jpg') !== false) return "api/uploads/thumbnails/defaultaudio.jpg";
@@ -120,7 +127,6 @@ function streamVideo($id, $pdo) {
     $fileSize = filesize($realPath);
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     
-    // Mime detection
     if ($ext === 'mp3') $mime = 'audio/mpeg';
     else if ($ext === 'wav') $mime = 'audio/wav';
     else if ($ext === 'm4a') $mime = 'audio/mp4';
@@ -129,7 +135,6 @@ function streamVideo($id, $pdo) {
     else if ($ext === 'webm') $mime = 'video/webm';
     else $mime = 'video/mp4';
 
-    // Cabeceras cruciales para jsmediatags y reproductores
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
     header("Access-Control-Allow-Headers: Range, Authorization, Content-Type");
@@ -137,7 +142,6 @@ function streamVideo($id, $pdo) {
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
 
-    // Manejo de peticiones HEAD (Rápido para metadatos)
     if ($_SERVER['REQUEST_METHOD'] === 'HEAD') {
         header("Content-Length: $fileSize");
         exit;
@@ -160,7 +164,6 @@ function streamVideo($id, $pdo) {
         header("Content-Length: $fileSize");
     }
     
-    // Buffer más pequeño para NAS con DDR2 (evita picos de RAM)
     $bufferSize = 1024 * 128; 
     while (!feof($fp)) {
         echo fread($fp, $bufferSize);
