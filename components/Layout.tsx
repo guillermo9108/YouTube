@@ -5,7 +5,7 @@ import {
     DownloadCloud, LogOut, ShoppingBag, Server, ChevronRight, Crown, 
     Smartphone as MobileIcon, MonitorDown, AlertTriangle, CheckCircle2, 
     Clock, ShoppingCart as SaleIcon, Zap, User as UserIcon, Layout as LayoutIcon,
-    Heart, Search, History
+    Heart, Search, History, Wallet
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUpload } from '../context/UploadContext';
@@ -35,7 +35,7 @@ const Sidebar = ({ isOpen, onClose, user, isAdmin, logout }: any) => {
             <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose}></div>
             <div className="absolute top-0 left-0 bottom-0 w-[300px] bg-slate-900 border-r border-white/5 shadow-2xl flex flex-col animate-in slide-in-from-left duration-500">
                 <div className="p-8 bg-slate-950 border-b border-white/5">
-                    <div className="flex items-center gap-4 mb-2">
+                    <div className="flex items-center gap-4 mb-6">
                         <div className="w-14 h-14 rounded-2xl bg-indigo-600 flex items-center justify-center font-black text-white text-2xl shadow-xl shadow-indigo-600/20">
                             {user?.username?.[0] || '?'}
                         </div>
@@ -43,6 +43,10 @@ const Sidebar = ({ isOpen, onClose, user, isAdmin, logout }: any) => {
                             <div className="font-black text-white truncate text-lg">@{user?.username || 'Usuario'}</div>
                             <div className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.2em]">{user?.role}</div>
                         </div>
+                    </div>
+                    <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Mi Balance</p>
+                        <div className="text-xl font-black text-emerald-400">{Number(user?.balance || 0).toFixed(2)} $</div>
                     </div>
                 </div>
 
@@ -67,7 +71,7 @@ const Sidebar = ({ isOpen, onClose, user, isAdmin, logout }: any) => {
                                 onClick={() => { navigate('/admin'); onClose(); }} 
                                 className="w-full flex items-center gap-4 p-4 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20 hover:bg-amber-500 hover:text-black transition-all"
                             >
-                                <ShieldCheck size={20}/><span className="text-[10px] font-black uppercase tracking-widest">Panel de Control</span>
+                                <ShieldCheck size={20}/><span className="text-[10px] font-black uppercase tracking-widest">Panel Admin</span>
                             </button>
                         </div>
                     )}
@@ -98,7 +102,7 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col bg-black overflow-x-hidden">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
       
-      {/* Neo-Header Premium */}
+      {/* Premium Header */}
       <header className="fixed top-0 left-0 right-0 z-[100] bg-black/60 backdrop-blur-2xl border-b border-white/5 h-[74px]">
           <div className="container mx-auto px-4 h-full flex items-center justify-between max-w-7xl">
               <div className="flex items-center gap-5">
@@ -135,8 +139,8 @@ export default function Layout() {
           </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 container mx-auto px-4 pt-[90px] pb-24 max-w-7xl animate-in fade-in duration-700">
+      {/* Main Content Area con paddings dinámicos */}
+      <main className="flex-1 container mx-auto px-4 pt-[94px] pb-24 md:pb-8 max-w-7xl animate-in fade-in duration-700">
         <Outlet />
       </main>
 
@@ -150,12 +154,6 @@ export default function Layout() {
         <Link to="/marketplace" className={isActive('/marketplace')}><ShoppingBag size={24}/></Link>
         <Link to="/profile" className={isActive('/profile')}><User size={24}/></Link>
       </nav>
-      
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 10px; }
-      `}</style>
     </div>
   );
 }
