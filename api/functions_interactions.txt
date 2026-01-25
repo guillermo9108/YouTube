@@ -1,6 +1,6 @@
 <?php
 /**
- * INTERACCIONES - CORE FUNCTIONS V12.0 (Full Restore)
+ * INTERACCIONES - CORE FUNCTIONS V12.1 (Fix: Guest View Support)
  */
 
 function interact_submit_manual_vip($pdo, $post, $files) {
@@ -25,7 +25,6 @@ function interact_submit_manual_vip($pdo, $post, $files) {
 }
 
 function interact_purchase_video($pdo, $input) {
-    // Re-alias de interact_purchase para consistencia
     interact_purchase($pdo, $input);
 }
 
@@ -66,11 +65,20 @@ function interact_purchase_vip_instant($pdo, $input) {
 }
 
 function interact_rate($pdo, $input) {
-    $uid = $input['userId']; $vid = $input['videoId']; $type = $input['type'];
+    $type = $input['type'] ?? '';
+    $vid = $input['videoId'] ?? '';
+
+    // Fix: Handle guest views or unauthenticated view increments
     if ($type === 'view') {
-        $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$vid]);
+        if ($vid) {
+            $pdo->prepare("UPDATE videos SET views = views + 1 WHERE id = ?")->execute([$vid]);
+        }
         respond(true);
     }
+
+    $uid = $input['userId'] ?? null;
+    if (!$uid || !$vid) respond(false, null, 'Datos incompletos para calificación');
+
     $stmt = $pdo->prepare("SELECT * FROM interactions WHERE userId = ? AND videoId = ?"); $stmt->execute([$uid, $vid]); $curr = $stmt->fetch();
     $liked = ($type === 'like') ? ($curr && $curr['liked'] ? 0 : 1) : ($curr ? $curr['liked'] : 0);
     $disliked = ($type === 'dislike') ? ($curr && $curr['disliked'] ? 0 : 1) : ($curr ? $curr['disliked'] : 0);

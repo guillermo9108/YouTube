@@ -5,8 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Category, Notification as AppNotification, MarketplaceItem, User } from '../../types';
 import { 
-    // Added Server to imports
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Folder, Bell, Check, Zap, Clock, Film, ShoppingBag, Tag, Users, Star, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, Database, Sparkles, Server
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Folder, Database, Film, ShoppingBag, Users, Star, ArrowRight, Sparkles, Server
 } from 'lucide-react';
 import { useLocation, useNavigate, Link } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -37,7 +36,6 @@ const Breadcrumbs = ({ path, onNavigate }: { path: string[], onNavigate: (cat: s
     </div>
 );
 
-// Fix: Use React.FC to handle potential key prop conflicts in strict environments
 const SubCategoryCard: React.FC<{ name: string, videos: Video[], onClick: () => void }> = ({ name, videos, onClick }) => {
     const randomThumb = useMemo(() => {
         if (!videos || videos.length === 0) return null;
@@ -90,10 +88,6 @@ export default function Home() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [visibleCount, setVisibleCount] = useState(12);
 
-  // Search Logic
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const searchContainerRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     const loadData = async () => {
         setLoading(true);
@@ -105,7 +99,9 @@ export default function Home() {
                 db.getSystemSettings()
             ]);
             
-            setAllVideos(vids || []);
+            // Filtrar estados internos de procesamiento para la Home
+            const validVids = (vids || []).filter(v => !['PENDING', 'FAILED_METADATA'].includes(v.category));
+            setAllVideos(validVids);
             setMarketItems(mkt || []);
             setAllUsers(usersRes || []);
             setCategories(sets?.categories || []);
@@ -124,7 +120,6 @@ export default function Home() {
       const q = searchQuery.toLowerCase().trim();
       if (q.length < 2) return null;
       
-      // Fix: Ensure strings are properly typed for mapping subcategories
       return {
           videos: allVideos.filter(v => v.title.toLowerCase().includes(q)),
           marketplace: marketItems.filter(i => i.title.toLowerCase().includes(q)),
@@ -138,12 +133,14 @@ export default function Home() {
   const { currentSubCategories, levelVideos, breadcrumbPath } = useMemo(() => {
     if (searchQuery) return { currentSubCategories: [], levelVideos: [], breadcrumbPath: [] };
 
-    // Videos en el nivel actual
-    const levelVids = allVideos.filter(v => (v.parent_category || null) === activeCategory);
+    // Filtro inteligente de jerarquía física
+    const levelVids = allVideos.filter(v => {
+        if (!activeCategory) return !v.parent_category; // Estamos en la raíz
+        return v.parent_category === activeCategory; // Estamos dentro de una carpeta padre
+    });
     
-    // Carpetas del nivel actual (Subcategorías)
+    // Detectar carpetas únicas en este nivel
     const uniqueFolders = Array.from(new Set(levelVids.map(v => v.category as string)));
-    // Fix: Explicitly type as string[] and add explicit typing to mapping
     const subCats = (uniqueFolders as string[])
         .filter(name => name !== activeCategory)
         .map((name: string) => ({
@@ -153,8 +150,9 @@ export default function Home() {
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Solo videos que pertenecen a este nivel y NO a una subcarpeta
-    const filteredVids = levelVids.filter(v => v.category === activeCategory || (!activeCategory && !v.parent_category));
+    // Videos que son archivos directos de este nivel y no sub-carpetas
+    // (Por defecto en Janitor V7, si tiene parent_category y category igual al parent, es el archivo en la raíz de esa carpeta)
+    const filteredVids = levelVids.filter(v => v.category === activeCategory || !uniqueFolders.includes(v.category));
 
     return { 
         currentSubCategories: subCats, 
@@ -175,16 +173,18 @@ export default function Home() {
   return (
     <div className="space-y-6">
       {/* Search Header */}
-      <div className="relative group" ref={searchContainerRef}>
+      <div className="relative group">
           <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-indigo-400 transition-colors" size={20} />
           <input 
             type="text" value={searchQuery} 
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar por título, canal o producto..." 
+            placeholder="Buscar videos, canales o productos..." 
             className="w-full bg-slate-900/40 backdrop-blur-md border border-white/5 rounded-3xl pl-14 pr-12 py-5 text-sm text-white focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all shadow-xl placeholder:text-slate-600 font-bold" 
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery('')} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white bg-slate-800 p-1.5 rounded-full"><X size={16}/></button>
+            <button onClick={() => setSearchQuery('')} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white bg-slate-800 p-1.5 rounded-full transition-all">
+                <X size={16}/>
+            </button>
           )}
       </div>
 
@@ -192,14 +192,16 @@ export default function Home() {
 
       {/* --- RENDER RESULTADOS BÚSQUEDA --- */}
       {searchQuery && searchResults && (
-          <div className="space-y-10 animate-in fade-in duration-500">
+          <div className="space-y-12 animate-in fade-in duration-500">
               {searchResults.users.length > 0 && (
                   <div className="space-y-4">
-                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] border-l-2 border-pink-500 pl-3">Canales</h3>
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] border-l-2 border-pink-500 pl-3 flex items-center gap-2">
+                        <Users size={14}/> Canales
+                      </h3>
                       <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
                           {searchResults.users.map(u => (
-                              <Link key={u.id} to={`/channel/${u.id}`} className="bg-slate-900 border border-slate-800 p-4 rounded-3xl flex items-center gap-4 shrink-0 hover:border-indigo-500/30 min-w-[200px]">
-                                  <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-800">
+                              <Link key={u.id} to={`/channel/${u.id}`} className="bg-slate-900 border border-slate-800 p-4 rounded-3xl flex items-center gap-4 shrink-0 hover:border-indigo-500/30 transition-all min-w-[200px] shadow-lg">
+                                  <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-800 border border-white/5">
                                       {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover" alt={u.username}/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{u.username?.[0]}</div>}
                                   </div>
                                   <span className="font-black text-white text-xs truncate">@{u.username}</span>
@@ -211,7 +213,9 @@ export default function Home() {
 
               {searchResults.subcategories.length > 0 && (
                   <div className="space-y-4">
-                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] border-l-2 border-amber-500 pl-3">Colecciones</h3>
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] border-l-2 border-amber-500 pl-3 flex items-center gap-2">
+                        <Layers size={14}/> Colecciones
+                      </h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                           {searchResults.subcategories.map(sub => (
                               <SubCategoryCard key={sub.id} name={sub.name} videos={sub.videos} onClick={() => { setActiveCategory(sub.name); setSearchQuery(''); }} />
@@ -222,10 +226,37 @@ export default function Home() {
 
               {searchResults.videos.length > 0 && (
                   <div className="space-y-4">
-                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] border-l-2 border-indigo-500 pl-3">Videos</h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-10">
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] border-l-2 border-indigo-500 pl-3 flex items-center gap-2">
+                        <Film size={14}/> Videos
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-12">
                           {searchResults.videos.map(v => (
-                              <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} />
+                              <VideoCard key={v.id} video={v} isUnlocked={isAdmin || user?.id === v.creatorId} isWatched={watchedIds.includes(v.id)} />
+                          ))}
+                      </div>
+                  </div>
+              )}
+
+              {searchResults.marketplace.length > 0 && (
+                  <div className="space-y-4">
+                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] border-l-2 border-emerald-500 pl-3 flex items-center gap-2">
+                        <ShoppingBag size={14}/> Tienda
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                          {searchResults.marketplace.map(item => (
+                              <Link key={item.id} to={`/marketplace/${item.id}`} className="group bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-emerald-500/50 transition-all flex flex-col shadow-lg">
+                                  <div className="aspect-[3/4] overflow-hidden relative bg-black">
+                                      {item.images?.[0] ? <img src={item.images[0]} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/> : <div className="w-full h-full flex items-center justify-center text-slate-800"><ShoppingBag size={32}/></div>}
+                                      <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-black text-emerald-400 border border-emerald-500/30">{item.price} $</div>
+                                  </div>
+                                  <div className="p-3 flex-1 flex flex-col">
+                                      <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight mb-1">{item.title}</h4>
+                                      <div className="mt-auto flex items-center gap-1">
+                                          <Star size={10} className="text-amber-500" fill="currentColor"/>
+                                          <span className="text-[9px] font-bold text-slate-500">{(item.rating || 0).toFixed(1)}</span>
+                                      </div>
+                                  </div>
+                              </Link>
                           ))}
                       </div>
                   </div>
