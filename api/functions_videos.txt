@@ -125,32 +125,64 @@ function video_scan_local($pdo, $input) {
         $rootPath = trim($rootPath);
         if (!is_dir($rootPath)) { $errors[] = "Ruta no encontrada: $rootPath"; continue; }
 
-        // 1. Detección de Categorías Principales (solo nivel 1 de la ruta configurada)
+        // 1. Descubrimiento Jerárquico de Categorías (2 Niveles)
         try {
-            $dirEntries = @scandir($rootPath);
-            if ($dirEntries) {
-                foreach ($dirEntries as $entry) {
-                    if ($entry === '.' || $entry === '..' || in_array($entry, $blacklist)) continue;
-                    $fullEntryPath = $rootPath . DIRECTORY_SEPARATOR . $entry;
-                    if (is_dir($fullEntryPath) && is_readable($fullEntryPath)) {
-                        $cleanCatName = strtoupper(trim($entry));
-                        if (!in_array(strtolower($cleanCatName), $catNames)) {
+            $level1Entries = @scandir($rootPath);
+            if ($level1Entries) {
+                foreach ($level1Entries as $l1) {
+                    if ($l1 === '.' || $l1 === '..' || in_array($l1, $blacklist) || strpos($l1, '.') === 0) continue;
+                    $pathL1 = $rootPath . DIRECTORY_SEPARATOR . $l1;
+                    
+                    if (is_dir($pathL1)) {
+                        $catL1Name = strtoupper(trim($l1));
+                        $catL1Id = null;
+
+                        // Asegurar Categoría Nivel 1
+                        $foundIdx = array_search(strtolower($catL1Name), $catNames);
+                        if ($foundIdx === false) {
+                            $catL1Id = 'cat_' . uniqid();
                             $currentCategories[] = [
-                                'id' => 'cat_' . uniqid(),
-                                'name' => $cleanCatName,
+                                'id' => $catL1Id,
+                                'name' => $catL1Name,
                                 'price' => 1.00,
                                 'autoSub' => true,
-                                'sortOrder' => 'ALPHA'
+                                'sortOrder' => 'ALPHA',
+                                'parent' => null
                             ];
-                            $catNames[] = strtolower($cleanCatName);
+                            $catNames[] = strtolower($catL1Name);
                             $categoriesChanged = true;
+                        }
+
+                        // Explorar Nivel 2 (Subcategorías)
+                        $level2Entries = @scandir($pathL1);
+                        if ($level2Entries) {
+                            foreach ($level2Entries as $l2) {
+                                if ($l2 === '.' || $l2 === '..' || in_array($l2, $blacklist) || strpos($l2, '.') === 0) continue;
+                                $pathL2 = $pathL1 . DIRECTORY_SEPARATOR . $l2;
+                                
+                                if (is_dir($pathL2)) {
+                                    $catL2Name = strtoupper(trim($l2));
+                                    if (!in_array(strtolower($catL2Name), $catNames)) {
+                                        $currentCategories[] = [
+                                            'id' => 'cat_' . uniqid(),
+                                            'name' => $catL2Name,
+                                            'price' => 1.00,
+                                            'autoSub' => true,
+                                            'sortOrder' => 'ALPHA',
+                                            'parent' => $catL1Name // Vinculamos por nombre para lógica simple en UI
+                                        ];
+                                        $catNames[] = strtolower($catL2Name);
+                                        $categoriesChanged = true;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         } catch (Exception $e) {}
 
-        // 2. Escaneo recursivo de archivos de video y audio
+        // 2. Escaneo recursivo de archivos
         try {
             $directory = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
             $filter = new RecursiveCallbackFilterIterator($directory, function ($current, $key, $iterator) use ($blacklist) {
@@ -164,7 +196,6 @@ function video_scan_local($pdo, $input) {
             foreach ($it as $file) {
                 if ($file->isDir()) continue;
                 $ext = strtolower($file->getExtension());
-                // Soporte para archivos multimedia comunes
                 if (in_array($ext, ['mp4', 'mkv', 'avi', 'mov', 'webm', 'ts', 'mp3', 'wav', 'aac', 'm4a'])) {
                     $found++;
                     $fullPath = $file->getRealPath();
@@ -177,11 +208,12 @@ function video_scan_local($pdo, $input) {
                     if ($stmtCheck->fetchColumn() == 0) {
                         $title = pathinfo($fullPath, PATHINFO_FILENAME);
                         $title = trim(str_replace(['.', '_', '-'], ' ', $title));
-                        
                         $isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a']) ? 1 : 0;
                         
-                        $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, is_audio, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, ?, 'api/uploads/thumbnails/default.jpg')");
-                        $stmt->execute([$vidId, $title, $fullPath, $adminId, time(), $isAudio]);
+                        $defaultThumb = $isAudio ? 'api/uploads/thumbnails/defaultaudio.jpg' : 'api/uploads/thumbnails/default.jpg';
+                        
+                        $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, is_audio, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, ?, ?)");
+                        $stmt->execute([$vidId, $title, $fullPath, $adminId, time(), $isAudio, $defaultThumb]);
                         $added++;
                     }
                 }
@@ -215,7 +247,7 @@ function video_get_by_creator($pdo, $userId) {
 
 function video_get_related($pdo, $videoId) {
     $stmt = $pdo->prepare("SELECT category, parent_category, collection FROM videos WHERE id = ?");
-    $stmt->execute([$videoId]);
+    $stmt->execute([videoId]);
     $current = $stmt->fetch();
     if (!$current) respond(true, []);
     
@@ -247,7 +279,6 @@ function video_get_unprocessed($pdo) {
     $now = time();
     $timeout = $now - 300; 
 
-    // PRIORIDAD ALFABÉTICA: Por defecto usamos title ASC
     $orderBy = ($mode === 'random') ? 'RAND()' : 'title ASC';
     
     $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? ORDER BY $orderBy LIMIT " . intval($limit));
@@ -287,7 +318,7 @@ function video_upload($pdo, $post, $files) {
         }
     }
     
-    $thumbUrl = "uploads/thumbnails/default.jpg";
+    $thumbUrl = $isAudio ? "uploads/thumbnails/defaultaudio.jpg" : "uploads/thumbnails/default.jpg";
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         if (!is_dir('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
         $thumbPath = "uploads/thumbnails/{$id}.jpg";
@@ -301,28 +332,15 @@ function video_upload($pdo, $post, $files) {
     respond(true);
 }
 
-/**
- * ACTUALIZACIÓN DE METADATOS (Thumbnail & Duration)
- * Implementa política de 'Reparación Colaborativa' para Audios.
- */
 function video_update_metadata($pdo, $post, $files) {
     $id = $post['id'];
     $dur = intval($post['duration']);
     $success = ($post['success'] ?? '1') === '1';
     
-    // Obtener estado actual del video
-    $stmtV = $pdo->prepare("SELECT creatorId, is_audio, thumbnailUrl, category FROM videos WHERE id = ?");
+    $stmtV = $pdo->prepare("SELECT creatorId, is_audio, thumbnailUrl, category, videoUrl FROM videos WHERE id = ?");
     $stmtV->execute([$id]);
     $video = $stmtV->fetch();
     if (!$video) respond(false, null, "Video no encontrado");
-
-    // Lógica de Permisos Especiales: 
-    // Si es audio con thumb por defecto, permitimos que CUALQUIER usuario lo repare.
-    $isRepairingAudio = ($video['is_audio'] && strpos($video['thumbnailUrl'], 'default.jpg') !== false);
-    
-    // En otros casos (videos normales o cambios de metadatos profundos), solo dueño o admin.
-    // El token se valida en el controlador principal, aquí verificamos lógica de negocio.
-    // (Bypass simplificado para permitir la auto-reparación colaborativa)
 
     if (!$success) {
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, locked_at = 0 WHERE id = ?")->execute([$id]);
@@ -335,14 +353,12 @@ function video_update_metadata($pdo, $post, $files) {
     $fields = ["duration = ?", "processing_attempts = 0", "locked_at = 0"];
     $params = [$dur];
     
-    // Solo marcamos como PROCESSING (listo para paso 3) si está en PENDING
     if ($video['category'] === 'PENDING') {
         $fields[] = "category = 'PROCESSING'";
     }
     
     if (isset($files['thumbnail']) && $files['thumbnail']['error'] === UPLOAD_ERR_OK) {
         if (!is_dir('uploads/thumbnails')) mkdir('uploads/thumbnails', 0777, true);
-        // Usamos WebP si el cliente lo envió, de lo contrario JPG
         $ext = strpos($files['thumbnail']['type'], 'webp') !== false ? 'webp' : 'jpg';
         $thumbPath = "uploads/thumbnails/{$id}.{$ext}";
         move_uploaded_file($files['thumbnail']['tmp_name'], $thumbPath);
@@ -354,7 +370,6 @@ function video_update_metadata($pdo, $post, $files) {
     $stmt = $pdo->prepare("UPDATE videos SET " . implode(', ', $fields) . " WHERE id = ?");
     $stmt->execute($params);
     
-    // Si el video estaba en PENDING, ejecutar organización instantánea
     if ($video['category'] === 'PENDING') {
         $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
         video_organize_single($pdo, $id, $settings);
@@ -368,9 +383,13 @@ function video_organize_single($pdo, $id, $settings) {
     $stmt->execute([$id]);
     $v = $stmt->fetch();
     if (!$v) return;
+    
     $hierarchy = json_decode($settings['categories'] ?? '[]', true);
-    $meta = smartParseFilename($v['videoUrl'], $v['category'], $hierarchy);
+    $root = $settings['localLibraryPath'] ?: '';
+    
+    $meta = smartParseFilename($v['videoUrl'], $root, $hierarchy);
     $price = getPriceForCategory($meta['category'], $settings, $meta['parent_category']);
+    
     $stmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?");
     $stmt->execute([$meta['title'], $meta['category'], $meta['parent_category'], $meta['collection'], $price, $id]);
 }
@@ -392,7 +411,7 @@ function video_reorganize_all($pdo) {
 }
 
 function video_fix_metadata($pdo) {
-    $pdo->query("UPDATE videos SET category = 'PENDING', processing_attempts = 0, locked_at = 0 WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg') AND category != 'FAILED_METADATA'");
+    $pdo->query("UPDATE videos SET category = 'PENDING', processing_attempts = 0, locked_at = 0 WHERE (duration <= 0 OR thumbnailUrl LIKE '%default.jpg' OR thumbnailUrl LIKE '%defaultaudio.jpg') AND category != 'FAILED_METADATA'");
     respond(true, ['fixedBroken' => 1, 'reCategorized' => 0]);
 }
 
@@ -406,7 +425,12 @@ function video_delete($pdo, $input) {
     $user = $pdo->query("SELECT role FROM users WHERE id = '$uid'")->fetch();
     if ($v['creatorId'] !== $uid && $user['role'] !== 'ADMIN') respond(false, null, "No autorizado");
     if (strpos($v['videoUrl'], 'uploads/videos/') !== false && file_exists($v['videoUrl'])) @unlink($v['videoUrl']);
-    if (strpos($v['thumbnailUrl'], 'uploads/thumbnails/') !== false && file_exists($v['thumbnailUrl'])) @unlink($v['thumbnailUrl']);
+    
+    // Solo borrar miniatura si no es una por defecto
+    if (strpos($v['thumbnailUrl'], 'default.jpg') === false && strpos($v['thumbnailUrl'], 'defaultaudio.jpg') === false) {
+        if (strpos($v['thumbnailUrl'], 'uploads/thumbnails/') !== false && file_exists($v['thumbnailUrl'])) @unlink($v['thumbnailUrl']);
+    }
+    
     $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
     $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
     respond(true);

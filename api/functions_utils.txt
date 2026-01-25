@@ -1,40 +1,55 @@
 <?php
 
-function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
+/**
+ * Parsea el nombre de archivo y su ruta para extraer metadatos jerárquicos.
+ * Lógica:
+ * Nivel 1 (Carpeta raíz del escaneo) -> Categoría
+ * Nivel 2 (Subcarpeta) -> Subcategoría
+ * Archivos en niveles superiores heredan la estructura.
+ */
+function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
-    $pathParts = array_values(array_filter(explode('/', $fullPathNormalized)));
+    
+    // Si no se pasa el root, intentamos adivinarlo o usamos la lógica antigua simplificada
+    if ($scanRoot) {
+        $scanRootNormalized = str_replace('\\', '/', $scanRoot);
+        $relativePath = str_replace($scanRootNormalized, '', $fullPathNormalized);
+    } else {
+        $relativePath = $fullPathNormalized;
+    }
+
+    $relativePath = ltrim($relativePath, '/');
+    $parts = explode('/', $relativePath);
     
     $cleanText = function($txt) {
-        $junk = ['/\b(1080p|720p|4k|x264|h264|bluray|web-dl|mkv|mp4)\b/i', '/\./', '/_/'];
+        // Eliminar tags comunes de piratería/calidad
+        $junk = ['/\b(1080p|720p|4k|x264|h264|bluray|web-dl|mkv|mp4|avi|mov|wmv|mpg|mpeg)\b/i', '/\./', '/_/'];
         $t = $txt;
         foreach ($junk as $p) { $t = preg_replace($p, ' ', $t); }
         return trim(preg_replace('/\s+/', ' ', $t));
     };
+
     $cleanName = $cleanText($filename);
 
+    // Valores por defecto
     $detectedCat = 'GENERAL';
     $detectedParent = null;
     $detectedCollection = null;
 
-    $partsCount = count($pathParts);
-    for ($i = $partsCount - 1; $i >= 0; $i--) {
-        $segment = trim($pathParts[$i]);
-        if (empty($segment) || $segment === basename($fullPath)) continue;
-        foreach ($hierarchy as $cat) {
-            if (strcasecmp($segment, $cat['name']) === 0) {
-                $detectedCat = $cat['name'];
-                if (!empty($cat['autoSub'])) {
-                    if (isset($pathParts[$i + 1]) && $pathParts[$i + 1] !== basename($fullPath)) {
-                        $detectedParent = $cat['name'];
-                        $detectedCat = $pathParts[$i + 1];
-                        if (isset($pathParts[$i + 2]) && $pathParts[$i + 2] !== basename($fullPath)) {
-                            $detectedCollection = $pathParts[$i + 1];
-                            $detectedCat = $pathParts[$i + 2];
-                        }
-                    }
-                }
-                break 2;
+    // Lógica Jerárquica Estricta
+    if (count($parts) >= 2) {
+        // El primer elemento es siempre la Categoría (Nivel 1)
+        $detectedCat = strtoupper($cleanText($parts[0]));
+        
+        // Si hay un segundo elemento y no es el archivo mismo, es la Subcategoría (Nivel 2)
+        if (count($parts) > 2 || (count($parts) == 2 && !is_file($fullPath))) {
+            $detectedParent = $detectedCat;
+            $detectedCat = strtoupper($cleanText($parts[1]));
+            
+            // Si el archivo está en un Nivel 3 o más profundo, el Nivel 2 actúa como "Colección"
+            if (count($parts) > 2) {
+                $detectedCollection = $detectedCat;
             }
         }
     }
@@ -78,7 +93,11 @@ function resolve_video_path($pathOrUrl) {
 }
 
 function fix_url($url) {
+    // Whitelist de imágenes por defecto para evitar que desaparezcan del UI si el janitor las toca (aunque ahora están protegidas)
     if (empty($url)) return "api/uploads/thumbnails/default.jpg"; 
+    if (strpos($url, 'default.jpg') !== false) return "api/uploads/thumbnails/default.jpg";
+    if (strpos($url, 'defaultaudio.jpg') !== false) return "api/uploads/thumbnails/defaultaudio.jpg";
+
     if (strpos($url, 'http') === 0) return $url;
     if (strpos($url, 'data:') === 0) return $url;
     $clean = ltrim($url, '/');
