@@ -2,14 +2,11 @@
 import jsmediatags from 'jsmediatags';
 
 /**
- * Intenta extraer la carátula de un audio con un timeout estricto.
+ * Extrae la carátula de un audio con timeout de seguridad.
  */
 const extractAudioCoverSafe = async (fileOrUrl: File | string): Promise<File | null> => {
     return new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-            console.warn("jsmediatags: Timeout alcanzado");
-            resolve(null);
-        }, 5000); // No esperar más de 5s por los tags
+        const timeout = setTimeout(() => resolve(null), 6000); 
 
         try {
             const reader = (jsmediatags as any).read || jsmediatags;
@@ -22,29 +19,26 @@ const extractAudioCoverSafe = async (fileOrUrl: File | string): Promise<File | n
                         const byteArray = new Uint8Array(data);
                         const contentType = format || "image/jpeg";
                         const blob = new Blob([byteArray], { type: contentType });
-                        const file = new File([blob], `cover.jpg`, { type: contentType });
-                        resolve(file);
+                        resolve(new File([blob], `cover.jpg`, { type: contentType }));
                     } else {
                         resolve(null);
                     }
                 },
-                onError: (error: any) => {
+                onError: () => {
                     clearTimeout(timeout);
-                    console.warn("jsmediatags: Error en lectura", error);
                     resolve(null);
                 }
             });
         } catch (e) {
             clearTimeout(timeout);
-            console.error("jsmediatags: Excepción", e);
             resolve(null);
         }
     });
 };
 
 /**
- * Generador ultra-robusto de miniaturas y duración.
- * Garantiza resolución en máximo 15 segundos incluso si el archivo está dañado.
+ * Generador ultra-robusto. Siempre resuelve en max 15s.
+ * Usa Audio() para MP3 y Video() para el resto.
  */
 export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: boolean): Promise<{ thumbnail: File | null, duration: number }> => {
   const isFile = typeof fileOrUrl !== 'string';
@@ -62,24 +56,26 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
       let isResolved = false;
       let extractedThumbnail: File | null = null;
 
-      const media = document.createElement('video');
+      // Usamos el elemento correcto según el tipo para máxima fiabilidad
+      const media = isAudio ? new Audio() : document.createElement('video');
+      
       media.preload = "metadata"; 
       media.muted = true;
-      media.playsInline = true;
       media.crossOrigin = "anonymous";
       
-      media.style.position = 'fixed';
-      media.style.top = '-9999px';
-      media.style.left = '-9999px';
-      media.style.opacity = '0';
-      document.body.appendChild(media);
+      if (!isAudio) {
+          (media as HTMLVideoElement).style.position = 'fixed';
+          (media as HTMLVideoElement).style.top = '-9999px';
+          (media as HTMLVideoElement).style.opacity = '0';
+          document.body.appendChild(media);
+      }
 
       const cleanup = () => {
           try {
               media.pause();
-              media.removeAttribute('src');
+              media.src = "";
               media.load();
-              media.remove();
+              if (!isAudio) (media as HTMLVideoElement).remove();
               if (isFile) URL.revokeObjectURL(mediaUrl);
           } catch(e) {}
       };
@@ -89,64 +85,51 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
           isResolved = true;
           clearTimeout(mainTimeout);
           cleanup();
-          resolve({ thumbnail: thumb, duration: Math.floor(dur) });
+          resolve({ thumbnail: thumb, duration: Math.floor(dur) || 0 });
       };
 
-      // Timeout Maestro (15s) - Garantía de que nada se queda colgado
       const mainTimeout = setTimeout(() => {
-          console.warn("ThumbnailGenerator: Timeout Maestro alcanzado");
-          const fallbackDur = (media.duration && isFinite(media.duration)) ? media.duration : 0;
-          finish(extractedThumbnail, fallbackDur);
+          console.warn("Generator: Timeout Maestro");
+          finish(extractedThumbnail, media.duration || 0);
       }, 15000);
 
-      // Si es audio, disparamos la extracción de tags en paralelo
       if (isAudio) {
-          extractAudioCoverSafe(fileOrUrl).then(thumb => {
-              extractedThumbnail = thumb;
-          });
+          extractAudioCoverSafe(fileOrUrl).then(thumb => { extractedThumbnail = thumb; });
       }
 
       media.onloadedmetadata = () => {
+          if (isResolved) return;
           const duration = media.duration;
-          if (!isFinite(duration)) {
-              media.currentTime = 0.5; 
-          } else {
-              if (isAudio || media.videoWidth === 0) {
-                  // Si pasaron 2s y ya tenemos metadata, terminamos (esperamos un poco a que jsmediatags termine si puede)
-                  setTimeout(() => finish(extractedThumbnail, duration), 1000);
-              } else {
-                  media.currentTime = Math.min(2, duration / 2);
-              }
+          
+          if (isAudio || (media instanceof HTMLVideoElement && media.videoWidth === 0)) {
+              // Esperar un momento por jsmediatags
+              setTimeout(() => finish(extractedThumbnail, duration), 1500);
+          } else if (media instanceof HTMLVideoElement) {
+              media.currentTime = Math.min(2, duration / 2);
           }
       };
 
       media.onseeked = () => {
-          if (isResolved || isAudio || media.videoWidth === 0) return;
+          if (isResolved || isAudio || !(media instanceof HTMLVideoElement) || media.videoWidth === 0) return;
 
           try {
               const canvas = document.createElement('canvas');
               const scale = Math.min(1, 640 / media.videoWidth);
               canvas.width = media.videoWidth * scale;
               canvas.height = media.videoHeight * scale;
-              
               const ctx = canvas.getContext('2d');
               if (ctx) {
                   ctx.drawImage(media, 0, 0, canvas.width, canvas.height);
                   canvas.toBlob(blob => {
-                      const file = blob ? new File([blob], "thumbnail.webp", { type: "image/webp" }) : null;
+                      const file = blob ? new File([blob], "thumb.webp", { type: "image/webp" }) : null;
                       finish(file, media.duration || 0);
                   }, 'image/webp', 0.7);
-              } else {
-                  finish(null, media.duration || 0);
-              }
-          } catch (e) {
-              finish(null, media.duration || 0);
-          }
+              } else finish(null, media.duration || 0);
+          } catch (e) { finish(null, media.duration || 0); }
       };
 
       media.onerror = () => {
-          console.error("Media Error durante extracción");
-          // Si el media falla, quizás los tags ID3 sí funcionaron
+          // Si el stream falla, intentar devolver al menos lo capturado por jsmediatags
           setTimeout(() => finish(extractedThumbnail, 0), 500);
       };
 

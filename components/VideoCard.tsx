@@ -7,7 +7,8 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { generateThumbnail } from '../utils/videoGenerator';
 
-// Blacklist local para no re-intentar archivos que fallaron en esta sesión
+// Sistema de control global para no saturar el servidor
+let isAnyCardProcessing = false;
 const failedExtractions = new Set<string>();
 
 interface VideoCardProps {
@@ -48,7 +49,6 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   const [localThumb, setLocalThumb] = useState<string | null>(null);
   const [inWatchLater, setInWatchLater] = useState(user?.watchLater?.includes(video.id) || false);
   
-  // Optimizaciones de estado y visibilidad
   const [isProcessing, setIsProcessing] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -56,7 +56,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   const isAudio = Boolean(video.is_audio);
   const hasDefaultThumb = !video.thumbnailUrl || video.thumbnailUrl.includes('default.jpg');
 
-  // 1. Observer: Detectar cuando la tarjeta entra en el viewport
+  // 1. Observer: Detectar visibilidad
   useEffect(() => {
       if (!isAudio || !hasDefaultThumb || failedExtractions.has(video.id)) return;
 
@@ -65,24 +65,23 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
               setIsVisible(true);
               observer.disconnect(); 
           }
-      }, { threshold: 0.1, rootMargin: '100px' });
+      }, { threshold: 0.1, rootMargin: '50px' });
 
       if (cardRef.current) observer.observe(cardRef.current);
       return () => observer.disconnect();
   }, [video.id, isAudio, hasDefaultThumb]);
 
-  // 2. AUTO-EXTRACCIÓN: Reparación silenciosa con gestión de memoria
+  // 2. AUTO-EXTRACCIÓN: Con Lock Global y reintentos limitados
   useEffect(() => {
       let isMounted = true;
 
-      const canProcess = isAudio && hasDefaultThumb && isVisible && !isProcessing && !localThumb && !failedExtractions.has(video.id);
+      const canProcess = isAudio && hasDefaultThumb && isVisible && !isProcessing && !localThumb && !isAnyCardProcessing && !failedExtractions.has(video.id);
 
       if (canProcess) {
+          isAnyCardProcessing = true;
           setIsProcessing(true);
           
-          const delay = Math.random() * 1500 + 500;
-          
-          const timeout = setTimeout(async () => {
+          const process = async () => {
               try {
                   const streamUrl = video.videoUrl.includes('action=stream') 
                     ? video.videoUrl 
@@ -104,37 +103,33 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
                           fd.append('thumbnail', result.thumbnail);
                       }
                       
-                      if (user) fd.append('requesterId', user.id);
-                      
                       await db.request('action=update_video_metadata', { method: 'POST', body: fd });
                       db.setHomeDirty();
                   } else {
-                      // Marcar como fallido para esta sesión
                       failedExtractions.add(video.id);
                   }
               } catch (e) {
-                  console.warn(`Auto-reparación fallida para: ${video.title}`);
                   failedExtractions.add(video.id);
               } finally {
-                  if (isMounted) setIsProcessing(false);
+                  if (isMounted) {
+                      setIsProcessing(false);
+                      isAnyCardProcessing = false;
+                  }
               }
-          }, delay);
-
-          return () => {
-              isMounted = false;
-              clearTimeout(timeout);
           };
+
+          // Pequeño retardo para no colisionar con otros procesos
+          const t = setTimeout(process, 1000);
+          return () => { isMounted = false; clearTimeout(t); };
       }
   }, [video.id, isAudio, hasDefaultThumb, isVisible, isProcessing, localThumb]);
 
-  // 3. Cleanup: Liberar memoria de Blobs al desmontar
   useEffect(() => {
       return () => {
-          if (localThumb) {
-              URL.revokeObjectURL(localThumb);
-          }
+          if (localThumb) URL.revokeObjectURL(localThumb);
+          if (isProcessing) isAnyCardProcessing = false;
       };
-  }, [localThumb]);
+  }, [localThumb, isProcessing]);
 
   const handleClick = () => {
       if (context && context.query) sessionStorage.setItem('sp_nav_context', JSON.stringify(context));
@@ -175,12 +170,12 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
                 <div className="relative">
                     {isAudio ? <Music size={48} className="opacity-20 mb-2" /> : <Play size={48} className="opacity-20 mb-2"/>}
                     {isProcessing && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <RefreshCw size={24} className="text-indigo-500 animate-spin opacity-60" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full scale-150">
+                            <RefreshCw size={20} className="text-indigo-500 animate-spin" />
                         </div>
                     )}
                 </div>
-                <span className="text-[8px] font-black uppercase tracking-widest opacity-20 text-center">{video.title}</span>
+                <span className="text-[8px] font-black uppercase tracking-widest opacity-20 text-center line-clamp-1 mt-2">{video.title}</span>
             </div>
         )}
         
@@ -223,7 +218,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       <div className="flex gap-3 px-1">
         <Link to={`/channel/${video.creatorId}`} className="shrink-0 mt-1">
             {video.creatorAvatarUrl ? (
-                <img src={video.creatorAvatarUrl} className="w-10 h-10 rounded-2xl object-cover bg-slate-900 border border-white/5 group-hover:border-indigo-500 transition-colors shadow-md" alt={video.creatorName} loading="lazy" decoding="async" />
+                <img src={video.creatorAvatarUrl} className="w-10 h-10 rounded-2xl object-cover bg-slate-900 border border-white/5 group-hover:border-indigo-500 transition-colors shadow-md" alt={video.creatorName} loading="lazy" />
             ) : (
                 <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-sm font-black text-white shadow-inner uppercase">
                     {video.creatorName?.[0] || '?'}
