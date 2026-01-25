@@ -65,17 +65,19 @@ function smartParseFilename($fullPath, $scanRoot = null, $hierarchy = []) {
 }
 
 function getPriceForCategory($catName, $settings, $parentCatName = null) {
-    $categories = is_array($settings['categories']) ? $settings['categories'] : json_decode($settings['categories'] ?? '[]', true);
+    // CORRECCIÓN: Garantizar que $categories sea siempre un array
+    $rawCats = $settings['categories'] ?? '[]';
+    $categories = is_array($rawCats) ? $rawCats : (json_decode($rawCats, true) ?: []);
     
     // Buscar coincidencia exacta por nombre
     foreach ($categories as $cat) {
-        if (strcasecmp($cat['name'], $catName) === 0) return floatval($cat['price']);
+        if (isset($cat['name']) && strcasecmp($cat['name'], $catName) === 0) return floatval($cat['price']);
     }
     
     // Si no hay precio para la categoría hija, buscar en la madre
     if ($parentCatName) {
         foreach ($categories as $cat) {
-            if (strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
+            if (isset($cat['name']) && strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
         }
     }
     

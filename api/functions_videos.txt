@@ -22,7 +22,7 @@ function video_process_rows(&$rows) {
         if (isset($v['is_audio'])) {
             $v['is_audio'] = (bool)$v['is_audio'];
         } else {
-            $ext = strtolower(pathinfo($v['rawPath'], PATHINFO_EXTENSION));
+            $ext = strtolower(pathinfo($v['rawPath'] ?? '', PATHINFO_EXTENSION));
             $v['is_audio'] = ($ext === 'mp3' || $ext === 'wav' || $ext === 'aac' || $ext === 'm4a');
         }
     }
@@ -60,6 +60,42 @@ function video_get_admin_stats($pdo) {
     ];
 
     respond(true, $stats);
+}
+
+/**
+ * Obtiene todas las carpetas raíz y sus subcarpetas inmediatas para el escaneo por lotes.
+ */
+function video_get_scan_folders($pdo) {
+    $stmt = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
+    $sets = $stmt->fetch();
+    
+    $roots = json_decode($sets['libraryPaths'] ?? '[]', true) ?: [];
+    if (!empty($sets['localLibraryPath'])) $roots[] = $sets['localLibraryPath'];
+    $roots = array_unique(array_filter($roots));
+    
+    $branches = [];
+    $blacklist = ['#recycle', '@eaDir', '$RECYCLE.BIN', 'System Volume Information', '.Thumbnails', '.DS_Store', 'lost+found'];
+
+    foreach ($roots as $r) {
+        $r = rtrim(str_replace('\\', '/', $r), '/');
+        if (!is_dir($r)) continue;
+        
+        // Agregar la raíz misma
+        $branches[] = ['path' => $r, 'name' => basename($r) ?: $r];
+        
+        // Explorar primer nivel de subcarpetas
+        $items = @scandir($r);
+        if ($items) {
+            foreach ($items as $item) {
+                if ($item === '.' || $item === '..' || in_array($item, $blacklist)) continue;
+                $full = $r . '/' . $item;
+                if (is_dir($full)) {
+                    $branches[] = ['path' => $full, 'name' => $item];
+                }
+            }
+        }
+    }
+    respond(true, $branches);
 }
 
 function video_server_process_metadata($pdo) {
@@ -164,18 +200,20 @@ function video_organize_single($pdo, $id, $settings) {
     foreach ($configuredRoots as $root) {
         $rootClean = rtrim(str_replace('\\', '/', $root), '/');
         if (strpos($filePath, $rootClean) === 0) {
-            // El root más largo es el más preciso (ej: /volume3/pkt3 sobre /volume3)
             if (strlen($rootClean) > strlen($bestRoot)) {
                 $bestRoot = $rootClean;
             }
         }
     }
     
-    $hierarchy = json_decode($settings['categories'] ?? '[]', true);
+    // CORRECCIÓN: Garantizar que $hierarchy sea un array
+    $rawHierarchy = $settings['categories'] ?? '[]';
+    $hierarchy = is_array($rawHierarchy) ? $rawHierarchy : (json_decode($rawHierarchy, true) ?: []);
+
     $meta = smartParseFilename($v['videoUrl'], $bestRoot ?: null, $hierarchy);
     
-    // Auto-registrar categoría si no existe para que sea visible
-    $catNames = array_map('strtolower', array_column($hierarchy, 'name'));
+    // Auto-registrar categoría si no existe
+    $catNames = !empty($hierarchy) ? array_map('strtolower', array_column($hierarchy, 'name')) : [];
     if (!in_array(strtolower($meta['category']), $catNames)) {
         $hierarchy[] = [
             'id' => 'cat_' . uniqid(),
@@ -200,7 +238,7 @@ function video_scan_local($pdo, $input) {
     else {
         $stmt = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
         $sets = $stmt->fetch();
-        $paths = json_decode($sets['libraryPaths'] ?: '[]', true);
+        $paths = json_decode($sets['libraryPaths'] ?? '[]', true) ?: [];
         if ($sets['localLibraryPath']) $paths[] = $sets['localLibraryPath'];
     }
 
@@ -293,7 +331,7 @@ function video_get_related($pdo, $videoId) {
           RAND()
         LIMIT 100
     ");
-    $stmt->execute([$videoId, $current['collection'], $current['category'], $current['parent_category']]);
+    $stmt->execute([$videoId, $current['collection'] ?? '', $current['category'] ?? '', $current['parent_category'] ?? '']);
     
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);

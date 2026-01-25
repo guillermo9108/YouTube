@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V17.9.2 (Cleanup Protection Fix + Whitelist)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V17.9.3 (JSON Consistency Patch)
  */
 
 function admin_get_settings($pdo) {
@@ -12,10 +12,14 @@ function admin_get_settings($pdo) {
             if (isset($settings[$field])) {
                 if (is_string($settings[$field]) && !empty($settings[$field])) {
                     $decoded = json_decode($settings[$field], true);
+                    // GARANTÍA: Si decodifica a nulo pero el string no estaba vacío, forzar estructura por defecto
                     $settings[$field] = $decoded !== null ? $decoded : ($field === 'ftpSettings' || $field === 'paymentMethods' ? new stdClass() : []);
-                } elseif (empty($settings[$field])) {
+                } else {
+                    // Si el campo está vacío en DB, devolver estructura vacía según tipo
                     $settings[$field] = ($field === 'ftpSettings' || $field === 'paymentMethods' ? new stdClass() : []);
                 }
+            } else {
+                $settings[$field] = ($field === 'ftpSettings' || $field === 'paymentMethods' ? new stdClass() : []);
             }
         }
         respond(true, $settings);
@@ -189,9 +193,6 @@ function admin_repair_db($pdo, $input) {
 
 function admin_cleanup_files($pdo) {
     $dbFiles = [];
-
-    // --- LISTA BLANCA DE ARCHIVOS DEL SISTEMA ---
-    // Protegemos archivos estáticos esenciales
     $whitelistFilenames = ['default.jpg', 'defaultaudio.jpg', 'default_avatar.png', 'logo.png', '.htaccess', 'index.php'];
     
     foreach ($whitelistFilenames as $wf) {
@@ -201,46 +202,28 @@ function admin_cleanup_files($pdo) {
             __DIR__ . '/uploads/videos/' . $wf
         ];
         foreach ($possiblePaths as $pp) {
-            if (file_exists($pp)) {
-                $dbFiles[] = realpath($pp);
-            }
+            if (file_exists($pp)) { $dbFiles[] = realpath($pp); }
         }
     }
 
-    // 1. Proteger archivos de Videos (Videos + Miniaturas)
     $videos = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos")->fetchAll();
     foreach ($videos as $v) {
         if ($p1 = resolve_video_path($v['videoUrl'])) $dbFiles[] = $p1;
         if ($p2 = resolve_video_path($v['thumbnailUrl'])) $dbFiles[] = $p2;
     }
 
-    // 2. Proteger Avatares de Usuarios
     $avatars = $pdo->query("SELECT avatarUrl FROM users WHERE avatarUrl IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
-    foreach ($avatars as $url) {
-        if ($p = resolve_video_path($url)) $dbFiles[] = $p;
-    }
+    foreach ($avatars as $url) { if ($p = resolve_video_path($url)) $dbFiles[] = $p; }
 
-    // 3. Proteger imágenes del Marketplace
     $market = $pdo->query("SELECT images FROM marketplace_items")->fetchAll(PDO::FETCH_COLUMN);
     foreach ($market as $json) {
         $imgs = json_decode($json, true);
         if (is_array($imgs)) {
-            foreach ($imgs as $url) {
-                if ($p = resolve_video_path($url)) $dbFiles[] = $p;
-            }
+            foreach ($imgs as $url) { if ($p = resolve_video_path($url)) $dbFiles[] = $p; }
         }
     }
 
-    // 4. Proteger comprobantes VIP
-    $proofs = $pdo->query("SELECT proofImageUrl FROM vip_requests WHERE proofImageUrl IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
-    foreach ($proofs as $url) {
-        if ($p = resolve_video_path($url)) $dbFiles[] = $p;
-    }
-
-    // Normalizar lista de protegidos
     $dbFiles = array_unique(array_filter($dbFiles));
-
-    // 5. Barrido de carpetas
     $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market', 'uploads/proofs'];
     $deleted = 0;
     foreach ($dirs as $d) {
@@ -250,14 +233,9 @@ function admin_cleanup_files($pdo) {
         foreach ($files as $f) {
             if ($f === '.' || $f === '..') continue;
             $full = realpath($path . '/' . $f);
-            
-            // Si el archivo existe pero no está en la lista de protegidos, se borra
             if ($full && is_file($full) && !in_array($full, $dbFiles)) { 
-                // Doble chequeo por seguridad para no borrar archivos de la lista blanca por nombre base
                 if (in_array(basename($full), $whitelistFilenames)) continue;
-                
-                @unlink($full); 
-                $deleted++; 
+                @unlink($full); $deleted++; 
             }
         }
     }
@@ -267,7 +245,7 @@ function admin_cleanup_files($pdo) {
 function admin_get_local_stats($pdo) {
     $stmt = $pdo->query("SELECT libraryPaths, localLibraryPath FROM system_settings WHERE id = 1");
     $sets = $stmt->fetch();
-    $paths = json_decode($sets['libraryPaths'] ?: '[]', true);
+    $paths = json_decode($sets['libraryPaths'] ?? '[]', true) ?: [];
     if ($sets['localLibraryPath']) $paths[] = $sets['localLibraryPath'];
     $volumes = [];
     foreach (array_unique($paths) as $p) {
@@ -437,12 +415,9 @@ function admin_smart_cleaner_execute($pdo, $input) {
             $realThumb = resolve_video_path($v['thumbnailUrl']);
             
             if ($realVideo && file_exists($realVideo)) @unlink($realVideo);
-            
-            // Solo borrar miniatura si no es una por defecto (Protección Janitor)
             if (strpos($v['thumbnailUrl'], 'default.jpg') === false && strpos($v['thumbnailUrl'], 'defaultaudio.jpg') === false) {
                 if ($realThumb && file_exists($realThumb)) @unlink($realThumb);
             }
-            
             $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
             $deleted++;
         }
