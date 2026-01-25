@@ -17,7 +17,9 @@ function video_process_rows(&$rows) {
 }
 
 function video_get_all($pdo) {
-    $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA') ORDER BY v.createdAt DESC");
+    // CAMBIO: Permitimos ver videos en estado PROCESSING para que el usuario sepa que hay contenido nuevo llegando.
+    // Excluimos explícitamente PENDING (aún no analizados) y FAILED_METADATA.
+    $stmt = $pdo->query("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.category NOT IN ('PENDING', 'FAILED_METADATA') ORDER BY v.createdAt DESC");
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
@@ -148,7 +150,6 @@ function video_organize_single($pdo, $id, $settings) {
     
     $meta = smartParseFilename($v['videoUrl'], $bestRoot ?: null, $hierarchy);
     
-    // Auto-registrar categoría si no existe
     $catNames = is_array($hierarchy) ? array_map('strtolower', array_column($hierarchy, 'name')) : [];
     if (!in_array(strtolower($meta['category']), $catNames)) {
         $hierarchy[] = ['id' => 'cat_'.uniqid(), 'name' => strtoupper($meta['category']), 'price' => 1.00, 'autoSub' => true];
