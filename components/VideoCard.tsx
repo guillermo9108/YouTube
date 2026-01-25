@@ -71,7 +71,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       return () => observer.disconnect();
   }, [video.id, isAudio, hasDefaultThumb]);
 
-  // 2. AUTO-EXTRACCIÓN: Con Lock Global y reintentos limitados
+  // 2. AUTO-EXTRACCIÓN (Solo Duración para audios): Con Lock Global
   useEffect(() => {
       let isMounted = true;
 
@@ -87,21 +87,16 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
                     ? video.videoUrl 
                     : `api/index.php?action=stream&id=${video.id}`;
                   
-                  const result = await generateThumbnail(streamUrl, true);
+                  // Agilizado: Saltamos extracción de carátula en procesos automáticos
+                  const result = await generateThumbnail(streamUrl, true, true);
                   
                   if (!isMounted) return;
 
-                  if (result.duration > 0 || result.thumbnail) {
+                  if (result.duration > 0) {
                       const fd = new FormData();
                       fd.append('id', video.id);
                       fd.append('duration', String(result.duration || video.duration));
                       fd.append('success', '1');
-                      
-                      if (result.thumbnail) {
-                          const objectUrl = URL.createObjectURL(result.thumbnail);
-                          setLocalThumb(objectUrl);
-                          fd.append('thumbnail', result.thumbnail);
-                      }
                       
                       await db.request('action=update_video_metadata', { method: 'POST', body: fd });
                       db.setHomeDirty();
@@ -118,7 +113,6 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
               }
           };
 
-          // Pequeño retardo para no colisionar con otros procesos
           const t = setTimeout(process, 1000);
           return () => { isMounted = false; clearTimeout(t); };
       }
@@ -147,7 +141,10 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       } catch (e) {}
   };
 
-  const displayThumb = localThumb || (!imgError && video.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? video.thumbnailUrl : null);
+  // Lógica de miniatura por defecto para audio
+  const getAudioThumb = () => "api/uploads/thumbnails/defaultaudio.jpg";
+
+  const displayThumb = localThumb || (!imgError && video.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? video.thumbnailUrl : (isAudio ? getAudioThumb() : null));
 
   return (
     <div ref={cardRef} className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
@@ -181,7 +178,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         
         {isAudio && (
             <div className="absolute top-2 left-2 bg-indigo-600/90 text-white text-[8px] font-black px-2 py-0.5 rounded-lg backdrop-blur-md border border-white/10 shadow-lg uppercase tracking-widest flex items-center gap-1">
-                {localThumb ? <Sparkles size={10} className="animate-pulse" /> : <Music size={10}/>} AUDIO
+                <Music size={10}/> AUDIO
             </div>
         )}
 

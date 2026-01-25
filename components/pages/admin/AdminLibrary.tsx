@@ -24,7 +24,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         const checkType = () => {
             const ext = video.videoUrl.split('.').pop()?.toLowerCase();
             const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'flac'];
-            // CORRECCIÓN: is_audio con guion bajo es como viene de MariaDB
             const audioDetected = Boolean(video.is_audio) || (ext && audioExts.includes(ext)) || video.videoUrl.includes('.mp3');
             if (audioDetected) {
                 setIsAudio(true);
@@ -36,16 +35,17 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
 
     const processMedia = async (force: boolean) => {
         if (processedRef.current) return;
-        setStatus('Extrayendo ID3...');
+        setStatus('Extrayendo Metadatos...');
         
         try {
             const streamUrl = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
-            const result = await generateThumbnail(streamUrl, force);
+            // Agilizado en Admin: skipImage=true
+            const result = await generateThumbnail(streamUrl, force, true);
             
             if (!processedRef.current) {
                 processedRef.current = true;
-                setStatus(result.thumbnail ? 'Carátula OK' : 'Sin carátula');
-                onComplete(result.duration, result.thumbnail, result.duration > 0, false);
+                setStatus('Listo (Solo Duración)');
+                onComplete(result.duration, null, result.duration > 0, false);
             }
         } catch (e) {
             if (!processedRef.current) {
@@ -112,7 +112,7 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
             {isAudio ? (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-indigo-400">
                     <Music size={48} className="animate-pulse mb-2"/>
-                    <span className="text-[10px] font-black uppercase tracking-widest">Audio Processing</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Analizando Audio...</span>
                 </div>
             ) : (
                 <video 

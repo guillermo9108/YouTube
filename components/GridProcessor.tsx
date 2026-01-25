@@ -78,8 +78,8 @@ export default function GridProcessor() {
         setStatus('CAPTURING');
         
         try {
-            // CORRECCIÓN: Pasar true para forzar el modo audio basado en el metadato is_audio del task
-            const res = await generateThumbnail(url, true);
+            // Agilizado: skipImage=true para no perder tiempo buscando carátulas ID3
+            const res = await generateThumbnail(url, true, true);
             if (!processedRef.current && activeTask) {
                 processedRef.current = true;
                 setStatus('DONE');
@@ -89,7 +89,6 @@ export default function GridProcessor() {
                 fd.append('duration', String(res.duration));
                 fd.append('success', '1');
                 fd.append('clientIncompatible', '0');
-                if (res.thumbnail) fd.append('thumbnail', res.thumbnail);
                 
                 await db.request(`action=update_video_metadata`, { method: 'POST', body: fd });
                 completeTask(res.duration, null);
@@ -136,7 +135,6 @@ export default function GridProcessor() {
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0);
-                    // CAMBIO CRÍTICO: Uso de WebP para aliviar el servidor DDR2
                     canvas.toBlob(async (blob) => {
                         if (!activeTask) return;
                         setStatus('DONE');
@@ -178,7 +176,7 @@ export default function GridProcessor() {
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
                         <Sparkles size={10} className="text-indigo-400" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{status === 'DONE' ? 'LISTO' : (isAudioMode ? 'ID3 AUDIO' : 'ANALIZANDO')}</span>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{status === 'DONE' ? 'LISTO' : (isAudioMode ? 'METADATOS AUDIO' : 'ANALIZANDO')}</span>
                     </div>
                     <div className="text-[11px] font-bold text-white truncate" title={activeTask.title}>{activeTask.title}</div>
                     {(status === 'CAPTURING' || status === 'INIT') && <div className="w-full h-1 bg-slate-800 rounded-full mt-1.5 overflow-hidden"><div className="h-full bg-indigo-500 animate-pulse"></div></div>}

@@ -6,7 +6,7 @@ import jsmediatags from 'jsmediatags';
  */
 const extractAudioCoverSafe = async (fileOrUrl: File | string): Promise<File | null> => {
     return new Promise((resolve) => {
-        const timeout = setTimeout(() => resolve(null), 6000); 
+        const timeout = setTimeout(() => resolve(null), 5000); 
 
         try {
             const reader = (jsmediatags as any).read || jsmediatags;
@@ -37,10 +37,14 @@ const extractAudioCoverSafe = async (fileOrUrl: File | string): Promise<File | n
 };
 
 /**
- * Generador ultra-robusto. Siempre resuelve en max 15s.
- * Usa Audio() para MP3 y Video() para el resto.
+ * Generador robusto de miniaturas y duración.
+ * @param skipImage Si es true, para audios solo se extraerá la duración, ignorando la carátula.
  */
-export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: boolean): Promise<{ thumbnail: File | null, duration: number }> => {
+export const generateThumbnail = async (
+    fileOrUrl: File | string, 
+    forceAudio?: boolean,
+    skipImage?: boolean
+): Promise<{ thumbnail: File | null, duration: number }> => {
   const isFile = typeof fileOrUrl !== 'string';
   const mediaUrl = isFile ? URL.createObjectURL(fileOrUrl) : fileOrUrl as string;
   
@@ -56,9 +60,45 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
       let isResolved = false;
       let extractedThumbnail: File | null = null;
 
-      // Usamos el elemento correcto según el tipo para máxima fiabilidad
+      // Si es audio y pedimos omitir imagen, vamos por la vía rápida
+      if (isAudio && skipImage) {
+          const audio = new Audio();
+          audio.preload = "metadata";
+          audio.crossOrigin = "anonymous";
+          
+          const t = setTimeout(() => {
+              if(!isResolved) {
+                  isResolved = true;
+                  if(isFile) URL.revokeObjectURL(mediaUrl);
+                  resolve({ thumbnail: null, duration: 0 });
+              }
+          }, 8000);
+
+          audio.onloadedmetadata = () => {
+              if (isResolved) return;
+              isResolved = true;
+              clearTimeout(t);
+              const dur = Math.floor(audio.duration) || 0;
+              audio.src = "";
+              audio.load();
+              if(isFile) URL.revokeObjectURL(mediaUrl);
+              resolve({ thumbnail: null, duration: dur });
+          };
+
+          audio.onerror = () => {
+              if (isResolved) return;
+              isResolved = true;
+              clearTimeout(t);
+              if(isFile) URL.revokeObjectURL(mediaUrl);
+              resolve({ thumbnail: null, duration: 0 });
+          };
+
+          audio.src = mediaUrl;
+          return;
+      }
+
+      // Proceso estándar (con soporte de imagen) para Videos o Upload manual
       const media = isAudio ? new Audio() : document.createElement('video');
-      
       media.preload = "metadata"; 
       media.muted = true;
       media.crossOrigin = "anonymous";
@@ -89,11 +129,10 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
       };
 
       const mainTimeout = setTimeout(() => {
-          console.warn("Generator: Timeout Maestro");
           finish(extractedThumbnail, media.duration || 0);
       }, 15000);
 
-      if (isAudio) {
+      if (isAudio && !skipImage) {
           extractAudioCoverSafe(fileOrUrl).then(thumb => { extractedThumbnail = thumb; });
       }
 
@@ -102,8 +141,7 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
           const duration = media.duration;
           
           if (isAudio || (media instanceof HTMLVideoElement && media.videoWidth === 0)) {
-              // Esperar un momento por jsmediatags
-              setTimeout(() => finish(extractedThumbnail, duration), 1500);
+              setTimeout(() => finish(extractedThumbnail, duration), isAudio ? 1200 : 500);
           } else if (media instanceof HTMLVideoElement) {
               media.currentTime = Math.min(2, duration / 2);
           }
@@ -129,7 +167,6 @@ export const generateThumbnail = async (fileOrUrl: File | string, forceAudio?: b
       };
 
       media.onerror = () => {
-          // Si el stream falla, intentar devolver al menos lo capturado por jsmediatags
           setTimeout(() => finish(extractedThumbnail, 0), 500);
       };
 
