@@ -118,8 +118,15 @@ interface SubCategoryCardProps {
 const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick }) => {
     const randomThumb = useMemo(() => {
         if (!videos || videos.length === 0) return null;
-        const randomIndex = Math.floor(Math.random() * videos.length);
-        return videos[randomIndex]?.thumbnailUrl;
+        // Intentar buscar una miniatura que no sea la default
+        const goodVids = videos.filter(v => v.thumbnailUrl && !v.thumbnailUrl.includes('default.jpg'));
+        const source = goodVids.length > 0 ? goodVids : videos;
+        const randomIndex = Math.floor(Math.random() * source.length);
+        return source[randomIndex]?.thumbnailUrl;
+    }, [videos]);
+
+    const isProcessingOnly = useMemo(() => {
+        return videos.every(v => ['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category));
     }, [videos]);
 
     return (
@@ -150,8 +157,15 @@ const SubCategoryCard: React.FC<SubCategoryCardProps> = ({ name, videos, onClick
                 <h3 className="text-lg md:text-xl font-black text-white uppercase tracking-tighter leading-none drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors">
                     {name}
                 </h3>
-                <div className="mt-2 bg-black/40 backdrop-blur-md px-3 py-0.5 rounded-full border border-white/5">
-                    <span className="text-[10px] text-slate-300 font-black uppercase tracking-widest">{videos?.length || 0} Elementos</span>
+                <div className="mt-2 flex flex-col items-center gap-1">
+                    <div className="bg-black/40 backdrop-blur-md px-3 py-0.5 rounded-full border border-white/5">
+                        <span className="text-[10px] text-slate-300 font-black uppercase tracking-widest">{videos?.length || 0} Elementos</span>
+                    </div>
+                    {isProcessingOnly && (
+                        <div className="flex items-center gap-1 text-[8px] font-black text-amber-500 animate-pulse uppercase">
+                            <Clock size={8}/> Sincronizando...
+                        </div>
+                    )}
                 </div>
             </div>
         </button>
@@ -182,6 +196,7 @@ export default function Home() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   
   const [allVideos, setAllVideos] = useState<Video[]>([]);
+  const [rawVideos, setRawVideos] = useState<Video[]>([]); // Lista sin filtrar para ver carpetas vacías
   const [marketItems, setMarketItems] = useState<MarketplaceItem[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   
@@ -240,6 +255,9 @@ export default function Home() {
                 db.getAllUsers(),
                 db.getSystemSettings()
             ]);
+            
+            // Guardamos todos para detectar carpetas incluso si estan en PENDING
+            setRawVideos(vids || []);
             
             // Programación Defensiva: Filtrar nulls y asegurar que la propiedad category exista
             const validVids = (vids || []).filter(v => v && v.category && !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category));
@@ -332,19 +350,19 @@ export default function Home() {
               matchedSubCats.push({
                   id: c.id,
                   name: c.name,
-                  videos: allVideos.filter(v => v.category === c.name || v.parent_category === c.name)
+                  videos: rawVideos.filter(v => v.category === c.name || v.parent_category === c.name)
               });
           }
       });
 
-      const physicalFolders = Array.from(new Set(allVideos.map(v => String(v.category)))) as string[];
+      const physicalFolders = Array.from(new Set(rawVideos.map(v => String(v.category)))) as string[];
       physicalFolders.forEach(folder => {
           if (matchesFragmented(folder, queryStr)) {
               if (!matchedSubCats.find(s => s.name === folder)) {
                   matchedSubCats.push({
                       id: folder,
                       name: folder,
-                      videos: allVideos.filter(v => v.category === folder)
+                      videos: rawVideos.filter(v => v.category === folder)
                   });
               }
           }
@@ -356,15 +374,15 @@ export default function Home() {
           users: filteredUsers,
           subcategories: matchedSubCats
       };
-  }, [searchQuery, allVideos, marketItems, allUsers, categories]);
+  }, [searchQuery, allVideos, rawVideos, marketItems, allUsers, categories]);
 
   const breadcrumbPath = useMemo<string[]>(() => {
       if (!activeCategory) return [];
       const active = activeCategory as string;
-      const currentVideoSample = allVideos.find(v => v.category === active);
+      const currentVideoSample = rawVideos.find(v => v.category === active);
       if (currentVideoSample && currentVideoSample.parent_category) return [currentVideoSample.parent_category as string, active];
       return [active];
-  }, [activeCategory, allVideos]);
+  }, [activeCategory, rawVideos]);
 
   const currentSubCategories = useMemo<{name: string, id: string, videos: Video[]}[]>(() => {
       const queryStr = String(searchQuery || '');
@@ -372,17 +390,18 @@ export default function Home() {
 
       if (queryStr) return []; 
       if (!active) {
+          // Mostramos todas las categorías del sistema si tienen algún video (incluso sin procesar)
           return categories.map(c => ({ 
               name: c.name, 
               id: c.id, 
-              videos: allVideos.filter(v => v.category === c.name || v.parent_category === c.name)
+              videos: rawVideos.filter(v => v.category === c.name || v.parent_category === c.name)
           })).filter(c => c.videos.length > 0);
       }
       
       const rootCat = categories.find(c => c.name === active);
       if (rootCat && rootCat.autoSub) {
           const subs = Array.from(new Set(
-              allVideos
+              rawVideos
                 .filter(v => v.parent_category === active)
                 .map(v => v.category)
           )) as string[];
@@ -390,11 +409,11 @@ export default function Home() {
           return subs.map(s => ({
               name: s,
               id: s,
-              videos: allVideos.filter(v => v.category === s && v.parent_category === active)
+              videos: rawVideos.filter(v => v.category === s && v.parent_category === active)
           }));
       }
       return [];
-  }, [activeCategory, categories, allVideos, searchQuery]);
+  }, [activeCategory, categories, rawVideos, searchQuery]);
 
   const filteredList = useMemo(() => {
       if (searchQuery) return []; 

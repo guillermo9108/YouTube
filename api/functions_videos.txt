@@ -68,25 +68,30 @@ function video_get_admin_stats($pdo) {
 }
 
 /**
- * PROCESADOR NATIVO DEL SERVIDOR (FFMPEG)
+ * PROCESADOR NATIVO DEL SERVIDOR (FFMPEG ROBUSTO)
  * Esta función permite extraer metadatos sin intervención del navegador.
+ * Mejorado con Fallback de detección de duración.
  */
 function video_server_process_metadata($pdo) {
     set_time_limit(0); 
-    $limit = intval($_GET['limit'] ?? 1); // Procesar de 1 en 1 por defecto para no saturar CPU
+    $limit = intval($_GET['limit'] ?? 1); 
     
     $settings = $pdo->query("SELECT ffmpegPath, localLibraryPath, categories FROM system_settings WHERE id = 1")->fetch();
     $ffmpeg = $settings['ffmpegPath'] ?: 'ffmpeg';
+    // Intentar deducir ffprobe, pero no depender ciegamente
     $ffprobe = str_replace('ffmpeg', 'ffprobe', $ffmpeg);
     
     if (!function_exists('exec')) {
-        respond(false, null, "Función exec() deshabilitada en el servidor. El procesamiento automático requiere exec().");
+        respond(false, null, "Función exec() deshabilitada en el servidor.");
     }
 
     $now = time();
-    $timeout = $now - 300;
+    $timeout = $now - 60; // Reducimos timeout de bloqueo para reintento rápido
     
-    // Obtener videos pendientes que no estén bloqueados
+    // Resetear videos en error para que el nuevo procesador robusto los intente
+    $pdo->query("UPDATE videos SET category = 'PENDING', processing_attempts = 0 WHERE category = 'FAILED_METADATA' AND processing_attempts >= 3 LIMIT 50");
+
+    // Obtener videos pendientes
     $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? LIMIT $limit");
     $stmt->execute([$timeout]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -101,23 +106,35 @@ function video_server_process_metadata($pdo) {
     foreach ($videos as $v) {
         $id = $v['id'];
         $videoPath = $v['videoUrl'];
+        $duration = 0;
         
-        // Bloquear video para que otros procesos no lo toquen
         $pdo->prepare("UPDATE videos SET locked_at = ? WHERE id = ?")->execute([time(), $id]);
         
         if (!file_exists($videoPath)) {
-            $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = 'Archivo no encontrado físicamente' WHERE id = ?")->execute([$id]);
-            $errors[] = "Video $id: No encontrado en $videoPath";
+            $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = 'Archivo no encontrado' WHERE id = ?")->execute([$id]);
+            $errors[] = "Video $id: No encontrado físicamente";
             continue;
         }
 
-        // 1. Obtener Duración via ffprobe
+        // --- MÉTODO 1: FFPROBE (Rápido) ---
         $cmdDur = "$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($videoPath);
-        $duration = floatval(shell_exec($cmdDur));
+        $outDur = shell_exec($cmdDur);
+        $duration = floatval($outDur);
+
+        // --- MÉTODO 2: FFMPEG FALLBACK (Lento pero seguro) ---
+        if ($duration <= 0) {
+            $cmdAlt = "$ffmpeg -i " . escapeshellarg($videoPath) . " 2>&1";
+            $output = shell_exec($cmdAlt);
+            // Buscar patrón "Duration: 00:00:00.00"
+            if (preg_match('/Duration: ((\d+):(\d+):(\d+))/i', $output, $matches)) {
+                $parts = explode(':', $matches[1]);
+                $duration = ($parts[0] * 3600) + ($parts[1] * 60) + $parts[2];
+            }
+        }
 
         if ($duration <= 0) {
             $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, locked_at = 0 WHERE id = ?")->execute([$id]);
-            $errors[] = "Video $id: Error al extraer duración";
+            $errors[] = "Video $id: Falló ffprobe y ffmpeg-regex";
             continue;
         }
 
@@ -129,12 +146,12 @@ function video_server_process_metadata($pdo) {
             $thumbDir = 'uploads/thumbnails/';
             if (!is_dir($thumbDir)) mkdir($thumbDir, 0777, true);
             $thumbFile = $thumbDir . $id . '.jpg';
-            $seek = min(5, $duration / 2); // Capturar al segundo 5 o a la mitad
+            $seek = min(2, $duration / 2); // Capturamos muy al inicio por si el archivo es pesado
             
-            $cmdThumb = "$ffmpeg -y -ss $seek -i " . escapeshellarg($videoPath) . " -vframes 1 -q:v 2 " . escapeshellarg($thumbFile) . " 2>&1";
+            $cmdThumb = "$ffmpeg -y -ss $seek -i " . escapeshellarg($videoPath) . " -vframes 1 -q:v 4 " . escapeshellarg($thumbFile) . " 2>&1";
             exec($cmdThumb, $out, $ret);
             
-            if ($ret === 0) {
+            if ($ret === 0 && file_exists($thumbFile)) {
                 $thumbUrl = $thumbFile;
             }
         }
@@ -143,11 +160,10 @@ function video_server_process_metadata($pdo) {
         $pdo->prepare("UPDATE videos SET duration = ?, thumbnailUrl = ?, category = 'PROCESSING', processing_attempts = 0, locked_at = 0 WHERE id = ?")
             ->execute([intval($duration), $thumbUrl, $id]);
         
-        // 4. Aplicar Organización Inteligente Inmediata (Paso 3 Auto)
+        // 4. Aplicar Organización Inteligente Inmediata (Publicación Auto)
         video_organize_single($pdo, $id, $settings);
         
         $processed++;
-        write_log("Procesado Servidor: " . $v['title'] . " (ID: $id)");
     }
 
     respond(true, [
