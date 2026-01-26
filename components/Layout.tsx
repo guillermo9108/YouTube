@@ -1,18 +1,15 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState } from 'react';
 import { 
-    Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Menu, 
-    DownloadCloud, LogOut, ShoppingBag, Server, ChevronRight, Crown, 
-    Smartphone as MobileIcon, MonitorDown, AlertTriangle, CheckCircle2, 
-    Clock, ShoppingCart as SaleIcon, Zap, User as UserIcon, Layout as LayoutIcon,
-    Heart, Search, History, Wallet
+    Home, ShieldCheck, Menu, 
+    DownloadCloud, LogOut, ShoppingBag, ChevronRight, Crown, 
+    User as UserIcon, Layout as LayoutIcon, Clock, ShoppingCart as SaleIcon,
+    Zap, Search, History, Wallet, Smartphone, Upload, Bell, X, MonitorDown
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useUpload } from '../context/UploadContext';
-import { useCart } from '../context/CartContext';
-import { useServerTask } from '../context/ServerTaskContext';
 import { Link, useLocation, Outlet, useNavigate } from './Router';
-import { db } from '../services/db';
 import GridProcessor from './GridProcessor';
+import { useCart } from '../context/CartContext';
 
 const Sidebar = ({ isOpen, onClose, user, isAdmin, logout }: any) => {
     const navigate = useNavigate();
@@ -89,20 +86,23 @@ const Sidebar = ({ isOpen, onClose, user, isAdmin, logout }: any) => {
 export default function Layout() {
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { cart } = useCart();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
-  const isActive = (path: string) => location.pathname === path ? 'text-indigo-400 scale-110' : 'text-slate-500 hover:text-indigo-200 transition-all';
   const isShortsMode = location.pathname === '/shorts';
   const isHomePage = location.pathname === '/';
   const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
   if (isShortsMode) return <div className="fixed inset-0 bg-black overflow-hidden"><Outlet /></div>;
 
+  const navIconClass = (path: string) => 
+    `flex flex-col items-center justify-center w-12 h-12 rounded-2xl transition-all ${location.pathname === path ? 'bg-indigo-600/20 text-indigo-400' : 'text-slate-500'}`;
+
   return (
     <div className="min-h-screen flex flex-col bg-black overflow-x-hidden">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
       
-      {/* Premium Header - Condicionalmente invisible en la Home */}
+      {/* Header Dinámico */}
       <header className={`fixed top-0 left-0 right-0 z-[100] transition-all duration-500 ${isHomePage ? 'bg-transparent border-none' : 'bg-black/60 backdrop-blur-2xl border-b border-white/5 h-[74px]'}`}>
           <div className="container mx-auto px-4 h-full flex items-center justify-between max-w-7xl">
               <div className="flex items-center gap-5">
@@ -137,15 +137,15 @@ export default function Layout() {
                     )}
                     
                     <Link to="/profile" className="w-11 h-11 rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center hover:border-indigo-500/50 transition-all shadow-lg">
-                            {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover" /> : <span className="text-white font-black">{user?.username?.[0]}</span>}
+                            {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover" alt="Profile" /> : <span className="text-white font-black">{user?.username?.[0]}</span>}
                     </Link>
                 </div>
               )}
           </div>
       </header>
 
-      {/* Main Content Area con paddings dinámicos. En Home reducimos el pt para que no haya hueco. */}
-      <main className={`flex-1 container mx-auto px-4 ${isHomePage ? 'pt-4' : 'pt-[94px]'} pb-24 md:pb-8 max-w-7xl animate-in fade-in duration-700`}>
+      {/* Main Content Area con paddings dinámicos */}
+      <main className={`flex-1 container mx-auto px-4 ${isHomePage ? 'pt-6' : 'pt-[94px]'} pb-24 md:pb-8 max-w-7xl animate-in fade-in duration-700`}>
         <Outlet />
       </main>
 
@@ -153,3 +153,50 @@ export default function Layout() {
 
       {/* Navigation Bar - Bottom (Móvil) */}
       <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur-2xl border-t border-white/5 flex justify-around items-center py-4 z-[150] safe-area-bottom md:hidden shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+          <Link to="/" className={navIconClass('/')}>
+              <Home size={22} />
+              <span className="text-[8px] font-black uppercase mt-1">Inicio</span>
+          </Link>
+          <Link to="/shorts" className={navIconClass('/shorts')}>
+              <Zap size={22} />
+              <span className="text-[8px] font-black uppercase mt-1">Shorts</span>
+          </Link>
+          <Link to="/marketplace" className={navIconClass('/marketplace')}>
+              <ShoppingBag size={22} />
+              <span className="text-[8px] font-black uppercase mt-1">Tienda</span>
+          </Link>
+          <Link to="/cart" className="relative flex flex-col items-center justify-center w-12 h-12">
+              <div className={navIconClass('/cart')}>
+                  <SaleIcon size={22} />
+                  <span className="text-[8px] font-black uppercase mt-1">Carrito</span>
+              </div>
+              {cart.length > 0 && (
+                  <span className="absolute top-1 right-1 w-4 h-4 bg-red-600 text-white text-[8px] font-black rounded-full flex items-center justify-center border border-slate-900 animate-in zoom-in">
+                      {cart.length}
+                  </span>
+              )}
+          </Link>
+          <Link to="/profile" className={navIconClass('/profile')}>
+              {/* Fix: Use UserIcon instead of User to match renamed import from lucide-react */}
+              <UserIcon size={22} />
+              <span className="text-[8px] font-black uppercase mt-1">Perfil</span>
+          </Link>
+      </nav>
+
+      {/* Desktop Floating Action Buttons */}
+      <div className="hidden md:flex fixed bottom-8 right-8 flex-col gap-3 z-50">
+          <Link to="/upload" className="w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl flex items-center justify-center shadow-2xl shadow-indigo-600/40 hover:scale-110 active:scale-95 transition-all">
+              <Upload size={24} />
+          </Link>
+          <Link to="/cart" className="w-14 h-14 bg-slate-900 border border-white/10 hover:border-indigo-500 text-white rounded-2xl flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all relative">
+              <SaleIcon size={24} />
+              {cart.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-black">
+                      {cart.length}
+                  </span>
+              )}
+          </Link>
+      </div>
+    </div>
+  );
+}
