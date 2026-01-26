@@ -1,3 +1,4 @@
+
 <?php
 
 // --- TROPIPAY INTEGRATION ---
@@ -39,65 +40,9 @@ function getTropipayToken($clientId, $clientSecret) {
     return $json['access_token'];
 }
 
-function payment_create_link($pdo, $input) {
-    $userId = $input['userId'];
-    $plan = $input['plan'];
-    
-    $stmtS = $pdo->query("SELECT tropipayClientId, tropipayClientSecret, currencyConversion FROM system_settings LIMIT 1");
-    $s = $stmtS->fetch(PDO::FETCH_ASSOC);
-    
-    if (empty($s['tropipayClientId'])) throw new Exception("Tropipay no está configurado por el administrador.");
-
-    $token = getTropipayToken($s['tropipayClientId'], $s['tropipayClientSecret']);
-    $reference = 'SP_' . uniqid() . '_' . $userId;
-    
-    // Convertir USD a EUR si es necesario (Tropipay trabaja en Cents de EUR por defecto en muchos endpoints)
-    // Asumimos que el precio del plan está en USD y Tropipay espera EUR
-    $amountCents = intval($plan['price'] * 100); 
-
-    $payload = json_encode([
-        "reference" => $reference,
-        "amount" => $amountCents,
-        "currency" => "EUR",
-        "description" => "StreamPay: " . $plan['name'],
-        "reason" => "Servicios Digitales",
-        "lang" => "es",
-        "urlSuccess" => "https://tu-sitio.com/#/profile?pay=success&ref=" . $reference,
-        "urlFailed" => "https://tu-sitio.com/#/profile?pay=failed",
-        "urlNotification" => "https://tu-sitio.com/api/index.php?action=verify_payment&userId=" . $userId . "&reference=" . $reference,
-        "serviceId" => "1"
-    ]);
-
-    $curl = curl_init();
-    curl_setopt_array($curl, [
-        CURLOPT_URL => "https://tropipay.com/api/v2/paymentcards",
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CUSTOMREQUEST => "POST",
-        CURLOPT_POSTFIELDS => $payload,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_HTTPHEADER => [
-            "Content-Type: application/json",
-            "Authorization: Bearer " . $token
-        ],
-    ]);
-
-    $response = curl_exec($curl);
-    curl_close($curl);
-    
-    $json = json_decode($response, true);
-    if (!isset($json['shortUrl'])) throw new Exception("Error creando link: " . ($json['message'] ?? 'Respuesta inválida'));
-
-    // Guardar solicitud pendiente
-    $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, paymentRef, status, createdAt) VALUES (?, ?, ?, ?, 'PENDING', ?)")
-        ->execute([uniqid('vreq_'), $userId, json_encode($plan), $reference, time()]);
-
-    respond(true, ['paymentUrl' => $json['shortUrl']]);
-}
-
 function payment_verify($pdo, $input) {
-    $ref = $input['reference'] ?? $_GET['reference'] ?? '';
-    $userId = $input['userId'] ?? $_GET['userId'] ?? '';
+    $ref = $input['reference'];
+    $userId = $input['userId'];
     
     $stmt = $pdo->prepare("SELECT * FROM vip_requests WHERE paymentRef = ? AND userId = ? AND status = 'PENDING'");
     $stmt->execute([$ref, $userId]);
@@ -146,13 +91,19 @@ function payment_verify($pdo, $input) {
                 $bonusAmount = $priceBase * ($bonusPercent / 100);
                 $totalCredit = $priceBase + $bonusAmount;
 
+                // 1. Acreditar saldo total al usuario
                 $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$totalCredit, $userId]);
+                
+                // 2. Registrar el Dinero Real (isExternal = 1)
                 $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 1)")
                     ->execute([uniqid('tx_cash_auto_'), $userId, $priceBase, time(), $plan['name']]);
+                
+                // 3. Registrar el Bono (isExternal = 0)
                 if ($bonusAmount > 0) {
                     $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'DEPOSIT', ?, ?, 0)")
                         ->execute([uniqid('tx_bonus_auto_'), $userId, $bonusAmount, time(), "Bono: " . $plan['name']]);
                 }
+                    
             } else {
                 $days = intval($plan['durationDays']);
                 $seconds = $days * 86400;
@@ -164,18 +115,22 @@ function payment_verify($pdo, $input) {
                 $newExpiry = $newStart + $seconds;
                 $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
                 
+                // Membresía de Acceso es 100% externo
                 $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, timestamp, type, videoTitle, isExternal) VALUES (?, ?, ?, ?, 'VIP', ?, 1)")
                     ->execute([uniqid('tx_vip_auto_'), $userId, $plan['price'], time(), $plan['name']]);
             }
             
+            $nid = uniqid('n_');
             $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp) VALUES (?, ?, 'SYSTEM', ?, '/profile', 0, ?)")
-                ->execute([uniqid('n_'), $userId, "Pago confirmado. Plan '{$plan['name']}' activado.", time()]);
+                ->execute([$nid, $userId, "Pago confirmado. Plan '{$plan['name']}' activado.", time()]);
             
             $pdo->commit();
-            respond(true, ['message' => 'Activación Exitosa']);
+            respond(true, ['message' => 'VIP Activado Exitosamente']);
         } else {
-            respond(false, null, 'Pago no encontrado o pendiente.');
+            respond(false, null, 'Pago no encontrado o pendiente en Tropipay. Intenta de nuevo en unos minutos.');
         }
-    } catch (Exception $e) { respond(false, null, $e->getMessage()); }
+    } catch (Exception $e) {
+        respond(false, null, $e->getMessage());
+    }
 }
 ?>
