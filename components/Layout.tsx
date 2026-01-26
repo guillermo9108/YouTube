@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
     Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Menu, 
@@ -94,6 +93,7 @@ export default function Layout() {
   
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400 scale-110' : 'text-slate-500 hover:text-indigo-200 transition-all';
   const isShortsMode = location.pathname === '/shorts';
+  const isHomePage = location.pathname === '/';
   const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
   if (isShortsMode) return <div className="fixed inset-0 bg-black overflow-hidden"><Outlet /></div>;
@@ -102,45 +102,50 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col bg-black overflow-x-hidden">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
       
-      {/* Premium Header */}
-      <header className="fixed top-0 left-0 right-0 z-[100] bg-black/60 backdrop-blur-2xl border-b border-white/5 h-[74px]">
+      {/* Premium Header - Condicionalmente invisible en la Home */}
+      <header className={`fixed top-0 left-0 right-0 z-[100] transition-all duration-500 ${isHomePage ? 'bg-transparent border-none' : 'bg-black/60 backdrop-blur-2xl border-b border-white/5 h-[74px]'}`}>
           <div className="container mx-auto px-4 h-full flex items-center justify-between max-w-7xl">
               <div className="flex items-center gap-5">
                   <button 
                     onClick={() => setIsSidebarOpen(true)} 
-                    className="p-3 bg-slate-900 border border-white/10 rounded-2xl text-indigo-400 active:scale-90 hover:bg-slate-800 transition-all shadow-lg"
+                    className={`p-3 bg-slate-900 border border-white/10 rounded-2xl text-indigo-400 active:scale-90 hover:bg-slate-800 transition-all shadow-lg ${isHomePage ? 'mt-4' : ''}`}
                   >
                       <Menu size={22}/>
                   </button>
-                  <Link to="/" className="flex items-center gap-3 group">
-                      <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-xl shadow-indigo-600/20 group-hover:rotate-12 transition-transform">
-                        <LayoutIcon size={22} className="text-white" />
-                      </div>
-                      <span className="text-2xl font-black text-white tracking-tighter uppercase italic hidden xs:block">StreamPay</span>
-                  </Link>
+                  
+                  {!isHomePage && (
+                    <Link to="/" className="flex items-center gap-3 group animate-in fade-in">
+                        <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-xl shadow-indigo-600/20 group-hover:rotate-12 transition-transform">
+                          <LayoutIcon size={22} className="text-white" />
+                        </div>
+                        <span className="text-2xl font-black text-white tracking-tighter uppercase italic hidden xs:block">StreamPay</span>
+                    </Link>
+                  )}
               </div>
               
-              <div className="flex items-center gap-4">
-                   <div className="hidden md:flex bg-slate-900/50 border border-white/5 rounded-2xl px-4 py-2 items-center gap-3">
-                        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Saldo</div>
-                        <div className="text-sm font-black text-emerald-400">{Number(user?.balance || 0).toFixed(2)} $</div>
-                   </div>
+              {!isHomePage && (
+                <div className="flex items-center gap-4 animate-in fade-in slide-in-from-right-4">
+                    <div className="hidden md:flex bg-slate-900/50 border border-white/5 rounded-2xl px-4 py-2 items-center gap-3">
+                            <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Saldo</div>
+                            <div className="text-sm font-black text-emerald-400">{Number(user?.balance || 0).toFixed(2)} $</div>
+                    </div>
 
-                   {isAdmin && (
-                       <Link to="/admin" className="p-3 text-amber-500 hover:bg-amber-500/10 rounded-2xl transition-all border border-transparent hover:border-amber-500/20 hidden sm:flex">
-                           <ShieldCheck size={22}/>
-                       </Link>
-                   )}
-                   
-                   <Link to="/profile" className="w-11 h-11 rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center hover:border-indigo-500/50 transition-all shadow-lg">
-                        {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover" /> : <span className="text-white font-black">{user?.username?.[0]}</span>}
-                   </Link>
-              </div>
+                    {isAdmin && (
+                        <Link to="/admin" className="p-3 text-amber-500 hover:bg-amber-500/10 rounded-2xl transition-all border border-transparent hover:border-amber-500/20 hidden sm:flex">
+                            <ShieldCheck size={22}/>
+                        </Link>
+                    )}
+                    
+                    <Link to="/profile" className="w-11 h-11 rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center hover:border-indigo-500/50 transition-all shadow-lg">
+                            {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover" /> : <span className="text-white font-black">{user?.username?.[0]}</span>}
+                    </Link>
+                </div>
+              )}
           </div>
       </header>
 
-      {/* Main Content Area con paddings dinámicos */}
-      <main className="flex-1 container mx-auto px-4 pt-[94px] pb-24 md:pb-8 max-w-7xl animate-in fade-in duration-700">
+      {/* Main Content Area con paddings dinámicos. En Home reducimos el pt para que no haya hueco. */}
+      <main className={`flex-1 container mx-auto px-4 ${isHomePage ? 'pt-4' : 'pt-[94px]'} pb-24 md:pb-8 max-w-7xl animate-in fade-in duration-700`}>
         <Outlet />
       </main>
 
@@ -148,12 +153,3 @@ export default function Layout() {
 
       {/* Navigation Bar - Bottom (Móvil) */}
       <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur-2xl border-t border-white/5 flex justify-around items-center py-4 z-[150] safe-area-bottom md:hidden shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
-        <Link to="/" className={isActive('/')}><Home size={24}/></Link>
-        <Link to="/shorts" className={isActive('/shorts')}><MobileIcon size={24}/></Link>
-        <Link to="/upload" className="flex items-center justify-center w-14 h-14 rounded-3xl bg-indigo-600 text-white shadow-2xl shadow-indigo-600/40 active:scale-90 transition-transform -mt-10 border-4 border-black"><Upload size={26}/></Link>
-        <Link to="/marketplace" className={isActive('/marketplace')}><ShoppingBag size={24}/></Link>
-        <Link to="/profile" className={isActive('/profile')}><User size={24}/></Link>
-      </nav>
-    </div>
-  );
-}
