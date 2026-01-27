@@ -65,6 +65,11 @@ function write_log($message, $level = 'INFO') {
     $timestamp = date('Y-m-d H:i:s');
     $formattedMessage = "[$timestamp] [$level] $message" . PHP_EOL;
     @file_put_contents($logFile, $formattedMessage, FILE_APPEND);
+    
+    // Si estamos en CLI (Worker), también imprimir a pantalla
+    if (php_sapi_name() === 'cli') {
+        echo $formattedMessage;
+    }
 }
 
 function resolve_video_path($pathOrUrl) {
@@ -110,7 +115,6 @@ function streamVideo($id, $pdo) {
     else if ($ext === 'webm') $mime = 'video/webm';
     else $mime = 'video/mp4';
 
-    // Cabeceras cruciales para jsmediatags y reproductores
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
     header("Access-Control-Allow-Headers: Range, Authorization, Content-Type");
@@ -118,7 +122,6 @@ function streamVideo($id, $pdo) {
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
 
-    // Manejo de peticiones HEAD (Rápido para metadatos)
     if ($_SERVER['REQUEST_METHOD'] === 'HEAD') {
         header("Content-Length: $fileSize");
         exit;
@@ -141,7 +144,6 @@ function streamVideo($id, $pdo) {
         header("Content-Length: $fileSize");
     }
     
-    // Buffer más pequeño para NAS con DDR2 (evita picos de RAM)
     $bufferSize = 1024 * 128; 
     while (!feof($fp)) {
         echo fread($fp, $bufferSize);

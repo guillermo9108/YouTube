@@ -1,15 +1,16 @@
 <?php
 /**
- * StreamPay - Server-Side Video Worker V1.0
- * Este script procesa la cola de videos PENDING de forma automática.
- * Ejecución recomendada: php video_worker.php
+ * StreamPay - Server-Side Video Worker V1.1 (Optimizado para Xpenology/Synology)
+ * Procesa la cola de videos PENDING de forma automática.
+ * Ejecución recomendada en Programador de Tareas: php video_worker.php
  */
 
 // Aumentar límites para procesos largos
-set_time_limit(0);
+set_time_limit(300); // 5 minutos por ejecución
 ini_set('memory_limit', '512M');
 
 require_once 'functions_utils.php';
+require_once 'functions_videos.php';
 
 // 1. Cargar Configuración de BD
 $configFile = 'db_config.json';
@@ -25,99 +26,122 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
     ]);
 } catch (PDOException $e) {
-    die("Error de conexión BD: " . $e->getMessage() . "\n");
+    write_log("Worker Connection Error: " . $e->getMessage(), 'FATAL');
+    die("Error de conexión BD\n");
 }
 
-// 2. Obtener Rutas de Herramientas del Sistema
-$stmtS = $pdo->query("SELECT ffmpegPath, categories FROM system_settings WHERE id = 1");
-$settings = $stmtS->fetch();
-$ffmpeg = $settings['ffmpegPath'] ?: 'ffmpeg';
-$ffprobe = str_replace('ffmpeg', 'ffprobe', $ffmpeg); // Asumimos que están en la misma carpeta
+// 2. Autodetección de Rutas FFmpeg (Específico para DSM)
+$stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
+$sysFfmpeg = $stmtS->fetchColumn();
 
-// 3. Buscar un video PENDING que no esté bloqueado
-$now = time();
-$timeout = $now - 600; // 10 minutos de gracia para bloqueos viejos
+$ffmpegPaths = [
+    $sysFfmpeg,
+    '/usr/local/ffmpeg/bin/ffmpeg', // SynoCommunity (Recomendado)
+    '/usr/bin/ffmpeg',               // Default Synology
+    'ffmpeg'                         // PATH
+];
 
-$stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND locked_at < ? ORDER BY createdAt ASC LIMIT 1");
-$stmt->execute([$timeout]);
-$video = $stmt->fetch();
-
-if (!$video) {
-    echo "No hay videos pendientes de procesar.\n";
-    exit;
-}
-
-// 4. Bloquear registro para este proceso
-$pdo->prepare("UPDATE videos SET locked_at = ? WHERE id = ?")->execute([$now, $video['id']]);
-
-echo "Procesando: {$video['title']} (ID: {$video['id']})\n";
-
-$realPath = resolve_video_path($video['videoUrl']);
-if (!$realPath || !file_exists($realPath)) {
-    echo "Error: Archivo no encontrado en disco: {$video['videoUrl']}\n";
-    $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = 'Archivo no encontrado' WHERE id = ?")->execute([$video['id']]);
-    exit;
-}
-
-// 5. Determinar si es Audio
-$ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
-$isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a', 'flac']) || (isset($video['is_audio']) && $video['is_audio']);
-
-// 6. Obtener Duración vía FFPROBE
-$duration = 0;
-$probeCmd = "$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath);
-$output = shell_exec($probeCmd);
-$duration = floor(floatval(trim($output)));
-
-if ($duration <= 0) {
-    echo "Error: No se pudo obtener la duración.\n";
-    $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, locked_at = 0 WHERE id = ?")->execute([$video['id']]);
-    exit;
-}
-
-$thumbPath = null;
-$finalCategory = 'PROCESSING'; // Listo para el Paso 3 (Organización IA)
-
-// 7. Extraer Miniatura (Solo para Videos)
-if (!$isAudio) {
-    $thumbFile = 'uploads/thumbnails/' . $video['id'] . '.jpg';
-    $fullThumbPath = __DIR__ . '/' . $thumbFile;
-    
-    // Capturar frame en el segundo 2
-    $captureTime = ($duration > 5) ? "00:00:02" : "00:00:00.5";
-    $ffmpegCmd = "$ffmpeg -y -ss $captureTime -i " . escapeshellarg($realPath) . " -frames:v 1 -q:v 4 " . escapeshellarg($fullThumbPath) . " 2>&1";
-    
-    exec($ffmpegCmd, $outputLog, $returnVar);
-    
-    if ($returnVar === 0 && file_exists($fullThumbPath)) {
-        $thumbPath = 'api/' . $thumbFile;
-        echo "Miniatura extraída con éxito.\n";
-    } else {
-        echo "Advertencia: Falló extracción de miniatura de video.\n";
+$ffmpeg = 'ffmpeg';
+foreach ($ffmpegPaths as $path) {
+    if ($path && @shell_exec("$path -version")) {
+        $ffmpeg = $path;
+        break;
     }
-} else {
-    // Es Audio: Usar imagen por defecto
-    $thumbPath = 'api/uploads/thumbnails/defaultaudio.jpg';
-    echo "Archivo detectado como Audio. Asignando imagen por defecto.\n";
+}
+$ffprobe = str_replace('ffmpeg', 'ffprobe', $ffmpeg);
+
+// 3. Procesamiento por Lotes (Batch Mode)
+$batchSize = 5;
+$processedCount = 0;
+
+write_log("Worker iniciado. Usando: $ffmpeg", 'INFO');
+
+for ($i = 0; $i < $batchSize; $ i++) {
+    $now = time();
+    $lockTimeout = $now - 600; // 10 minutos
+
+    // Buscar video pendiente
+    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? ORDER BY createdAt ASC LIMIT 1");
+    $stmt->execute([$lockTimeout]);
+    $video = $stmt->fetch();
+
+    if (!$video) {
+        if ($processedCount === 0) echo "Cola vacía.\n";
+        break;
+    }
+
+    $processedCount++;
+    // Bloquear registro
+    $pdo->prepare("UPDATE videos SET locked_at = ? WHERE id = ?")->execute([$now, $video['id']]);
+
+    echo "[$processedCount/$batchSize] Procesando: {$video['title']}...\n";
+
+    $realPath = resolve_video_path($video['videoUrl']);
+    if (!$realPath || !file_exists($realPath)) {
+        write_log("Worker: Archivo no encontrado - {$video['videoUrl']}", 'ERROR');
+        $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = 'Archivo no encontrado', locked_at = 0 WHERE id = ?")->execute([$video['id']]);
+        continue;
+    }
+
+    // Identificar si es audio
+    $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    $isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a', 'flac']) || (isset($video['is_audio']) && $video['is_audio']);
+
+    // Extraer Duración
+    $probeCmd = "$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath);
+    $durationStr = shell_exec($probeCmd);
+    $duration = floor(floatval(trim($durationStr)));
+
+    if ($duration <= 0) {
+        $attempts = $video['processing_attempts'] + 1;
+        $status = ($attempts >= 3) ? 'FAILED_METADATA' : 'PENDING';
+        $pdo->prepare("UPDATE videos SET processing_attempts = ?, category = ?, locked_at = 0 WHERE id = ?")
+            ->execute([$attempts, $status, $video['id']]);
+        write_log("Worker: Error duración en {$video['title']} (Intento $attempts)", 'WARNING');
+        continue;
+    }
+
+    $thumbPath = null;
+    if (!$isAudio) {
+        $thumbFile = 'uploads/thumbnails/' . $video['id'] . '.jpg';
+        $fullThumbPath = __DIR__ . '/' . $thumbFile;
+        
+        $captureTime = ($duration > 5) ? "00:00:02" : "00:00:00.5";
+        // DSM Tip: -vcodec mjpeg para mayor compatibilidad de hardware
+        $ffmpegCmd = "$ffmpeg -y -ss $captureTime -i " . escapeshellarg($realPath) . " -frames:v 1 -q:v 4 -f image2 " . escapeshellarg($fullThumbPath) . " 2>&1";
+        
+        exec($ffmpegCmd, $outputLog, $returnVar);
+        
+        if ($returnVar === 0 && file_exists($fullThumbPath)) {
+            $thumbPath = 'api/' . $thumbFile;
+        } else {
+            write_log("Worker: Falló miniatura en {$video['title']}. Error: " . end($outputLog), 'WARNING');
+        }
+    } else {
+        $thumbPath = 'api/uploads/thumbnails/defaultaudio.jpg';
+    }
+
+    // Guardar Metadatos y Pasar a Paso 3
+    $fields = ["duration = ?", "category = 'PROCESSING'", "locked_at = 0", "processing_attempts = 0"];
+    $params = [$duration];
+
+    if ($thumbPath) {
+        $fields[] = "thumbnailUrl = ?";
+        $params[] = $thumbPath;
+    }
+
+    $params[] = $video['id'];
+    $sql = "UPDATE videos SET " . implode(', ', $fields) . " WHERE id = ?";
+    $pdo->prepare($sql)->execute($params);
+
+    // Organización IA Automática
+    $settingsArr = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
+    video_organize_single($pdo, $video['id'], $settingsArr);
+    
+    echo "OK: {$video['title']} publicado.\n";
 }
 
-// 8. Actualizar Base de Datos
-$fields = ["duration = ?", "category = 'PROCESSING'", "locked_at = 0", "processing_attempts = 0"];
-$params = [$duration];
-
-if ($thumbPath) {
-    $fields[] = "thumbnailUrl = ?";
-    $params[] = $thumbPath;
+if ($processedCount > 0) {
+    write_log("Worker batch finalizado. Procesados: $processedCount", 'INFO');
 }
-
-$params[] = $video['id'];
-$sql = "UPDATE videos SET " . implode(', ', $fields) . " WHERE id = ?";
-$pdo->prepare($sql)->execute($params);
-
-// 9. Auto-Organización (Paso 3 Integrado)
-require_once 'functions_videos.php';
-$settingsArr = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
-video_organize_single($pdo, $video['id'], $settingsArr);
-
-echo "Completado: {$video['title']}. Duración: {$duration}s. Estado: Publicado.\n";
 ?>
