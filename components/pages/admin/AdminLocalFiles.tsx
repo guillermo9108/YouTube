@@ -8,8 +8,7 @@ import {
     FolderTree, CheckCircle, TrendingUp, Activity, Filter, Search,
     ArrowUpRight, BarChart3, Layers, FileVideo, Shield, RefreshCw,
     AlertCircle, Gauge, ChevronRight, Download, Server, Edit3, DollarSign, Save, Percent, Heart, ThumbsDown,
-    // Fix: Add missing Brush icon import
-    Brush
+    Brush, Wrench, Settings, CheckCircle2
 } from 'lucide-react';
 
 interface CategoryEditModalProps {
@@ -76,6 +75,7 @@ export default function AdminLocalFiles() {
     const [activeTab, setActiveTab] = useState<'HEALTH' | 'EXPLORER' | 'LIBRARIAN'>('HEALTH');
     
     const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+    const [isProcessing, setIsProcessing] = useState(false);
 
     // Advanced Janitor State
     const [cleanupPreview, setCleanupPreview] = useState<SmartCleanerResult | null>(null);
@@ -104,13 +104,43 @@ export default function AdminLocalFiles() {
 
     useEffect(() => { loadData(); }, []);
 
+    // Solo mostrar categorías que tengan conteo real de archivos en el disco
+    const activeCategories = useMemo(() => {
+        if (!settings?.categories || !stats?.category_stats) return [];
+        const statsArray = Array.isArray(stats.category_stats) ? stats.category_stats : [];
+        const counts = new Map<string, number>(
+            statsArray.map((s: any) => [String(s.category).toLowerCase(), Number(s.count)])
+        );
+        return settings.categories.filter(c => {
+            const count = counts.get(c.name.toLowerCase()) || 0;
+            return count > 0;
+        });
+    }, [settings, stats]);
+
     const handlePriceSave = async (newPrice: number, sync: boolean) => {
         if (!editingCategory) return;
+        setIsProcessing(true);
         try {
             await db.updateCategoryPrice(editingCategory.id, newPrice, sync);
-            toast.success("Precio actualizado");
+            db.invalidateCache('get_videos');
+            db.setHomeDirty();
+            toast.success("Precio actualizado y caché invalidada");
             loadData();
         } catch (e: any) { toast.error(e.message); }
+        finally { setIsProcessing(false); }
+    };
+
+    const handleLibrarianAction = async (action: string) => {
+        setIsProcessing(true);
+        try {
+            // @ts-ignore
+            await db[action]();
+            toast.success("Operación completada");
+            db.invalidateCache('get_videos');
+            db.setHomeDirty();
+            loadData();
+        } catch (e: any) { toast.error(e.message); }
+        finally { setIsProcessing(false); }
     };
 
     const handlePreviewPurge = async () => {
@@ -121,14 +151,14 @@ export default function AdminLocalFiles() {
                 body: JSON.stringify(purgeConfig)
             });
             setCleanupPreview(res);
-            if (res.preview.length === 0) toast.info("No se hallaron videos críticos con estos filtros.");
+            if (res.preview.length === 0) toast.info("No se hallaron videos críticos.");
         } catch (e: any) { toast.error(e.message); }
         finally { setIsSearching(false); }
     };
 
     const executePurge = async () => {
         if (!cleanupPreview || cleanupPreview.preview.length === 0) return;
-        if (!confirm(`¿Eliminar definitivamente ${cleanupPreview.preview.length} videos? Recuperarás ${cleanupPreview.stats.spaceReclaimed}`)) return;
+        if (!confirm(`¿Eliminar definitivamente ${cleanupPreview.preview.length} videos?`)) return;
 
         setIsSearching(true);
         try {
@@ -149,7 +179,7 @@ export default function AdminLocalFiles() {
         if (stats?.volumes) {
             stats.volumes.forEach((v: any) => {
                 const usage = (v.total - v.free) / v.total;
-                if (usage > 0.9) list.push({ level: 'CRITICAL', text: `Disco '${v.name}' al ${Math.round(usage*100)}%. LIBERAR ESPACIO YA.` });
+                if (usage > 0.9) list.push({ level: 'CRITICAL', text: `Disco '${v.name}' al ${Math.round(usage*100)}%. LIBERAR ESPACIO.` });
             });
         }
         return list;
@@ -222,9 +252,11 @@ export default function AdminLocalFiles() {
                         </div>
 
                         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
-                            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-4"><BarChart3 size={14}/> Top Categorías & Precios</h4>
+                            <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-4"><BarChart3 size={14}/> Top Categorías Activas</h4>
                             <div className="space-y-2">
-                                {settings?.categories.map(cat => (
+                                {activeCategories.length === 0 ? (
+                                    <div className="text-center py-10 opacity-20"><Database size={40} className="mx-auto mb-2"/><p className="text-[10px] font-black uppercase">Sin archivos indexados</p></div>
+                                ) : activeCategories.map(cat => (
                                     <div key={cat.id} className="bg-slate-950 p-3 rounded-2xl border border-slate-800 flex items-center justify-between group hover:border-indigo-500/30 transition-all">
                                         <div className="min-w-0">
                                             <span className="text-xs font-black text-white uppercase truncate block">{cat.name}</span>
@@ -330,6 +362,73 @@ export default function AdminLocalFiles() {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {activeTab === 'LIBRARIAN' && (
+                <div className="space-y-6 animate-in slide-in-from-right-10">
+                    <div className="bg-slate-900 border border-slate-800 rounded-[32px] p-6 md:p-10 shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none"><Zap size={140} className="text-indigo-400" /></div>
+                        <div className="flex items-center gap-3 mb-8">
+                            <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-900/40"><Zap size={28}/></div>
+                            <div>
+                                <h3 className="text-xl font-black text-white uppercase italic tracking-tighter">Janitor Librarian V8</h3>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Sincronización masiva de metadatos y precios</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <button 
+                                onClick={() => handleLibrarianAction('smartOrganizeLibrary')} 
+                                disabled={isProcessing}
+                                className="p-6 bg-slate-950 border border-slate-800 rounded-3xl text-left hover:border-indigo-500/50 transition-all group shadow-xl"
+                            >
+                                <div className="flex justify-between items-center mb-3">
+                                    <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400 group-hover:scale-110 transition-transform"><Wand2 size={24}/></div>
+                                    {isProcessing && <Loader2 size={16} className="animate-spin text-indigo-500"/>}
+                                </div>
+                                <h4 className="text-xs font-black text-white uppercase tracking-widest mb-1">Publicación Inteligente</h4>
+                                <p className="text-[10px] text-slate-500 leading-relaxed uppercase font-bold">Mueve videos de PROCESSING a sus categorías finales basándose en la estructura del disco.</p>
+                            </button>
+
+                            <button 
+                                onClick={() => handleLibrarianAction('reorganizeAllVideos')} 
+                                disabled={isProcessing}
+                                className="p-6 bg-slate-950 border border-slate-800 rounded-3xl text-left hover:border-emerald-500/50 transition-all group shadow-xl"
+                            >
+                                <div className="flex justify-between items-center mb-3">
+                                    <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-400 group-hover:scale-110 transition-transform"><Layers size={24}/></div>
+                                    {isProcessing && <Loader2 size={16} className="animate-spin text-emerald-500"/>}
+                                </div>
+                                <h4 className="text-xs font-black text-white uppercase tracking-widest mb-1">Sincronizar Todo</h4>
+                                <p className="text-[10px] text-slate-500 leading-relaxed uppercase font-bold">Recorre TODA la base de datos y actualiza nombres y precios según la configuración actual de Admin.</p>
+                            </button>
+
+                            <button 
+                                onClick={() => handleLibrarianAction('fixLibraryMetadata')} 
+                                disabled={isProcessing}
+                                className="p-6 bg-slate-950 border border-slate-800 rounded-3xl text-left hover:border-amber-500/50 transition-all group shadow-xl"
+                            >
+                                <div className="flex justify-between items-center mb-3">
+                                    <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-400 group-hover:scale-110 transition-transform"><AlertCircle size={24}/></div>
+                                </div>
+                                <h4 className="text-xs font-black text-white uppercase tracking-widest mb-1">Mantenimiento de Rotos</h4>
+                                <p className="text-[10px] text-slate-500 leading-relaxed uppercase font-bold">Detecta videos sin miniatura o duración y los devuelve al PASO 2 para ser re-escaneados.</p>
+                            </button>
+
+                            <button 
+                                onClick={() => handleLibrarianAction('adminRepairDb')} 
+                                disabled={isProcessing}
+                                className="p-6 bg-slate-950 border border-slate-800 rounded-3xl text-left hover:border-red-500/50 transition-all group shadow-xl"
+                            >
+                                <div className="flex justify-between items-center mb-3">
+                                    <div className="p-3 rounded-2xl bg-red-500/10 text-red-400 group-hover:scale-110 transition-transform"><Database size={24}/></div>
+                                </div>
+                                <h4 className="text-xs font-black text-white uppercase tracking-widest mb-1">Reparar MariaDB</h4>
+                                <p className="text-[10px] text-slate-500 leading-relaxed uppercase font-bold">Asegura que todas las tablas y columnas existan. Vital tras actualizaciones de sistema.</p>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 

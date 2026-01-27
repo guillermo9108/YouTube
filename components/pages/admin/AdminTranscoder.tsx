@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { 
     Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, 
     Filter, History, AlertCircle, Activity, Box, Radio, Trash2, Settings2, 
     Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert, 
-    FileText, ScrollText, Copy, FastForward, Save, PlusCircle, Loader2, Gauge, HardDrive
+    FileText, ScrollText, Copy, FastForward, Save, PlusCircle, Loader2, Gauge, HardDrive, Edit3
 } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
 import { Video } from '../../../types';
@@ -23,7 +22,6 @@ export default function AdminTranscoder() {
     const [isScanning, setIsScanning] = useState(false);
     const [showProfileEditor, setShowProfileEditor] = useState(false);
     const [showFailedList, setShowFailedList] = useState(false);
-    const [technicalLog, setTechnicalLog] = useState<string | null>(null);
 
     const [editingProfile, setEditingProfile] = useState({ 
         extension: '', 
@@ -38,7 +36,14 @@ export default function AdminTranscoder() {
 
     const loadData = async () => {
         try {
-            const all = await db.getAllVideos();
+            const [all, profileData, lStats, settings, realLogs] = await Promise.all([
+                db.getAllVideos(),
+                db.request<any[]>('action=admin_get_transcode_profiles'),
+                db.request<any>('action=admin_get_local_stats'),
+                db.getSystemSettings(),
+                db.request<string[]>('action=admin_get_logs')
+            ]);
+
             setAllVideos(all);
             setStats({
                 waiting: all.filter((v: any) => v.transcode_status === 'WAITING').length,
@@ -47,16 +52,9 @@ export default function AdminTranscoder() {
                 done: all.filter((v: any) => v.transcode_status === 'DONE').length
             });
             
-            const lStats: any = await db.request('action=admin_get_local_stats');
-            setActiveProcesses(lStats.active_processes || []);
-
-            const profileData: any = await db.request('action=admin_get_transcode_profiles');
             setProfiles(profileData || []);
-
-            const settings = await db.getSystemSettings();
+            setActiveProcesses(lStats.active_processes || []);
             setIsRunning(!!settings.is_transcoder_active);
-            
-            const realLogs: any = await db.request('action=admin_get_logs');
             if (Array.isArray(realLogs)) setLog(realLogs);
             
         } catch (e) {}
@@ -95,10 +93,10 @@ export default function AdminTranscoder() {
         try {
             toast.info("Iniciando conversión FFmpeg...");
             await db.request('action=admin_process_next_transcode', { method: 'POST' });
-            toast.success("Tarea completada con éxito");
+            toast.success("Tarea completada");
             loadData();
         } catch (e: any) {
-            toast.error("Fallo FFmpeg: Verifique el Log detallado.");
+            toast.error("Fallo FFmpeg");
         } finally {
             setIsProcessingSingle(false);
         }
@@ -108,6 +106,14 @@ export default function AdminTranscoder() {
         try {
             await db.request(`action=${action}`, { method: 'POST' });
             toast.success("Operación completada");
+            loadData();
+        } catch (e: any) { toast.error(e.message); }
+    };
+
+    const handleDeleteProfile = async (ext: string) => {
+        if (!confirm(`¿Borrar perfil .${ext}?`)) return;
+        try {
+            await db.request(`action=admin_delete_transcode_profile&extension=${ext}`, { method: 'POST' });
             loadData();
         } catch (e: any) { toast.error(e.message); }
     };
@@ -123,7 +129,7 @@ export default function AdminTranscoder() {
                 body: JSON.stringify({ 
                     extension: ext, 
                     command_args: args, 
-                    description: editingProfile.description || 'Optimizado para Synology 2.7.1 (Bruteforce Mode)'
+                    description: editingProfile.description || 'Optimizado Synology'
                 })
             });
             toast.success(`Perfil .${ext} guardado`);
@@ -131,20 +137,6 @@ export default function AdminTranscoder() {
             setEditingProfile({ extension: '', command_args: '', description: '' });
             loadData();
         } catch (e: any) { toast.error(e.message); }
-    };
-
-    const applyHardwarePreset = (level: 1 | 2 | 3) => {
-        const extensions = ['mkv', 'avi', 'ts', 'mov', 'flv'];
-        let args = '';
-        
-        switch(level) {
-            case 1: args = '-c copy'; break;
-            case 2: args = '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 1280x720 -aspect 16:9 -r 30 -b:v 2000k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100'; break;
-            case 3: args = '-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -s 854x480 -aspect 16:9 -r 24 -b:v 1000k -pix_fmt yuv420p -vtag avc1 -c:a aac -strict experimental -ac 2 -ar 44100'; break;
-        }
-
-        extensions.forEach(ext => handleSaveProfile(ext, args));
-        toast.success("Presets v2.7.1 (Bruteforce Mode) aplicados");
     };
 
     return (
@@ -181,99 +173,141 @@ export default function AdminTranscoder() {
                 </div>
             </div>
 
-            <div className="bg-slate-900 border border-indigo-500/30 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
-                <div className="absolute -right-10 -top-10 opacity-5 pointer-events-none rotate-12"><Gauge size={200}/></div>
-                <div className="relative z-10">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center"><Gauge size={28}/></div>
-                        <div>
-                            <h3 className="text-xl font-black text-white uppercase tracking-tighter italic leading-none">Perfiles Synology v2.7.1</h3>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Corrección de DAR 0:0 y 0-channels (Bruteforce)</p>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <button onClick={() => applyHardwarePreset(1)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-emerald-500/50 transition-all group">
-                            <div className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-1">Copia Directa</div>
-                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Re-empaquetado MP4 sin carga de CPU. Rápido y seguro.</p>
-                        </button>
-                        <button onClick={() => applyHardwarePreset(2)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-amber-500/50 transition-all group">
-                            <div className="text-xs font-black text-amber-400 uppercase tracking-widest mb-1">Bruteforce 720p</div>
-                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Ignora metadatos originales. Fuerza 1280x720, 16:9 y Audio Estéreo.</p>
-                        </button>
-                        <button onClick={() => applyHardwarePreset(3)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-left hover:border-red-500/50 transition-all group">
-                            <div className="text-xs font-black text-red-400 uppercase tracking-widest mb-1">Mobile SD 480p</div>
-                            <p className="text-[10px] text-slate-400 leading-relaxed mb-3">Bajo bitrate para máxima velocidad de red en NAS antiguos.</p>
-                        </button>
+            {activeProcesses.length > 0 && (
+                <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-6 shadow-xl animate-pulse">
+                    <h3 className="text-xs font-black text-emerald-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <RefreshCw size={14} className="animate-spin"/> Conversiones en curso
+                    </h3>
+                    <div className="space-y-3">
+                        {activeProcesses.map((p, i) => (
+                            <div key={i} className="bg-slate-950 p-4 rounded-2xl border border-white/5 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400"><Cpu size={20}/></div>
+                                    <div>
+                                        <div className="text-xs font-bold text-white uppercase truncate max-w-[200px]">{p.title || 'Video en proceso'}</div>
+                                        <div className="text-[9px] text-slate-500 font-mono">{p.pid ? `PID: ${p.pid}` : 'FFmpeg Instance'}</div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-xs font-black text-emerald-400">{p.progress || 0}%</div>
+                                    <div className="w-24 h-1 bg-slate-900 rounded-full overflow-hidden mt-1"><div className="h-full bg-emerald-500" style={{width: `${p.progress}%`}}></div></div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
-            </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-4 space-y-6">
-                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
-                        <div className="relative z-10">
-                            <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-4 flex items-center gap-2">
-                                <Cpu size={20} className={isRunning ? 'text-indigo-400 animate-pulse' : 'text-slate-600'}/>
-                                Motor Manual
-                            </h3>
-                            <div className="flex flex-col gap-2">
-                                <button 
-                                    onClick={handleProcessSingle} 
-                                    disabled={isProcessingSingle || stats.waiting === 0}
-                                    className={`w-full py-4 rounded-2xl font-black text-xs flex items-center justify-center gap-3 shadow-xl transition-all active:scale-95 bg-emerald-600 text-white disabled:opacity-50`}
-                                >
-                                    {isProcessingSingle ? <RefreshCw className="animate-spin" size={18}/> : <Play size={18} fill="currentColor"/>}
-                                    PROCESAR 1 TAREA
-                                </button>
-                                <button 
-                                    onClick={() => handleAction('admin_transcode_batch')} 
-                                    className="w-full py-3 rounded-2xl text-[10px] font-black uppercase text-white bg-indigo-600 border border-indigo-500 flex items-center justify-center gap-2 shadow-lg"
-                                >
-                                    ACTIVAR AUTO-BATCH
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
-                        <h3 className="font-bold text-white mb-4 text-xs uppercase flex items-center gap-2">
-                            <Filter size={14} className="text-indigo-400"/> Gestor Tareas
-                        </h3>
-                        <div className="space-y-3">
-                            <label className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer">
-                                <input type="checkbox" checked={filters.onlyNonMp4} onChange={e => setFilters({...filters, onlyNonMp4: e.target.checked})} className="accent-indigo-500 w-4 h-4"/>
-                                <span className="text-[11px] text-slate-300 font-bold uppercase">No-MP4</span>
-                            </label>
-                            <div className="grid grid-cols-2 gap-2 mt-4">
-                                <button onClick={() => handleScanFilter('PREVIEW')} disabled={isScanning} className="bg-slate-800 text-slate-300 py-2.5 rounded-lg text-[10px] font-black uppercase">Escanear</button>
-                                <button onClick={() => handleScanFilter('EXECUTE')} disabled={isScanning || scanResult === 0} className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 py-2.5 rounded-lg text-[10px] font-black uppercase">Encolar</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <div className="lg:col-span-8 space-y-6">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-lg font-black text-white uppercase flex items-center gap-2 italic tracking-tighter"><Gauge size={20} className="text-amber-500"/> Perfiles de Salida</h3>
+                            <button onClick={() => setShowProfileEditor(true)} className="p-2 bg-indigo-600 rounded-xl text-white hover:bg-indigo-500 transition-all"><Plus size={20}/></button>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3">
+                            {profiles.length === 0 ? (
+                                <div className="text-center py-10 opacity-30 uppercase text-[10px] font-black italic tracking-widest">Sin perfiles configurados</div>
+                            ) : profiles.map(p => (
+                                <div key={p.extension} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex items-center justify-between group">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="bg-indigo-600 text-white px-2 py-0.5 rounded text-[9px] font-black uppercase">.{p.extension}</span>
+                                            <span className="text-xs font-bold text-white">{p.description}</span>
+                                        </div>
+                                        <code className="text-[9px] text-slate-500 font-mono mt-2 block break-all opacity-60 group-hover:opacity-100 transition-opacity">ffmpeg {p.command_args}</code>
+                                    </div>
+                                    <button onClick={() => handleDeleteProfile(p.extension)} className="p-2 text-slate-600 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
                     <div className="bg-black rounded-2xl p-5 border border-slate-800 shadow-2xl h-80 flex flex-col">
                          <div className="flex justify-between items-center mb-3">
                              <div className="flex items-center gap-2 text-slate-500">
                                  <Terminal size={14}/>
-                                 <span className="text-[10px] font-black uppercase tracking-widest">Salida FFmpeg (Debug)</span>
+                                 <span className="text-[10px] font-black uppercase tracking-widest">Log Técnico FFmpeg</span>
                              </div>
-                             <button onClick={() => handleAction('admin_clear_logs')} className="text-[9px] text-slate-600 hover:text-white uppercase font-bold">Limpiar</button>
+                             <div className="flex gap-2">
+                                <button onClick={() => handleAction('admin_clear_logs')} className="text-[9px] text-slate-600 hover:text-white uppercase font-bold bg-slate-800 px-2 py-1 rounded">Limpiar</button>
+                                <button onClick={loadData} className="text-[9px] text-indigo-400 hover:text-white uppercase font-bold bg-indigo-500/10 px-2 py-1 rounded">Actualizar</button>
+                             </div>
                          </div>
                          <div className="font-mono text-[10px] flex-1 overflow-y-auto space-y-1 custom-scrollbar text-slate-500">
-                            {log.map((line, i) => (
-                                <div key={i} className={`flex gap-3 ${line.includes('ERROR') || line.includes('fail') || line.includes('opening encoder') || line.includes('DAR 0:0') ? 'text-red-500' : 'text-slate-600'}`}>
-                                    <span className="opacity-20 shrink-0">[{i}]</span>
-                                    <span className="break-all">{line}</span>
-                                </div>
-                            ))}
-                            {log.length === 0 && <p className="italic opacity-30">Listo para convertir...</p>}
+                            {log.map((line, i) => {
+                                const isError = line.includes('ERROR') || line.includes('fail') || line.includes('DAR 0:0');
+                                return (
+                                    <div key={i} className={`flex gap-3 ${isError ? 'text-red-500' : 'text-slate-600'}`}>
+                                        <span className="opacity-20 shrink-0">[{i}]</span>
+                                        <span className="break-all">{line}</span>
+                                    </div>
+                                );
+                            })}
                          </div>
                     </div>
                 </div>
+
+                <div className="lg:col-span-4 space-y-6">
+                    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+                        <h3 className="text-sm font-black text-white uppercase tracking-tighter mb-4 flex items-center gap-2"><Cpu size={18}/> Controles de Flujo</h3>
+                        <div className="space-y-2">
+                            <button onClick={handleProcessSingle} disabled={isProcessingSingle || stats.waiting === 0} className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50">
+                                {isProcessingSingle ? <RefreshCw className="animate-spin" size={16}/> : <Play size={16} fill="currentColor"/>} Iniciar 1 Tarea
+                            </button>
+                            <button onClick={() => handleAction('admin_retry_failed_transcodes')} className="w-full py-3 bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white rounded-2xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
+                                <RotateCcw size={14}/> Reintentar Fallidos
+                            </button>
+                            <button onClick={() => handleAction('admin_clear_transcode_queue')} className="w-full py-3 bg-red-950/20 hover:bg-red-600 text-red-500 hover:text-white rounded-2xl text-[10px] font-black uppercase transition-all border border-red-900/30 flex items-center justify-center gap-2">
+                                <Trash2 size={14}/> Vaciar Cola
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                        <h3 className="font-bold text-white mb-4 text-xs uppercase flex items-center gap-2"><Filter size={14}/> Filtros de Auto-Encolado</h3>
+                        <div className="space-y-3">
+                            <label className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer">
+                                <input type="checkbox" checked={filters.onlyNonMp4} onChange={e => setFilters({...filters, onlyNonMp4: e.target.checked})} className="accent-indigo-500 w-4 h-4"/>
+                                <span className="text-[11px] text-slate-300 font-bold uppercase">Solo no-MP4</span>
+                            </label>
+                            <div className="grid grid-cols-2 gap-2 mt-4">
+                                <button onClick={() => handleScanFilter('PREVIEW')} disabled={isScanning} className="bg-slate-800 text-slate-300 py-2.5 rounded-lg text-[10px] font-black uppercase">Escanear</button>
+                                <button onClick={() => handleScanFilter('EXECUTE')} disabled={isScanning} className="bg-indigo-600 text-white py-2.5 rounded-lg text-[10px] font-black uppercase">Encolar</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            {/* Modal: Fallidos */}
+            {showFailedList && (
+                <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-white/10 w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95">
+                        <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                            <div>
+                                <h3 className="font-black text-white uppercase text-sm">Videos con Error</h3>
+                                <p className="text-[10px] text-red-400 font-bold uppercase">Requieren revisión manual de códec</p>
+                            </div>
+                            <button onClick={() => setShowFailedList(false)} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white"><X/></button>
+                        </div>
+                        <div className="max-h-[60vh] overflow-y-auto custom-scrollbar p-4 space-y-3">
+                            {failedVideos.map(v => (
+                                <div key={v.id} className="bg-slate-950 border border-red-900/20 p-4 rounded-2xl flex items-center justify-between group">
+                                    <div className="min-w-0">
+                                        <div className="text-xs font-bold text-white truncate max-w-[250px]">{v.title}</div>
+                                        <div className="text-[10px] text-red-500 font-bold uppercase mt-1 italic">{v.reason || 'Error desconocido de FFmpeg'}</div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => handleAction(`admin_remove_from_queue&videoId=${v.id}`)} className="p-2 bg-slate-900 rounded-xl text-slate-500 hover:text-red-500"><Trash2 size={14}/></button>
+                                        <button onClick={() => handleAction(`admin_skip_transcode&videoId=${v.id}`)} className="p-2 bg-slate-900 rounded-xl text-slate-500 hover:text-indigo-400" title="Marcar como LISTO (Ignorar error)"><FastForward size={14}/></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Modal: Perfil Editor */}
             {showProfileEditor && (
@@ -289,14 +323,20 @@ export default function AdminTranscoder() {
                                 <input type="text" value={editingProfile.extension} onChange={e => setEditingProfile({...editingProfile, extension: e.target.value.toLowerCase()})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono text-sm outline-none focus:border-indigo-500" placeholder="ts" />
                             </div>
                             <div>
-                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">Argumentos FFmpeg (v2.7.1)</label>
-                                <textarea rows={4} value={editingProfile.command_args} onChange={e => setEditingProfile({...editingProfile, command_args: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono text-xs outline-none focus:border-indigo-500" placeholder="-c:v libx264 ..." />
+                                <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">Argumentos FFmpeg</label>
+                                <textarea rows={4} value={editingProfile.command_args} onChange={e => setEditingProfile({...editingProfile, command_args: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono text-xs outline-none focus:border-indigo-500" />
                             </div>
-                            <button onClick={() => handleSaveProfile()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl transition-all">GUARDAR</button>
+                            <button onClick={() => handleSaveProfile()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl transition-all">GUARDAR PERFIL</button>
                         </div>
                     </div>
                 </div>
             )}
+            
+            <style>{`
+                .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+                .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+            `}</style>
         </div>
     );
 }
