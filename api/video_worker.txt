@@ -47,6 +47,9 @@ for ($i = 0; $i < $batchSize; $i++) {
         continue;
     }
 
+    $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    $isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a']);
+
     // Extraer Duración Real
     $duration = 0;
     $probe = shell_exec("$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath));
@@ -58,15 +61,20 @@ for ($i = 0; $i < $batchSize; $i++) {
     }
 
     // Miniatura
-    $thumbFile = 'uploads/thumbnails/' . $video['id'] . '.jpg';
-    $fullThumb = __DIR__ . '/' . $thumbFile;
-    $capture = ($duration > 10) ? "00:00:05" : "00:00:01";
-    
-    exec("$ffmpeg -y -ss $capture -i " . escapeshellarg($realPath) . " -frames:v 1 -q:v 2 " . escapeshellarg($fullThumb));
+    $thumbUrl = '';
+    if ($isAudio) {
+        $thumbUrl = 'api/uploads/thumbnails/defaultaudio.jpg';
+    } else {
+        $thumbFile = 'uploads/thumbnails/' . $video['id'] . '.jpg';
+        $fullThumb = __DIR__ . '/' . $thumbFile;
+        $capture = ($duration > 10) ? "00:00:05" : "00:00:01";
+        exec("$ffmpeg -y -ss $capture -i " . escapeshellarg($realPath) . " -frames:v 1 -q:v 2 " . escapeshellarg($fullThumb));
+        $thumbUrl = 'api/' . $thumbFile;
+    }
 
     // Guardar y Organizar
-    $pdo->prepare("UPDATE videos SET duration = ?, thumbnailUrl = ?, category = 'PROCESSING', locked_at = 0 WHERE id = ?")
-        ->execute([$duration, 'api/' . $thumbFile, $video['id']]);
+    $pdo->prepare("UPDATE videos SET duration = ?, thumbnailUrl = ?, category = 'PROCESSING', locked_at = 0, is_audio = ? WHERE id = ?")
+        ->execute([$duration, $thumbUrl, ($isAudio ? 1 : 0), $video['id']]);
 
     $sets = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
     video_organize_single($pdo, $video['id'], $sets);

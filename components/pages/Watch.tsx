@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart, Music
+    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart, Music, ChevronDown
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -26,6 +26,7 @@ export default function Watch() {
     const [isPurchasing, setIsPurchasing] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
+    const [visibleRelated, setVisibleRelated] = useState(12);
     
     const [likes, setLikes] = useState<number>(0);
     const [dislikes, setDislikes] = useState<number>(0);
@@ -42,6 +43,7 @@ export default function Watch() {
         refreshUser(); 
         viewMarkedRef.current = false;
         setThrottled(true);
+        setVisibleRelated(12);
         return () => { setThrottled(false); };
     }, [id]);
 
@@ -62,7 +64,6 @@ export default function Watch() {
                     setLikes(Number(v.likes || 0));
                     setDislikes(Number(v.dislikes || 0));
 
-                    // Lógica de "Relacionados" basada en el Explorador de Carpetas
                     const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
                     
                     const siblings = all.filter(ov => {
@@ -75,7 +76,7 @@ export default function Watch() {
                         if (ov.id === v.id) return false;
                         const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
                         return ovPath !== currentPath;
-                    }).sort(() => Math.random() - 0.5).slice(0, 20);
+                    }).sort(() => Math.random() - 0.5);
 
                     setRelatedVideos([...siblings, ...otherVideos]);
                     db.getComments(v.id).then(setComments);
@@ -163,7 +164,7 @@ export default function Watch() {
                 </div>
             </div>
 
-            <div className="max-w-7xl mx-auto w-full p-4 lg:p-8 flex flex-col lg:row gap-8">
+            <div className="max-w-7xl mx-auto w-full p-4 lg:p-8 flex flex-col lg:flex-row gap-8">
                 <div className="flex-1">
                     <h1 className="text-2xl font-black text-white mb-4 uppercase italic tracking-tighter">{video?.title}</h1>
                     <div className="flex items-center gap-4 border-b border-white/5 pb-6 mb-6">
@@ -177,19 +178,30 @@ export default function Watch() {
                 </div>
 
                 <div className="lg:w-80 space-y-4">
-                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-2">Explorador: Siguiente en Carpeta</h3>
-                    {relatedVideos.map((v, idx) => (
-                        <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
-                            <div className="w-28 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
-                                <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
-                                {idx === 0 && <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center"><Play size={20} className="text-white"/></div>}
-                            </div>
-                            <div className="flex-1 min-w-0 py-1">
-                                <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight group-hover:text-indigo-400">{v.title}</h4>
-                                <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
-                            </div>
-                        </Link>
-                    ))}
+                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-2">Explorador: Recomendados</h3>
+                    <div className="space-y-4">
+                        {relatedVideos.slice(0, visibleRelated).map((v, idx) => (
+                            <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
+                                <div className="w-28 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
+                                    <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
+                                    {idx === 0 && <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center"><Play size={20} className="text-white"/></div>}
+                                </div>
+                                <div className="flex-1 min-w-0 py-1">
+                                    <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight group-hover:text-indigo-400">{v.title}</h4>
+                                    <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+
+                    {relatedVideos.length > visibleRelated && (
+                        <button 
+                            onClick={() => setVisibleRelated(prev => prev + 12)}
+                            className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-2xl border border-slate-800 transition-all flex items-center justify-center gap-2"
+                        >
+                            <ChevronDown size={14}/> Cargar más
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
