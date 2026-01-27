@@ -37,6 +37,7 @@ jobs:
         # Copiar archivos PHP al dist/api
         cp api/index_code.txt dist/api/index.php 2>/dev/null || :
         cp api/install_code.txt dist/api/install.php 2>/dev/null || :
+        cp api/video_worker.txt dist/api/video_worker.php 2>/dev/null || :
         
         # Copiar módulos de funciones (convertir .txt a .php)
         for file in api/functions_*.txt; do
