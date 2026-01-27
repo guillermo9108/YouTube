@@ -1,3 +1,4 @@
+
 import { 
     User, Video, Transaction, VipPlan, Comment, UserInteraction, 
     Notification as AppNotification, VideoResult, ContentRequest, 
@@ -46,18 +47,12 @@ class DBService {
         });
     }
 
-    /**
-     * Obtiene videos con patron Stale-While-Revalidate para maxima fluidez
-     */
     public async getAllVideos(): Promise<Video[]> { 
-        // 1. Devolver cache inmediatamente si existe
         const cached = localStorage.getItem('sp_cache_vids');
         if (cached && !this.homeDirty) {
-            // Disparamos fetch en segundo plano para actualizar
             this.syncVideosInBackground();
             return JSON.parse(cached);
         }
-
         return this.syncVideosInBackground();
     }
 
@@ -203,6 +198,13 @@ class DBService {
 
     public async updateSystemSettings(settings: Partial<SystemSettings>): Promise<void> {
         return this.request<void>('action=update_system_settings', { method: 'POST', body: JSON.stringify(settings) });
+    }
+
+    public async updateCategoryPrice(categoryId: string, newPrice: number, syncVideos: boolean): Promise<void> {
+        return this.request<void>('action=admin_update_category_price', { 
+            method: 'POST', 
+            body: JSON.stringify({ categoryId, newPrice, syncVideos }) 
+        });
     }
 
     public async hasPurchased(userId: string, videoId: string): Promise<boolean> {
