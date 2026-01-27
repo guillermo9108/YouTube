@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
@@ -13,7 +14,6 @@ const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivit
 
 // --- Componentes Auxiliares ---
 
-// Fix: Use React.FC to ensure standard React component typing and support for intrinsic props
 const Sidebar: React.FC<{ isOpen: boolean, onClose: () => void, user: User | null, isAdmin: boolean, logout: () => void }> = ({ isOpen, onClose, user, isAdmin, logout }) => {
     const navigate = useNavigate();
     if (!isOpen) return null;
@@ -76,7 +76,6 @@ const Sidebar: React.FC<{ isOpen: boolean, onClose: () => void, user: User | nul
     );
 };
 
-// Fix: Use React.FC to ensure standard React component typing
 const Breadcrumbs: React.FC<{ path: string[], onNavigate: (index: number) => void }> = ({ path, onNavigate }) => (
     <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in sticky top-0 bg-black/80 backdrop-blur-md z-20">
         <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors shrink-0">
@@ -96,7 +95,6 @@ const Breadcrumbs: React.FC<{ path: string[], onNavigate: (index: number) => voi
     </div>
 );
 
-// Fix: Use React.FC to allow standard React props like 'key' when used in list mapping (fixes error on line 298)
 const SubCategoryCard: React.FC<{ name: string, videos: Video[], onClick: () => void }> = ({ name, videos, onClick }) => {
     const randomThumb = useMemo(() => {
         if (!videos || videos.length === 0) return null;
@@ -109,7 +107,7 @@ const SubCategoryCard: React.FC<{ name: string, videos: Video[], onClick: () => 
         <button onClick={onClick} className="group relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-sm hover:shadow-xl hover:shadow-indigo-500/10 hover:scale-[1.02] transition-all duration-300 ring-1 ring-white/5">
             {randomThumb ? <img src={randomThumb} className="w-full h-full object-cover opacity-50 group-hover:opacity-70 group-hover:scale-110 transition-all duration-700" alt={name} /> : <div className="w-full h-full flex items-center justify-center text-slate-700"><Folder size={48} /></div>}
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent"></div>
-            <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-indigo-600/90 backdrop-blur-md px-2 py-1 rounded-md shadow-lg border border-white/10"><Layers size={10} className="text-white"/><span className="text-[8px] font-black text-white uppercase tracking-widest">CARPETA</span></div>
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-indigo-600/90 backdrop-blur-md px-2 py-1 rounded-md shadow-lg border border-white/10"><Layers size={10} className="text-white"/><span className="text-[8px] font-black text-white uppercase tracking-widest">CATEGORÍA</span></div>
             <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
                 <h3 className="text-lg md:text-xl font-black text-white uppercase tracking-tighter leading-none drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors">{name}</h3>
                 <div className="mt-2 bg-black/40 backdrop-blur-md px-3 py-0.5 rounded-full border border-white/5"><span className="text-[10px] text-slate-300 font-black uppercase tracking-widest">{videos?.length || 0} Archivos</span></div>
@@ -193,7 +191,7 @@ export default function Home() {
         else if (s.type === 'USER') navigate(`/channel/${s.id}`);
     };
 
-    // --- Lógica de Explorador de Carpetas Real ---
+    // --- Lógica de Explorador de Categorías Globales (Tag-based) ---
     
     const getRelativeSegments = (video: Video) => {
         const raw = (video as any).rawPath || video.videoUrl;
@@ -207,31 +205,41 @@ export default function Home() {
     const currentExploration = useMemo(() => {
         if (searchQuery) return { folders: [], videos: [] };
 
-        const currentVideosInPath = allVideos.filter(v => {
+        // 1. Filtrar videos que contienen TODOS los segmentos de la ruta actual
+        const matchingVideos = allVideos.filter(v => {
             const segments = getRelativeSegments(v);
-            return navigationPath.every((seg, i) => segments[i] === seg);
+            // Cada segmento del navigationPath debe existir en los segmentos del video
+            return navigationPath.every(navSeg => segments.includes(navSeg));
         });
 
-        // 1. Extraer Subcarpetas únicas del siguiente nivel
+        // 2. Extraer "Carpetas" (Siguientes Tags Disponibles)
         const foldersMap = new Map<string, Video[]>();
-        currentVideosInPath.forEach(v => {
+        matchingVideos.forEach(v => {
             const segments = getRelativeSegments(v);
-            const nextSegment = segments[navigationPath.length];
-            // Si hay un segmento siguiente y no es el archivo mismo (el archivo es el último segmento)
-            if (nextSegment && segments.length > navigationPath.length + 1) {
-                if (!foldersMap.has(nextSegment)) foldersMap.set(nextSegment, []);
-                foldersMap.get(nextSegment)!.push(v);
+            
+            if (navigationPath.length === 0) {
+                // En la raíz, las carpetas son el primer nivel de cada video
+                const rootTag = segments[0];
+                if (rootTag && segments.length > 1) { // Solo si no es un archivo suelto en root
+                    if (!foldersMap.has(rootTag)) foldersMap.set(rootTag, []);
+                    foldersMap.get(rootTag)!.push(v);
+                }
+            } else {
+                // Dentro de una categoría, buscamos el segmento inmediatamente posterior a la última tag
+                const lastTag = navigationPath[navigationPath.length - 1];
+                const lastTagIndex = segments.lastIndexOf(lastTag);
+                const nextTag = segments[lastTagIndex + 1];
+                
+                // Solo mostramos como carpeta si hay más niveles después de esta tag
+                if (nextTag && segments.length > lastTagIndex + 2) {
+                    if (!foldersMap.has(nextTag)) foldersMap.set(nextTag, []);
+                    foldersMap.get(nextTag)!.push(v);
+                }
             }
         });
 
-        // 2. Extraer Videos que están EXACTAMENTE en esta carpeta
-        const directVideos = currentVideosInPath.filter(v => {
-            const segments = getRelativeSegments(v);
-            return segments.length === navigationPath.length + 1;
-        });
-
-        // Ordenar
-        const sortedVideos = [...directVideos].sort((a, b) => {
+        // 3. Videos Resultantes (Todos los que coinciden con los tags actuales, acumulativos)
+        const sortedVideos = [...matchingVideos].sort((a, b) => {
             const catDef = categories.find(c => c.name === navigationPath[0]);
             const mode = catDef?.sortOrder || 'LATEST';
             if (mode === 'ALPHA') return naturalCollator.compare(a.title, b.title);
@@ -239,7 +247,9 @@ export default function Home() {
         });
 
         return {
-            folders: Array.from(foldersMap.entries()).map(([name, vids]) => ({ name, videos: vids })),
+            folders: Array.from(foldersMap.entries())
+                .map(([name, vids]) => ({ name, videos: vids }))
+                .sort((a, b) => naturalCollator.compare(a.name, b.name)),
             videos: sortedVideos
         };
     }, [navigationPath, allVideos, searchQuery, systemSettings, categories]);
@@ -310,7 +320,7 @@ export default function Home() {
                             ))}
                         </div>
                     ) : currentExploration.folders.length === 0 && (
-                        <div className="text-center py-40 opacity-20"><Folder size={80} className="mx-auto mb-4" /><p className="font-black uppercase tracking-widest">Carpeta Vacía</p></div>
+                        <div className="text-center py-40 opacity-20"><Folder size={80} className="mx-auto mb-4" /><p className="font-black uppercase tracking-widest">Sin contenido disponible</p></div>
                     )}
                 </div>
             )}
