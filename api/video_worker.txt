@@ -1,13 +1,11 @@
 <?php
 /**
- * StreamPay - Server-Side Video Worker V1.2.1 (Corregido)
- * Procesa la cola de videos PENDING y los organiza jerárquicamente.
+ * StreamPay - Server-Side Video Worker V1.3.0 (Verbose Diagnostic Edition)
+ * Procesa la cola de videos PENDING con logs detallados para Synology.
  */
 
 set_time_limit(600);
 ini_set('memory_limit', '512M');
-
-// Mostrar errores en el log para debug (puedes quitarlo luego)
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
@@ -15,85 +13,141 @@ require_once 'functions_utils.php';
 require_once 'functions_videos.php';
 
 $configFile = 'db_config.json';
-if (!file_exists($configFile)) die("No instalado\n");
+if (!file_exists($configFile)) {
+    die("[FATAL] db_config.json no encontrado. El sistema no está instalado.\n");
+}
 $config = json_decode(file_get_contents($configFile), true);
 
 try {
-    // CORRECCIÓN: Se añade el campo 'port' al DSN de conexión
     $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['name']};charset=utf8mb4";
-    
     $pdo = new PDO($dsn, $config['user'], $config['password'], [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4"
     ]);
 } catch (Exception $e) { 
-    // Ahora te dirá EXACTAMENTE por qué falla la conexión
-    die("Error BD: " . $e->getMessage() . "\n"); 
+    die("[FATAL] Error de conexión a MariaDB: " . $e->getMessage() . "\n"); 
 }
 
+// Obtener rutas de herramientas
 $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
-$ffmpeg = $stmtS->fetchColumn() ?: '/usr/bin/ffmpeg'; // Ruta estándar en Synology
+$ffmpeg = $stmtS->fetchColumn() ?: '/usr/bin/ffmpeg';
 $ffprobe = str_replace('ffmpeg', 'ffprobe', $ffmpeg);
+
+// Verificar existencia de binarios
+$ffExists = is_executable($ffmpeg);
+$fpExists = is_executable($ffprobe);
+
+echo "--- STREAM PAY WORKER INICIADO ---\n";
+echo "[INFO] Fecha: " . date('Y-m-d H:i:s') . "\n";
+echo "[INFO] FFmpeg Path: $ffmpeg (" . ($ffExists ? "OK" : "NO ENCONTRADO") . ")\n";
+echo "[INFO] FFprobe Path: $ffprobe (" . ($fpExists ? "OK" : "NO ENCONTRADO") . ")\n";
 
 $batchSize = 10;
 $processed = 0;
-
-write_log("Worker iniciado modo explorador.", 'INFO');
+$failed = 0;
 
 for ($i = 0; $i < $batchSize; $i++) {
     $now = time();
+    // Buscamos videos PENDING, con menos de 3 intentos, y no bloqueados en los últimos 5 min
     $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? ORDER BY createdAt ASC LIMIT 1");
     $stmt->execute([$now - 300]);
     $video = $stmt->fetch();
 
-    if (!$video) break;
+    if (!$video) {
+        echo "[INFO] No hay más videos PENDING en la cola.\n";
+        break;
+    }
 
-    $processed++;
+    echo "[TAREA " . ($i+1) . "] Procesando ID: {$video['id']} - '{$video['title']}'\n";
+
+    // 1. Bloqueo inmediato
     $pdo->prepare("UPDATE videos SET locked_at = ? WHERE id = ?")->execute([$now, $video['id']]);
     
     $realPath = resolve_video_path($video['videoUrl']);
+    
+    // 2. Verificaciones de acceso físico
     if (!$realPath || !file_exists($realPath)) {
-        $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = '404', locked_at = 0 WHERE id = ?")->execute([$video['id']]);
+        echo "[ERROR] El archivo no existe físicamente: {$video['videoUrl']}\n";
+        $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = 'Archivo no encontrado (404)', locked_at = 0 WHERE id = ?")->execute([$video['id']]);
+        $failed++;
+        continue;
+    }
+
+    if (!is_readable($realPath)) {
+        echo "[ERROR] Permisos de lectura insuficientes para el usuario PHP en: $realPath\n";
+        $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, reason = 'Error de lectura (Permisos)', locked_at = 0 WHERE id = ?")->execute([$video['id']]);
+        $failed++;
         continue;
     }
 
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
-    $isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a']);
+    $isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a', 'flac']);
 
-    // Extraer Duración Real
-    $duration = 0;
-    $probe = shell_exec("$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath));
-    if ($probe) $duration = floor(floatval(trim($probe)));
+    // 3. Extraer Duración con FFprobe
+    echo "[INFO] Ejecutando FFprobe...\n";
+    $cmdProbe = "$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath) . " 2>&1";
+    $probeOutput = shell_exec($cmdProbe);
+    $duration = floor(floatval(trim($probeOutput)));
 
     if ($duration <= 0) {
-        $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, locked_at = 0 WHERE id = ?")->execute([$video['id']]);
+        echo "[ERROR] FFprobe no pudo obtener la duración. Salida: " . ($probeOutput ?: "Vacia") . "\n";
+        $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, reason = 'Error FFprobe (Duracion 0)', locked_at = 0 WHERE id = ?")->execute([$video['id']]);
+        $failed++;
         continue;
     }
+    echo "[SUCCESS] Duración detectada: $duration segundos.\n";
 
-    // Miniatura
+    // 4. Extraer Miniatura con FFmpeg
     $thumbUrl = '';
     if ($isAudio) {
         $thumbUrl = 'api/uploads/thumbnails/defaultaudio.jpg';
+        echo "[INFO] Es un archivo de audio, usando carátula por defecto.\n";
     } else {
         $thumbFile = 'uploads/thumbnails/' . $video['id'] . '.jpg';
-        $fullThumb = __DIR__ . '/' . $thumbFile;
-        $capture = ($duration > 10) ? "00:00:05" : "00:00:01";
+        $fullThumbPath = __DIR__ . '/' . $thumbFile;
+        $thumbDir = dirname($fullThumbPath);
+
+        // Verificar permisos de escritura en carpeta de destino
+        if (!is_writable($thumbDir)) {
+            echo "[ERROR] No se puede escribir en la carpeta de miniaturas: $thumbDir\n";
+            $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, reason = 'Error escritura miniaturas', locked_at = 0 WHERE id = ?")->execute([$video['id']]);
+            $failed++;
+            continue;
+        }
+
+        $captureTime = ($duration > 10) ? "00:00:05" : "00:00:01";
+        $cmdFfmpeg = "$ffmpeg -y -ss $captureTime -i " . escapeshellarg($realPath) . " -frames:v 1 -q:v 2 " . escapeshellarg($fullThumbPath) . " 2>&1";
         
-        // Usamos exec para mayor compatibilidad
-        exec("$ffmpeg -y -ss $capture -i " . escapeshellarg($realPath) . " -frames:v 1 -q:v 2 " . escapeshellarg($fullThumb));
-        $thumbUrl = 'api/' . $thumbFile;
+        echo "[INFO] Ejecutando FFmpeg: $cmdFfmpeg\n";
+        exec($cmdFfmpeg, $output, $returnCode);
+
+        if ($returnCode === 0 && file_exists($fullThumbPath)) {
+            $thumbUrl = 'api/' . $thumbFile;
+            echo "[SUCCESS] Miniatura generada correctamente.\n";
+        } else {
+            echo "[ERROR] FFmpeg falló (Code $returnCode). Salida:\n" . implode("\n", array_slice($output, -5)) . "\n";
+            // No detenemos el proceso, pero registramos el fallo
+            $thumbUrl = 'api/uploads/thumbnails/default.jpg';
+        }
     }
 
-    // Guardar y Organizar
+    // 5. Guardar metadatos y mover a etapa de Organización
+    echo "[INFO] Actualizando base de datos...\n";
     $pdo->prepare("UPDATE videos SET duration = ?, thumbnailUrl = ?, category = 'PROCESSING', locked_at = 0, is_audio = ? WHERE id = ?")
         ->execute([$duration, $thumbUrl, ($isAudio ? 1 : 0), $video['id']]);
 
+    // 6. Ejecutar Organización Automática (Paso 3) inmediatamente
     $sets = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
     video_organize_single($pdo, $video['id'], $sets);
     
-    echo "Procesado: {$video['title']}\n";
+    echo "[OK] '{$video['title']}' procesado y publicado.\n\n";
+    $processed++;
 }
 
-write_log("Worker finalizado. Procesados: $processed", 'INFO');
+write_log("Worker finalizado. Exitos: $processed, Fallos en este ciclo: $failed", 'INFO');
+echo "--- RESUMEN FINAL ---\n";
+echo "Exitosos: $processed\n";
+echo "Fallidos: $failed\n";
+echo "---------------------\n";
 ?>
