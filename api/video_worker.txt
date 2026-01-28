@@ -1,7 +1,7 @@
 <?php
 /**
- * StreamPay - Server-Side Video Worker V1.4.1 (NAS Optimized)
- * Procesa la cola de videos PENDING con auto-detección de binarios.
+ * StreamPay - Server-Side Video Worker V1.4.2 (NAS Optimized)
+ * Procesa la cola de videos PENDING con soporte para Audio y Video.
  */
 
 set_time_limit(900);
@@ -51,12 +51,7 @@ if (!$ffmpeg || !is_executable($ffmpeg)) {
     }
 }
 
-/**
- * CORRECCIÓN CRÍTICA:
- * No usamos str_replace ya que en Synology la ruta suele ser /volume1/@appstore/ffmpeg/bin/ffmpeg
- * str_replace cambiaría AMBOS 'ffmpeg' por 'ffprobe', resultando en una carpeta inexistente.
- * Usamos dirname para mantener la carpeta intacta y solo cambiar el binario.
- */
+// Autodetección de FFprobe basada en FFmpeg
 $ffprobe = (strpos($ffmpeg, DIRECTORY_SEPARATOR) !== false) 
     ? dirname($ffmpeg) . DIRECTORY_SEPARATOR . 'ffprobe' 
     : 'ffprobe';
@@ -65,10 +60,6 @@ echo "--- DIAGNÓSTICO DE ENTORNO ---\n";
 echo "[INFO] PHP User: " . get_current_user() . " (UID: " . getmyuid() . ")\n";
 echo "[INFO] FFmpeg: $ffmpeg " . (is_executable($ffmpeg) ? "[OK]" : "[NO EJECUTABLE]") . "\n";
 echo "[INFO] FFprobe: $ffprobe " . (is_executable($ffprobe) ? "[OK]" : "[NO EJECUTABLE]") . "\n";
-
-// Verificar open_basedir
-$obd = ini_get('open_basedir');
-if ($obd) echo "[WARN] open_basedir activo: $obd\n";
 
 $batchSize = 10;
 $processed = 0;
@@ -100,7 +91,7 @@ for ($i = 0; $i < $batchSize; $i++) {
         continue;
     }
 
-    // Extraer Duración
+    // A. Extraer Duración (Funciona para Audio y Video)
     $cmdProbe = "$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath) . " 2>&1";
     $durOutput = shell_exec($cmdProbe);
     $duration = floor(floatval(trim($durOutput)));
@@ -112,16 +103,33 @@ for ($i = 0; $i < $batchSize; $i++) {
         continue;
     }
 
-    // Extraer Miniatura
-    $thumbFile = 'uploads/thumbnails/' . $video['id'] . '.jpg';
-    $fullThumbPath = __DIR__ . '/' . $thumbFile;
-    $time = ($duration > 5) ? "00:00:03" : "00:00:01";
-    
-    $cmdFfmpeg = "$ffmpeg -y -ss $time -i " . escapeshellarg($realPath) . " -frames:v 1 -q:v 4 " . escapeshellarg($fullThumbPath) . " 2>&1";
-    exec($cmdFfmpeg, $ffOutput, $ffCode);
+    // B. Manejo de Miniatura (Detectar si es audio para no fallar en FFmpeg)
+    $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    $isAudio = (bool)$video['is_audio'] || in_array($ext, ['mp3', 'wav', 'aac', 'm4a', 'flac', 'ogg']);
+    $thumbUrl = '';
+    $ffCode = 0;
+    $ffOutput = [];
 
+    if ($isAudio) {
+        // Para audios usamos la miniatura por defecto directamente
+        $thumbUrl = 'api/uploads/thumbnails/defaultaudio.jpg';
+        echo "[INFO] Audio detectado. Usando miniatura defaultaudio.jpg\n";
+    } else {
+        // Para videos intentamos extraer un frame
+        $thumbFile = 'uploads/thumbnails/' . $video['id'] . '.jpg';
+        $fullThumbPath = __DIR__ . '/' . $thumbFile;
+        $time = ($duration > 5) ? "00:00:03" : "00:00:01";
+        
+        $cmdFfmpeg = "$ffmpeg -y -ss $time -i " . escapeshellarg($realPath) . " -frames:v 1 -q:v 4 " . escapeshellarg($fullThumbPath) . " 2>&1";
+        exec($cmdFfmpeg, $ffOutput, $ffCode);
+        
+        if ($ffCode === 0) {
+            $thumbUrl = 'api/' . $thumbFile;
+        }
+    }
+
+    // C. Finalizar Tarea
     if ($ffCode === 0) {
-        $thumbUrl = 'api/' . $thumbFile;
         echo "[SUCCESS] Procesado OK. Duración: $duration s.\n";
         $pdo->prepare("UPDATE videos SET duration = ?, thumbnailUrl = ?, category = 'PROCESSING', locked_at = 0, processing_attempts = 0 WHERE id = ?")
             ->execute([$duration, $thumbUrl, $video['id']]);
@@ -131,7 +139,8 @@ for ($i = 0; $i < $batchSize; $i++) {
         video_organize_single($pdo, $video['id'], $sets);
         $processed++;
     } else {
-        echo "[ERROR] FFmpeg falló (Code $ffCode): " . end($ffOutput) . "\n";
+        $errorMsg = !empty($ffOutput) ? end($ffOutput) : "Error desconocido FFmpeg";
+        echo "[ERROR] FFmpeg falló (Code $ffCode): $errorMsg\n";
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, locked_at = 0 WHERE id = ?")->execute([$video['id']]);
         $failed++;
     }
