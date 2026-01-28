@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Server-Side Video Worker V1.4.0 (NAS Optimized)
+ * StreamPay - Server-Side Video Worker V1.4.1 (NAS Optimized)
  * Procesa la cola de videos PENDING con auto-detección de binarios.
  */
 
@@ -35,6 +35,7 @@ if (!$ffmpeg || !is_executable($ffmpeg)) {
     $search_paths = [
         '/usr/bin/ffmpeg',
         '/usr/local/bin/ffmpeg',
+        '/volume1/@appstore/ffmpeg/bin/ffmpeg',
         '/volume1/@appstore/VideoStation/bin/ffmpeg',
         '/volume1/@appstore/CodecPack/bin/ffmpeg',
         'ffmpeg' // fallback a global
@@ -50,7 +51,15 @@ if (!$ffmpeg || !is_executable($ffmpeg)) {
     }
 }
 
-$ffprobe = str_replace('ffmpeg', 'ffprobe', $ffmpeg);
+/**
+ * CORRECCIÓN CRÍTICA:
+ * No usamos str_replace ya que en Synology la ruta suele ser /volume1/@appstore/ffmpeg/bin/ffmpeg
+ * str_replace cambiaría AMBOS 'ffmpeg' por 'ffprobe', resultando en una carpeta inexistente.
+ * Usamos dirname para mantener la carpeta intacta y solo cambiar el binario.
+ */
+$ffprobe = (strpos($ffmpeg, DIRECTORY_SEPARATOR) !== false) 
+    ? dirname($ffmpeg) . DIRECTORY_SEPARATOR . 'ffprobe' 
+    : 'ffprobe';
 
 echo "--- DIAGNÓSTICO DE ENTORNO ---\n";
 echo "[INFO] PHP User: " . get_current_user() . " (UID: " . getmyuid() . ")\n";
