@@ -1,0 +1,144 @@
+<?php
+
+function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
+    $filename = pathinfo($fullPath, PATHINFO_FILENAME);
+    $fullPathNormalized = str_replace('\\', '/', $fullPath);
+    $pathParts = array_values(array_filter(explode('/', $fullPathNormalized)));
+    
+    $cleanText = function($txt) {
+        $junk = ['/\b(1080p|720p|4k|x264|h264|bluray|web-dl|mkv|mp4)\b/i', '/\./', '/_/'];
+        $t = $txt;
+        foreach ($junk as $p) { $t = preg_replace($p, ' ', $t); }
+        return trim(preg_replace('/\s+/', ' ', $t));
+    };
+    $cleanName = $cleanText($filename);
+
+    $detectedCat = 'GENERAL';
+    $detectedParent = null;
+    $detectedCollection = null;
+
+    $partsCount = count($pathParts);
+    for ($i = $partsCount - 1; $i >= 0; $i--) {
+        $segment = trim($pathParts[$i]);
+        if (empty($segment) || $segment === basename($fullPath)) continue;
+        foreach ($hierarchy as $cat) {
+            if (strcasecmp($segment, $cat['name']) === 0) {
+                $detectedCat = $cat['name'];
+                if (!empty($cat['autoSub'])) {
+                    if (isset($pathParts[$i + 1]) && $pathParts[$i + 1] !== basename($fullPath)) {
+                        $detectedParent = $cat['name'];
+                        $detectedCat = $pathParts[$i + 1];
+                        if (isset($pathParts[$i + 2]) && $pathParts[$i + 2] !== basename($fullPath)) {
+                            $detectedCollection = $pathParts[$i + 1];
+                            $detectedCat = $pathParts[$i + 2];
+                        }
+                    }
+                }
+                break 2;
+            }
+        }
+    }
+
+    return [
+        'title' => substr(ucwords(strtolower($cleanName)), 0, 250), 
+        'category' => substr($detectedCat, 0, 95),
+        'parent_category' => $detectedParent ? substr($detectedParent, 0, 95) : null,
+        'collection' => $detectedCollection ? substr($detectedCollection, 0, 95) : null
+    ];
+}
+
+function getPriceForCategory($catName, $settings, $parentCatName = null) {
+    $categories = is_array($settings['categories']) ? $settings['categories'] : json_decode($settings['categories'] ?? '[]', true);
+    foreach ($categories as $cat) {
+        if (strcasecmp($cat['name'], $catName) === 0) return floatval($cat['price']);
+    }
+    if ($parentCatName) {
+        foreach ($categories as $cat) {
+            if (strcasecmp($cat['name'], $parentCatName) === 0) return floatval($cat['price']);
+        }
+    }
+    return 1.00; 
+}
+
+function write_log($message, $level = 'INFO') {
+    $logFile = __DIR__ . '/debug_log.txt';
+    $timestamp = date('Y-m-d H:i:s');
+    $formattedMessage = "[$timestamp] [$level] $message" . PHP_EOL;
+    @file_put_contents($logFile, $formattedMessage, FILE_APPEND);
+    if (php_sapi_name() === 'cli') echo $formattedMessage;
+}
+
+function resolve_video_path($pathOrUrl) {
+    if (!$pathOrUrl) return false;
+    $path = str_replace('\\', '/', $pathOrUrl);
+    
+    // 1. Ruta absoluta directa
+    if (file_exists($path) && is_file($path)) return realpath($path);
+    
+    // 2. Ruta relativa a la API
+    $cleanPath = (strpos($path, 'api/') === 0) ? substr($path, 4) : $path;
+    $internalPath = __DIR__ . '/' . $cleanPath;
+    if (file_exists($internalPath) && is_file($internalPath)) return realpath($internalPath);
+    
+    // 3. Intento de corrección para volúmenes Synology (Si empieza con /volumeX)
+    if (preg_match('/^\/volume\d+/', $path) && file_exists($path)) return $path;
+
+    return false;
+}
+
+function fix_url($url) {
+    if (empty($url)) return "api/uploads/thumbnails/default.jpg"; 
+    if (strpos($url, 'http') === 0) return $url;
+    if (strpos($url, 'data:') === 0) return $url;
+    $clean = ltrim($url, '/');
+    if (strpos($clean, 'api/') === 0) return $clean;
+    if (strpos($clean, 'uploads/') === 0) return 'api/' . $clean;
+    return 'api/' . $clean;
+}
+
+function streamVideo($id, $pdo) {
+    while (ob_get_level()) ob_end_clean();
+    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $videoUrl = $stmt->fetchColumn();
+    if (!$videoUrl) { header("HTTP/1.1 404 Not Found"); exit; }
+    $realPath = resolve_video_path($videoUrl);
+    if (!$realPath || !file_exists($realPath)) { header("HTTP/1.1 404 Not Found"); exit; }
+    $fileSize = filesize($realPath);
+    $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    if ($ext === 'mp3') $mime = 'audio/mpeg';
+    else if ($ext === 'wav') $mime = 'audio/wav';
+    else if ($ext === 'm4a') $mime = 'audio/mp4';
+    else if ($ext === 'aac') $mime = 'audio/aac';
+    else if ($ext === 'mkv') $mime = 'video/x-matroska';
+    else if ($ext === 'webm') $mime = 'video/webm';
+    else $mime = 'video/mp4';
+    header("Access-Control-Allow-Origin: *");
+    header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
+    header("Access-Control-Allow-Headers: Range, Authorization, Content-Type");
+    header("Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges");
+    header("Accept-Ranges: bytes");
+    header("Content-Type: $mime");
+    if ($_SERVER['REQUEST_METHOD'] === 'HEAD') { header("Content-Length: $fileSize"); exit; }
+    $fp = @fopen($realPath, 'rb');
+    if (!$fp) { header("HTTP/1.1 403 Forbidden"); exit; }
+    set_time_limit(0); 
+    if (isset($_SERVER['HTTP_RANGE'])) {
+        preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
+        $offset = intval($matches[1]);
+        $end = isset($matches[2]) ? intval($matches[2]) : $fileSize - 1;
+        header('HTTP/1.1 206 Partial Content');
+        header("Content-Range: bytes $offset-$end/$fileSize");
+        header("Content-Length: " . ($end - $offset + 1));
+        fseek($fp, $offset);
+    } else { header("Content-Length: $fileSize"); }
+    $bufferSize = 1024 * 128; 
+    while (!feof($fp)) {
+        echo fread($fp, $bufferSize);
+        flush();
+        if (connection_aborted()) break;
+    }
+    fclose($fp);
+    exit;
+}
+?>
