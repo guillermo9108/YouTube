@@ -59,7 +59,8 @@ export default function GridProcessor() {
         safetyTimeoutRef.current = window.setTimeout(() => {
             if (!processedRef.current && activeTask) {
                 const dur = (vid.duration && isFinite(vid.duration)) ? vid.duration : 0;
-                handleForceComplete(dur, true);
+                // Si llegamos aquí por timeout, marcamos como incompatible para que el servidor intente extraer miniatura
+                handleFinishTask(dur, dur > 0, true);
             }
         }, 12000);
 
@@ -78,41 +79,36 @@ export default function GridProcessor() {
         setStatus('CAPTURING');
         
         try {
-            // Agilizado: skipImage=true para no perder tiempo buscando carátulas ID3
+            // Agilizado: skipImage=true para no perder tiempo buscando carátulas ID3 en colaboración
             const res = await generateThumbnail(url, true, true);
             if (!processedRef.current && activeTask) {
-                processedRef.current = true;
-                setStatus('DONE');
-                
-                const fd = new FormData();
-                fd.append('id', activeTask.id);
-                fd.append('duration', String(res.duration));
-                fd.append('success', '1');
-                fd.append('clientIncompatible', '0');
-                
-                await db.request(`action=update_video_metadata`, { method: 'POST', body: fd });
-                completeTask(res.duration, null);
+                handleFinishTask(res.duration, res.duration > 0, false);
             }
         } catch (e) {
-            handleForceComplete(0, true);
+            handleFinishTask(0, false, true);
         }
     };
 
-    const handleForceComplete = async (duration: number, isIncompatible: boolean) => {
+    /**
+     * Centraliza la finalización de la tarea y el reporte al servidor
+     */
+    const handleFinishTask = async (duration: number, isSuccess: boolean, isIncompatible: boolean) => {
         if (processedRef.current || !activeTask) return;
         processedRef.current = true;
-        setStatus('DONE');
+        setStatus(isSuccess ? 'DONE' : 'ERROR');
         
         try {
             const fd = new FormData();
             fd.append('id', activeTask.id);
             fd.append('duration', String(duration));
-            fd.append('success', '1');
+            // CRÍTICO: Si no hubo éxito, enviamos '0' para que el servidor incremente el intento o lo mande a mantenimiento
+            fd.append('success', isSuccess ? '1' : '0');
             fd.append('clientIncompatible', isIncompatible ? '1' : '0');
             
             await db.request(`action=update_video_metadata`, { method: 'POST', body: fd });
             completeTask(duration, null);
         } catch(e) {
+            // Si falla la red al reportar, liberamos la tarea para que otro cliente o el worker la tome
             skipTask();
         }
     };
@@ -127,7 +123,6 @@ export default function GridProcessor() {
         }
 
         if (vid.currentTime > 1.5 && vid.videoWidth > 0) {
-            processedRef.current = true;
             try {
                 const canvas = document.createElement('canvas');
                 canvas.width = vid.videoWidth;
@@ -136,10 +131,13 @@ export default function GridProcessor() {
                 if (ctx) {
                     ctx.drawImage(vid, 0, 0);
                     canvas.toBlob(async (blob) => {
-                        if (!activeTask) return;
-                        setStatus('DONE');
+                        if (!activeTask || processedRef.current) return;
+                        
                         const file = blob ? new File([blob], "thumb.webp", { type: "image/webp" }) : null;
                         
+                        processedRef.current = true;
+                        setStatus('DONE');
+
                         const fd = new FormData();
                         fd.append('id', activeTask.id);
                         fd.append('duration', String(vid.duration));
@@ -151,10 +149,10 @@ export default function GridProcessor() {
                         completeTask(vid.duration, null);
                     }, 'image/webp', 0.6);
                 } else {
-                    handleForceComplete(vid.duration, false);
+                    handleFinishTask(vid.duration, vid.duration > 0, false);
                 }
             } catch (err) {
-                handleForceComplete(vid.duration, true);
+                handleFinishTask(vid.duration, vid.duration > 0, true);
             }
         }
     };
@@ -169,14 +167,17 @@ export default function GridProcessor() {
                     {isAudioMode ? (
                         <Music size={24} className="text-indigo-500 animate-pulse" />
                     ) : (
-                        <video ref={videoRef} className={`w-full h-full object-cover ${status === 'DONE' ? 'opacity-30' : 'opacity-100'}`} muted playsInline crossOrigin="anonymous" onTimeUpdate={handleTimeUpdate} onError={() => handleForceComplete(0, true)} />
+                        <video ref={videoRef} className={`w-full h-full object-cover ${status === 'DONE' ? 'opacity-30' : 'opacity-100'}`} muted playsInline crossOrigin="anonymous" onTimeUpdate={handleTimeUpdate} onError={() => handleFinishTask(0, false, true)} />
                     )}
                     {status === 'DONE' && <div className="absolute inset-0 flex items-center justify-center bg-black/40"><Check size={20} className="text-emerald-400" /></div>}
+                    {status === 'ERROR' && <div className="absolute inset-0 flex items-center justify-center bg-black/40"><AlertCircle size={20} className="text-red-400" /></div>}
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
                         <Sparkles size={10} className="text-indigo-400" />
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{status === 'DONE' ? 'LISTO' : (isAudioMode ? 'METADATOS AUDIO' : 'ANALIZANDO')}</span>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                            {status === 'DONE' ? 'LISTO' : (status === 'ERROR' ? 'ERROR' : (isAudioMode ? 'METADATOS AUDIO' : 'ANALIZANDO'))}
+                        </span>
                     </div>
                     <div className="text-[11px] font-bold text-white truncate" title={activeTask.title}>{activeTask.title}</div>
                     {(status === 'CAPTURING' || status === 'INIT') && <div className="w-full h-1 bg-slate-800 rounded-full mt-1.5 overflow-hidden"><div className="h-full bg-indigo-500 animate-pulse"></div></div>}
