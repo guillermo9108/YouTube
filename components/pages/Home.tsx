@@ -5,10 +5,11 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Category, Notification as AppNotification, MarketplaceItem, User, SystemSettings } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, Zap, Clock, Film, ShoppingBag, Tag, Users, Star, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, Heart, History, ChevronLeft
+    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Shuffle, Folder, Bell, Check, Zap, Clock, Film, ShoppingBag, Tag, Users, Star, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, Heart, History, ChevronLeft, MessageSquare, CheckCircle2
 } from 'lucide-react';
 import { useLocation, useNavigate, Link } from '../Router';
 import AIConcierge from '../AIConcierge';
+import { useToast } from '../../context/ToastContext';
 
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -119,13 +120,12 @@ const SubCategoryCard: React.FC<{ name: string, videos: Video[], onClick: () => 
 export default function Home() {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
+    const toast = useToast();
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [navigationPath, setNavigationPath] = useState<string[]>([]);
     
     const [allVideos, setAllVideos] = useState<Video[]>([]);
-    const [marketItems, setMarketItems] = useState<MarketplaceItem[]>([]);
-    const [allUsers, setAllUsers] = useState<User[]>([]);
     const [watchedIds, setWatchedIds] = useState<string[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
     const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
@@ -153,12 +153,10 @@ export default function Home() {
     const loadData = async () => {
         setLoading(true);
         try {
-            const [vids, mkt, usersRes, sets] = await Promise.all([
-                db.getAllVideos(), db.getMarketplaceItems(), db.getAllUsers(), db.getSystemSettings()
+            const [vids, sets] = await Promise.all([
+                db.getAllVideos(), db.getSystemSettings()
             ]);
             setAllVideos((vids || []).filter(v => v && v.category && !['PENDING', 'PROCESSING', 'FAILED_METADATA'].includes(v.category)));
-            setMarketItems(mkt || []);
-            setAllUsers(usersRes || []);
             setCategories(sets?.categories || []);
             setSystemSettings(sets);
             if (user) {
@@ -191,6 +189,17 @@ export default function Home() {
         else if (s.type === 'USER') navigate(`/channel/${s.id}`);
     };
 
+    const handleNotifClick = async (n: AppNotification) => {
+        if (Number(n.isRead) === 0) {
+            try {
+                await db.markNotificationRead(n.id);
+                setNotifs(prev => prev.map(p => p.id === n.id ? { ...p, isRead: true } : p));
+            } catch(e) {}
+        }
+        setShowNotifMenu(false);
+        navigate(n.link);
+    };
+
     // --- Lógica de Explorador de Categorías Globales (Tag-based) ---
     
     const getRelativeSegments = (video: Video) => {
@@ -205,32 +214,25 @@ export default function Home() {
     const currentExploration = useMemo(() => {
         if (searchQuery) return { folders: [], videos: [] };
 
-        // 1. Filtrar videos que contienen TODOS los segmentos de la ruta actual
         const matchingVideos = allVideos.filter(v => {
             const segments = getRelativeSegments(v);
-            // Cada segmento del navigationPath debe existir en los segmentos del video
             return navigationPath.every(navSeg => segments.includes(navSeg));
         });
 
-        // 2. Extraer "Carpetas" (Siguientes Tags Disponibles)
         const foldersMap = new Map<string, Video[]>();
         matchingVideos.forEach(v => {
             const segments = getRelativeSegments(v);
             
             if (navigationPath.length === 0) {
-                // En la raíz, las carpetas son el primer nivel de cada video
                 const rootTag = segments[0];
-                if (rootTag && segments.length > 1) { // Solo si no es un archivo suelto en root
+                if (rootTag && segments.length > 1) {
                     if (!foldersMap.has(rootTag)) foldersMap.set(rootTag, []);
                     foldersMap.get(rootTag)!.push(v);
                 }
             } else {
-                // Dentro de una categoría, buscamos el segmento inmediatamente posterior a la última tag
                 const lastTag = navigationPath[navigationPath.length - 1];
                 const lastTagIndex = segments.lastIndexOf(lastTag);
                 const nextTag = segments[lastTagIndex + 1];
-                
-                // Solo mostramos como carpeta si hay más niveles después de esta tag
                 if (nextTag && segments.length > lastTagIndex + 2) {
                     if (!foldersMap.has(nextTag)) foldersMap.set(nextTag, []);
                     foldersMap.get(nextTag)!.push(v);
@@ -238,7 +240,6 @@ export default function Home() {
             }
         });
 
-        // 3. Videos Resultantes (Todos los que coinciden con los tags actuales, acumulativos)
         const sortedVideos = [...matchingVideos].sort((a, b) => {
             const catDef = categories.find(c => c.name === navigationPath[0]);
             const mode = catDef?.sortOrder || 'LATEST';
@@ -274,7 +275,20 @@ export default function Home() {
                     <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400 active:scale-95 transition-transform"><Menu size={20}/></button>
                     <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
                         <Search className="absolute left-4 top-3 text-slate-500" size={18} />
-                        <input type="text" value={searchQuery} onChange={(e) => handleSearchChange(e.target.value)} onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)} placeholder="Buscar en el servidor..." className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" />
+                        <input 
+                            type="text" 
+                            value={searchQuery} 
+                            onChange={(e) => handleSearchChange(e.target.value)} 
+                            onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    setShowSuggestions(false);
+                                    if (searchQuery.length > 1) db.saveSearch(searchQuery);
+                                }
+                            }}
+                            placeholder="Buscar en el servidor..." 
+                            className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" 
+                        />
                         {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-500 hover:text-white"><X size={16}/></button>}
                         {showSuggestions && suggestions.length > 0 && (
                             <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 origin-top">
@@ -288,10 +302,52 @@ export default function Home() {
                         )}
                     </div>
                     <div className="relative" ref={menuRef}>
-                        <button onClick={() => setShowNotifMenu(!showNotifMenu)} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 relative">
+                        <button onClick={() => setShowNotifMenu(!showNotifMenu)} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 relative active:scale-95 transition-transform">
                             <Bell size={22} className={unreadCount > 0 ? "animate-bounce" : ""} />
                             {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black">{unreadCount}</span>}
                         </button>
+
+                        {/* DESPLEGABLE DE NOTIFICACIONES */}
+                        {showNotifMenu && (
+                            <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 border border-white/10 rounded-[32px] shadow-2xl overflow-hidden z-[60] animate-in fade-in zoom-in-95 origin-top-right">
+                                <div className="p-5 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                                    <h4 className="font-black text-white uppercase text-[10px] tracking-widest">Notificaciones</h4>
+                                    {unreadCount > 0 && <button onClick={() => db.markAllNotificationsRead(user!.id).then(loadData)} className="text-[9px] font-black text-indigo-400 uppercase hover:text-white transition-colors">Leídas</button>}
+                                </div>
+                                <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+                                    {notifs.length === 0 ? (
+                                        <div className="py-12 text-center text-slate-600 flex flex-col items-center gap-3">
+                                            <MessageSquare size={32} className="opacity-20" />
+                                            <p className="text-[10px] font-black uppercase tracking-widest">Sin alertas nuevas</p>
+                                        </div>
+                                    ) : notifs.map(n => {
+                                        const isRead = Number(n.isRead) === 1;
+                                        return (
+                                            <button 
+                                                key={n.id} 
+                                                onClick={() => handleNotifClick(n)}
+                                                className={`w-full p-4 flex gap-4 text-left border-b border-white/5 transition-all hover:bg-white/5 ${!isRead ? 'bg-indigo-500/[0.03]' : 'opacity-60 grayscale-[0.5]'}`}
+                                            >
+                                                <div className="w-10 h-10 rounded-xl bg-slate-800 shrink-0 border border-white/5 overflow-hidden flex items-center justify-center">
+                                                    {n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover" /> : <Bell size={16} className="text-slate-500" />}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between items-start mb-0.5">
+                                                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-tighter">{n.type}</span>
+                                                        <span className="text-[8px] text-slate-600 font-bold">{new Date(n.timestamp * 1000).toLocaleDateString()}</span>
+                                                    </div>
+                                                    <p className={`text-xs leading-snug truncate ${!isRead ? 'text-white font-bold' : 'text-slate-400'}`}>{n.text}</p>
+                                                </div>
+                                                {!isRead && <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full mt-2 shrink-0"></div>}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <div className="p-3 bg-slate-950/50 text-center">
+                                    <Link to="/profile" onClick={() => setShowNotifMenu(false)} className="text-[9px] font-black text-slate-500 uppercase hover:text-indigo-400 transition-colors">Ver todas en el perfil</Link>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
                 {!searchQuery && <Breadcrumbs path={navigationPath} onNavigate={handleNavigate} />}

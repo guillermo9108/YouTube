@@ -332,9 +332,8 @@ export default function Watch() {
                                 </button>
                             </div>
 
-                            <button onClick={() => setShowShareModal(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95">
+                            <button onClick={() => setShowShareModal(true)} className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95" title="Compartir">
                                 <Share2 size={18}/>
-                                <span className="text-[10px] font-black uppercase tracking-widest">Compartir</span>
                             </button>
 
                             <button onClick={() => setShowComments(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95">
