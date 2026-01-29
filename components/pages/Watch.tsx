@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -28,6 +27,7 @@ export default function Watch() {
     const [isPurchasing, setIsPurchasing] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
+    const [seriesQueue, setSeriesQueue] = useState<Video[]>([]); // Nueva cola de capítulos ordenados
     const [visibleRelated, setVisibleRelated] = useState(12);
     
     // Social State
@@ -58,7 +58,7 @@ export default function Watch() {
         setThrottled(true);
         setVisibleRelated(12);
         setShowComments(false);
-        setExtractionAttempted(false); // Reset extraction flag on video change
+        setExtractionAttempted(false); 
         return () => { setThrottled(false); };
     }, [id]);
 
@@ -81,19 +81,22 @@ export default function Watch() {
 
                     const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
                     
-                    const siblings = all.filter(ov => {
-                        if (ov.id === v.id) return false;
+                    // Definimos la serie: Todos los videos en la misma carpeta ORDENADOS NATURALMENTE
+                    const series = all.filter(ov => {
                         const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
                         return ovPath === currentPath;
                     }).sort((a, b) => naturalCollator.compare(a.title, b.title));
 
-                    const otherVideos = all.filter(ov => {
-                        if (ov.id === v.id) return false;
+                    setSeriesQueue(series);
+
+                    // Para la interfaz de recomendados: excluímos el actual y barajamos el resto que no es de la carpeta
+                    const siblings = series.filter(ov => ov.id !== v.id);
+                    const others = all.filter(ov => {
                         const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
                         return ovPath !== currentPath;
                     }).sort(() => Math.random() - 0.5);
 
-                    setRelatedVideos([...siblings, ...otherVideos]);
+                    setRelatedVideos([...siblings, ...others]);
                     db.getComments(v.id).then(setComments);
 
                     if (user) {
@@ -188,7 +191,6 @@ export default function Watch() {
         const isDefault = video.thumbnailUrl.includes('default.jpg') || video.thumbnailUrl.includes('defaultaudio.jpg');
         if (!isDefault) return;
 
-        // 1. Lógica para VIDEO (Captura de Frame)
         if (!video.is_audio && el.currentTime > 2 && el.videoWidth > 0) {
             setExtractionAttempted(true);
             try {
@@ -202,7 +204,6 @@ export default function Watch() {
                         if (blob) {
                             const file = new File([blob], "thumb_auto.jpg", { type: "image/jpeg" });
                             await db.updateVideoMetadata(video.id, Math.floor(el.duration), file);
-                            // Actualizamos estado local
                             setVideo(prev => prev ? { ...prev, thumbnailUrl: URL.createObjectURL(blob) } : null);
                         }
                     }, 'image/jpeg', 0.8);
@@ -210,11 +211,9 @@ export default function Watch() {
             } catch (e) { console.warn("Lazy extraction failed for video", e); }
         }
         
-        // 2. Lógica para AUDIO (Extracción de Carátula ID3)
         if (video.is_audio && el.currentTime > 0.5) {
             setExtractionAttempted(true);
             try {
-                // Reutilizamos la URL de stream para buscar metadatos ID3
                 const result = await generateThumbnail(streamUrl, true, false); 
                 if (result.thumbnail) {
                     await db.updateVideoMetadata(video.id, Math.floor(el.duration || video.duration), result.thumbnail);
@@ -225,8 +224,26 @@ export default function Watch() {
     };
 
     const handleVideoEnded = async () => {
-        if (!relatedVideos.length || !user) return;
-        const nextVid = relatedVideos[0];
+        if (!video || !user) return;
+
+        // ESTRATEGIA DE ÍNDICE SECUENCIAL:
+        // Buscamos el video actual en la cola de la serie (que ya está ordenada naturalmente)
+        const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
+        
+        // El siguiente es matemáticamente el índice + 1
+        let nextVid = seriesQueue[currentIndex + 1];
+
+        // Si no hay siguiente en la carpeta, tomamos el primero de las recomendaciones externas
+        if (!nextVid && relatedVideos.length > 0) {
+            // Filtramos para asegurar que no regresamos a un "sibling" ya visto o al actual
+            const externalVids = relatedVideos.filter(rv => {
+                const rvPath = ((rv as any).rawPath || rv.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                const curPath = ((video as any).rawPath || video.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                return rvPath !== curPath;
+            });
+            nextVid = externalVids[0];
+        }
+
         if (!nextVid) return;
 
         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
@@ -350,7 +367,6 @@ export default function Watch() {
                         </div>
                     )}
 
-                    {/* Desktop Comments Inline */}
                     <div className="hidden lg:block">
                         <div className="flex items-center gap-3 mb-6">
                             <MessageCircle size={20} className="text-indigo-400"/>
@@ -390,18 +406,28 @@ export default function Watch() {
                         <Play size={12} className="text-indigo-500"/> Recomendados
                     </h3>
                     <div className="space-y-4">
-                        {relatedVideos.slice(0, visibleRelated).map((v, idx) => (
-                            <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
-                                <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
-                                    <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
-                                    {idx === 0 && <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center animate-in fade-in"><Play size={20} className="text-white fill-current"/></div>}
-                                </div>
-                                <div className="flex-1 min-w-0 py-1">
-                                    <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight group-hover:text-indigo-400 transition-colors">{v.title}</h4>
-                                    <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
-                                </div>
-                            </Link>
-                        ))}
+                        {relatedVideos.slice(0, visibleRelated).map((v, idx) => {
+                            const isNextInSeries = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
+                            return (
+                                <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
+                                    <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
+                                        <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
+                                        {isNextInSeries && (
+                                            <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center animate-in fade-in">
+                                                <div className="flex flex-col items-center">
+                                                    <Play size={20} className="text-white fill-current"/>
+                                                    <span className="text-[8px] font-black text-white uppercase mt-1">Siguiente</span>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0 py-1">
+                                        <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight group-hover:text-indigo-400 transition-colors">{v.title}</h4>
+                                        <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
+                                    </div>
+                                </Link>
+                            );
+                        })}
                     </div>
 
                     {relatedVideos.length > visibleRelated && (

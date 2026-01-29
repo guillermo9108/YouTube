@@ -1,6 +1,6 @@
 {
-  "name": "StreamPay OFICIAL 0.0.12.7",
-  "description": "Mejorar las notificaciones ",
+  "name": "StreamPay OFICIAL 0.0.12.8",
+  "description": "Mejorar la reproducción continua. ",
   "requestFramePermissions": [
     "camera",
     "microphone"
