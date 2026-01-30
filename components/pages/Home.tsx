@@ -115,7 +115,7 @@ export default function Home() {
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [showFolderGrid, setShowFolderGrid] = useState(false);
-    const [headerVisible, setHeaderVisible] = useState(true); // Controla la barra inferior del header
+    const [navVisible, setNavVisible] = useState(true); // Solo para la fila inferior
     
     // Data State (Paginación)
     const [videos, setVideos] = useState<Video[]>([]);
@@ -187,23 +187,23 @@ export default function Home() {
         }
     };
 
-    // 3. Lógica de Scroll inteligente (Ocultar solo la barra de categorías/carpetas)
+    // 3. Scroll Inteligente (Solo afecta a la Capa Inferior de Navegación)
     useEffect(() => {
         const handleScroll = () => {
             const currentScrollY = window.scrollY;
             
-            // Margen para evitar saltos en la parte superior
-            if (currentScrollY < 100) {
-                setHeaderVisible(true);
+            // Si estamos al principio, siempre visible
+            if (currentScrollY < 80) {
+                setNavVisible(true);
                 lastScrollY.current = currentScrollY;
                 return;
             }
 
-            // Scroll abajo: ocultar barra inferior. Scroll arriba: mostrar.
+            // Scroll hacia abajo: ocultar. Scroll hacia arriba: mostrar.
             if (currentScrollY > lastScrollY.current + 10) {
-                setHeaderVisible(false);
+                setNavVisible(false);
             } else if (currentScrollY < lastScrollY.current - 10) {
-                setHeaderVisible(true);
+                setNavVisible(true);
             }
             
             lastScrollY.current = currentScrollY;
@@ -258,13 +258,15 @@ export default function Home() {
         else setNavigationPath(navigationPath.slice(0, index + 1));
         setSelectedCategory('TODOS');
         setShowFolderGrid(false);
+        setNavVisible(true);
     };
 
     const handleCategoryClick = (cat: string) => {
         setSelectedCategory(cat);
-        // Requerimiento: Al filtrar por una categoría que no sea TODOS, desplegar automáticamente la barra de carpetas
+        // REQUERIMIENTO: Si se abre una categoría distinta de TODOS, desplegar automáticamente la barra de carpetas padre
         if (cat !== 'TODOS' && folders.length > 0) {
             setShowFolderGrid(true);
+            setNavVisible(true);
         }
     };
 
@@ -286,10 +288,10 @@ export default function Home() {
         <div className="relative pb-20">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
-            {/* HEADER INMERSIVO HÍBRIDO */}
+            {/* HEADER HÍBRIDO */}
             <div className="fixed top-0 left-0 right-0 z-[60]">
-                {/* FILA SUPERIOR: SIEMPRE FIJA (Menú, Búsqueda, Campana) */}
-                <div className="relative z-20 backdrop-blur-2xl bg-black/40 border-b border-white/5 pt-4 pb-2 px-4 md:px-8 shadow-2xl">
+                {/* 1. CAPA SUPERIOR: FIJA (Buscador, Menú, Notificaciones) */}
+                <div className="relative z-20 backdrop-blur-2xl bg-black/40 border-b border-white/5 pt-4 pb-2 px-4 md:px-8 shadow-xl">
                     <div className="flex gap-3 items-center max-w-7xl mx-auto">
                         <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform shrink-0"><Menu size={20}/></button>
                         <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
@@ -338,9 +340,9 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* FILA INFERIOR: DINÁMICA (Breadcrumbs, Categorías) - Se oculta al scroll */}
+                {/* 2. CAPA INFERIOR: DINÁMICA (Breadcrumbs, Categorías) - Responde al Scroll */}
                 {!searchQuery && (
-                    <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${headerVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
+                    <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
                         <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-6 max-w-7xl mx-auto">
                             <Breadcrumbs 
                                 path={navigationPath} 
@@ -377,7 +379,7 @@ export default function Home() {
                 )}
             </div>
 
-            {/* CONTENIDO PRINCIPAL: Ajustado para la cabecera híbrida */}
+            {/* CONTENIDO PRINCIPAL */}
             <div className="pt-36 px-4 md:px-8 max-w-7xl mx-auto">
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-40 gap-4">
