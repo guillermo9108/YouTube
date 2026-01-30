@@ -54,7 +54,6 @@ function video_get_all($pdo) {
             $folderPath = str_replace('\\', '/', $root . '/' . $folder);
             $folderPath = rtrim($folderPath, '/') . '/';
             
-            // Si hay categoría, mostramos videos de esa categoría que estén en la carpeta O que sean externos (uploads)
             $where[] = "v.category = ? AND (v.videoUrl LIKE ? OR v.isLocal = 0)";
             $params[] = $category;
             $params[] = $folderPath . "%";
@@ -63,7 +62,6 @@ function video_get_all($pdo) {
             $params[] = $category;
         }
     } else if (!empty($folder)) {
-        // Sin categoría seleccionada, restricción estricta de carpeta
         $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
         $root = rtrim($stmtS->fetchColumn(), '/\\');
         $folderPath = str_replace('\\', '/', $root . '/' . $folder);
@@ -95,7 +93,22 @@ function video_get_all($pdo) {
         $subfolders = video_discover_subfolders($pdo, $folder);
     }
 
-    $stmtActiveCats = $pdo->query("SELECT DISTINCT category FROM videos WHERE category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')");
+    // --- CATEGORÍAS CONTEXTUALES ---
+    // Solo mostramos categorías que tengan videos en el contexto actual (carpeta/búsqueda)
+    $catWhere = ["category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
+    $catParams = [];
+    if (!empty($folder)) {
+        $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
+        $root = rtrim($stmtS->fetchColumn(), '/\\');
+        $folderPath = str_replace('\\', '/', $root . '/' . $folder);
+        $folderPath = rtrim($folderPath, '/') . '/';
+        $catWhere[] = "(videoUrl LIKE ? OR isLocal = 0)";
+        $catParams[] = $folderPath . "%";
+    }
+    
+    $catSql = "SELECT DISTINCT category FROM videos WHERE " . implode(" AND ", $catWhere);
+    $stmtActiveCats = $pdo->prepare($catSql);
+    $stmtActiveCats->execute($catParams);
     $activeCategories = $stmtActiveCats->fetchAll(PDO::FETCH_COLUMN);
 
     video_process_rows($videos);

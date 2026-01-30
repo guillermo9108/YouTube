@@ -77,16 +77,15 @@ const Breadcrumbs: React.FC<{
     showFolders: boolean,
     hasFolders: boolean
 }> = ({ path, onNavigate, onToggleFolders, showFolders, hasFolders }) => (
-    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-3 animate-in fade-in sticky top-0 bg-black/80 backdrop-blur-md z-20">
-        <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-white/5 shrink-0">
-            <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
+    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-3 animate-in fade-in shrink-0">
+        <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0">
+            <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-white/10 rounded-lg text-white transition-colors">
                 <HomeIcon size={16}/>
             </button>
             {hasFolders && (
                 <button 
                     onClick={onToggleFolders} 
-                    className={`p-2 rounded-lg transition-all duration-300 ${showFolders ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-500 hover:text-slate-300'}`}
-                    title={showFolders ? "Ocultar carpetas" : "Mostrar carpetas"}
+                    className={`p-2 rounded-lg transition-all duration-300 ${showFolders ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-300 hover:text-white'}`}
                 >
                     <ChevronDown size={16} className={`transition-transform duration-300 ${showFolders ? 'rotate-180' : ''}`} />
                 </button>
@@ -94,10 +93,10 @@ const Breadcrumbs: React.FC<{
         </div>
         {path.map((segment, i) => (
             <React.Fragment key={`${segment}-${i}`}>
-                <ChevronRight size={12} className="text-slate-600 shrink-0"/>
+                <ChevronRight size={12} className="text-white/40 shrink-0"/>
                 <button 
                     onClick={() => onNavigate(i)}
-                    className={`whitespace-nowrap px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${i === path.length - 1 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-500 hover:text-slate-300'}`}
+                    className={`whitespace-nowrap px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${i === path.length - 1 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-300 hover:text-white hover:bg-white/5'}`}
                 >
                     {segment}
                 </button>
@@ -142,6 +141,7 @@ export default function Home() {
     const searchTimeout = useRef<any>(null);
 
     const currentFolder = navigationPath.join('/');
+    const parentFolderName = navigationPath.length > 0 ? navigationPath[navigationPath.length - 1] : null;
 
     // 1. Cargar configuración inicial
     useEffect(() => {
@@ -228,6 +228,7 @@ export default function Home() {
     const handleNavigate = (index: number) => {
         if (index === -1) setNavigationPath([]);
         else setNavigationPath(navigationPath.slice(0, index + 1));
+        setSelectedCategory('TODOS');
     };
 
     const handleNotifClick = async (n: AppNotification) => {
@@ -245,164 +246,181 @@ export default function Home() {
     const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
     return (
-        <div className="pb-20 space-y-6">
+        <div className="relative pb-20">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
-            <div className="sticky top-0 z-30 bg-black/95 backdrop-blur-xl py-4 -mx-4 px-4 md:mx-0 border-b border-white/5 shadow-2xl">
-                <div className="flex gap-3 mb-4 items-center w-full">
-                    <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-indigo-400 active:scale-95 transition-transform"><Menu size={20}/></button>
-                    <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
-                        <Search className="absolute left-4 top-3 text-slate-500" size={18} />
-                        <input 
-                            type="text" 
-                            value={searchQuery} 
-                            onChange={(e) => handleSearchChange(e.target.value)} 
-                            onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)}
-                            placeholder="Buscar en miles de archivos..." 
-                            className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:border-indigo-500 outline-none transition-all shadow-inner" 
-                        />
-                        {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-500 hover:text-white"><X size={16}/></button>}
-                        {showSuggestions && suggestions.length > 0 && (
-                            <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 origin-top">
-                                {suggestions.map((s, i) => (
-                                    <button key={i} onClick={() => handleSuggestionClick(s)} className="w-full p-4 flex items-center gap-4 hover:bg-white/5 transition-colors text-left group">
-                                        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/20 text-indigo-400"><Layers size={16}/></div>
-                                        <div className="flex-1 min-w-0"><div className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors truncate">{s.label}</div><div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{s.type}</div></div>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                    <div className="relative">
-                        <button onClick={() => setShowNotifMenu(!showNotifMenu)} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 relative active:scale-95 transition-transform">
-                            <Bell size={22} className={unreadCount > 0 ? "animate-bounce" : ""} />
-                            {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black">{unreadCount}</span>}
-                        </button>
-                        {showNotifMenu && (
-                            <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 border border-white/10 rounded-[32px] shadow-2xl overflow-hidden z-[60] animate-in fade-in zoom-in-95 origin-top-right">
-                                <div className="p-5 bg-slate-950 border-b border-white/5 flex justify-between items-center">
-                                    <h4 className="font-black text-white uppercase text-[10px] tracking-widest">Notificaciones</h4>
+            {/* HEADER INMERSIVO SUPERPUESTO */}
+            <div className="fixed top-0 left-0 right-0 z-[60] animate-in fade-in duration-700">
+                <div className="absolute inset-0 bg-gradient-to-b from-black via-black/40 to-transparent pointer-events-none h-48"></div>
+                
+                <div className="relative backdrop-blur-xl bg-black/10 border-b border-white/5 pt-4 pb-2 px-4 md:px-8">
+                    {/* Fila Superior: Búsqueda y Perfil */}
+                    <div className="flex gap-3 mb-3 items-center max-w-7xl mx-auto">
+                        <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform"><Menu size={20}/></button>
+                        <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
+                            <Search className="absolute left-4 top-3 text-slate-400" size={18} />
+                            <input 
+                                type="text" 
+                                value={searchQuery} 
+                                onChange={(e) => handleSearchChange(e.target.value)} 
+                                onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)}
+                                placeholder="Explorar biblioteca..." 
+                                className="w-full bg-white/5 border border-white/10 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:bg-white/10 focus:border-indigo-500 outline-none transition-all shadow-inner" 
+                            />
+                            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-white"><X size={16}/></button>}
+                            {showSuggestions && suggestions.length > 0 && (
+                                <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
+                                    {suggestions.map((s, i) => (
+                                        <button key={i} onClick={() => handleSuggestionClick(s)} className="w-full p-4 flex items-center gap-4 hover:bg-white/5 transition-colors text-left group">
+                                            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/20 text-indigo-400"><Layers size={16}/></div>
+                                            <div className="flex-1 min-w-0"><div className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors truncate">{s.label}</div><div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{s.type}</div></div>
+                                        </button>
+                                    ))}
                                 </div>
-                                <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
-                                    {notifs.length === 0 ? (
-                                        <div className="py-12 text-center text-slate-600 flex flex-col items-center gap-3"><MessageSquare size={32} className="opacity-20" /><p className="text-[10px] font-black uppercase tracking-widest">Sin alertas</p></div>
-                                    ) : notifs.map(n => (
-                                        <button key={n.id} onClick={() => handleNotifClick(n)} className={`w-full p-4 flex gap-4 text-left border-b border-white/5 transition-all hover:bg-white/5 ${Number(n.isRead) === 0 ? 'bg-indigo-500/[0.03]' : 'opacity-60'}`}>
-                                            <div className="w-10 h-10 rounded-xl bg-slate-800 shrink-0 flex items-center justify-center">{n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover" /> : <Bell size={16} className="text-slate-500" />}</div>
-                                            <div className="flex-1 min-w-0"><div className="flex justify-between items-start mb-0.5"><span className="text-[9px] font-black text-indigo-400 uppercase">{n.type}</span></div><p className="text-xs leading-snug truncate text-white">{n.text}</p></div>
+                            )}
+                        </div>
+                        <div className="relative">
+                            <button onClick={() => setShowNotifMenu(!showNotifMenu)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white relative active:scale-95 transition-transform">
+                                <Bell size={22} className={unreadCount > 0 ? "animate-bounce" : ""} />
+                                {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black">{unreadCount}</span>}
+                            </button>
+                            {showNotifMenu && (
+                                <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 border border-white/10 rounded-[32px] shadow-2xl overflow-hidden z-[60] animate-in fade-in zoom-in-95 origin-top-right">
+                                    <div className="p-5 bg-slate-950 border-b border-white/5 flex justify-between items-center"><h4 className="font-black text-white uppercase text-[10px] tracking-widest">Notificaciones</h4></div>
+                                    <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+                                        {notifs.length === 0 ? (
+                                            <div className="py-12 text-center text-slate-600 flex flex-col items-center gap-3"><MessageSquare size={32} className="opacity-20" /><p className="text-[10px] font-black uppercase tracking-widest">Sin alertas</p></div>
+                                        ) : notifs.map(n => (
+                                            <button key={n.id} onClick={() => handleNotifClick(n)} className={`w-full p-4 flex gap-4 text-left border-b border-white/5 transition-all hover:bg-white/5 ${Number(n.isRead) === 0 ? 'bg-indigo-500/[0.03]' : 'opacity-60'}`}>
+                                                <div className="w-10 h-10 rounded-xl bg-slate-800 shrink-0 flex items-center justify-center">{n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover" /> : <Bell size={16} className="text-slate-500" />}</div>
+                                                <div className="flex-1 min-w-0"><div className="flex justify-between items-start mb-0.5"><span className="text-[9px] font-black text-indigo-400 uppercase">{n.type}</span></div><p className="text-xs leading-snug truncate text-white">{n.text}</p></div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Fila Inferior: Navegación y Categorías Contextuales */}
+                    {!searchQuery && (
+                        <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-6 max-w-7xl mx-auto">
+                            <Breadcrumbs 
+                                path={navigationPath} 
+                                onNavigate={handleNavigate} 
+                                onToggleFolders={() => setShowFolderGrid(!showFolderGrid)}
+                                showFolders={showFolderGrid}
+                                hasFolders={folders.length > 0}
+                            />
+                            
+                            <div className="flex-1 min-w-0 flex items-center gap-3 overflow-x-auto scrollbar-hide py-1">
+                                {parentFolderName && (
+                                    <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3">
+                                        <Folder size={12}/> {parentFolderName}
+                                    </div>
+                                )}
+                                <div className="flex gap-2">
+                                    {activeCategories.map(cat => (
+                                        <button 
+                                            key={cat}
+                                            onClick={() => setSelectedCategory(cat)}
+                                            className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${
+                                                selectedCategory === cat 
+                                                ? 'bg-white text-black border-white shadow-lg' 
+                                                : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white'
+                                            }`}
+                                        >
+                                            {cat === 'TODOS' ? (parentFolderName ? 'Todo en ' + parentFolderName : 'Todo') : cat}
                                         </button>
                                     ))}
                                 </div>
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    )}
                 </div>
-
-                {!searchQuery && (
-                    <div className="flex gap-2 overflow-x-auto py-2 scrollbar-hide">
-                        {activeCategories.map(cat => (
-                            <button 
-                                key={cat}
-                                onClick={() => setSelectedCategory(cat)}
-                                className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${
-                                    selectedCategory === cat 
-                                    ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-900/40 scale-105' 
-                                    : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-600'
-                                }`}
-                            >
-                                {cat}
-                            </button>
-                        ))}
-                    </div>
-                )}
-                
-                {!searchQuery && (
-                    <Breadcrumbs 
-                        path={navigationPath} 
-                        onNavigate={handleNavigate} 
-                        onToggleFolders={() => setShowFolderGrid(!showFolderGrid)}
-                        showFolders={showFolderGrid}
-                        hasFolders={folders.length > 0}
-                    />
-                )}
             </div>
 
-            {loading ? (
-                <div className="flex flex-col items-center justify-center py-40 gap-4">
-                    <Loader2 className="animate-spin text-indigo-500" size={48} />
-                    <p className="text-xs font-black text-slate-500 uppercase tracking-widest animate-pulse">Optimizando librería...</p>
-                </div>
-            ) : (
-                <div className="space-y-10 animate-in fade-in duration-500">
-                    
-                    {/* Render de Carpetas (Oculto por defecto mediante showFolderGrid) */}
-                    {!searchQuery && folders.length > 0 && showFolderGrid && (
-                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4 animate-in slide-in-from-top-4 duration-500">
-                            {folders.map(folder => (
-                                <button 
-                                    key={folder.name} 
-                                    onClick={() => { setNavigationPath([...navigationPath, folder.name]); setShowFolderGrid(false); }}
-                                    className="group relative aspect-[4/5] sm:aspect-video rounded-[24px] sm:rounded-[32px] overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500 shadow-2xl hover:scale-[1.03] transition-all duration-300 ring-1 ring-white/10"
-                                >
-                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
-                                    <div className="relative h-full flex flex-col p-4 sm:p-5">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div className="p-2 sm:p-2.5 bg-slate-800/80 rounded-xl border border-white/5 text-indigo-400">
-                                                <Folder size={20} className="sm:w-7 sm:h-7" />
-                                            </div>
-                                            <div className="bg-indigo-600/20 backdrop-blur-md px-1.5 sm:px-2 py-0.5 rounded-lg border border-indigo-500/30">
-                                                <span className="text-[7px] sm:text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} FILE</span>
-                                            </div>
-                                        </div>
-                                        <div className="mt-auto pt-4">
-                                            <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-3">
-                                                {folder.name}
-                                            </h3>
-                                            <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-16 transition-all duration-500"></div>
-                                        </div>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Grid de Contenido Aplanado */}
-                    <div>
-                        {!searchQuery && (
-                            <div className="flex items-center gap-2 mb-6 px-1">
-                                <Tag size={16} className="text-indigo-500" />
-                                <h2 className="text-[11px] font-black text-white uppercase tracking-[0.2em]">Contenido disponible</h2>
-                                <div className="flex-1 h-px bg-white/5"></div>
-                            </div>
-                        )}
+            {/* CONTENIDO PRINCIPAL: COMIENZA DESDE TOP 0 */}
+            <div className="pt-32 px-4 md:px-8 max-w-7xl mx-auto">
+                {loading ? (
+                    <div className="flex flex-col items-center justify-center py-40 gap-4">
+                        <Loader2 className="animate-spin text-indigo-500" size={48} />
+                        <p className="text-xs font-black text-slate-500 uppercase tracking-widest animate-pulse">Sincronizando contenido...</p>
+                    </div>
+                ) : (
+                    <div className="space-y-12 animate-in fade-in duration-1000">
                         
-                        {videos.length > 0 ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10">
-                                {videos.map(v => (
-                                    <VideoCard 
-                                        key={v.id} 
-                                        video={v} 
-                                        isUnlocked={isAdmin || user?.id === v.creatorId} 
-                                        isWatched={watchedIds.includes(v.id)} 
-                                    />
+                        {/* Rejilla de Carpetas (Desplegable) */}
+                        {!searchQuery && folders.length > 0 && showFolderGrid && (
+                            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
+                                {folders.map(folder => (
+                                    <button 
+                                        key={folder.name} 
+                                        onClick={() => { setNavigationPath([...navigationPath, folder.name]); setShowFolderGrid(false); }}
+                                        className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300"
+                                    >
+                                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
+                                        <div className="relative h-full flex flex-col p-5">
+                                            <div className="flex justify-between items-start">
+                                                <div className="p-3 bg-slate-800/80 rounded-2xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform">
+                                                    <Folder size={24}/>
+                                                </div>
+                                                <div className="bg-indigo-600/20 backdrop-blur-md px-2 py-0.5 rounded-lg border border-indigo-500/30">
+                                                    <span className="text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} ITEMS</span>
+                                                </div>
+                                            </div>
+                                            <div className="mt-auto">
+                                                <h3 className="text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-2">
+                                                    {folder.name}
+                                                </h3>
+                                                <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-full transition-all duration-700"></div>
+                                            </div>
+                                        </div>
+                                    </button>
                                 ))}
                             </div>
-                        ) : folders.length === 0 && (
-                            <div className="text-center py-40 opacity-20 flex flex-col items-center gap-4">
-                                <Folder size={80} />
-                                <p className="font-black uppercase tracking-widest">Sin contenido en esta ubicación</p>
+                        )}
+
+                        {/* Listado de Videos */}
+                        <div className="space-y-8">
+                            {!searchQuery && (
+                                <div className="flex items-center gap-3 px-1">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+                                    <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-4">
+                                        {selectedCategory !== 'TODOS' ? `Filtrando por: ${selectedCategory}` : (parentFolderName ? `Videos en ${parentFolderName}` : 'Novedades')}
+                                        <span className="w-12 h-px bg-white/10"></span>
+                                    </h2>
+                                </div>
+                            )}
+                            
+                            {videos.length > 0 ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-12">
+                                    {videos.map(v => (
+                                        <VideoCard 
+                                            key={v.id} 
+                                            video={v} 
+                                            isUnlocked={isAdmin || user?.id === v.creatorId} 
+                                            isWatched={watchedIds.includes(v.id)} 
+                                        />
+                                    ))}
+                                </div>
+                            ) : folders.length === 0 && (
+                                <div className="text-center py-40 opacity-20 flex flex-col items-center gap-4">
+                                    <Folder size={80} />
+                                    <p className="font-black uppercase tracking-widest">Sin contenido disponible</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {hasMore && (
+                            <div ref={loadMoreRef} className="py-20 flex flex-col items-center justify-center gap-3">
+                                <Loader2 className="animate-spin text-slate-700" size={32} />
+                                <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Cargando más resultados...</p>
                             </div>
                         )}
                     </div>
-
-                    {hasMore && (
-                        <div ref={loadMoreRef} className="py-20 flex flex-col items-center justify-center gap-3">
-                            <Loader2 className="animate-spin text-slate-700" size={32} />
-                            <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Cargando más resultados...</p>
-                        </div>
-                    )}
-                </div>
-            )}
+                )}
+            </div>
 
             <AIConcierge videos={videos} isVisible={geminiActive} />
         </div>
