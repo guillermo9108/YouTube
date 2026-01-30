@@ -29,7 +29,7 @@ function video_process_rows(&$rows) {
 }
 
 /**
- * OBTENER VIDEOS PAGINADOS Y FILTRADOS (Soporta Carpetas y Categorías Globales)
+ * OBTENER VIDEOS PAGINADOS Y FILTRADOS
  */
 function video_get_all($pdo) {
     $limit = intval($_GET['limit'] ?? 40);
@@ -54,9 +54,19 @@ function video_get_all($pdo) {
     if (!empty($folder)) {
         $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
         $root = rtrim($stmtS->fetchColumn(), '/\\');
-        $folderPath = $root . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $folder);
-        $where[] = "v.videoUrl LIKE ?";
-        $params[] = $folderPath . DIRECTORY_SEPARATOR . "%";
+        $folderPath = $root . '/' . str_replace(['\\'], '/', $folder);
+        $folderPath = rtrim($folderPath, '/') . '/';
+        
+        // Si hay una categoría seleccionada, permitimos verla de forma global (NAS + Uploads)
+        // Si no hay categoría (TODOS), restringimos estrictamente a la carpeta física.
+        if (empty($category) || $category === 'TODOS') {
+            $where[] = "v.videoUrl LIKE ?";
+            $params[] = $folderPath . "%";
+        } else {
+            // Lógica híbrida: En esta categoría, muestra lo que está en esta carpeta O lo que es un upload (no local)
+            $where[] = "(v.videoUrl LIKE ? OR v.isLocal = 0)";
+            $params[] = $folderPath . "%";
+        }
     }
 
     $whereClause = implode(" AND ", $where);
@@ -77,13 +87,11 @@ function video_get_all($pdo) {
     $stmtCount->execute($params);
     $total = $stmtCount->fetchColumn();
 
-    // Descubrimiento de subcarpetas (Solo si no hay búsqueda activa)
     $subfolders = [];
     if (empty($search)) {
         $subfolders = video_discover_subfolders($pdo, $folder);
     }
 
-    // NUEVO: Obtener solo categorías que tienen videos publicados
     $stmtActiveCats = $pdo->query("SELECT DISTINCT category FROM videos WHERE category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')");
     $activeCategories = $stmtActiveCats->fetchAll(PDO::FETCH_COLUMN);
 
@@ -102,12 +110,17 @@ function video_discover_subfolders($pdo, $currentFolder) {
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $root = rtrim($stmtS->fetchColumn(), '/\\');
     
-    $targetPath = empty($currentFolder) ? $root : $root . DIRECTORY_SEPARATOR . $currentFolder;
-    $targetPath = rtrim($targetPath, '/\\') . DIRECTORY_SEPARATOR;
+    // Normalizar a separadores "/"
+    $root = str_replace('\\', '/', $root);
+    $currentFolderNormalized = str_replace('\\', '/', $currentFolder);
+    
+    $targetPath = empty($currentFolderNormalized) ? $root : $root . '/' . $currentFolderNormalized;
+    $targetPath = rtrim($targetPath, '/') . '/';
     
     $sql = "SELECT DISTINCT videoUrl FROM videos 
             WHERE videoUrl LIKE ? 
-            AND category NOT IN ('PENDING', 'PROCESSING')";
+            AND category NOT IN ('PENDING', 'PROCESSING')
+            AND isLocal = 1"; // Solo descubrimos carpetas del NAS
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$targetPath . "%"]);
     $urls = $stmt->fetchAll(PDO::FETCH_COLUMN);
@@ -116,9 +129,11 @@ function video_discover_subfolders($pdo, $currentFolder) {
     $targetLen = strlen($targetPath);
 
     foreach ($urls as $url) {
+        $url = str_replace('\\', '/', $url);
         $relative = substr($url, $targetLen);
         if (!$relative) continue;
-        $parts = explode(DIRECTORY_SEPARATOR, $relative);
+        
+        $parts = explode('/', $relative);
         if (count($parts) > 1) {
             $folderName = $parts[0];
             if (!isset($foldersMap[$folderName])) {

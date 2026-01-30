@@ -152,7 +152,6 @@ export default function Home() {
             if (reset) {
                 setVideos(res.videos);
                 setFolders(res.folders);
-                // NUEVO: Solo mostrar categorías que tienen contenido real según la API
                 setActiveCategories(['TODOS', ...res.activeCategories]);
             } else {
                 setVideos(prev => [...prev, ...res.videos]);
@@ -281,7 +280,6 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* NUEVO: Barra de Categorías Globales (Solo las que tienen contenido) */}
                 {!searchQuery && (
                     <div className="flex gap-2 overflow-x-auto py-2 scrollbar-hide">
                         {activeCategories.map(cat => (
@@ -311,26 +309,28 @@ export default function Home() {
             ) : (
                 <div className="space-y-10 animate-in fade-in duration-500">
                     
-                    {/* Render de Carpetas (Solo si no hay búsqueda y hay subfolders) */}
+                    {/* Render de Carpetas con visibilidad mejorada de nombres */}
                     {!searchQuery && folders.length > 0 && (
                         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                             {folders.map(folder => (
                                 <button 
                                     key={folder.name} 
                                     onClick={() => setNavigationPath([...navigationPath, folder.name])}
-                                    className="group relative aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-xl hover:scale-[1.03] transition-all duration-300 ring-1 ring-white/5"
+                                    className="group relative aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500 shadow-2xl hover:scale-[1.03] transition-all duration-300 ring-1 ring-white/10"
                                 >
-                                    <div className="absolute inset-0 bg-gradient-to-b from-white/[0.03] to-transparent"></div>
-                                    <div className="p-5 h-full flex flex-col justify-between">
-                                        <div className="flex justify-between items-start">
-                                            <Folder size={32} className="text-indigo-500 group-hover:scale-110 transition-transform" />
-                                            <div className="bg-black/40 px-2 py-0.5 rounded-full border border-white/5">
-                                                <span className="text-[8px] text-slate-400 font-black uppercase tracking-widest">{folder.count} Archivos</span>
+                                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/20 to-transparent"></div>
+                                    <div className="relative h-full flex flex-col p-5">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <Folder size={28} className="text-indigo-400 shrink-0" />
+                                            <div className="bg-slate-800/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10">
+                                                <span className="text-[7px] text-slate-300 font-black uppercase tracking-widest">{folder.count} ARCHIVOS</span>
                                             </div>
                                         </div>
-                                        <div className="space-y-0.5">
-                                            <h3 className="text-xs font-black text-white uppercase tracking-tighter line-clamp-2 text-left leading-tight group-hover:text-indigo-400 transition-colors">{folder.name}</h3>
-                                            <p className="text-[8px] text-slate-500 font-black uppercase tracking-[0.2em] text-left">Explorar Subcarpeta</p>
+                                        <div className="mt-auto">
+                                            <h3 className="text-[13px] font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-md group-hover:text-indigo-300 transition-colors">
+                                                {folder.name}
+                                            </h3>
+                                            <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-12 transition-all"></div>
                                         </div>
                                     </div>
                                 </button>
@@ -367,7 +367,6 @@ export default function Home() {
                         )}
                     </div>
 
-                    {/* Infinite Scroll Sentinel */}
                     {hasMore && (
                         <div ref={loadMoreRef} className="py-20 flex flex-col items-center justify-center gap-3">
                             <Loader2 className="animate-spin text-slate-700" size={32} />
