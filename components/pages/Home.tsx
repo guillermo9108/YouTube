@@ -309,28 +309,33 @@ export default function Home() {
             ) : (
                 <div className="space-y-10 animate-in fade-in duration-500">
                     
-                    {/* Render de Carpetas con visibilidad mejorada de nombres */}
+                    {/* Render de Carpetas con visibilidad móvil optimizada (Proporción 4:5 y paddings menores) */}
                     {!searchQuery && folders.length > 0 && (
-                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
                             {folders.map(folder => (
                                 <button 
                                     key={folder.name} 
                                     onClick={() => setNavigationPath([...navigationPath, folder.name])}
-                                    className="group relative aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500 shadow-2xl hover:scale-[1.03] transition-all duration-300 ring-1 ring-white/10"
+                                    className="group relative aspect-[4/5] sm:aspect-video rounded-[24px] sm:rounded-[32px] overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500 shadow-2xl hover:scale-[1.03] transition-all duration-300 ring-1 ring-white/10"
                                 >
-                                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/20 to-transparent"></div>
-                                    <div className="relative h-full flex flex-col p-5">
+                                    {/* Fondo con degradado para legibilidad del texto blanco */}
+                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
+                                    
+                                    <div className="relative h-full flex flex-col p-4 sm:p-5">
                                         <div className="flex justify-between items-start mb-2">
-                                            <Folder size={28} className="text-indigo-400 shrink-0" />
-                                            <div className="bg-slate-800/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/10">
-                                                <span className="text-[7px] text-slate-300 font-black uppercase tracking-widest">{folder.count} ARCHIVOS</span>
+                                            <div className="p-2 sm:p-2.5 bg-slate-800/80 rounded-xl border border-white/5 text-indigo-400">
+                                                <Folder size={20} className="sm:w-7 sm:h-7" />
+                                            </div>
+                                            <div className="bg-indigo-600/20 backdrop-blur-md px-1.5 sm:px-2 py-0.5 rounded-lg border border-indigo-500/30">
+                                                <span className="text-[7px] sm:text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} FILE</span>
                                             </div>
                                         </div>
-                                        <div className="mt-auto">
-                                            <h3 className="text-[13px] font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-md group-hover:text-indigo-300 transition-colors">
+                                        
+                                        <div className="mt-auto pt-4">
+                                            <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-3">
                                                 {folder.name}
                                             </h3>
-                                            <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-12 transition-all"></div>
+                                            <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-16 transition-all duration-500"></div>
                                         </div>
                                     </div>
                                 </button>
