@@ -115,6 +115,7 @@ export default function Home() {
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [showFolderGrid, setShowFolderGrid] = useState(false);
+    const [headerVisible, setHeaderVisible] = useState(true);
     
     // Data State (Paginación)
     const [videos, setVideos] = useState<Video[]>([]);
@@ -139,6 +140,7 @@ export default function Home() {
     const searchContainerRef = useRef<HTMLDivElement>(null);
     const loadMoreRef = useRef<HTMLDivElement>(null);
     const searchTimeout = useRef<any>(null);
+    const lastScrollY = useRef(0);
 
     const currentFolder = navigationPath.join('/');
     const parentFolderName = navigationPath.length > 0 ? navigationPath[navigationPath.length - 1] : null;
@@ -185,12 +187,38 @@ export default function Home() {
         }
     };
 
-    // 3. Trigger de carga cuando cambian filtros
+    // 3. Lógica de Scroll inteligente (Show/Hide Header)
+    useEffect(() => {
+        const handleScroll = () => {
+            const currentScrollY = window.scrollY;
+            
+            // Si está muy arriba, siempre mostrar
+            if (currentScrollY < 50) {
+                setHeaderVisible(true);
+                lastScrollY.current = currentScrollY;
+                return;
+            }
+
+            // Scroll hacia abajo: ocultar. Scroll hacia arriba: mostrar.
+            if (currentScrollY > lastScrollY.current + 5) {
+                setHeaderVisible(false);
+            } else if (currentScrollY < lastScrollY.current - 5) {
+                setHeaderVisible(true);
+            }
+            
+            lastScrollY.current = currentScrollY;
+        };
+
+        window.addEventListener('scroll', handleScroll, { passive: true });
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
+
+    // 4. Trigger de carga cuando cambian filtros
     useEffect(() => {
         fetchVideos(0, true);
     }, [currentFolder, searchQuery, selectedCategory]);
 
-    // 4. Infinite Scroll Observer
+    // 5. Infinite Scroll Observer
     useEffect(() => {
         if (!hasMore || loading || loadingMore) return;
 
@@ -229,6 +257,15 @@ export default function Home() {
         if (index === -1) setNavigationPath([]);
         else setNavigationPath(navigationPath.slice(0, index + 1));
         setSelectedCategory('TODOS');
+        setShowFolderGrid(false); // Reset al navegar
+    };
+
+    const handleCategoryClick = (cat: string) => {
+        setSelectedCategory(cat);
+        // Requerimiento: Al abrir una categoría que no sea TODOS, abrir automáticamente el grid de carpetas
+        if (cat !== 'TODOS' && folders.length > 0) {
+            setShowFolderGrid(true);
+        }
     };
 
     const handleNotifClick = async (n: AppNotification) => {
@@ -249,8 +286,8 @@ export default function Home() {
         <div className="relative pb-20">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
-            {/* HEADER INMERSIVO SUPERPUESTO */}
-            <div className="fixed top-0 left-0 right-0 z-[60] animate-in fade-in duration-700">
+            {/* HEADER INMERSIVO SUPERPUESTO - Con animación de ocultamiento */}
+            <div className={`fixed top-0 left-0 right-0 z-[60] transition-transform duration-500 ease-in-out ${headerVisible ? 'translate-y-0' : '-translate-y-full'}`}>
                 <div className="absolute inset-0 bg-gradient-to-b from-black via-black/40 to-transparent pointer-events-none h-48"></div>
                 
                 <div className="relative backdrop-blur-xl bg-black/10 border-b border-white/5 pt-4 pb-2 px-4 md:px-8">
@@ -323,7 +360,7 @@ export default function Home() {
                                     {activeCategories.map(cat => (
                                         <button 
                                             key={cat}
-                                            onClick={() => setSelectedCategory(cat)}
+                                            onClick={() => handleCategoryClick(cat)}
                                             className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${
                                                 selectedCategory === cat 
                                                 ? 'bg-white text-black border-white shadow-lg' 
