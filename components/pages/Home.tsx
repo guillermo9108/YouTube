@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Notification as AppNotification, User } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag
+    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag
 } from 'lucide-react';
 import { useNavigate, Link } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -70,11 +70,28 @@ const Sidebar: React.FC<{ isOpen: boolean, onClose: () => void, user: User | nul
     );
 };
 
-const Breadcrumbs: React.FC<{ path: string[], onNavigate: (index: number) => void }> = ({ path, onNavigate }) => (
+const Breadcrumbs: React.FC<{ 
+    path: string[], 
+    onNavigate: (index: number) => void,
+    onToggleFolders: () => void,
+    showFolders: boolean,
+    hasFolders: boolean
+}> = ({ path, onNavigate, onToggleFolders, showFolders, hasFolders }) => (
     <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-3 animate-in fade-in sticky top-0 bg-black/80 backdrop-blur-md z-20">
-        <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors shrink-0">
-            <HomeIcon size={16}/>
-        </button>
+        <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-white/5 shrink-0">
+            <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors">
+                <HomeIcon size={16}/>
+            </button>
+            {hasFolders && (
+                <button 
+                    onClick={onToggleFolders} 
+                    className={`p-2 rounded-lg transition-all duration-300 ${showFolders ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-500 hover:text-slate-300'}`}
+                    title={showFolders ? "Ocultar carpetas" : "Mostrar carpetas"}
+                >
+                    <ChevronDown size={16} className={`transition-transform duration-300 ${showFolders ? 'rotate-180' : ''}`} />
+                </button>
+            )}
+        </div>
         {path.map((segment, i) => (
             <React.Fragment key={`${segment}-${i}`}>
                 <ChevronRight size={12} className="text-slate-600 shrink-0"/>
@@ -98,6 +115,7 @@ export default function Home() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
+    const [showFolderGrid, setShowFolderGrid] = useState(false);
     
     // Data State (Paginación)
     const [videos, setVideos] = useState<Video[]>([]);
@@ -298,7 +316,15 @@ export default function Home() {
                     </div>
                 )}
                 
-                {!searchQuery && <Breadcrumbs path={navigationPath} onNavigate={handleNavigate} />}
+                {!searchQuery && (
+                    <Breadcrumbs 
+                        path={navigationPath} 
+                        onNavigate={handleNavigate} 
+                        onToggleFolders={() => setShowFolderGrid(!showFolderGrid)}
+                        showFolders={showFolderGrid}
+                        hasFolders={folders.length > 0}
+                    />
+                )}
             </div>
 
             {loading ? (
@@ -309,18 +335,16 @@ export default function Home() {
             ) : (
                 <div className="space-y-10 animate-in fade-in duration-500">
                     
-                    {/* Render de Carpetas con visibilidad móvil optimizada (Proporción 4:5 y paddings menores) */}
-                    {!searchQuery && folders.length > 0 && (
-                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+                    {/* Render de Carpetas (Oculto por defecto mediante showFolderGrid) */}
+                    {!searchQuery && folders.length > 0 && showFolderGrid && (
+                        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4 animate-in slide-in-from-top-4 duration-500">
                             {folders.map(folder => (
                                 <button 
                                     key={folder.name} 
-                                    onClick={() => setNavigationPath([...navigationPath, folder.name])}
+                                    onClick={() => { setNavigationPath([...navigationPath, folder.name]); setShowFolderGrid(false); }}
                                     className="group relative aspect-[4/5] sm:aspect-video rounded-[24px] sm:rounded-[32px] overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500 shadow-2xl hover:scale-[1.03] transition-all duration-300 ring-1 ring-white/10"
                                 >
-                                    {/* Fondo con degradado para legibilidad del texto blanco */}
                                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
-                                    
                                     <div className="relative h-full flex flex-col p-4 sm:p-5">
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="p-2 sm:p-2.5 bg-slate-800/80 rounded-xl border border-white/5 text-indigo-400">
@@ -330,7 +354,6 @@ export default function Home() {
                                                 <span className="text-[7px] sm:text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} FILE</span>
                                             </div>
                                         </div>
-                                        
                                         <div className="mt-auto pt-4">
                                             <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-3">
                                                 {folder.name}
