@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
-import { Video, Notification as AppNotification, User } from '../../types';
+import { Video, Notification as AppNotification, User, SystemSettings } from '../../types';
 import { 
     RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag
 } from 'lucide-react';
@@ -115,15 +115,16 @@ export default function Home() {
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [showFolderGrid, setShowFolderGrid] = useState(false);
-    const [navVisible, setNavVisible] = useState(true); // Solo para la fila inferior
+    const [navVisible, setNavVisible] = useState(true);
     
-    // Data State (Paginación)
+    // Data State
     const [videos, setVideos] = useState<Video[]>([]);
     const [folders, setFolders] = useState<{ name: string; count: number }[]>([]);
     const [page, setPage] = useState(0);
     const [hasMore, setHasMore] = useState(true);
     const [loading, setLoading] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
     
     // Filters State
     const [searchQuery, setSearchQuery] = useState('');
@@ -147,7 +148,10 @@ export default function Home() {
 
     // 1. Cargar configuración inicial
     useEffect(() => {
-        db.getSystemSettings().then(s => setGeminiActive(!!s.geminiKey));
+        db.getSystemSettings().then(s => {
+            setSystemSettings(s);
+            setGeminiActive(!!s.geminiKey);
+        });
         if (user) {
             db.getUserActivity(user.id).then(act => setWatchedIds(act?.watched || []));
             db.getNotifications(user.id).then(setNotifs);
@@ -173,6 +177,42 @@ export default function Home() {
                 setVideos(res.videos);
                 setFolders(res.folders);
                 setActiveCategories(['TODOS', ...res.activeCategories]);
+
+                // --- LÓGICA DE AUTO-NAVEGACIÓN AL PADRE ---
+                // Si seleccionamos una categoría desde la raíz y hay resultados, saltamos a la carpeta física
+                if (selectedCategory !== 'TODOS' && navigationPath.length === 0 && res.videos.length > 0 && systemSettings) {
+                    const firstVid = res.videos[0];
+                    const rawPath = (firstVid as any).rawPath || firstVid.videoUrl;
+                    const rootPath = systemSettings.localLibraryPath || '';
+                    
+                    if (rawPath.startsWith(rootPath)) {
+                        const relative = rawPath.substring(rootPath.length).replace(/^[\\/]+/, '');
+                        const segments = relative.split(/[\\/]/).filter(Boolean);
+                        
+                        // Si el archivo está en subcarpetas (ej: DCIM/camera/file.mp4)
+                        if (segments.length > 1) {
+                            // Navegamos hasta el penúltimo nivel (el padre de la categoría o el archivo)
+                            const newPath = segments.slice(0, -1);
+                            
+                            // Caso especial: si el último segmento de carpeta coincide con la categoría, 
+                            // tal vez queramos subir un nivel más para ver el grid de carpetas.
+                            // Pero siguiendo el requerimiento "si abre camera y el padre es DCIM, abrir DCIM":
+                            if (newPath.length > 0) {
+                                // Si la última carpeta se llama igual que la categoría, subimos 1
+                                const finalPath = (newPath[newPath.length-1].toLowerCase() === selectedCategory.toLowerCase()) 
+                                    ? newPath.slice(0, -1) 
+                                    : newPath;
+                                
+                                if (finalPath.length > 0) {
+                                    setNavigationPath(finalPath);
+                                    setShowFolderGrid(true);
+                                    setNavVisible(true);
+                                }
+                            }
+                        }
+                    }
+                }
+                // ------------------------------------------
             } else {
                 setVideos(prev => [...prev, ...res.videos]);
             }
@@ -187,28 +227,15 @@ export default function Home() {
         }
     };
 
-    // 3. Scroll Inteligente (Solo afecta a la Capa Inferior de Navegación)
+    // 3. Scroll Inteligente (Solo fila inferior)
     useEffect(() => {
         const handleScroll = () => {
             const currentScrollY = window.scrollY;
-            
-            // Si estamos al principio, siempre visible
-            if (currentScrollY < 80) {
-                setNavVisible(true);
-                lastScrollY.current = currentScrollY;
-                return;
-            }
-
-            // Scroll hacia abajo: ocultar. Scroll hacia arriba: mostrar.
-            if (currentScrollY > lastScrollY.current + 10) {
-                setNavVisible(false);
-            } else if (currentScrollY < lastScrollY.current - 10) {
-                setNavVisible(true);
-            }
-            
+            if (currentScrollY < 80) { setNavVisible(true); lastScrollY.current = currentScrollY; return; }
+            if (currentScrollY > lastScrollY.current + 10) { setNavVisible(false); } 
+            else if (currentScrollY < lastScrollY.current - 10) { setNavVisible(true); }
             lastScrollY.current = currentScrollY;
         };
-
         window.addEventListener('scroll', handleScroll, { passive: true });
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
@@ -221,13 +248,9 @@ export default function Home() {
     // 5. Infinite Scroll Observer
     useEffect(() => {
         if (!hasMore || loading || loadingMore) return;
-
         const observer = new IntersectionObserver((entries) => {
-            if (entries[0].isIntersecting) {
-                fetchVideos(page + 1);
-            }
+            if (entries[0].isIntersecting) { fetchVideos(page + 1); }
         }, { threshold: 0.1, rootMargin: '400px' });
-
         if (loadMoreRef.current) observer.observe(loadMoreRef.current);
         return () => observer.disconnect();
     }, [page, hasMore, loading, loadingMore]);
@@ -236,7 +259,6 @@ export default function Home() {
         setSearchQuery(val);
         if (searchTimeout.current) clearTimeout(searchTimeout.current);
         if (val.length < 2) { setSuggestions([]); setShowSuggestions(false); return; }
-        
         searchTimeout.current = setTimeout(async () => {
             try {
                 const res = await db.getSearchSuggestions(val);
@@ -263,8 +285,8 @@ export default function Home() {
 
     const handleCategoryClick = (cat: string) => {
         setSelectedCategory(cat);
-        // REQUERIMIENTO: Si se abre una categoría distinta de TODOS, desplegar automáticamente la barra de carpetas padre
-        if (cat !== 'TODOS' && folders.length > 0) {
+        // Desplegamos el grid de carpetas siempre que se filtre por categoría
+        if (cat !== 'TODOS') {
             setShowFolderGrid(true);
             setNavVisible(true);
         }
@@ -288,17 +310,15 @@ export default function Home() {
         <div className="relative pb-20">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
-            {/* HEADER HÍBRIDO */}
             <div className="fixed top-0 left-0 right-0 z-[60]">
-                {/* 1. CAPA SUPERIOR: FIJA (Buscador, Menú, Notificaciones) */}
+                {/* CAPA SUPERIOR FIJA */}
                 <div className="relative z-20 backdrop-blur-2xl bg-black/40 border-b border-white/5 pt-4 pb-2 px-4 md:px-8 shadow-xl">
                     <div className="flex gap-3 items-center max-w-7xl mx-auto">
                         <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform shrink-0"><Menu size={20}/></button>
                         <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
                             <Search className="absolute left-4 top-3 text-slate-400" size={18} />
                             <input 
-                                type="text" 
-                                value={searchQuery} 
+                                type="text" value={searchQuery} 
                                 onChange={(e) => handleSearchChange(e.target.value)} 
                                 onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)}
                                 placeholder="Explorar biblioteca..." 
@@ -340,18 +360,15 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* 2. CAPA INFERIOR: DINÁMICA (Breadcrumbs, Categorías) - Responde al Scroll */}
+                {/* CAPA INFERIOR DINÁMICA */}
                 {!searchQuery && (
                     <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
                         <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-6 max-w-7xl mx-auto">
                             <Breadcrumbs 
-                                path={navigationPath} 
-                                onNavigate={handleNavigate} 
+                                path={navigationPath} onNavigate={handleNavigate} 
                                 onToggleFolders={() => setShowFolderGrid(!showFolderGrid)}
-                                showFolders={showFolderGrid}
-                                hasFolders={folders.length > 0}
+                                showFolders={showFolderGrid} hasFolders={folders.length > 0}
                             />
-                            
                             <div className="flex-1 min-w-0 flex items-center gap-3 overflow-x-auto scrollbar-hide py-1">
                                 {parentFolderName && (
                                     <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3">
@@ -361,12 +378,9 @@ export default function Home() {
                                 <div className="flex gap-2">
                                     {activeCategories.map(cat => (
                                         <button 
-                                            key={cat}
-                                            onClick={() => handleCategoryClick(cat)}
+                                            key={cat} onClick={() => handleCategoryClick(cat)}
                                             className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${
-                                                selectedCategory === cat 
-                                                ? 'bg-white text-black border-white shadow-lg' 
-                                                : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white'
+                                                selectedCategory === cat ? 'bg-white text-black border-white shadow-lg' : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white'
                                             }`}
                                         >
                                             {cat === 'TODOS' ? (parentFolderName ? 'Todo en ' + parentFolderName : 'Todo') : cat}
@@ -379,7 +393,6 @@ export default function Home() {
                 )}
             </div>
 
-            {/* CONTENIDO PRINCIPAL */}
             <div className="pt-36 px-4 md:px-8 max-w-7xl mx-auto">
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-40 gap-4">
@@ -388,8 +401,6 @@ export default function Home() {
                     </div>
                 ) : (
                     <div className="space-y-12 animate-in fade-in duration-1000">
-                        
-                        {/* Rejilla de Carpetas (Desplegable) */}
                         {!searchQuery && folders.length > 0 && showFolderGrid && (
                             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
                                 {folders.map(folder => (
@@ -401,17 +412,13 @@ export default function Home() {
                                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
                                         <div className="relative h-full flex flex-col p-5">
                                             <div className="flex justify-between items-start">
-                                                <div className="p-3 bg-slate-800/80 rounded-2xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform">
-                                                    <Folder size={24}/>
-                                                </div>
+                                                <div className="p-3 bg-slate-800/80 rounded-2xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform"><Folder size={24}/></div>
                                                 <div className="bg-indigo-600/20 backdrop-blur-md px-2 py-0.5 rounded-lg border border-indigo-500/30">
                                                     <span className="text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} ITEMS</span>
                                                 </div>
                                             </div>
                                             <div className="mt-auto">
-                                                <h3 className="text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-2">
-                                                    {folder.name}
-                                                </h3>
+                                                <h3 className="text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-2">{folder.name}</h3>
                                                 <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-full transition-all duration-700"></div>
                                             </div>
                                         </div>
@@ -420,7 +427,6 @@ export default function Home() {
                             </div>
                         )}
 
-                        {/* Listado de Videos */}
                         <div className="space-y-8">
                             {!searchQuery && (
                                 <div className="flex items-center gap-3 px-1">
@@ -436,8 +442,7 @@ export default function Home() {
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-12">
                                     {videos.map(v => (
                                         <VideoCard 
-                                            key={v.id} 
-                                            video={v} 
+                                            key={v.id} video={v} 
                                             isUnlocked={isAdmin || user?.id === v.creatorId} 
                                             isWatched={watchedIds.includes(v.id)} 
                                         />
