@@ -111,7 +111,7 @@ export default function Home() {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('TODOS');
     const [navigationPath, setNavigationPath] = useState<string[]>([]);
-    const [sysCategories, setSysCategories] = useState<string[]>([]);
+    const [activeCategories, setActiveCategories] = useState<string[]>(['TODOS']);
     
     // Secondary Data
     const [watchedIds, setWatchedIds] = useState<string[]>([]);
@@ -125,15 +125,9 @@ export default function Home() {
 
     const currentFolder = navigationPath.join('/');
 
-    // 1. Cargar configuración y categorías
+    // 1. Cargar configuración inicial
     useEffect(() => {
-        db.getSystemSettings().then(s => {
-            setGeminiActive(!!s.geminiKey);
-            if (s.categories) {
-                const names = s.categories.map(c => c.name);
-                setSysCategories(['TODOS', ...names]);
-            }
-        });
+        db.getSystemSettings().then(s => setGeminiActive(!!s.geminiKey));
         if (user) {
             db.getUserActivity(user.id).then(act => setWatchedIds(act?.watched || []));
             db.getNotifications(user.id).then(setNotifs);
@@ -158,6 +152,8 @@ export default function Home() {
             if (reset) {
                 setVideos(res.videos);
                 setFolders(res.folders);
+                // NUEVO: Solo mostrar categorías que tienen contenido real según la API
+                setActiveCategories(['TODOS', ...res.activeCategories]);
             } else {
                 setVideos(prev => [...prev, ...res.videos]);
             }
@@ -285,10 +281,10 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* NUEVO: Barra de Categorías Globales (Pills) */}
+                {/* NUEVO: Barra de Categorías Globales (Solo las que tienen contenido) */}
                 {!searchQuery && (
                     <div className="flex gap-2 overflow-x-auto py-2 scrollbar-hide">
-                        {sysCategories.map(cat => (
+                        {activeCategories.map(cat => (
                             <button 
                                 key={cat}
                                 onClick={() => setSelectedCategory(cat)}
@@ -322,14 +318,19 @@ export default function Home() {
                                 <button 
                                     key={folder.name} 
                                     onClick={() => setNavigationPath([...navigationPath, folder.name])}
-                                    className="group relative aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-sm hover:shadow-xl hover:scale-[1.02] transition-all duration-300 ring-1 ring-white/5"
+                                    className="group relative aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 shadow-xl hover:scale-[1.03] transition-all duration-300 ring-1 ring-white/5"
                                 >
-                                    <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/20 to-transparent"></div>
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
-                                        <Folder size={32} className="text-indigo-400 mb-2 group-hover:scale-110 transition-transform" />
-                                        <h3 className="text-xs font-black text-white uppercase tracking-tighter line-clamp-2">{folder.name}</h3>
-                                        <div className="mt-1 bg-black/40 px-2 py-0.5 rounded-full border border-white/5">
-                                            <span className="text-[8px] text-slate-400 font-black uppercase tracking-widest">{folder.count} Archivos</span>
+                                    <div className="absolute inset-0 bg-gradient-to-b from-white/[0.03] to-transparent"></div>
+                                    <div className="p-5 h-full flex flex-col justify-between">
+                                        <div className="flex justify-between items-start">
+                                            <Folder size={32} className="text-indigo-500 group-hover:scale-110 transition-transform" />
+                                            <div className="bg-black/40 px-2 py-0.5 rounded-full border border-white/5">
+                                                <span className="text-[8px] text-slate-400 font-black uppercase tracking-widest">{folder.count} Archivos</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            <h3 className="text-xs font-black text-white uppercase tracking-tighter line-clamp-2 text-left leading-tight group-hover:text-indigo-400 transition-colors">{folder.name}</h3>
+                                            <p className="text-[8px] text-slate-500 font-black uppercase tracking-[0.2em] text-left">Explorar Subcarpeta</p>
                                         </div>
                                     </div>
                                 </button>
@@ -337,7 +338,7 @@ export default function Home() {
                         </div>
                     )}
 
-                    {/* Grid de Contenido Aplanado (Videos de este nivel y subniveles) */}
+                    {/* Grid de Contenido Aplanado */}
                     <div>
                         {!searchQuery && (
                             <div className="flex items-center gap-2 mb-6 px-1">

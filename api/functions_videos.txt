@@ -36,7 +36,7 @@ function video_get_all($pdo) {
     $offset = intval($_GET['offset'] ?? 0);
     $search = trim($_GET['search'] ?? '');
     $folder = trim($_GET['folder'] ?? ''); 
-    $category = trim($_GET['category'] ?? ''); // NUEVO: Filtro por categoría real (Movies, Series, etc)
+    $category = trim($_GET['category'] ?? ''); 
     
     $params = [];
     $where = ["v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
@@ -83,11 +83,16 @@ function video_get_all($pdo) {
         $subfolders = video_discover_subfolders($pdo, $folder);
     }
 
+    // NUEVO: Obtener solo categorías que tienen videos publicados
+    $stmtActiveCats = $pdo->query("SELECT DISTINCT category FROM videos WHERE category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')");
+    $activeCategories = $stmtActiveCats->fetchAll(PDO::FETCH_COLUMN);
+
     video_process_rows($videos);
     
     respond(true, [
         'videos' => $videos,
         'folders' => $subfolders,
+        'activeCategories' => $activeCategories,
         'total' => (int)$total,
         'hasMore' => ($offset + $limit) < $total
     ]);

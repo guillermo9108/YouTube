@@ -8,6 +8,7 @@ import {
 interface VideoPagedResponse {
     videos: Video[];
     folders: { name: string; count: number }[];
+    activeCategories: string[];
     total: number;
     hasMore: boolean;
 }
