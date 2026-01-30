@@ -77,7 +77,7 @@ const Breadcrumbs: React.FC<{
     showFolders: boolean,
     hasFolders: boolean
 }> = ({ path, onNavigate, onToggleFolders, showFolders, hasFolders }) => (
-    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-3 animate-in fade-in shrink-0">
+    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in shrink-0">
         <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0">
             <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-white/10 rounded-lg text-white transition-colors">
                 <HomeIcon size={16}/>
@@ -115,7 +115,7 @@ export default function Home() {
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [showFolderGrid, setShowFolderGrid] = useState(false);
-    const [headerVisible, setHeaderVisible] = useState(true);
+    const [headerVisible, setHeaderVisible] = useState(true); // Controla la barra inferior del header
     
     // Data State (Paginación)
     const [videos, setVideos] = useState<Video[]>([]);
@@ -187,22 +187,22 @@ export default function Home() {
         }
     };
 
-    // 3. Lógica de Scroll inteligente (Show/Hide Header)
+    // 3. Lógica de Scroll inteligente (Ocultar solo la barra de categorías/carpetas)
     useEffect(() => {
         const handleScroll = () => {
             const currentScrollY = window.scrollY;
             
-            // Si está muy arriba, siempre mostrar
-            if (currentScrollY < 50) {
+            // Margen para evitar saltos en la parte superior
+            if (currentScrollY < 100) {
                 setHeaderVisible(true);
                 lastScrollY.current = currentScrollY;
                 return;
             }
 
-            // Scroll hacia abajo: ocultar. Scroll hacia arriba: mostrar.
-            if (currentScrollY > lastScrollY.current + 5) {
+            // Scroll abajo: ocultar barra inferior. Scroll arriba: mostrar.
+            if (currentScrollY > lastScrollY.current + 10) {
                 setHeaderVisible(false);
-            } else if (currentScrollY < lastScrollY.current - 5) {
+            } else if (currentScrollY < lastScrollY.current - 10) {
                 setHeaderVisible(true);
             }
             
@@ -257,12 +257,12 @@ export default function Home() {
         if (index === -1) setNavigationPath([]);
         else setNavigationPath(navigationPath.slice(0, index + 1));
         setSelectedCategory('TODOS');
-        setShowFolderGrid(false); // Reset al navegar
+        setShowFolderGrid(false);
     };
 
     const handleCategoryClick = (cat: string) => {
         setSelectedCategory(cat);
-        // Requerimiento: Al abrir una categoría que no sea TODOS, abrir automáticamente el grid de carpetas
+        // Requerimiento: Al filtrar por una categoría que no sea TODOS, desplegar automáticamente la barra de carpetas
         if (cat !== 'TODOS' && folders.length > 0) {
             setShowFolderGrid(true);
         }
@@ -286,14 +286,12 @@ export default function Home() {
         <div className="relative pb-20">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
-            {/* HEADER INMERSIVO SUPERPUESTO - Con animación de ocultamiento */}
-            <div className={`fixed top-0 left-0 right-0 z-[60] transition-transform duration-500 ease-in-out ${headerVisible ? 'translate-y-0' : '-translate-y-full'}`}>
-                <div className="absolute inset-0 bg-gradient-to-b from-black via-black/40 to-transparent pointer-events-none h-48"></div>
-                
-                <div className="relative backdrop-blur-xl bg-black/10 border-b border-white/5 pt-4 pb-2 px-4 md:px-8">
-                    {/* Fila Superior: Búsqueda y Perfil */}
-                    <div className="flex gap-3 mb-3 items-center max-w-7xl mx-auto">
-                        <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform"><Menu size={20}/></button>
+            {/* HEADER INMERSIVO HÍBRIDO */}
+            <div className="fixed top-0 left-0 right-0 z-[60]">
+                {/* FILA SUPERIOR: SIEMPRE FIJA (Menú, Búsqueda, Campana) */}
+                <div className="relative z-20 backdrop-blur-2xl bg-black/40 border-b border-white/5 pt-4 pb-2 px-4 md:px-8 shadow-2xl">
+                    <div className="flex gap-3 items-center max-w-7xl mx-auto">
+                        <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform shrink-0"><Menu size={20}/></button>
                         <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
                             <Search className="absolute left-4 top-3 text-slate-400" size={18} />
                             <input 
@@ -316,7 +314,7 @@ export default function Home() {
                                 </div>
                             )}
                         </div>
-                        <div className="relative">
+                        <div className="relative shrink-0">
                             <button onClick={() => setShowNotifMenu(!showNotifMenu)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white relative active:scale-95 transition-transform">
                                 <Bell size={22} className={unreadCount > 0 ? "animate-bounce" : ""} />
                                 {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black">{unreadCount}</span>}
@@ -338,9 +336,11 @@ export default function Home() {
                             )}
                         </div>
                     </div>
+                </div>
 
-                    {/* Fila Inferior: Navegación y Categorías Contextuales */}
-                    {!searchQuery && (
+                {/* FILA INFERIOR: DINÁMICA (Breadcrumbs, Categorías) - Se oculta al scroll */}
+                {!searchQuery && (
+                    <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${headerVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
                         <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-6 max-w-7xl mx-auto">
                             <Breadcrumbs 
                                 path={navigationPath} 
@@ -373,12 +373,12 @@ export default function Home() {
                                 </div>
                             </div>
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
             </div>
 
-            {/* CONTENIDO PRINCIPAL: COMIENZA DESDE TOP 0 */}
-            <div className="pt-32 px-4 md:px-8 max-w-7xl mx-auto">
+            {/* CONTENIDO PRINCIPAL: Ajustado para la cabecera híbrida */}
+            <div className="pt-36 px-4 md:px-8 max-w-7xl mx-auto">
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-40 gap-4">
                         <Loader2 className="animate-spin text-indigo-500" size={48} />
