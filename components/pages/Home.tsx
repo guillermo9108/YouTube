@@ -75,14 +75,14 @@ const Breadcrumbs: React.FC<{
     onNavigate: (index: number) => void,
     onToggleFolders: () => void,
     showFolders: boolean,
-    hasFolders: boolean
-}> = ({ path, onNavigate, onToggleFolders, showFolders, hasFolders }) => (
+    hasContent: boolean
+}> = ({ path, onNavigate, onToggleFolders, showFolders, hasContent }) => (
     <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in shrink-0">
         <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0">
             <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-white/10 rounded-lg text-white transition-colors">
                 <HomeIcon size={16}/>
             </button>
-            {hasFolders && (
+            {hasContent && (
                 <button 
                     onClick={onToggleFolders} 
                     className={`p-2 rounded-lg transition-all duration-300 ${showFolders ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-300 hover:text-white'}`}
@@ -108,19 +108,19 @@ const Breadcrumbs: React.FC<{
 export default function Home() {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
-    const location = useLocation();
     const toast = useToast();
     
     // UI State
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const [showFolderGrid, setShowFolderGrid] = useState(false);
+    const [showFolderGrid, setShowFolderGrid] = useState(true);
     const [navVisible, setNavVisible] = useState(true);
     
     // Data State
     const [videos, setVideos] = useState<Video[]>([]);
     const [folders, setFolders] = useState<{ name: string; count: number }[]>([]);
+    const [availableCategories, setAvailableCategories] = useState<{ name: string; count: number }[]>([]);
     const [page, setPage] = useState(0);
     const [hasMore, setHasMore] = useState(true);
     const [loading, setLoading] = useState(false);
@@ -144,7 +144,6 @@ export default function Home() {
     const [searchQuery, setSearchQuery] = useState(initialQuery);
     const [selectedCategory, setSelectedCategory] = useState('TODOS');
     const [navigationPath, setNavigationPath] = useState<string[]>([]);
-    const [activeCategories, setActiveCategories] = useState<string[]>(['TODOS']);
     
     // Secondary Data
     const [watchedIds, setWatchedIds] = useState<string[]>([]);
@@ -181,39 +180,17 @@ export default function Home() {
         if (reset) {
             setLoading(true);
             setVideos([]);
-            setFolders([]);
         } else {
             setLoadingMore(true);
         }
 
         try {
-            const res = await db.getVideos(p, 40, currentFolder, searchQuery, selectedCategory);
+            const res: any = await db.getVideos(p, 40, currentFolder, searchQuery, selectedCategory);
             
             if (reset) {
                 setVideos(res.videos);
-                setFolders(res.folders);
-                setActiveCategories(['TODOS', ...res.activeCategories]);
-
-                if (selectedCategory !== 'TODOS' && navigationPath.length === 0 && res.videos.length > 0 && systemSettings) {
-                    const firstVid = res.videos[0];
-                    const rawPath = (firstVid as any).rawPath || firstVid.videoUrl;
-                    const rootPath = systemSettings.localLibraryPath || '';
-                    if (rawPath.startsWith(rootPath)) {
-                        const relative = rawPath.substring(rootPath.length).replace(/^[\\/]+/, '');
-                        const segments = relative.split(/[\\/]/).filter(Boolean);
-                        if (segments.length > 1) {
-                            const newPath = segments.slice(0, -1);
-                            if (newPath.length > 0) {
-                                const finalPath = (newPath[newPath.length-1].toLowerCase() === selectedCategory.toLowerCase()) ? newPath.slice(0, -1) : newPath;
-                                if (finalPath.length > 0) {
-                                    setNavigationPath(finalPath);
-                                    setShowFolderGrid(true);
-                                    setNavVisible(true);
-                                }
-                            }
-                        }
-                    }
-                }
+                setFolders(res.folders || []);
+                setAvailableCategories(res.activeCategories || []);
             } else {
                 setVideos(prev => [...prev, ...res.videos]);
             }
@@ -297,13 +274,38 @@ export default function Home() {
         if (index === -1) setNavigationPath([]);
         else setNavigationPath(navigationPath.slice(0, index + 1));
         setSelectedCategory('TODOS');
-        setShowFolderGrid(false);
+        setShowFolderGrid(true);
         setNavVisible(true);
     };
 
-    const handleCategoryClick = (cat: string) => {
+    const handleFolderClick = (folderName: string) => {
+        setNavigationPath([...navigationPath, folderName]);
+        setSelectedCategory('TODOS');
+        setNavVisible(true);
+    };
+
+    // Lógica de SALTO DE CATEGORÍA
+    const handleCategoryCardClick = (cat: string) => {
+        // 1. Si hay un video que coincida con la categoría y tenga una ruta física, saltamos a esa carpeta
+        const matchingVid = videos.find(v => v.category.toLowerCase() === cat.toLowerCase());
+        if (matchingVid && systemSettings) {
+            const rawPath = (matchingVid as any).rawPath || matchingVid.videoUrl;
+            const rootPath = systemSettings.localLibraryPath || '';
+            if (rawPath.startsWith(rootPath)) {
+                const relative = rawPath.substring(rootPath.length).replace(/^[\\/]+/, '');
+                const segments = relative.split(/[\\/]/).filter(Boolean);
+                if (segments.length > 1) {
+                    const newPath = segments.slice(0, -1);
+                    setNavigationPath(newPath);
+                }
+            }
+        }
+        
+        // 2. Establecemos el filtro de categoría y ocultamos el grid para ver resultados
         setSelectedCategory(cat);
-        if (cat !== 'TODOS') { setShowFolderGrid(true); setNavVisible(true); }
+        setShowFolderGrid(false);
+        setNavVisible(true);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     const handleNotifClick = async (n: AppNotification) => {
@@ -330,6 +332,8 @@ export default function Home() {
             default: return <Layers size={14} className="text-slate-400" />;
         }
     };
+
+    const hasNavNodes = folders.length > 0 || availableCategories.length > 1;
 
     return (
         <div className="relative pb-20">
@@ -377,13 +381,16 @@ export default function Home() {
                 {!searchQuery && (
                     <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
                         <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-6 max-w-7xl mx-auto">
-                            <Breadcrumbs path={navigationPath} onNavigate={handleNavigate} onToggleFolders={() => setShowFolderGrid(!showFolderGrid)} showFolders={showFolderGrid} hasFolders={folders.length > 0} />
+                            <Breadcrumbs path={navigationPath} onNavigate={handleNavigate} onToggleFolders={() => setShowFolderGrid(!showFolderGrid)} showFolders={showFolderGrid} hasContent={hasNavNodes} />
                             <div className="flex-1 min-w-0 flex items-center gap-3 overflow-x-auto scrollbar-hide py-1">
                                 {parentFolderName && <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3"><Folder size={12}/> {parentFolderName}</div>}
                                 <div className="flex gap-2">
-                                    {activeCategories.map(cat => (
-                                        <button key={cat} onClick={() => handleCategoryClick(cat)} className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${selectedCategory === cat ? 'bg-white text-black border-white shadow-lg' : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white'}`}>
-                                            {cat === 'TODOS' ? (parentFolderName ? 'Todo en ' + parentFolderName : 'Todo') : cat}
+                                    <button onClick={() => { setSelectedCategory('TODOS'); setShowFolderGrid(true); }} className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${selectedCategory === 'TODOS' ? 'bg-white text-black border-white shadow-lg' : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white'}`}>
+                                        {parentFolderName ? 'Todo en ' + parentFolderName : 'Explorar'}
+                                    </button>
+                                    {availableCategories.filter(c => c.name !== 'TODOS' && c.name !== 'GENERAL').map(cat => (
+                                        <button key={cat.name} onClick={() => { setSelectedCategory(cat.name); setShowFolderGrid(false); }} className={`whitespace-nowrap px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${selectedCategory === cat.name ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg' : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white'}`}>
+                                            {cat.name}
                                         </button>
                                     ))}
                                 </div>
@@ -398,11 +405,12 @@ export default function Home() {
                     <div className="flex flex-col items-center justify-center py-40 gap-4"><Loader2 className="animate-spin text-indigo-500" size={48} /><p className="text-xs font-black text-slate-500 uppercase tracking-widest animate-pulse">Sincronizando contenido...</p></div>
                 ) : (
                     <div className="space-y-12 animate-in fade-in duration-1000">
-                        {!searchQuery && folders.length > 0 && showFolderGrid && (
+                        {!searchQuery && showFolderGrid && (
                             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
+                                {/* RENDERING FOLDERS */}
                                 {folders.map(folder => (
-                                    <div key={folder.name} className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300">
-                                        <button onClick={() => { setNavigationPath([...navigationPath, folder.name]); setSelectedCategory('TODOS'); setShowFolderGrid(false); }} className="absolute inset-0 w-full h-full text-left">
+                                    <div key={'f_'+folder.name} className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300">
+                                        <button onClick={() => handleFolderClick(folder.name)} className="absolute inset-0 w-full h-full text-left">
                                             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
                                             <div className="relative h-full flex flex-col p-5">
                                                 <div className="flex justify-between items-start">
@@ -416,6 +424,25 @@ export default function Home() {
                                             </div>
                                         </button>
                                         {isAdmin && <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingFolder(folder.name); }} className="absolute bottom-4 right-4 p-2.5 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-xl border border-white/10 text-white z-20 opacity-0 group-hover:opacity-100 transition-all active:scale-90"><Edit3 size={16}/></button>}
+                                    </div>
+                                ))}
+
+                                {/* RENDERING CATEGORIES AS NODES */}
+                                {availableCategories.filter(c => c.name !== 'TODOS' && c.name !== 'GENERAL').map(cat => (
+                                    <div key={'c_'+cat.name} className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-pink-500 shadow-2xl transition-all duration-300">
+                                        <button onClick={() => handleCategoryCardClick(cat.name)} className="absolute inset-0 w-full h-full text-left">
+                                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-pink-500/10"></div>
+                                            <div className="relative h-full flex flex-col p-5">
+                                                <div className="flex justify-between items-start">
+                                                    <div className="p-3 bg-slate-800/80 rounded-2xl border border-white/5 text-pink-400 group-hover:scale-110 transition-transform"><Tag size={24}/></div>
+                                                    <div className="bg-pink-600/20 backdrop-blur-md px-2 py-0.5 rounded-lg border border-pink-500/30"><span className="text-[8px] text-pink-200 font-black uppercase tracking-widest">{cat.count} VIDEOS</span></div>
+                                                </div>
+                                                <div className="mt-auto">
+                                                    <h3 className="text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-pink-300 transition-colors line-clamp-2">{cat.name}</h3>
+                                                    <div className="w-6 h-1 bg-pink-500 mt-2 rounded-full group-hover:w-full transition-all duration-700"></div>
+                                                </div>
+                                            </div>
+                                        </button>
                                     </div>
                                 ))}
                             </div>
@@ -435,7 +462,7 @@ export default function Home() {
                 )}
             </div>
 
-            {/* Folder Edit Modal (Admin) */}
+            {/* Folder Edit Modal (Admin) se mantiene igual */}
             {editingFolder && (
                 <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
                     <div className="bg-slate-900 border border-white/10 rounded-[40px] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95">
