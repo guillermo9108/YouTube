@@ -1,6 +1,6 @@
 <?php
 /**
- * VIDEOS - CORE FUNCTIONS V19.0 (Folder Discovery & Safety Patch)
+ * VIDEOS - CORE FUNCTIONS V20.0 (Admin Library Discovery & Batch Patch)
  */
 
 function video_process_rows(&$rows) {
@@ -19,6 +19,50 @@ function video_process_rows(&$rows) {
         if (isset($v['is_audio'])) { $v['is_audio'] = (bool)$v['is_audio']; }
         if (!isset($v['creatorRole']) || empty($v['creatorRole'])) { $v['creatorRole'] = 'USER'; }
     }
+}
+
+// --- SCANNER ENGINE ---
+
+/**
+ * Descubre ramas (carpetas de primer nivel) en los discos configurados.
+ * Permite segmentar el escaneo masivo para evitar timeouts de PHP.
+ */
+function video_get_scan_folders($pdo) {
+    $stmt = $pdo->query("SELECT localLibraryPath, libraryPaths FROM system_settings WHERE id = 1");
+    $settings = $stmt->fetch();
+    if (!$settings) respond(false, null, "Configuración no encontrada");
+
+    $root = $settings['localLibraryPath'] ?? '';
+    $others = json_decode($settings['libraryPaths'] ?? '[]', true);
+    
+    $allRoots = array_unique(array_filter(array_merge([$root], $others)));
+    $folders = [];
+    
+    foreach ($allRoots as $r) {
+        $r = rtrim($r, '/\\');
+        if (!is_dir($r)) continue;
+        
+        $items = scandir($r);
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') continue;
+            $full = $r . DIRECTORY_SEPARATOR . $item;
+            if (is_dir($full)) {
+                $folders[] = [
+                    'path' => $full,
+                    'name' => $item,
+                    'parent' => basename($r)
+                ];
+            }
+        }
+    }
+    respond(true, $folders);
+}
+
+function video_process_scan_batch($pdo) {
+    // Esta función maneja la lógica de procesamiento interno si el cliente 
+    // delega la importación pesada al servidor.
+    // Por ahora, el cliente llama a scan_local_library secuencialmente.
+    respond(true, ['status' => 'idle', 'processed' => 0]);
 }
 
 // --- YOUTUBE BRIDGE INTEGRATION ---
@@ -124,7 +168,6 @@ function video_get_all($pdo) {
         $params[] = $category;
     }
 
-    // Filtro por carpeta
     if (!empty($currentFolder) && empty($search)) {
         $where[] = "v.videoUrl LIKE ?";
         $params[] = "%/" . ltrim($currentFolder, '/') . "/%";
@@ -146,7 +189,6 @@ function video_get_all($pdo) {
     $total->execute($params);
     $totalCount = $total->fetchColumn();
 
-    // 1. Descubrimiento de Carpetas Dinámicas
     $folders = [];
     if (empty($search)) {
         $folderSql = "SELECT videoUrl FROM videos v WHERE $whereClause";
@@ -155,28 +197,14 @@ function video_get_all($pdo) {
         $allUrls = $fStmt->fetchAll(PDO::FETCH_COLUMN);
 
         $folderCounts = [];
-        $prefix = $currentFolder ? rtrim($currentFolder, '/') . '/' : '';
-        
         foreach ($allUrls as $url) {
             $url = str_replace('\\', '/', $url);
-            if ($currentFolder && strpos($url, $currentFolder) === false) continue;
-            
             $parts = explode('/', $url);
             $foundIndex = -1;
             
-            if (!$currentFolder) {
-                // Si estamos en la raíz, buscamos el primer segmento significativo después de uploads/videos o similar
-                foreach($parts as $idx => $p) {
-                    if ($p === 'videos' || $p === 'media' || $p === 'Libreria') {
-                        $foundIndex = $idx + 1; break;
-                    }
-                }
-            } else {
-                // Si ya estamos en una subcarpeta, buscamos el siguiente nivel
-                foreach($parts as $idx => $p) {
-                    if ($p === basename($currentFolder)) {
-                        $foundIndex = $idx + 1; break;
-                    }
+            foreach($parts as $idx => $p) {
+                if ($p === 'videos' || $p === 'media' || $p === 'Libreria' || $p === 'NAS') {
+                    $foundIndex = $idx + 1; break;
                 }
             }
 
@@ -192,7 +220,6 @@ function video_get_all($pdo) {
         usort($folders, function($a, $b) { return strcmp($a['name'], $b['name']); });
     }
 
-    // 2. Categorías Activas en el set actual
     $activeCategories = [];
     $catSql = "SELECT DISTINCT category FROM videos v WHERE $whereClause";
     $cStmt = $pdo->prepare($catSql);
@@ -306,10 +333,8 @@ function video_update_metadata($pdo, $post, $files) {
     $pdo->prepare("UPDATE videos SET duration = ?, thumbnailUrl = IFNULL(?, thumbnailUrl), category = 'PROCESSING', processing_attempts = 0 WHERE id = ?")
         ->execute([$dur, $thumbUrl, $id]);
     
-    // Auto-organize pipeline
     $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
     video_organize_single($pdo, $id, $settings);
-    
     respond(true);
 }
 

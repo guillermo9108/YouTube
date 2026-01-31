@@ -36,12 +36,20 @@ class DBService {
         }
         return fetch(url, options).then(async (response) => {
             const rawText = await response.text();
+            
             if (response.status === 401) {
                 window.dispatchEvent(new Event('sp_session_expired'));
                 throw new Error("Sesión expirada");
             }
+
             let json: any;
-            try { json = JSON.parse(rawText); } catch (e) { throw new Error(`Respuesta inválida.`); }
+            try { 
+                json = JSON.parse(rawText); 
+            } catch (e) { 
+                const snippet = rawText.substring(0, 100).replace(/<[^>]*>?/gm, '');
+                throw new Error(`Respuesta inválida del servidor (Probable error PHP): ${snippet}...`); 
+            }
+
             if (json.success === false) throw new Error(json.error || 'Error desconocido');
             return json.data as T;
         });
