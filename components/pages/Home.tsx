@@ -179,7 +179,6 @@ export default function Home() {
                 setActiveCategories(['TODOS', ...res.activeCategories]);
 
                 // --- LÓGICA DE AUTO-NAVEGACIÓN AL PADRE ---
-                // Si seleccionamos una categoría desde la raíz y hay resultados, saltamos a la carpeta física
                 if (selectedCategory !== 'TODOS' && navigationPath.length === 0 && res.videos.length > 0 && systemSettings) {
                     const firstVid = res.videos[0];
                     const rawPath = (firstVid as any).rawPath || firstVid.videoUrl;
@@ -189,16 +188,9 @@ export default function Home() {
                         const relative = rawPath.substring(rootPath.length).replace(/^[\\/]+/, '');
                         const segments = relative.split(/[\\/]/).filter(Boolean);
                         
-                        // Si el archivo está en subcarpetas (ej: DCIM/camera/file.mp4)
                         if (segments.length > 1) {
-                            // Navegamos hasta el penúltimo nivel (el padre de la categoría o el archivo)
                             const newPath = segments.slice(0, -1);
-                            
-                            // Caso especial: si el último segmento de carpeta coincide con la categoría, 
-                            // tal vez queramos subir un nivel más para ver el grid de carpetas.
-                            // Pero siguiendo el requerimiento "si abre camera y el padre es DCIM, abrir DCIM":
                             if (newPath.length > 0) {
-                                // Si la última carpeta se llama igual que la categoría, subimos 1
                                 const finalPath = (newPath[newPath.length-1].toLowerCase() === selectedCategory.toLowerCase()) 
                                     ? newPath.slice(0, -1) 
                                     : newPath;
@@ -212,7 +204,6 @@ export default function Home() {
                         }
                     }
                 }
-                // ------------------------------------------
             } else {
                 setVideos(prev => [...prev, ...res.videos]);
             }
@@ -285,7 +276,6 @@ export default function Home() {
 
     const handleCategoryClick = (cat: string) => {
         setSelectedCategory(cat);
-        // Desplegamos el grid de carpetas siempre que se filtre por categoría
         if (cat !== 'TODOS') {
             setShowFolderGrid(true);
             setNavVisible(true);
@@ -406,7 +396,11 @@ export default function Home() {
                                 {folders.map(folder => (
                                     <button 
                                         key={folder.name} 
-                                        onClick={() => { setNavigationPath([...navigationPath, folder.name]); setShowFolderGrid(false); }}
+                                        onClick={() => { 
+                                            setNavigationPath([...navigationPath, folder.name]); 
+                                            setSelectedCategory('TODOS'); // REQUERIMIENTO: Limpiar filtro de categoría al navegar manualmente a carpeta hija
+                                            setShowFolderGrid(false); 
+                                        }}
                                         className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300"
                                     >
                                         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
