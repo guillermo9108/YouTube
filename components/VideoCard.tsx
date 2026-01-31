@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
@@ -56,7 +57,6 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   const isAudio = Boolean(video.is_audio);
   const hasDefaultThumb = !video.thumbnailUrl || video.thumbnailUrl.includes('default.jpg');
 
-  // Add missing useMemo import to satisfy line 60
   // Obtener nombre de la carpeta (último segmento de la ruta)
   const locationLabel = useMemo(() => {
     const path = (video as any).rawPath || video.videoUrl || '';
@@ -66,6 +66,12 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
     }
     return null;
   }, [video.videoUrl]);
+
+  const watchUrl = useMemo(() => {
+    const base = `/watch/${video.id}`;
+    if (context?.query) return `${base}?q=${encodeURIComponent(context.query)}`;
+    return base;
+  }, [video.id, context?.query]);
 
   useEffect(() => {
       if (!isAudio || !hasDefaultThumb || failedExtractions.has(video.id)) return;
@@ -129,7 +135,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   return (
     <div ref={cardRef} className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
       <Link 
-        to={`/watch/${video.id}`} 
+        to={watchUrl} 
         className="relative aspect-video rounded-2xl overflow-hidden bg-slate-900 shadow-sm hover:shadow-2xl hover:shadow-indigo-500/20 hover:scale-[1.03] transition-all duration-500 block ring-1 ring-white/5 hover:ring-indigo-500/40"
       >
         {displayThumb ? (
@@ -195,7 +201,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
         </Link>
 
         <div className="flex-1 min-w-0 flex flex-col">
-            <Link to={`/watch/${video.id}`} title={video.title}>
+            <Link to={watchUrl} title={video.title}>
                 <h3 className="text-sm font-black text-white leading-tight line-clamp-2 mb-1 group-hover:text-indigo-400 transition-colors uppercase tracking-tighter italic">{video.title}</h3>
             </Link>
             <div className="text-[10px] text-slate-500 flex flex-col gap-0.5">

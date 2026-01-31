@@ -7,7 +7,7 @@ import { Video, Notification as AppNotification, User, SystemSettings } from '..
 import { 
     RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History
 } from 'lucide-react';
-import { useNavigate, Link } from '../Router';
+import { useNavigate, Link, useLocation } from '../Router';
 import AIConcierge from '../AIConcierge';
 import { useToast } from '../../context/ToastContext';
 
@@ -109,6 +109,7 @@ const Breadcrumbs: React.FC<{
 export default function Home() {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
     const toast = useToast();
     
     // UI State
@@ -127,8 +128,15 @@ export default function Home() {
     const [loadingMore, setLoadingMore] = useState(false);
     const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
     
-    // Filters State
-    const [searchQuery, setSearchQuery] = useState('');
+    // Filters State - Inicializar desde URL
+    const initialQuery = useMemo(() => {
+        const hash = window.location.hash;
+        if (!hash.includes('?')) return '';
+        const params = new URLSearchParams(hash.split('?')[1]);
+        return params.get('q') || '';
+    }, []);
+
+    const [searchQuery, setSearchQuery] = useState(initialQuery);
     const [selectedCategory, setSelectedCategory] = useState('TODOS');
     const [navigationPath, setNavigationPath] = useState<string[]>([]);
     const [activeCategories, setActiveCategories] = useState<string[]>(['TODOS']);
@@ -259,6 +267,15 @@ export default function Home() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    const updateUrlSearch = (term: string) => {
+        const hashBase = '/';
+        if (term.trim()) {
+            navigate(`${hashBase}?q=${encodeURIComponent(term.trim())}`, { replace: true });
+        } else {
+            navigate(hashBase, { replace: true });
+        }
+    };
+
     const handleSearchChange = (val: string) => {
         setSearchQuery(val);
         if (searchTimeout.current) clearTimeout(searchTimeout.current);
@@ -278,8 +295,8 @@ export default function Home() {
         if (term.length >= 2) {
             db.saveSearch(term);
         }
+        updateUrlSearch(term);
         setShowSuggestions(false);
-        // Forzar cierre de teclado móvil
         if (searchInputRef.current) {
             searchInputRef.current.blur();
         }
@@ -287,13 +304,13 @@ export default function Home() {
 
     const handleSuggestionClick = (s: any) => {
         setShowSuggestions(false);
-        // Forzar cierre de teclado móvil al seleccionar sugerencia
         if (searchInputRef.current) {
             searchInputRef.current.blur();
         }
 
         if (s.type === 'HISTORY' || s.type === 'CATEGORY') {
             setSearchQuery(s.label);
+            updateUrlSearch(s.label);
             if (s.type === 'CATEGORY') setSelectedCategory(s.label);
             db.saveSearch(s.label);
         } else {
@@ -373,7 +390,7 @@ export default function Home() {
                                 placeholder="Explorar biblioteca..." 
                                 className="w-full bg-white/5 border border-white/10 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:bg-white/10 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                             />
-                            {searchQuery && <button type="button" onClick={() => { setSearchQuery(''); fetchVideos(0, true); }} className="absolute right-3 top-3 text-slate-400 hover:text-white"><X size={16}/></button>}
+                            {searchQuery && <button type="button" onClick={() => { setSearchQuery(''); updateUrlSearch(''); fetchVideos(0, true); }} className="absolute right-3 top-3 text-slate-400 hover:text-white"><X size={16}/></button>}
                             {showSuggestions && suggestions.length > 0 && (
                                 <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 origin-top">
                                     <div className="p-2 bg-slate-950 border-b border-white/5 flex items-center justify-between">
@@ -513,7 +530,7 @@ export default function Home() {
                                             <span className="w-12 h-px bg-white/10"></span>
                                         </h2>
                                     </div>
-                                    <button onClick={() => { setSearchQuery(''); fetchVideos(0, true); }} className="text-[10px] font-black text-slate-500 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1.5">
+                                    <button onClick={() => { setSearchQuery(''); updateUrlSearch(''); fetchVideos(0, true); }} className="text-[10px] font-black text-slate-500 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1.5">
                                         <X size={12}/> Limpiar
                                     </button>
                                 </div>

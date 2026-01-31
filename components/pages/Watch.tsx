@@ -28,7 +28,7 @@ export default function Watch() {
         if (!hash.includes('?')) return null;
         const params = new URLSearchParams(hash.split('?')[1]);
         return params.get('q');
-    }, [id]);
+    }, [id, window.location.hash]);
 
     const [video, setVideo] = useState<Video | null>(null);
     const [loading, setLoading] = useState(true);
@@ -88,7 +88,7 @@ export default function Watch() {
                 // 2. Obtener videos relacionados según el contexto (Búsqueda o Carpeta)
                 let allVids: Video[] = [];
                 if (searchContext) {
-                    const res = await db.getVideos(0, 100, '', searchContext, 'TODOS');
+                    const res = await db.getVideos(0, 500, '', searchContext, 'TODOS');
                     allVids = res.videos;
                 } else {
                     allVids = await db.getAllVideos();
@@ -100,7 +100,7 @@ export default function Watch() {
                 let contextQueue: Video[] = [];
 
                 if (searchContext) {
-                    // Si hay búsqueda, la cola es el resultado de la búsqueda
+                    // Si hay búsqueda, la cola es el resultado de la búsqueda preservando orden natural
                     contextQueue = allVids.sort((a, b) => naturalCollator.compare(a.title, b.title));
                 } else {
                     // Si no hay búsqueda, la cola es la carpeta actual
@@ -112,10 +112,10 @@ export default function Watch() {
 
                 setSeriesQueue(contextQueue);
 
-                // Recomendados UI: Excluimos el actual
-                const suggestions = allVids.filter(ov => ov.id !== v.id);
+                // Recomendados UI: Priorizar la cola de contexto, luego el resto
+                const suggestions = contextQueue.filter(ov => ov.id !== v.id);
                 
-                // Si la cola de contexto es corta, rellenamos con otros aleatorios de la base global
+                // Si la cola de contexto es corta y no es búsqueda, rellenamos con otros aleatorios
                 if (suggestions.length < 10 && !searchContext) {
                     const global = await db.getAllVideos();
                     const others = global.filter(gv => !suggestions.some(sv => sv.id === gv.id) && gv.id !== v.id)
@@ -426,7 +426,7 @@ export default function Watch() {
                 <div className="lg:w-80 space-y-4 shrink-0">
                     <div className="flex items-center justify-between px-2">
                         <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'Siguiente en búsqueda' : 'Recomendados'}
+                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'En esta búsqueda' : 'Recomendados'}
                         </h3>
                         {searchContext && (
                             <Link to="/" className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-tighter flex items-center gap-1">
@@ -440,7 +440,7 @@ export default function Watch() {
                             <div className="flex items-center gap-2 text-indigo-400 font-black text-[9px] uppercase tracking-widest">
                                 <ListFilter size={12}/> Viendo resultados de:
                             </div>
-                            <div className="text-xs font-bold text-white mt-1 italic">"{searchContext}"</div>
+                            <div className="text-xs font-bold text-white mt-1 italic line-clamp-1">"{searchContext}"</div>
                         </div>
                     )}
 
