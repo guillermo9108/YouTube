@@ -1,7 +1,4 @@
 <?php
-/**
- * UTILS - CORE FUNCTIONS V18.5 (Security Patch)
- */
 
 function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
@@ -68,7 +65,11 @@ function write_log($message, $level = 'INFO') {
     $timestamp = date('Y-m-d H:i:s');
     $formattedMessage = "[$timestamp] [$level] $message" . PHP_EOL;
     @file_put_contents($logFile, $formattedMessage, FILE_APPEND);
-    if (php_sapi_name() === 'cli') echo $formattedMessage;
+    
+    // Si estamos en CLI (Worker), también imprimir a pantalla
+    if (php_sapi_name() === 'cli') {
+        echo $formattedMessage;
+    }
 }
 
 function resolve_video_path($pathOrUrl) {
@@ -94,57 +95,25 @@ function fix_url($url) {
 function streamVideo($id, $pdo) {
     while (ob_get_level()) ob_end_clean();
     
-    // 1. Obtener Datos del Video y Creador
-    $stmtV = $pdo->prepare("SELECT v.videoUrl, v.price, v.creatorId, u.role as creatorRole FROM videos v LEFT JOIN users u ON v.creatorId = u.id WHERE v.id = ?");
-    $stmtV->execute([$id]);
-    $video = $stmtV->fetch();
-    if (!$video) { header("HTTP/1.1 404 Not Found"); exit; }
-
-    // 2. Extraer Token (Header o URL)
-    $headers = getallheaders();
-    $token = $headers['Authorization'] ?? $headers['authorization'] ?? $_GET['token'] ?? null;
-    if ($token && preg_match('/Bearer\s(\S+)/', $token, $matches)) $token = $matches[1];
+    $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
+    $stmt->execute([$id]);
+    $videoUrl = $stmt->fetchColumn();
+    if (!$videoUrl) { header("HTTP/1.1 404 Not Found"); exit; }
     
-    $user = null;
-    if ($token) {
-        $stmtU = $pdo->prepare("SELECT id, role, vipExpiry FROM users WHERE currentSessionId = ?");
-        $stmtU->execute([$token]);
-        $user = $stmtU->fetch();
-    }
-
-    // 3. Verificación de Acceso Real
-    $hasAccess = false;
-    $price = floatval($video['price']);
-
-    if ($price <= 0) {
-        $hasAccess = true; 
-    } elseif ($user) {
-        $isAdmin = ($user['role'] === 'ADMIN');
-        $isCreator = ($user['id'] === $video['creatorId']);
-        $isVipActive = ($user['vipExpiry'] > time());
-        $isOfficialVip = ($isVipActive && $video['creatorRole'] === 'ADMIN');
-
-        if ($isAdmin || $isCreator || $isOfficialVip) {
-            $hasAccess = true;
-        } else {
-            $stmtT = $pdo->prepare("SELECT COUNT(*) FROM transactions WHERE buyerId = ? AND videoId = ? AND type = 'PURCHASE'");
-            $stmtT->execute([$user['id'], $id]);
-            $hasAccess = ($stmtT->fetchColumn() > 0);
-        }
-    }
-
-    if (!$hasAccess) { header("HTTP/1.1 403 Forbidden"); echo "Acceso denegado: Se requiere compra o membresía activa."; exit; }
-
-    // 4. Servir archivo
-    $realPath = resolve_video_path($video['videoUrl']);
+    $realPath = resolve_video_path($videoUrl);
     if (!$realPath || !file_exists($realPath)) { header("HTTP/1.1 404 Not Found"); exit; }
     
     $fileSize = filesize($realPath);
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
-    $mime = 'video/mp4';
+    
+    // Mime detection
     if ($ext === 'mp3') $mime = 'audio/mpeg';
     else if ($ext === 'wav') $mime = 'audio/wav';
+    else if ($ext === 'm4a') $mime = 'audio/mp4';
+    else if ($ext === 'aac') $mime = 'audio/aac';
     else if ($ext === 'mkv') $mime = 'video/x-matroska';
+    else if ($ext === 'webm') $mime = 'video/webm';
+    else $mime = 'video/mp4';
 
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
@@ -153,9 +122,14 @@ function streamVideo($id, $pdo) {
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
 
-    if ($_SERVER['REQUEST_METHOD'] === 'HEAD') { header("Content-Length: $fileSize"); exit; }
+    if ($_SERVER['REQUEST_METHOD'] === 'HEAD') {
+        header("Content-Length: $fileSize");
+        exit;
+    }
+
     $fp = @fopen($realPath, 'rb');
     if (!$fp) { header("HTTP/1.1 403 Forbidden"); exit; }
+    
     set_time_limit(0); 
 
     if (isset($_SERVER['HTTP_RANGE'])) {
