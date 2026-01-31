@@ -1,6 +1,6 @@
 {
-  "name": "StreamPay OFICIAL 0.0.13.1",
-  "description": "Mejorar búsqueda y lista a continuación ",
+  "name": "StreamPay OFICIAL 0.0.13.2",
+  "description": "Edicion de tarjetas de carpetas y de videos",
   "requestFramePermissions": [
     "camera",
     "microphone"

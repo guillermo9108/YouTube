@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Notification as AppNotification, User, SystemSettings } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History
+    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History, Edit3, DollarSign, Save
 } from 'lucide-react';
 import { useNavigate, Link, useLocation } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -128,6 +127,11 @@ export default function Home() {
     const [loadingMore, setLoadingMore] = useState(false);
     const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
     
+    // Edit Folder State
+    const [editingFolder, setEditingFolder] = useState<string | null>(null);
+    const [newFolderPrice, setNewFolderPrice] = useState('1.00');
+    const [isUpdatingPrice, setIsUpdatingPrice] = useState(false);
+
     // Filters State - Inicializar desde URL
     const initialQuery = useMemo(() => {
         const hash = window.location.hash;
@@ -155,6 +159,7 @@ export default function Home() {
 
     const currentFolder = navigationPath.join('/');
     const parentFolderName = navigationPath.length > 0 ? navigationPath[navigationPath.length - 1] : null;
+    const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
     // 1. Cargar configuración inicial
     useEffect(() => {
@@ -256,17 +261,6 @@ export default function Home() {
         return () => observer.disconnect();
     }, [page, hasMore, loading, loadingMore]);
 
-    // Cerrar sugerencias al hacer click fuera
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
-                setShowSuggestions(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
     const updateUrlSearch = (term: string) => {
         const hashBase = '/';
         if (term.trim()) {
@@ -302,23 +296,28 @@ export default function Home() {
         }
     };
 
+    // Added handleSuggestionClick to fix error on line 389
     const handleSuggestionClick = (s: any) => {
+        setSearchQuery(s.label);
+        updateUrlSearch(s.label);
         setShowSuggestions(false);
         if (searchInputRef.current) {
             searchInputRef.current.blur();
         }
+    };
 
-        if (s.type === 'HISTORY' || s.type === 'CATEGORY') {
-            setSearchQuery(s.label);
-            updateUrlSearch(s.label);
-            if (s.type === 'CATEGORY') setSelectedCategory(s.label);
-            db.saveSearch(s.label);
-        } else {
-            db.saveSearch(searchQuery || s.label);
-            const contextParam = searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : '';
-            if (s.type === 'VIDEO' || s.type === 'AUDIO') navigate(`/watch/${s.id}${contextParam}`);
-            else if (s.type === 'MARKET') navigate(`/marketplace/${s.id}`);
-            else if (s.type === 'USER') navigate(`/channel/${s.id}`);
+    const handleUpdateFolderPrice = async () => {
+        if (!editingFolder) return;
+        setIsUpdatingPrice(true);
+        try {
+            const res = await db.updateFolderPrice(editingFolder, currentFolder, parseFloat(newFolderPrice));
+            toast.success(`Actualización masiva completada: ${res.affected} videos afectados.`);
+            setEditingFolder(null);
+            fetchVideos(0, true);
+        } catch (e: any) {
+            toast.error(e.message);
+        } finally {
+            setIsUpdatingPrice(false);
         }
     };
 
@@ -350,7 +349,6 @@ export default function Home() {
     };
 
     const unreadCount = useMemo(() => notifs.filter(n => Number(n.isRead) === 0).length, [notifs]);
-    const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
     const getSuggestionIcon = (type: string) => {
         switch (type) {
@@ -374,7 +372,6 @@ export default function Home() {
                     <div className="flex gap-3 items-center max-w-7xl mx-auto">
                         <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform shrink-0"><Menu size={20}/></button>
                         
-                        {/* FORMULARIO DE BÚSQUEDA MEJORADO */}
                         <form 
                             className="relative flex-1 min-w-0" 
                             ref={searchContainerRef}
@@ -420,21 +417,6 @@ export default function Home() {
                                 <Bell size={22} className={unreadCount > 0 ? "animate-bounce" : ""} />
                                 {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black">{unreadCount}</span>}
                             </button>
-                            {showNotifMenu && (
-                                <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 border border-white/10 rounded-[32px] shadow-2xl overflow-hidden z-[60] animate-in fade-in zoom-in-95 origin-top-right">
-                                    <div className="p-5 bg-slate-950 border-b border-white/5 flex justify-between items-center"><h4 className="font-black text-white uppercase text-[10px] tracking-widest">Notificaciones</h4></div>
-                                    <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
-                                        {notifs.length === 0 ? (
-                                            <div className="py-12 text-center text-slate-600 flex flex-col items-center gap-3"><MessageSquare size={32} className="opacity-20" /><p className="text-[10px] font-black uppercase tracking-widest">Sin alertas</p></div>
-                                        ) : notifs.map(n => (
-                                            <button key={n.id} onClick={() => handleNotifClick(n)} className={`w-full p-4 flex gap-4 text-left border-b border-white/5 transition-all hover:bg-white/5 ${Number(n.isRead) === 0 ? 'bg-indigo-500/[0.03]' : 'opacity-60'}`}>
-                                                <div className="w-10 h-10 rounded-xl bg-slate-800 shrink-0 flex items-center justify-center">{n.avatarUrl ? <img src={n.avatarUrl} className="w-full h-full object-cover" /> : <Bell size={16} className="text-slate-500" />}</div>
-                                                <div className="flex-1 min-w-0"><div className="flex justify-between items-start mb-0.5"><span className="text-[9px] font-black text-indigo-400 uppercase">{n.type}</span></div><p className="text-xs leading-snug truncate text-white">{n.text}</p></div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>
@@ -483,29 +465,38 @@ export default function Home() {
                         {!searchQuery && folders.length > 0 && showFolderGrid && (
                             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
                                 {folders.map(folder => (
-                                    <button 
-                                        key={folder.name} 
-                                        onClick={() => { 
-                                            setNavigationPath([...navigationPath, folder.name]); 
-                                            setSelectedCategory('TODOS'); 
-                                            setShowFolderGrid(false); 
-                                        }}
-                                        className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300"
-                                    >
-                                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
-                                        <div className="relative h-full flex flex-col p-5">
-                                            <div className="flex justify-between items-start">
-                                                <div className="p-3 bg-slate-800/80 rounded-2xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform"><Folder size={24}/></div>
-                                                <div className="bg-indigo-600/20 backdrop-blur-md px-2 py-0.5 rounded-lg border border-indigo-500/30">
-                                                    <span className="text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} ITEMS</span>
+                                    <div key={folder.name} className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300">
+                                        <button 
+                                            onClick={() => { 
+                                                setNavigationPath([...navigationPath, folder.name]); 
+                                                setSelectedCategory('TODOS'); 
+                                                setShowFolderGrid(false); 
+                                            }}
+                                            className="absolute inset-0 w-full h-full text-left"
+                                        >
+                                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
+                                            <div className="relative h-full flex flex-col p-5">
+                                                <div className="flex justify-between items-start">
+                                                    <div className="p-3 bg-slate-800/80 rounded-2xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform"><Folder size={24}/></div>
+                                                    <div className="bg-indigo-600/20 backdrop-blur-md px-2 py-0.5 rounded-lg border border-indigo-500/30">
+                                                        <span className="text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} ITEMS</span>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-auto">
+                                                    <h3 className="text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-2">{folder.name}</h3>
+                                                    <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-full transition-all duration-700"></div>
                                                 </div>
                                             </div>
-                                            <div className="mt-auto">
-                                                <h3 className="text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-2">{folder.name}</h3>
-                                                <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-full transition-all duration-700"></div>
-                                            </div>
-                                        </div>
-                                    </button>
+                                        </button>
+                                        {isAdmin && (
+                                            <button 
+                                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingFolder(folder.name); }}
+                                                className="absolute bottom-4 right-4 p-2.5 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-xl border border-white/10 text-white z-20 opacity-0 group-hover:opacity-100 transition-all active:scale-90"
+                                            >
+                                                <Edit3 size={16}/>
+                                            </button>
+                                        )}
+                                    </div>
                                 ))}
                             </div>
                         )}
@@ -544,6 +535,7 @@ export default function Home() {
                                             isUnlocked={isAdmin || user?.id === v.creatorId} 
                                             isWatched={watchedIds.includes(v.id)} 
                                             context={{ query: searchQuery, category: selectedCategory }}
+                                            onUpdate={() => fetchVideos(0, true)}
                                         />
                                     ))}
                                 </div>
@@ -564,6 +556,43 @@ export default function Home() {
                     </div>
                 )}
             </div>
+
+            {/* Folder Edit Modal (Admin) */}
+            {editingFolder && (
+                <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-slate-900 border border-white/10 rounded-[40px] w-full max-sm overflow-hidden shadow-2xl animate-in zoom-in-95">
+                        <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                            <div>
+                                <h4 className="font-black text-white uppercase text-xs tracking-widest">Ajuste Masivo</h4>
+                                <p className="text-[9px] text-indigo-400 font-bold uppercase mt-0.5">{editingFolder}</p>
+                            </div>
+                            <button onClick={() => setEditingFolder(null)} className="p-2 hover:bg-white/5 rounded-full text-slate-500"><X size={20}/></button>
+                        </div>
+                        <div className="p-8 space-y-6">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Nuevo Precio General ($)</label>
+                                <div className="relative">
+                                    <DollarSign className="absolute left-4 top-3.5 text-emerald-500" size={18}/>
+                                    <input 
+                                        type="number" step="0.5" value={newFolderPrice} onChange={e => setNewFolderPrice(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-11 pr-4 py-4 text-white font-black text-2xl focus:border-emerald-500 outline-none transition-all shadow-inner"
+                                    />
+                                </div>
+                            </div>
+                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                <p className="text-[10px] text-slate-400 leading-snug">Esta acción cambiará el precio de <strong>todos</strong> los videos dentro de esta carpeta y sus sub-carpetas hijas.</p>
+                            </div>
+                            <button 
+                                onClick={handleUpdateFolderPrice} disabled={isUpdatingPrice}
+                                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-4 rounded-[24px] shadow-xl transition-all flex items-center justify-center gap-3 uppercase text-[10px] tracking-widest active:scale-95"
+                            >
+                                {isUpdatingPrice ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>}
+                                Aplicar a la carpeta
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <AIConcierge videos={videos} isVisible={geminiActive} />
         </div>

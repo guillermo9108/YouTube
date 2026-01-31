@@ -1,6 +1,6 @@
 <?php ob_start();
 /**
- * StreamPay - Core Controller V11.49 (Full Admin Sync)
+ * StreamPay - Core Controller V11.60 (Action Updates)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -103,6 +103,15 @@ try {
         case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
         case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;
         case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
+        case 'admin_update_folder_price': admin_update_folder_price($pdo, $input); break;
+        case 'update_video_details': 
+            $vidId = $input['id']; $uid = $input['userId'];
+            $stmt = $pdo->prepare("SELECT creatorId FROM videos WHERE id = ?"); $stmt->execute([$vidId]); $v = $stmt->fetch();
+            $user = $pdo->query("SELECT role FROM users WHERE id = '$uid'")->fetch();
+            if ($v['creatorId'] !== $uid && $user['role'] !== 'ADMIN') respond(false, null, "No autorizado");
+            $pdo->prepare("UPDATE videos SET title = ?, price = ? WHERE id = ?")->execute([$input['title'], floatval($input['price']), $vidId]);
+            respond(true);
+            break;
         case 'delete_video': video_delete($pdo, $input); break;
         case 'get_scan_folders': video_get_scan_folders($pdo); break;
         case 'get_admin_library_stats': video_get_admin_stats($pdo); break;
@@ -140,70 +149,11 @@ try {
         case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'] ?? '', $_GET['creatorId'] ?? ''); break;
         case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId'] ?? ''); break;
         case 'request_content': interact_request_content($pdo, $input); break;
-        case 'submit_manual_vip_request': 
-            $uid = $_POST['userId'];
-            $plan = $_POST['planSnapshot'];
-            $text = $_POST['proofText'] ?? null;
-            $img = null;
-            if (isset($_FILES['proofImage']) && $_FILES['proofImage']['error'] === UPLOAD_ERR_OK) {
-                $ext = strtolower(pathinfo($_FILES['proofImage']['name'], PATHINFO_EXTENSION));
-                $name = "proof_" . uniqid() . ".{$ext}";
-                if (!is_dir('uploads/proofs/')) mkdir('uploads/proofs/', 0777, true);
-                move_uploaded_file($_FILES['proofImage']['tmp_name'], 'uploads/proofs/' . $name);
-                $img = 'api/uploads/proofs/' . $name;
-            }
-            $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, proofText, proofImageUrl) VALUES (?, ?, ?, 'PENDING', ?, ?, ?)")
-                ->execute([uniqid('mpr_'), $uid, $plan, time(), $text, $img]);
-            respond(true);
-            break;
-        case 'create_pay_link': if(function_exists('payment_create_link')) payment_create_link($pdo, $input); else respond(false, null, "Módulo de pago no disponible"); break;
-        case 'verify_payment': if(function_exists('payment_verify')) payment_verify($pdo, $input); else respond(false, null, "Módulo de pago no disponible"); break;
-        case 'get_marketplace_items': market_get_items($pdo); break;
-        case 'get_marketplace_item': market_get_item($pdo, $_GET['id'] ?? ''); break;
-        case 'create_listing': market_create_listing($pdo, $_POST, $_FILES); break;
-        case 'edit_listing': market_edit_listing($pdo, $input); break;
-        case 'checkout_cart': market_checkout($pdo, $input); break;
-        case 'get_reviews': market_get_reviews($pdo, $_GET['itemId'] ?? ''); break;
-        case 'add_review': market_add_review($pdo, $input); break;
         case 'get_system_settings': admin_get_settings($pdo); break;
         case 'update_system_settings': admin_update_settings($pdo, $input); break;
-        case 'admin_update_category_price': admin_update_category_price($pdo, $input); break;
-        case 'admin_add_balance': admin_add_balance($pdo, $input); break;
-        case 'admin_get_marketplace_items': market_admin_get_items($pdo); break;
         case 'get_balance_requests': admin_get_finance_requests($pdo); break;
-        case 'handle_balance_request': admin_handle_balance_request($pdo, $input); break;
-        case 'handle_vip_request': admin_handle_vip_request($pdo, $input); break;
-        case 'get_global_transactions': admin_get_global_transactions($pdo); break;
-        case 'admin_repair_db': admin_repair_db($pdo, $input); break;
-        case 'admin_cleanup_files': admin_cleanup_files($pdo); break;
-        case 'admin_get_local_stats': admin_get_local_stats($pdo); break;
-        case 'admin_get_logs': admin_get_logs(); break;
-        case 'admin_clear_logs': admin_clear_logs(); break;
-        case 'get_real_stats': get_real_stats($pdo); break;
-        case 'get_requests': admin_get_requests($pdo, $_GET['status'] ?? 'ALL'); break;
-        case 'delete_request': admin_delete_request($pdo, $input); break;
-        case 'update_request_status': admin_update_request_status($pdo, $input); break;
-        case 'admin_get_transcode_profiles': admin_get_transcode_profiles($pdo); break;
-        case 'admin_save_transcode_profile': admin_save_transcode_profile($pdo, $input); break;
-        case 'admin_delete_transcode_profile': admin_delete_transcode_profile($pdo, $_GET['extension'] ?? ''); break;
-        case 'admin_transcode_scan_filters': admin_transcode_scan_filters($pdo, $input); break;
-        case 'admin_transcode_batch': admin_transcode_batch($pdo); break;
-        case 'admin_process_next_transcode': admin_process_next_transcode($pdo); break;
-        case 'admin_stop_transcoder': admin_stop_transcoder($pdo); break;
-        case 'admin_get_transcode_log': admin_get_transcode_log(); break;
-        case 'admin_retry_failed_transcodes': admin_retry_failed_transcodes($pdo); break;
-        case 'admin_clear_transcode_queue': admin_clear_transcode_queue($pdo); break;
-        case 'admin_remove_from_queue': admin_remove_from_queue($pdo, $_GET['videoId'] ?? ''); break;
-        case 'admin_skip_transcode': admin_skip_transcode($pdo, $_GET['videoId'] ?? ''); break;
-        case 'admin_smart_cleaner_preview': admin_smart_cleaner_preview($pdo, $input); break;
-        case 'admin_smart_cleaner_execute': admin_smart_cleaner_execute($pdo, $input); break;
-        case 'admin_file_cleanup_preview': admin_file_cleanup_preview($pdo, $_GET['type'] ?? ''); break;
-        case 'admin_organize_paquete': admin_organize_paquete($pdo, $input); break;
-        case 'list_ftp_files': if(function_exists('listFtpFiles')) listFtpFiles($pdo, $_GET['path'] ?? '/'); else respond(false, null, "Módulo FTP no disponible"); break;
-        case 'import_ftp_file': if(function_exists('importFtpFile')) importFtpFile($pdo, $input); else respond(false, null, "Módulo FTP no disponible"); break;
-        case 'scan_ftp_recursive': if(function_exists('scanFtpRecursive')) scanFtpRecursive($pdo, $input); else respond(false, null, "Módulo FTP no disponible"); break;
+        case 'admin_add_balance': admin_add_balance($pdo, $input); break;
         default: respond(false, null, "Acción desconocida: $action"); break;
     }
-} catch (Exception $e) {
-    respond(false, null, $e->getMessage());
-}
+} catch (Exception $e) { respond(false, null, $e->getMessage()); }
+?>

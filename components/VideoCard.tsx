@@ -1,8 +1,8 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
-import { CheckCircle2, Clock, MoreVertical, Play, Music, RefreshCw, Folder } from 'lucide-react';
+// Added Loader2 to imports to fix error on line 323
+import { CheckCircle2, Clock, MoreVertical, Play, Music, RefreshCw, Folder, Edit3, Trash2, X, Save, DollarSign, Loader2 } from 'lucide-react';
 import { db } from '../services/db';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -17,6 +17,7 @@ interface VideoCardProps {
   isUnlocked: boolean;
   isWatched?: boolean;
   context?: { query: string, category: string };
+  onUpdate?: () => void;
 }
 
 const formatTimeAgo = (timestamp: number) => {
@@ -41,7 +42,7 @@ const formatDuration = (seconds: number) => {
     return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}` : `${m}:${s.toString().padStart(2, '0')}`;
 };
 
-const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched, context }) => {
+const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isWatched, context, onUpdate }) => {
   const { user, refreshUser } = useAuth();
   const toast = useToast();
   const isNew = (Date.now() / 1000 - video.createdAt) < 86400;
@@ -52,17 +53,29 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Edit States
+  const [editTitle, setEditTitle] = useState(video.title);
+  const [editPrice, setEditPrice] = useState(video.price);
+  
   const cardRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const isAudio = Boolean(video.is_audio);
   const hasDefaultThumb = !video.thumbnailUrl || video.thumbnailUrl.includes('default.jpg');
+  const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
+  const isCreator = user?.id === video.creatorId;
+  const canManage = isAdmin || isCreator;
 
-  // Obtener nombre de la carpeta (último segmento de la ruta)
+  // Obtener nombre de la carpeta
   const locationLabel = useMemo(() => {
     const path = (video as any).rawPath || video.videoUrl || '';
     const parts = path.split(/[\\/]/).filter(Boolean);
     if (parts.length > 1) {
-        return parts[parts.length - 2]; // Carpeta padre
+        return parts[parts.length - 2]; 
     }
     return null;
   }, [video.videoUrl]);
@@ -113,11 +126,14 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   }, [video.id, isAudio, hasDefaultThumb, isVisible, isProcessing, localThumb]);
 
   useEffect(() => {
-      return () => {
-          if (localThumb) URL.revokeObjectURL(localThumb);
-          if (isProcessing) isAnyCardProcessing = false;
+      const handleClickOutside = (e: MouseEvent) => {
+          if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+              setShowMenu(false);
+          }
       };
-  }, [localThumb, isProcessing]);
+      if (showMenu) document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMenu]);
 
   const handleWatchLater = async (e: React.MouseEvent) => {
       e.preventDefault(); e.stopPropagation();
@@ -130,7 +146,33 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       } catch (e) {}
   };
 
+  const handleEdit = async () => {
+      if (!user || isProcessing) return;
+      setIsProcessing(true);
+      try {
+          await db.updateVideoDetails(video.id, user.id, editTitle, editPrice);
+          toast.success("Video actualizado");
+          setShowEditModal(false);
+          if (onUpdate) onUpdate();
+          else db.setHomeDirty();
+      } catch (e: any) { toast.error(e.message); }
+      finally { setIsProcessing(false); }
+  };
+
+  const handleDelete = async () => {
+      if (!user || !confirm(`¿Eliminar definitivamente "${video.title}"?`)) return;
+      setIsDeleting(true);
+      try {
+          await db.deleteVideo(video.id, user.id);
+          toast.success("Video eliminado");
+          if (onUpdate) onUpdate();
+          else window.location.reload();
+      } catch (e: any) { toast.error(e.message); setIsDeleting(false); }
+  };
+
   const displayThumb = localThumb || (!imgError && video.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? video.thumbnailUrl : (isAudio ? "api/uploads/thumbnails/defaultaudio.jpg" : null));
+
+  if (isDeleting) return null;
 
   return (
     <div ref={cardRef} className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
@@ -216,8 +258,76 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
                 </div>
             </div>
         </div>
-        <button className="shrink-0 text-slate-600 hover:text-white self-start opacity-0 group-hover:opacity-100 transition-opacity p-1"><MoreVertical size={20} /></button>
+        
+        {/* Dropdown Menu */}
+        <div className="relative" ref={menuRef}>
+            <button 
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowMenu(!showMenu); }}
+                className="shrink-0 text-slate-600 hover:text-white self-start opacity-0 group-hover:opacity-100 transition-opacity p-1"
+            >
+                <MoreVertical size={20} />
+            </button>
+            
+            {showMenu && (
+                <div className="absolute right-0 top-full mt-1 w-40 bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 origin-top-right">
+                    {canManage && (
+                        <>
+                            <button onClick={(e) => { e.stopPropagation(); setShowEditModal(true); setShowMenu(false); }} className="w-full flex items-center gap-3 p-3 text-xs font-black text-slate-300 hover:bg-white/10 transition-colors uppercase tracking-widest">
+                                <Edit3 size={14} className="text-indigo-400"/> Editar
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); handleDelete(); setShowMenu(false); }} className="w-full flex items-center gap-3 p-3 text-xs font-black text-red-400 hover:bg-red-500/10 transition-colors uppercase tracking-widest">
+                                <Trash2 size={14}/> Eliminar
+                            </button>
+                        </>
+                    )}
+                    <button onClick={(e) => { e.stopPropagation(); handleWatchLater(e); setShowMenu(false); }} className="w-full flex items-center gap-3 p-3 text-xs font-black text-slate-300 hover:bg-white/10 transition-colors uppercase tracking-widest">
+                        <Clock size={14} className="text-amber-400"/> {inWatchLater ? 'Quitar Guardado' : 'Ver más tarde'}
+                    </button>
+                </div>
+            )}
+        </div>
       </div>
+
+      {/* Edit Modal */}
+      {showEditModal && (
+          <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-slate-900 border border-white/10 rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
+                  <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                      <div>
+                          <h4 className="font-black text-white uppercase text-xs tracking-widest">Editar Video</h4>
+                          <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">Gestión de Metadatos</p>
+                      </div>
+                      <button onClick={() => setShowEditModal(false)} className="p-2 hover:bg-white/10 rounded-full text-slate-500"><X size={20}/></button>
+                  </div>
+                  <div className="p-8 space-y-6">
+                      <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Título del Contenido</label>
+                          <input 
+                            type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-white font-black text-sm focus:border-indigo-500 outline-none transition-all shadow-inner"
+                          />
+                      </div>
+                      <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Precio de Desbloqueo ($)</label>
+                          <div className="relative">
+                            <DollarSign className="absolute left-4 top-3.5 text-emerald-500" size={18}/>
+                            <input 
+                                type="number" step="0.5" value={editPrice} onChange={e => setEditPrice(parseFloat(e.target.value))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-11 pr-4 py-4 text-white font-black text-xl focus:border-emerald-500 outline-none transition-all shadow-inner"
+                            />
+                          </div>
+                      </div>
+                      <button 
+                        onClick={handleEdit} disabled={isProcessing}
+                        className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-5 rounded-[24px] shadow-xl transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest active:scale-95"
+                      >
+                          {isProcessing ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>}
+                          Sincronizar Cambios
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 });
