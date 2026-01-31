@@ -80,17 +80,24 @@ export default function Watch() {
         const fetchData = async () => {
             setLoading(true);
             try {
-                // 1. Carga del video principal (Necesario para los metadatos)
+                // 1. Carga del video principal
                 const v = await db.getVideo(id);
                 if (!v) { setLoading(false); return; }
                 setVideo(v); 
                 setLikes(Number(v.likes || 0));
                 setDislikes(Number(v.dislikes || 0));
 
-                // 2. Carga de relacionados (Primera página)
-                const rel = await db.getRelatedVideos(v.id, 0);
-                setRelatedVideos(rel);
-                setHasMoreRelated(rel.length >= 30);
+                // 2. Carga de sugerencias (Dependiente del contexto)
+                if (searchContext) {
+                    const searchRes = await db.getVideos(0, 30, '', searchContext);
+                    // Filtrar el video actual
+                    setRelatedVideos(searchRes.videos.filter(rv => rv.id !== v.id));
+                    setHasMoreRelated(searchRes.hasMore);
+                } else {
+                    const rel = await db.getRelatedVideos(v.id, 0);
+                    setRelatedVideos(rel);
+                    setHasMoreRelated(rel.length >= 30);
+                }
 
                 db.getComments(v.id).then(setComments);
 
@@ -105,14 +112,15 @@ export default function Watch() {
                     setInteraction(interact);
                     setIsSubscribed(sub);
 
-                    // Lógica de Desbloqueo Robusta
+                    // Lógica de Desbloqueo Robusta y Precisa
                     const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
                     const isCreator = String(user.id) === String(v.creatorId);
                     const isVipActive = !!(user.vipExpiry && Number(user.vipExpiry) > Date.now() / 1000);
-                    // Acceso total: si el video es de un Admin y el usuario es VIP
-                    const isPlatformOwnerContent = isVipActive && v.creatorRole?.trim().toUpperCase() === 'ADMIN';
+                    
+                    // ACCESO TOTAL: Solo si el video pertenece al Admin y el usuario es VIP
+                    const isVipWithAdminAccess = isVipActive && v.creatorRole?.trim().toUpperCase() === 'ADMIN';
 
-                    setIsUnlocked(access || isAdmin || isCreator || isPlatformOwnerContent);
+                    setIsUnlocked(access || isAdmin || isCreator || isVipWithAdminAccess);
                 } else {
                     setIsUnlocked(false);
                 }
@@ -124,18 +132,27 @@ export default function Watch() {
         };
 
         fetchData();
-    }, [id, user?.id]);
+    }, [id, user?.id, searchContext]);
 
     const loadMoreRelated = async () => {
         if (!video || loadingMore || !hasMoreRelated) return;
         setLoadingMore(true);
         try {
             const nextPage = relatedPage + 1;
-            const more = await db.getRelatedVideos(video.id, nextPage);
+            let more: Video[] = [];
+
+            if (searchContext) {
+                const searchRes = await db.getVideos(nextPage, 30, '', searchContext);
+                more = searchRes.videos;
+                setHasMoreRelated(searchRes.hasMore);
+            } else {
+                more = await db.getRelatedVideos(video.id, nextPage);
+                setHasMoreRelated(more.length >= 30);
+            }
+
             if (more.length > 0) {
                 setRelatedVideos(prev => [...prev, ...more]);
                 setRelatedPage(nextPage);
-                setHasMoreRelated(more.length >= 30);
                 setVisibleRelated(prev => prev + 12);
             } else {
                 setHasMoreRelated(false);
@@ -397,14 +414,14 @@ export default function Watch() {
                 <div className="lg:w-80 space-y-4 shrink-0">
                     <div className="flex items-center justify-between px-2">
                         <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'En esta búsqueda' : 'Relacionados'}
+                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'Resultados de Búsqueda' : 'Relacionados'}
                         </h3>
                     </div>
                     
                     {searchContext && (
                         <div className="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-2xl mb-2">
                             <div className="flex items-center gap-2 text-indigo-400 font-black text-[9px] uppercase tracking-widest">
-                                <ListFilter size={12}/> Viendo resultados de:
+                                <ListFilter size={12}/> Buscando:
                             </div>
                             <div className="text-xs font-bold text-white mt-1 italic line-clamp-1">"{searchContext}"</div>
                         </div>
@@ -417,7 +434,7 @@ export default function Watch() {
                                 <Link key={v.id} to={`/watch/${v.id}${contextSuffix}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
                                     <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
                                         <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
-                                        {idx === 0 && (
+                                        {idx === 0 && !searchContext && (
                                             <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center animate-in fade-in">
                                                 <div className="flex flex-col items-center">
                                                     <Play size={20} className="text-white fill-current"/>
@@ -448,7 +465,7 @@ export default function Watch() {
                             className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-3xl border border-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl disabled:opacity-50"
                         >
                             {loadingMore ? <Loader2 className="animate-spin" size={14}/> : <ChevronDown size={14}/>} 
-                            {loadingMore ? 'Sincronizando...' : 'Ver más recomendaciones'}
+                            {loadingMore ? 'Sincronizando...' : 'Cargar más sugerencias'}
                         </button>
                     )}
                 </div>

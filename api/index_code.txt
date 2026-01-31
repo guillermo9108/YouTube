@@ -1,6 +1,6 @@
 <?php ob_start();
 /**
- * StreamPay - Core Controller V13.0 (Shorts & Paged Related)
+ * StreamPay - Core Controller V14.0 (Search Fixed)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -116,6 +116,8 @@ try {
         case 'purchase_video': interact_purchase($pdo, $input); break;
         case 'toggle_subscribe': interact_toggle_subscribe($pdo, $input); break;
         case 'get_notifications': interact_get_notifications($pdo, $_GET['userId'] ?? ''); break;
+        case 'save_search': interact_save_search($pdo, $input); break;
+        case 'get_search_suggestions': interact_get_search_suggestions($pdo, $_GET['q'] ?? ''); break;
 
         default: respond(false, null, "Acción desconocida: $action"); break;
     }

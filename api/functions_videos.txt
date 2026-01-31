@@ -138,14 +138,17 @@ function video_get_shorts($pdo) {
     $limit = intval($_GET['limit'] ?? 15);
     $offset = intval($_GET['offset'] ?? 0);
     
-    // Filtro: duración menor a 3 minutos y que no sean audios puros
+    // Si es el inicio (offset 0), usamos RAND() para variedad. 
+    // Si es paginación, mantenemos un orden basado en ID para no repetir videos en la misma sesión
+    $order = ($offset == 0) ? "RAND()" : "v.id ASC";
+
     $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole 
             FROM videos v 
             LEFT JOIN users u ON v.creatorId = u.id 
             WHERE v.duration > 0 AND v.duration < 180 
             AND v.is_audio = 0
             AND v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA') 
-            ORDER BY v.createdAt DESC
+            ORDER BY $order
             LIMIT $limit OFFSET $offset";
             
     $stmt = $pdo->query($sql);

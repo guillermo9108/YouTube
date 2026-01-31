@@ -31,7 +31,7 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
   const [dislikeCount, setDislikeCount] = useState(Number(video.dislikes || 0));
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Validación de Acceso Inteligente
+  // Validación de Acceso Inteligente (Respetando restricción de Admin)
   useEffect(() => {
     if (!user) return;
     
@@ -39,10 +39,11 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
         const isCreator = String(user.id) === String(video.creatorId);
         const isVipActive = !!(user.vipExpiry && Number(user.vipExpiry) > Date.now() / 1000);
-        // VIPs acceden gratis a lo del Admin
-        const hasVipAccess = isVipActive && video.creatorRole?.trim().toUpperCase() === 'ADMIN';
+        
+        // Acceso VIP limitado solo al contenido del administrador
+        const hasVipAccessToAdmin = isVipActive && video.creatorRole?.trim().toUpperCase() === 'ADMIN';
 
-        if (isAdmin || isCreator || hasVipAccess) {
+        if (isAdmin || isCreator || hasVipAccessToAdmin) {
             setIsUnlocked(true);
         } else {
             const purchased = await db.hasPurchased(user.id, video.id);
@@ -87,7 +88,6 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
         const res = await db.rateVideo(user.id, video.id, rating);
         setInteraction(res); 
         if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
-        // Fix: Use setDislikeCount instead of undefined setDislikes
         if (res.newDislikeCount !== undefined) setDislikeCount(res.newDislikeCount);
     } catch(e) {}
   };
@@ -258,6 +258,7 @@ export default function Shorts() {
     fetchShorts(0);
   }, []);
 
+  // Observador para scroll infinito
   useEffect(() => {
     const container = containerRef.current; if (!container || videos.length === 0) return;
     const observer = new IntersectionObserver((entries) => {
@@ -266,8 +267,8 @@ export default function Shorts() {
                 const index = Number((entry.target as HTMLElement).dataset.index);
                 if (!isNaN(index)) {
                     setActiveIndex(index);
-                    // Si llegamos cerca del final (ej: faltan 5), pedir más
-                    if (index >= videos.length - 5 && hasMore && !loading) {
+                    // Cargar más cuando falten 3 videos para llegar al final
+                    if (index >= videos.length - 3 && hasMore && !loading) {
                         fetchShorts(page + 1);
                     }
                 }
@@ -309,7 +310,7 @@ export default function Shorts() {
       {videos.length === 0 && loading ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4"><Loader2 className="animate-spin text-indigo-500" size={32}/><p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p></div>
       ) : videos.map((video, idx) => (
-        <div key={video.id} data-index={idx} className="w-full h-full snap-start">
+        <div key={video.id + idx} data-index={idx} className="w-full h-full snap-start">
              <ShortItem 
                 video={video} 
                 isActive={idx === activeIndex} 
