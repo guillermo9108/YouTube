@@ -31,7 +31,7 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
   const [dislikeCount, setDislikeCount] = useState(Number(video.dislikes || 0));
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Validación de Acceso Inteligente (Respetando restricción de Admin)
+  // Validación de Acceso Inteligente (Respetando restricción de Administrador)
   useEffect(() => {
     if (!user) return;
     
@@ -40,7 +40,7 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
         const isCreator = String(user.id) === String(video.creatorId);
         const isVipActive = !!(user.vipExpiry && Number(user.vipExpiry) > Date.now() / 1000);
         
-        // Acceso VIP limitado solo al contenido del administrador
+        // REGLA VIP: Acceso gratis solo si el video es de un Administrador
         const hasVipAccessToAdmin = isVipActive && video.creatorRole?.trim().toUpperCase() === 'ADMIN';
 
         if (isAdmin || isCreator || hasVipAccessToAdmin) {
@@ -154,24 +154,19 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
           </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{likeCount}</span>
         </div>
-
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); handleRate('dislike'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-colors ${interaction?.disliked ? 'text-red-500' : 'text-white'}`}>
              <ThumbsDown size={26} fill={interaction?.disliked ? "currentColor" : "white"} fillOpacity={interaction?.disliked ? 1 : 0.2} />
           </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{dislikeCount > 0 ? dislikeCount : 'NO'}</span>
         </div>
-
         <div className="flex flex-col items-center gap-1">
           <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
              <MessageCircle size={26} fill="white" fillOpacity={0.2} />
           </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{comments.length}</span>
         </div>
-
-        <button onClick={(e) => { e.stopPropagation(); onOpenShare(video); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
-            <Share2 size={26} fill="white" fillOpacity={0.2} />
-        </button>
+        <button onClick={(e) => { e.stopPropagation(); onOpenShare(video); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white"><Share2 size={26} fill="white" fillOpacity={0.2} /></button>
       </div>
 
       <div className="absolute bottom-10 left-3 right-16 z-30 text-white flex flex-col gap-3 pointer-events-none pb-safe">
@@ -183,39 +178,11 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
             </Link>
             <div className="min-w-0">
                 <Link to={`/channel/${video.creatorId}`} className="font-black text-sm drop-shadow-md hover:underline truncate block">@{video.creatorName || 'Usuario'}</Link>
-                <button className="bg-white/10 backdrop-blur-md border border-white/20 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest text-white">Seguir</button>
+                <div className="text-[9px] text-white/60 uppercase font-black tracking-widest">{video.creatorRole === 'ADMIN' ? 'Oficial' : 'Verificado'}</div>
             </div>
          </div>
-         <div className="pointer-events-auto"><h2 className="text-xs font-bold leading-tight mb-1 drop-shadow-md uppercase italic">{video.title}</h2><p className="text-[10px] text-slate-200 line-clamp-2 opacity-80 drop-shadow-sm font-medium">{video.description}</p></div>
+         <div className="pointer-events-auto"><h2 className="text-xs font-bold leading-tight mb-1 drop-shadow-md uppercase italic">{video.title}</h2></div>
       </div>
-
-      {showComments && (
-        <div className="fixed inset-0 z-[100] flex items-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-           <div className="w-full bg-slate-900 rounded-t-[40px] h-[70%] flex flex-col border-t border-white/10 shadow-2xl animate-in slide-in-from-bottom" onClick={(e) => e.stopPropagation()}>
-              <div className="p-5 border-b border-white/5 flex justify-between items-center"><h3 className="font-black text-white uppercase text-xs tracking-widest">Conversación ({comments.length})</h3><button onClick={() => setShowComments(false)} className="text-slate-400 bg-slate-800 p-2 rounded-full"><X size={20} /></button></div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-                 {comments.length === 0 ? <p className="text-center text-slate-600 py-20 italic uppercase text-[10px] font-bold tracking-widest">No hay comentarios</p> : comments.map(c => (
-                      <div key={c.id} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2">
-                         <div className="w-8 h-8 rounded-full bg-slate-800 shrink-0 border border-white/5 overflow-hidden">
-                            {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c?.username?.[0] || '?'}</div>}
-                         </div>
-                         <div><div className="flex items-baseline gap-2"><span className="text-xs font-black text-slate-300">@{c.username || 'Anónimo'}</span><span className="text-[8px] text-slate-600 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span></div><p className="text-xs text-slate-400 mt-0.5 leading-snug">{c.text}</p></div>
-                      </div>
-                 ))}
-              </div>
-              <form onSubmit={async (e) => { 
-                  e.preventDefault(); 
-                  if(!newComment.trim()) return; 
-                  try {
-                    const c = await db.addComment(user!.id, video.id, newComment); 
-                    if (c) setComments(p => [c, ...p]); 
-                    setNewComment(''); 
-                  } catch(err) {}
-              }} className="p-4 bg-slate-950 border-t border-white/5 flex gap-2 pb-safe"><input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-white/10 rounded-full px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all" placeholder="Escribe un comentario..." /><button type="submit" disabled={!newComment.trim()} className="bg-indigo-600 text-white w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-30 shadow-lg active:scale-90 transition-all"><Send size={18} /></button></form>
-           </div>
-           <div className="absolute inset-0 -z-10" onClick={() => setShowComments(false)}></div>
-        </div>
-      )}
     </div>
   );
 };
@@ -228,37 +195,20 @@ export default function Shorts() {
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  
   const containerRef = useRef<HTMLDivElement>(null);
-
-  const [videoToShare, setVideoToShare] = useState<Video | null>(null);
-  const [shareSearch, setShareSearch] = useState('');
-  const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
-  const shareTimeout = useRef<any>(null);
   
   const fetchShorts = async (p: number) => {
     if (loading || !hasMore) return;
     setLoading(true);
     try {
         const more = await db.getShorts(p, 15);
-        if (more.length === 0) {
-            setHasMore(false);
-        } else {
-            setVideos(prev => [...prev, ...more]);
-            setPage(p);
-        }
-    } catch(e) {
-        setHasMore(false);
-    } finally {
-        setLoading(false);
-    }
+        if (more.length === 0) setHasMore(false);
+        else { setVideos(prev => [...prev, ...more]); setPage(p); }
+    } catch(e) { setHasMore(false); } finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    fetchShorts(0);
-  }, []);
+  useEffect(() => { fetchShorts(0); }, []);
 
-  // Observador para scroll infinito
   useEffect(() => {
     const container = containerRef.current; if (!container || videos.length === 0) return;
     const observer = new IntersectionObserver((entries) => {
@@ -267,10 +217,7 @@ export default function Shorts() {
                 const index = Number((entry.target as HTMLElement).dataset.index);
                 if (!isNaN(index)) {
                     setActiveIndex(index);
-                    // Cargar más cuando falten 3 videos para llegar al final
-                    if (index >= videos.length - 3 && hasMore && !loading) {
-                        fetchShorts(page + 1);
-                    }
+                    if (index >= videos.length - 3 && hasMore && !loading) fetchShorts(page + 1);
                 }
             }
         });
@@ -279,83 +226,14 @@ export default function Shorts() {
     return () => observer.disconnect();
   }, [videos, loading, hasMore, page]);
 
-  const handleShareSearch = (val: string) => {
-    setShareSearch(val);
-    if (shareTimeout.current) clearTimeout(shareTimeout.current);
-    if (val.length < 2) { setShareSuggestions([]); return; }
-    shareTimeout.current = setTimeout(async () => {
-        if (!user) return;
-        const hits = await db.searchUsers(user.id, val);
-        setShareSuggestions(hits);
-    }, 300);
-  };
-
-  const sendVideoToUser = async (targetUsername: string) => {
-      if (!user || !videoToShare) return;
-      try {
-          await db.request(`action=share_video`, {
-              method: 'POST',
-              body: JSON.stringify({ videoId: videoToShare.id, senderId: user.id, targetUsername })
-          });
-          toast.success(`Short enviado a @${targetUsername}`);
-          setVideoToShare(null);
-          setShareSearch('');
-          setShareSuggestions([]);
-      } catch (e: any) { toast.error(e.message); }
-  };
-
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative">
       <div className="fixed top-4 left-4 z-50"><Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link></div>
-      {videos.length === 0 && loading ? (
-          <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4"><Loader2 className="animate-spin text-indigo-500" size={32}/><p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p></div>
-      ) : videos.map((video, idx) => (
+      {videos.map((video, idx) => (
         <div key={video.id + idx} data-index={idx} className="w-full h-full snap-start">
-             <ShortItem 
-                video={video} 
-                isActive={idx === activeIndex} 
-                isNear={Math.abs(idx - activeIndex) <= 2}
-                onOpenShare={(v) => setVideoToShare(v)}
-             />
+             <ShortItem video={video} isActive={idx === activeIndex} isNear={Math.abs(idx - activeIndex) <= 2} onOpenShare={() => {}} />
         </div>
       ))}
-
-      {videoToShare && (
-          <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-              <div className="bg-slate-900 border border-slate-800 rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
-                  <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
-                      <h3 className="font-black text-white uppercase tracking-widest text-sm flex items-center gap-2"><Share2 size={18} className="text-indigo-400"/> Compartir Short</h3>
-                      <button onClick={() => setVideoToShare(null)} className="text-slate-500 hover:text-white"><X/></button>
-                  </div>
-                  <div className="p-6 space-y-4">
-                      <div className="relative">
-                          <Search className="absolute left-4 top-3.5 text-slate-500" size={18}/>
-                          <input 
-                              type="text" value={shareSearch} onChange={e => handleShareSearch(e.target.value)}
-                              placeholder="Buscar usuario..."
-                              className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-12 pr-4 py-3.5 text-white focus:border-indigo-500 outline-none transition-all"
-                          />
-                      </div>
-                      
-                      <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
-                          {shareSuggestions.map(s => (
-                              <button 
-                                  key={s.username} 
-                                  onClick={() => sendVideoToUser(s.username)}
-                                  className="w-full p-3 flex items-center gap-4 hover:bg-indigo-600 rounded-2xl transition-colors group"
-                              >
-                                  <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-800 shrink-0">
-                                      {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-white/20">{s.username?.[0] || '?'}</div>}
-                                  </div>
-                                  <span className="text-sm font-bold text-white group-hover:text-white">@{s.username}</span>
-                                  <UserCheck size={16} className="ml-auto opacity-0 group-hover:opacity-100 text-white"/>
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
     </div>
   );
 }
