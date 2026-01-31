@@ -1,7 +1,7 @@
 
 <?php
 /**
- * INTERACCIONES - CORE FUNCTIONS V12.0 (Full Restore)
+ * INTERACCIONES - CORE FUNCTIONS V12.1 (Search Suggestions Optimized)
  */
 
 function interact_save_search($pdo, $input) {
@@ -12,16 +12,42 @@ function interact_save_search($pdo, $input) {
 }
 
 function interact_get_search_suggestions($pdo, $q) {
-    $q = trim($q); if (strlen($q) < 2) respond(true, []);
+    $q = trim($q);
     $res = [];
-    $stmt = $pdo->prepare("SELECT term as label, 'HISTORY' as type FROM search_history WHERE term LIKE ? ORDER BY count DESC LIMIT 3");
+
+    // Caso A: Entrada vacía -> Mostrar historial de tendencias (Top 6)
+    if (empty($q)) {
+        $stmt = $pdo->query("SELECT term as label, 'HISTORY' as type FROM search_history ORDER BY count DESC, last_searched DESC LIMIT 6");
+        respond(true, $stmt->fetchAll());
+    }
+
+    // Caso B: Con texto -> Búsqueda multi-tabla agrupada
+    
+    // 1. Categorías (Coincidencia exacta o parcial en nombres de categorías del sistema)
+    $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
+    $allCats = json_decode($stmtS->fetchColumn() ?: '[]', true);
+    foreach ($allCats as $cat) {
+        if (stripos($cat['name'], $q) !== false) {
+            $res[] = ['label' => $cat['name'], 'type' => 'CATEGORY', 'id' => $cat['id']];
+        }
+    }
+
+    // 2. Historial previo
+    $stmt = $pdo->prepare("SELECT term as label, 'HISTORY' as type FROM search_history WHERE term LIKE ? ORDER BY count DESC LIMIT 2");
     $stmt->execute(["%$q%"]); $res = array_merge($res, $stmt->fetchAll());
-    $stmt = $pdo->prepare("SELECT title as label, id, 'VIDEO' as type FROM videos WHERE title LIKE ? AND category NOT IN ('PENDING','PROCESSING') LIMIT 5");
+
+    // 3. Videos & Audios
+    $stmt = $pdo->prepare("SELECT title as label, id, CASE WHEN is_audio = 1 THEN 'AUDIO' ELSE 'VIDEO' END as type FROM videos WHERE title LIKE ? AND category NOT IN ('PENDING','PROCESSING','FAILED_METADATA') LIMIT 4");
     $stmt->execute(["%$q%"]); $res = array_merge($res, $stmt->fetchAll());
-    $stmt = $pdo->prepare("SELECT title as label, id, 'MARKET' as type FROM marketplace_items WHERE title LIKE ? LIMIT 3");
+
+    // 4. Marketplace
+    $stmt = $pdo->prepare("SELECT title as label, id, 'MARKET' as type FROM marketplace_items WHERE title LIKE ? AND status = 'ACTIVO' LIMIT 3");
     $stmt->execute(["%$q%"]); $res = array_merge($res, $stmt->fetchAll());
-    $stmt = $pdo->prepare("SELECT username as label, id, 'USER' as type FROM users WHERE username LIKE ? LIMIT 3");
+
+    // 5. Usuarios/Canales
+    $stmt = $pdo->prepare("SELECT username as label, id, 'USER' as type FROM users WHERE username LIKE ? LIMIT 2");
     $stmt->execute(["%$q%"]); $res = array_merge($res, $stmt->fetchAll());
+
     respond(true, $res);
 }
 
@@ -178,7 +204,7 @@ function interact_check_subscription($pdo, $uid, $cid) {
 
 function interact_get_subscriptions($pdo, $uid) {
     $stmt = $pdo->prepare("SELECT creatorId FROM subscriptions WHERE subscriberId = ?"); $stmt->execute([$uid]);
-    respond(true, $stmt->fetchAll(PDO::FETCH_COLUMN));
+    respond(true, $stmt->fetchAll(PDO::COLUMN));
 }
 
 function interact_request_content($pdo, $input) {

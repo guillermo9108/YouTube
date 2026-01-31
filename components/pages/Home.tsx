@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Notification as AppNotification, User, SystemSettings } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag
+    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History
 } from 'lucide-react';
 import { useNavigate, Link } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -138,7 +139,8 @@ export default function Home() {
     const [suggestions, setSuggestions] = useState<any[]>([]);
     const [geminiActive, setGeminiActive] = useState(false);
 
-    const searchContainerRef = useRef<HTMLDivElement>(null);
+    const searchContainerRef = useRef<HTMLFormElement>(null);
+    const searchInputRef = useRef<HTMLInputElement>(null);
     const loadMoreRef = useRef<HTMLDivElement>(null);
     const searchTimeout = useRef<any>(null);
     const lastScrollY = useRef(0);
@@ -246,24 +248,61 @@ export default function Home() {
         return () => observer.disconnect();
     }, [page, hasMore, loading, loadingMore]);
 
+    // Cerrar sugerencias al hacer click fuera
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+                setShowSuggestions(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
     const handleSearchChange = (val: string) => {
         setSearchQuery(val);
         if (searchTimeout.current) clearTimeout(searchTimeout.current);
-        if (val.length < 2) { setSuggestions([]); setShowSuggestions(false); return; }
+        
         searchTimeout.current = setTimeout(async () => {
             try {
                 const res = await db.getSearchSuggestions(val);
                 setSuggestions(res || []);
-                setShowSuggestions(res?.length > 0);
+                setShowSuggestions(true);
             } catch(e) {}
         }, 300);
     };
 
+    const handleSearchSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        const term = searchQuery.trim();
+        if (term.length >= 2) {
+            db.saveSearch(term);
+        }
+        setShowSuggestions(false);
+        // Forzar cierre de teclado móvil
+        if (searchInputRef.current) {
+            searchInputRef.current.blur();
+        }
+    };
+
     const handleSuggestionClick = (s: any) => {
-        setSearchQuery(s.label); setShowSuggestions(false); db.saveSearch(s.label);
-        if (s.type === 'VIDEO') navigate(`/watch/${s.id}`);
-        else if (s.type === 'MARKET') navigate(`/marketplace/${s.id}`);
-        else if (s.type === 'USER') navigate(`/channel/${s.id}`);
+        setShowSuggestions(false);
+        // Forzar cierre de teclado móvil al seleccionar sugerencia
+        if (searchInputRef.current) {
+            searchInputRef.current.blur();
+        }
+
+        if (s.type === 'HISTORY' || s.type === 'CATEGORY') {
+            setSearchQuery(s.label);
+            if (s.type === 'CATEGORY') setSelectedCategory(s.label);
+            db.saveSearch(s.label);
+        } else {
+            db.saveSearch(searchQuery || s.label);
+            const contextParam = searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : '';
+            if (s.type === 'VIDEO' || s.type === 'AUDIO') navigate(`/watch/${s.id}${contextParam}`);
+            else if (s.type === 'MARKET') navigate(`/marketplace/${s.id}`);
+            else if (s.type === 'USER') navigate(`/channel/${s.id}`);
+        }
     };
 
     const handleNavigate = (index: number) => {
@@ -296,6 +335,18 @@ export default function Home() {
     const unreadCount = useMemo(() => notifs.filter(n => Number(n.isRead) === 0).length, [notifs]);
     const isAdmin = user?.role?.trim().toUpperCase() === 'ADMIN';
 
+    const getSuggestionIcon = (type: string) => {
+        switch (type) {
+            case 'HISTORY': return <History size={14} className="text-slate-500" />;
+            case 'CATEGORY': return <Tag size={14} className="text-pink-400" />;
+            case 'VIDEO': return <Play size={14} className="text-indigo-400" />;
+            case 'AUDIO': return <Music size={14} className="text-emerald-400" />;
+            case 'MARKET': return <ShoppingBag size={14} className="text-amber-400" />;
+            case 'USER': return <UserIcon size={14} className="text-blue-400" />;
+            default: return <Layers size={14} className="text-slate-400" />;
+        }
+    };
+
     return (
         <div className="relative pb-20">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
@@ -305,27 +356,48 @@ export default function Home() {
                 <div className="relative z-20 backdrop-blur-2xl bg-black/40 border-b border-white/5 pt-4 pb-2 px-4 md:px-8 shadow-xl">
                     <div className="flex gap-3 items-center max-w-7xl mx-auto">
                         <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform shrink-0"><Menu size={20}/></button>
-                        <div className="relative flex-1 min-w-0" ref={searchContainerRef}>
+                        
+                        {/* FORMULARIO DE BÚSQUEDA MEJORADO */}
+                        <form 
+                            className="relative flex-1 min-w-0" 
+                            ref={searchContainerRef}
+                            onSubmit={handleSearchSubmit}
+                        >
                             <Search className="absolute left-4 top-3 text-slate-400" size={18} />
                             <input 
-                                type="text" value={searchQuery} 
+                                ref={searchInputRef}
+                                type="text" 
+                                value={searchQuery} 
                                 onChange={(e) => handleSearchChange(e.target.value)} 
-                                onFocus={() => searchQuery.length > 1 && setShowSuggestions(true)}
+                                onFocus={() => handleSearchChange(searchQuery)}
                                 placeholder="Explorar biblioteca..." 
                                 className="w-full bg-white/5 border border-white/10 rounded-2xl pl-11 pr-10 py-2.5 text-sm text-white focus:bg-white/10 focus:border-indigo-500 outline-none transition-all shadow-inner" 
                             />
-                            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-white"><X size={16}/></button>}
+                            {searchQuery && <button type="button" onClick={() => { setSearchQuery(''); fetchVideos(0, true); }} className="absolute right-3 top-3 text-slate-400 hover:text-white"><X size={16}/></button>}
                             {showSuggestions && suggestions.length > 0 && (
-                                <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50">
-                                    {suggestions.map((s, i) => (
-                                        <button key={i} onClick={() => handleSuggestionClick(s)} className="w-full p-4 flex items-center gap-4 hover:bg-white/5 transition-colors text-left group">
-                                            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/20 text-indigo-400"><Layers size={16}/></div>
-                                            <div className="flex-1 min-w-0"><div className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors truncate">{s.label}</div><div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{s.type}</div></div>
-                                        </button>
-                                    ))}
+                                <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 origin-top">
+                                    <div className="p-2 bg-slate-950 border-b border-white/5 flex items-center justify-between">
+                                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-2">{searchQuery ? 'Sugerencias Inteligentes' : 'Tendencias de búsqueda'}</span>
+                                        <button type="button" onClick={() => setShowSuggestions(false)} className="text-slate-600 hover:text-white"><X size={12}/></button>
+                                    </div>
+                                    <div className="max-h-[380px] overflow-y-auto custom-scrollbar">
+                                        {suggestions.map((s, i) => (
+                                            <button key={i} type="button" onClick={() => handleSuggestionClick(s)} className="w-full p-3.5 flex items-center gap-4 hover:bg-white/5 transition-colors text-left group border-b border-white/[0.03] last:border-0">
+                                                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 text-slate-400 group-hover:bg-indigo-500/20 group-hover:text-indigo-400 transition-colors">
+                                                    {getSuggestionIcon(s.type)}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors truncate uppercase tracking-tighter">{s.label}</div>
+                                                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-0.5">{s.type === 'HISTORY' ? 'RECUPERAR BÚSQUEDA' : s.type}</div>
+                                                </div>
+                                                <ChevronRight size={14} className="text-slate-700 opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1" />
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
-                        </div>
+                        </form>
+
                         <div className="relative shrink-0">
                             <button onClick={() => setShowNotifMenu(!showNotifMenu)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white relative active:scale-95 transition-transform">
                                 <Bell size={22} className={unreadCount > 0 ? "animate-bounce" : ""} />
@@ -398,7 +470,7 @@ export default function Home() {
                                         key={folder.name} 
                                         onClick={() => { 
                                             setNavigationPath([...navigationPath, folder.name]); 
-                                            setSelectedCategory('TODOS'); // REQUERIMIENTO: Limpiar filtro de categoría al navegar manualmente a carpeta hija
+                                            setSelectedCategory('TODOS'); 
                                             setShowFolderGrid(false); 
                                         }}
                                         className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300"
@@ -431,6 +503,21 @@ export default function Home() {
                                     </h2>
                                 </div>
                             )}
+
+                            {searchQuery && (
+                                <div className="flex items-center justify-between px-1">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
+                                        <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-4">
+                                            Resultados para: {searchQuery}
+                                            <span className="w-12 h-px bg-white/10"></span>
+                                        </h2>
+                                    </div>
+                                    <button onClick={() => { setSearchQuery(''); fetchVideos(0, true); }} className="text-[10px] font-black text-slate-500 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1.5">
+                                        <X size={12}/> Limpiar
+                                    </button>
+                                </div>
+                            )}
                             
                             {videos.length > 0 ? (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-12">
@@ -439,6 +526,7 @@ export default function Home() {
                                             key={v.id} video={v} 
                                             isUnlocked={isAdmin || user?.id === v.creatorId} 
                                             isWatched={watchedIds.includes(v.id)} 
+                                            context={{ query: searchQuery, category: selectedCategory }}
                                         />
                                     ))}
                                 </div>

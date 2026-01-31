@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -5,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart, Music, ChevronDown, Bell, BellOff
+    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart, Music, ChevronDown, Bell, BellOff, ListFilter
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -21,13 +22,21 @@ export default function Watch() {
     const navigate = useNavigate();
     const toast = useToast();
     
+    // Obtener contexto de búsqueda desde la URL
+    const searchContext = useMemo(() => {
+        const hash = window.location.hash;
+        if (!hash.includes('?')) return null;
+        const params = new URLSearchParams(hash.split('?')[1]);
+        return params.get('q');
+    }, [id]);
+
     const [video, setVideo] = useState<Video | null>(null);
     const [loading, setLoading] = useState(true);
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [isPurchasing, setIsPurchasing] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
-    const [seriesQueue, setSeriesQueue] = useState<Video[]>([]); // Nueva cola de capítulos ordenados
+    const [seriesQueue, setSeriesQueue] = useState<Video[]>([]); 
     const [visibleRelated, setVisibleRelated] = useState(12);
     
     // Social State
@@ -68,54 +77,72 @@ export default function Watch() {
         
         const fetchData = async () => {
             try {
-                const [v, settings, all] = await Promise.all([
-                    db.getVideo(id),
-                    db.getSystemSettings(),
-                    db.getAllVideos()
-                ]);
+                // 1. Obtener video actual
+                const v = await db.getVideo(id);
+                if (!v) { setLoading(false); return; }
 
-                if (v) {
-                    setVideo(v); 
-                    setLikes(Number(v.likes || 0));
-                    setDislikes(Number(v.dislikes || 0));
+                setVideo(v); 
+                setLikes(Number(v.likes || 0));
+                setDislikes(Number(v.dislikes || 0));
 
-                    const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                    
-                    // Definimos la serie: Todos los videos en la misma carpeta ORDENADOS NATURALMENTE
-                    const series = all.filter(ov => {
+                // 2. Obtener videos relacionados según el contexto (Búsqueda o Carpeta)
+                let allVids: Video[] = [];
+                if (searchContext) {
+                    const res = await db.getVideos(0, 100, '', searchContext, 'TODOS');
+                    allVids = res.videos;
+                } else {
+                    allVids = await db.getAllVideos();
+                }
+
+                const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                
+                // Definimos la cola principal basada en el contexto
+                let contextQueue: Video[] = [];
+
+                if (searchContext) {
+                    // Si hay búsqueda, la cola es el resultado de la búsqueda
+                    contextQueue = allVids.sort((a, b) => naturalCollator.compare(a.title, b.title));
+                } else {
+                    // Si no hay búsqueda, la cola es la carpeta actual
+                    contextQueue = allVids.filter(ov => {
                         const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
                         return ovPath === currentPath;
                     }).sort((a, b) => naturalCollator.compare(a.title, b.title));
+                }
 
-                    setSeriesQueue(series);
+                setSeriesQueue(contextQueue);
 
-                    // Para la interfaz de recomendados: excluímos el actual y barajamos el resto que no es de la carpeta
-                    const siblings = series.filter(ov => ov.id !== v.id);
-                    const others = all.filter(ov => {
-                        const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                        return ovPath !== currentPath;
-                    }).sort(() => Math.random() - 0.5);
+                // Recomendados UI: Excluimos el actual
+                const suggestions = allVids.filter(ov => ov.id !== v.id);
+                
+                // Si la cola de contexto es corta, rellenamos con otros aleatorios de la base global
+                if (suggestions.length < 10 && !searchContext) {
+                    const global = await db.getAllVideos();
+                    const others = global.filter(gv => !suggestions.some(sv => sv.id === gv.id) && gv.id !== v.id)
+                                         .sort(() => Math.random() - 0.5);
+                    setRelatedVideos([...suggestions, ...others]);
+                } else {
+                    setRelatedVideos(suggestions);
+                }
 
-                    setRelatedVideos([...siblings, ...others]);
-                    db.getComments(v.id).then(setComments);
+                db.getComments(v.id).then(setComments);
 
-                    if (user) {
-                        const [access, interact, sub] = await Promise.all([
-                            db.hasPurchased(user.id, v.id),
-                            db.getInteraction(user.id, v.id),
-                            db.checkSubscription(user.id, v.creatorId)
-                        ]);
-                        const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-                        const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-                        setIsUnlocked(Boolean(access || isAdmin || (isVipActive && v.creatorRole === 'ADMIN') || user.id === v.creatorId));
-                        setInteraction(interact);
-                        setIsSubscribed(sub);
-                    }
+                if (user) {
+                    const [access, interact, sub] = await Promise.all([
+                        db.hasPurchased(user.id, v.id),
+                        db.getInteraction(user.id, v.id),
+                        db.checkSubscription(user.id, v.creatorId)
+                    ]);
+                    const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
+                    const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
+                    setIsUnlocked(Boolean(access || isAdmin || (isVipActive && v.creatorRole === 'ADMIN') || user.id === v.creatorId));
+                    setInteraction(interact);
+                    setIsSubscribed(sub);
                 }
             } catch (e) {} finally { setLoading(false); }
         };
         fetchData();
-    }, [id, user?.id]);
+    }, [id, user?.id, searchContext]);
 
     const handleRate = async (type: 'like' | 'dislike') => {
         if (!user || !video) return;
@@ -226,22 +253,15 @@ export default function Watch() {
     const handleVideoEnded = async () => {
         if (!video || !user) return;
 
-        // ESTRATEGIA DE ÍNDICE SECUENCIAL:
         // Buscamos el video actual en la cola de la serie (que ya está ordenada naturalmente)
         const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
         
         // El siguiente es matemáticamente el índice + 1
         let nextVid = seriesQueue[currentIndex + 1];
 
-        // Si no hay siguiente en la carpeta, tomamos el primero de las recomendaciones externas
-        if (!nextVid && relatedVideos.length > 0) {
-            // Filtramos para asegurar que no regresamos a un "sibling" ya visto o al actual
-            const externalVids = relatedVideos.filter(rv => {
-                const rvPath = ((rv as any).rawPath || rv.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                const curPath = ((video as any).rawPath || video.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                return rvPath !== curPath;
-            });
-            nextVid = externalVids[0];
+        // Si no hay siguiente en el contexto actual, detenemos o vamos al primero de recomendados generales
+        if (!nextVid && !searchContext && relatedVideos.length > 0) {
+            nextVid = relatedVideos[0];
         }
 
         if (!nextVid) return;
@@ -250,18 +270,20 @@ export default function Watch() {
         const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
         const hasAccess = isAdmin || (isVip && nextVid.creatorRole === 'ADMIN') || user.id === nextVid.creatorId;
 
-        if (hasAccess) { navigate(`/watch/${nextVid.id}`); return; }
+        const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
+
+        if (hasAccess) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
         
         const purchased = await db.hasPurchased(user.id, nextVid.id);
-        if (purchased) { navigate(`/watch/${nextVid.id}`); return; }
+        if (purchased) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
 
         if (Number(nextVid.price) <= Number(user.autoPurchaseLimit) && Number(user.balance) >= Number(nextVid.price)) {
             try {
                 await db.purchaseVideo(user.id, nextVid.id);
-                refreshUser(); navigate(`/watch/${nextVid.id}`);
-            } catch (e) { navigate(`/watch/${nextVid.id}`); }
+                refreshUser(); navigate(`/watch/${nextVid.id}${contextSuffix}`);
+            } catch (e) { navigate(`/watch/${nextVid.id}${contextSuffix}`); }
         } else {
-            navigate(`/watch/${nextVid.id}`); 
+            navigate(`/watch/${nextVid.id}${contextSuffix}`); 
         }
     };
 
@@ -402,17 +424,36 @@ export default function Watch() {
                 </div>
 
                 <div className="lg:w-80 space-y-4 shrink-0">
-                    <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-2 flex items-center gap-2">
-                        <Play size={12} className="text-indigo-500"/> Recomendados
-                    </h3>
+                    <div className="flex items-center justify-between px-2">
+                        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'Siguiente en búsqueda' : 'Recomendados'}
+                        </h3>
+                        {searchContext && (
+                            <Link to="/" className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-tighter flex items-center gap-1">
+                                <X size={10}/> Limpiar Contexto
+                            </Link>
+                        )}
+                    </div>
+                    
+                    {searchContext && (
+                        <div className="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-2xl mb-2">
+                            <div className="flex items-center gap-2 text-indigo-400 font-black text-[9px] uppercase tracking-widest">
+                                <ListFilter size={12}/> Viendo resultados de:
+                            </div>
+                            <div className="text-xs font-bold text-white mt-1 italic">"{searchContext}"</div>
+                        </div>
+                    )}
+
                     <div className="space-y-4">
                         {relatedVideos.slice(0, visibleRelated).map((v, idx) => {
-                            const isNextInSeries = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
+                            const isNextInQueue = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
+                            const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
+                            
                             return (
-                                <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
+                                <Link key={v.id} to={`/watch/${v.id}${contextSuffix}`} className={`group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all ${isNextInQueue ? 'bg-indigo-500/[0.03] border border-indigo-500/10' : ''}`}>
                                     <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
                                         <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
-                                        {isNextInSeries && (
+                                        {isNextInQueue && (
                                             <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center animate-in fade-in">
                                                 <div className="flex flex-col items-center">
                                                     <Play size={20} className="text-white fill-current"/>

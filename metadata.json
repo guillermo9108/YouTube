@@ -1,6 +1,6 @@
 {
-  "name": "StreamPay OFICIAL 0.0.12.9",
-  "description": "Mejorar carga principal de archivos",
+  "name": "StreamPay OFICIAL 0.0.13.1",
+  "description": "Mejorar búsqueda y lista a continuación ",
   "requestFramePermissions": [
     "camera",
     "microphone"
