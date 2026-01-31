@@ -65,6 +65,11 @@ class DBService {
         return res.videos;
     }
 
+    public async getShorts(page: number = 0, limit: number = 15): Promise<Video[]> {
+        const offset = page * limit;
+        return this.request<Video[]>(`action=get_shorts&limit=${limit}&offset=${offset}`);
+    }
+
     public async getAdminLibraryStats(): Promise<any> {
         return this.request<any>('action=get_admin_library_stats');
     }
@@ -150,7 +155,10 @@ class DBService {
 
     public async getVideosByCreator(userId: string): Promise<Video[]> { return this.request<Video[]>(`action=get_videos_by_creator&userId=${userId}`); }
 
-    public async getRelatedVideos(videoId: string): Promise<Video[]> { return this.request<Video[]>(`action=get_related_videos&videoId=${videoId}`); }
+    public async getRelatedVideos(videoId: string, page: number = 0, limit: number = 30): Promise<Video[]> { 
+        const offset = page * limit;
+        return this.request<Video[]>(`action=get_related_videos&videoId=${videoId}&limit=${limit}&offset=${offset}`); 
+    }
 
     public async getUnprocessedVideos(limit: number = 50, mode: string = 'normal'): Promise<Video[]> { return this.request<Video[]>(`action=get_unprocessed_videos&limit=${limit}&mode=${mode}`); }
 

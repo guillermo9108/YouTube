@@ -1,6 +1,6 @@
 <?php ob_start();
 /**
- * StreamPay - Core Controller V12.0 (Admin Actions Mapped)
+ * StreamPay - Core Controller V13.0 (Shorts & Paged Related)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -61,6 +61,7 @@ try {
         // --- Videos ---
         case 'get_videos': video_get_all($pdo); break;
         case 'get_video': video_get_one($pdo, $_GET['id'] ?? ''); break;
+        case 'get_shorts': video_get_shorts($pdo); break;
         case 'get_videos_by_creator': video_get_by_creator($pdo, $_GET['userId'] ?? ''); break;
         case 'get_related_videos': video_get_related($pdo, $_GET['videoId'] ?? ''); break;
         case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;

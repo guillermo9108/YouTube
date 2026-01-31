@@ -32,8 +32,13 @@ export default function Watch() {
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [isPurchasing, setIsPurchasing] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
+    
+    // Related Logic
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     const [visibleRelated, setVisibleRelated] = useState(12);
+    const [relatedPage, setRelatedPage] = useState(0);
+    const [hasMoreRelated, setHasMoreRelated] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
     
     // Social State
     const [likes, setLikes] = useState<number>(0);
@@ -60,6 +65,9 @@ export default function Watch() {
         window.scrollTo(0, 0); 
         setThrottled(true);
         setVisibleRelated(12);
+        setRelatedPage(0);
+        setRelatedVideos([]);
+        setHasMoreRelated(true);
         setShowComments(false);
         setExtractionAttempted(false); 
         return () => { setThrottled(false); };
@@ -79,9 +87,11 @@ export default function Watch() {
                 setLikes(Number(v.likes || 0));
                 setDislikes(Number(v.dislikes || 0));
 
-                // 2. Carga de relacionados (Ahora optimizada en servidor)
-                // No llamamos a getAllVideos para no saturar memoria
-                db.getRelatedVideos(v.id).then(setRelatedVideos);
+                // 2. Carga de relacionados (Primera página)
+                const rel = await db.getRelatedVideos(v.id, 0);
+                setRelatedVideos(rel);
+                setHasMoreRelated(rel.length >= 30);
+
                 db.getComments(v.id).then(setComments);
 
                 // 3. Verificación de permisos y suscripción
@@ -98,10 +108,11 @@ export default function Watch() {
                     // Lógica de Desbloqueo Robusta
                     const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
                     const isCreator = String(user.id) === String(v.creatorId);
-                    const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-                    const isPlatformOwner = isVipActive && v.creatorRole === 'ADMIN';
+                    const isVipActive = !!(user.vipExpiry && Number(user.vipExpiry) > Date.now() / 1000);
+                    // Acceso total: si el video es de un Admin y el usuario es VIP
+                    const isPlatformOwnerContent = isVipActive && v.creatorRole?.trim().toUpperCase() === 'ADMIN';
 
-                    setIsUnlocked(access || isAdmin || isCreator || isPlatformOwner);
+                    setIsUnlocked(access || isAdmin || isCreator || isPlatformOwnerContent);
                 } else {
                     setIsUnlocked(false);
                 }
@@ -113,7 +124,28 @@ export default function Watch() {
         };
 
         fetchData();
-    }, [id, user?.id]); // Re-ejecutar si cambia el usuario (login/logout)
+    }, [id, user?.id]);
+
+    const loadMoreRelated = async () => {
+        if (!video || loadingMore || !hasMoreRelated) return;
+        setLoadingMore(true);
+        try {
+            const nextPage = relatedPage + 1;
+            const more = await db.getRelatedVideos(video.id, nextPage);
+            if (more.length > 0) {
+                setRelatedVideos(prev => [...prev, ...more]);
+                setRelatedPage(nextPage);
+                setHasMoreRelated(more.length >= 30);
+                setVisibleRelated(prev => prev + 12);
+            } else {
+                setHasMoreRelated(false);
+            }
+        } catch(e) {
+            setHasMoreRelated(false);
+        } finally {
+            setLoadingMore(false);
+        }
+    };
 
     const handleRate = async (type: 'like' | 'dislike') => {
         if (!user || !video) return;
@@ -403,12 +435,20 @@ export default function Watch() {
                         })}
                     </div>
 
-                    {relatedVideos.length > visibleRelated && (
+                    {(hasMoreRelated || relatedVideos.length > visibleRelated) && (
                         <button 
-                            onClick={() => setVisibleRelated(prev => prev + 12)}
-                            className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-3xl border border-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl"
+                            onClick={() => {
+                                if (visibleRelated + 12 >= relatedVideos.length && hasMoreRelated) {
+                                    loadMoreRelated();
+                                } else {
+                                    setVisibleRelated(prev => prev + 12);
+                                }
+                            }}
+                            disabled={loadingMore}
+                            className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-3xl border border-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl disabled:opacity-50"
                         >
-                            <ChevronDown size={14}/> Cargar más contenido
+                            {loadingMore ? <Loader2 className="animate-spin" size={14}/> : <ChevronDown size={14}/>} 
+                            {loadingMore ? 'Sincronizando...' : 'Ver más recomendaciones'}
                         </button>
                     )}
                 </div>

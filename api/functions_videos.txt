@@ -131,6 +131,29 @@ function video_get_all($pdo) {
     ]);
 }
 
+/**
+ * OBTENER SHORTS (Videos cortos aleatorios)
+ */
+function video_get_shorts($pdo) {
+    $limit = intval($_GET['limit'] ?? 15);
+    $offset = intval($_GET['offset'] ?? 0);
+    
+    // Filtro: duración menor a 3 minutos y que no sean audios puros
+    $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole 
+            FROM videos v 
+            LEFT JOIN users u ON v.creatorId = u.id 
+            WHERE v.duration > 0 AND v.duration < 180 
+            AND v.is_audio = 0
+            AND v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA') 
+            ORDER BY v.createdAt DESC
+            LIMIT $limit OFFSET $offset";
+            
+    $stmt = $pdo->query($sql);
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    video_process_rows($videos);
+    respond(true, $videos);
+}
+
 function video_discover_subfolders($pdo, $currentFolder) {
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $root = rtrim($stmtS->fetchColumn(), '/\\');
@@ -299,6 +322,9 @@ function video_get_by_creator($pdo, $userId) {
 }
 
 function video_get_related($pdo, $videoId) {
+    $limit = intval($_GET['limit'] ?? 30);
+    $offset = intval($_GET['offset'] ?? 0);
+    
     $stmt = $pdo->prepare("SELECT category, parent_category, collection, videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$videoId]);
     $current = $stmt->fetch();
@@ -308,7 +334,7 @@ function video_get_related($pdo, $videoId) {
     $path = str_replace('\\', '/', $current['videoUrl']);
     $folderPath = dirname($path) . '/';
 
-    // Query optimizada: Prioriza misma carpeta, luego colección, luego categoría. Límite estricto de 30.
+    // Query optimizada: Prioriza misma carpeta, luego colección, luego categoría.
     $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole 
             FROM videos v 
             LEFT JOIN users u ON v.creatorId = u.id 
@@ -319,7 +345,7 @@ function video_get_related($pdo, $videoId) {
                 CASE WHEN v.collection = ? THEN 0 ELSE 1 END, 
                 CASE WHEN v.category = ? THEN 0 ELSE 1 END, 
                 v.createdAt DESC 
-            LIMIT 30";
+            LIMIT $limit OFFSET $offset";
             
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$videoId, $folderPath . "%", $current['collection'], $current['category']]);

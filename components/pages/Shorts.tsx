@@ -37,9 +37,10 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
     
     const checkAccess = async () => {
         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-        const isCreator = user.id === video.creatorId;
-        const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-        const hasVipAccess = isVipActive && video.creatorRole === 'ADMIN';
+        const isCreator = String(user.id) === String(video.creatorId);
+        const isVipActive = !!(user.vipExpiry && Number(user.vipExpiry) > Date.now() / 1000);
+        // VIPs acceden gratis a lo del Admin
+        const hasVipAccess = isVipActive && video.creatorRole?.trim().toUpperCase() === 'ADMIN';
 
         if (isAdmin || isCreator || hasVipAccess) {
             setIsUnlocked(true);
@@ -49,7 +50,7 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
         }
     };
     checkAccess();
-  }, [user, video.id, video.creatorId, video.creatorRole]);
+  }, [user, video.id]);
 
   useEffect(() => {
     setLikeCount(Number(video.likes || 0));
@@ -86,6 +87,7 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
         const res = await db.rateVideo(user.id, video.id, rating);
         setInteraction(res); 
         if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
+        // Fix: Use setDislikeCount instead of undefined setDislikes
         if (res.newDislikeCount !== undefined) setDislikeCount(res.newDislikeCount);
     } catch(e) {}
   };
@@ -223,6 +225,10 @@ export default function Shorts() {
   const toast = useToast();
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [videoToShare, setVideoToShare] = useState<Video | null>(null);
@@ -230,11 +236,26 @@ export default function Shorts() {
   const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
   const shareTimeout = useRef<any>(null);
   
+  const fetchShorts = async (p: number) => {
+    if (loading || !hasMore) return;
+    setLoading(true);
+    try {
+        const more = await db.getShorts(p, 15);
+        if (more.length === 0) {
+            setHasMore(false);
+        } else {
+            setVideos(prev => [...prev, ...more]);
+            setPage(p);
+        }
+    } catch(e) {
+        setHasMore(false);
+    } finally {
+        setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    db.getAllVideos().then((all: Video[]) => {
-        const shorts = all.filter(v => v.duration < 180 && !['PENDING', 'PROCESSING'].includes(v.category)).sort(() => Math.random() - 0.5);
-        setVideos(shorts);
-    });
+    fetchShorts(0);
   }, []);
 
   useEffect(() => {
@@ -243,13 +264,19 @@ export default function Shorts() {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const index = Number((entry.target as HTMLElement).dataset.index);
-                if (!isNaN(index)) setActiveIndex(index);
+                if (!isNaN(index)) {
+                    setActiveIndex(index);
+                    // Si llegamos cerca del final (ej: faltan 5), pedir más
+                    if (index >= videos.length - 5 && hasMore && !loading) {
+                        fetchShorts(page + 1);
+                    }
+                }
             }
         });
     }, { root: container, threshold: 0.6 });
     Array.from(container.children).forEach((c) => observer.observe(c as Element));
     return () => observer.disconnect();
-  }, [videos]);
+  }, [videos, loading, hasMore, page]);
 
   const handleShareSearch = (val: string) => {
     setShareSearch(val);
@@ -279,7 +306,7 @@ export default function Shorts() {
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative">
       <div className="fixed top-4 left-4 z-50"><Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link></div>
-      {videos.length === 0 ? (
+      {videos.length === 0 && loading ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4"><Loader2 className="animate-spin text-indigo-500" size={32}/><p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p></div>
       ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">
