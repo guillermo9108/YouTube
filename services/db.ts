@@ -185,10 +185,10 @@ class DBService {
         });
     }
 
-    public async updateFolderPrice(folderName: string, navigationPath: string, newPrice: number): Promise<{affected: number}> {
+    public async updateFolderPrice(folderName: string, navigationPath: string, newPrice: number, newSort?: string): Promise<{affected: number}> {
         return this.request<{affected: number}>('action=admin_update_folder_price', { 
             method: 'POST', 
-            body: JSON.stringify({ folderName, navigationPath, newPrice }) 
+            body: JSON.stringify({ folderName, navigationPath, newPrice, newSort }) 
         });
     }
 
@@ -257,7 +257,6 @@ class DBService {
     public async editListing(id: string, userId: string, data: any): Promise<void> { return this.request<void>(`action=edit_listing`, { method: 'POST', body: JSON.stringify({ id, userId, data }) }); }
     public async adminDeleteListing(itemId: string): Promise<void> { return this.request<void>(`action=admin_delete_listing`, { method: 'POST', body: JSON.stringify({ id: itemId }) }); }
     public async checkoutCart(userId: string, cart: any[], shippingDetails: any): Promise<void> { return this.request<void>(`action=checkout_cart`, { method: 'POST', body: JSON.stringify({ userId, cart, shippingDetails }) }); }
-    // Fixed type mismatch: changed request<Comment[]> to request<MarketplaceReview[]> to match method return type and fix error on line 260
     public async getReviews(itemId: string): Promise<MarketplaceReview[]> { return this.request<MarketplaceReview[]>(`action=get_reviews&itemId=${itemId}`); }
     public async addReview(itemId: string, userId: string, rating: number, comment: string): Promise<void> { return this.request<void>(`action=add_review`, { method: 'POST', body: JSON.stringify({ itemId, userId, rating, comment }) }); }
 

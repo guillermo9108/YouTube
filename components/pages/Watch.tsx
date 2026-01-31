@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -12,8 +11,6 @@ import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
 import { useGrid } from '../../context/GridContext';
 import { generateThumbnail } from '../../utils/videoGenerator';
-
-const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 export default function Watch() {
     const { id } = useParams();
@@ -36,7 +33,6 @@ export default function Watch() {
     const [isPurchasing, setIsPurchasing] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
-    const [seriesQueue, setSeriesQueue] = useState<Video[]>([]); 
     const [visibleRelated, setVisibleRelated] = useState(12);
     
     // Social State
@@ -58,12 +54,10 @@ export default function Watch() {
     const shareTimeout = useRef<any>(null);
 
     const videoRef = useRef<HTMLVideoElement>(null);
-    const viewMarkedRef = useRef(false);
 
+    // Reset view state when ID changes
     useEffect(() => { 
         window.scrollTo(0, 0); 
-        refreshUser(); 
-        viewMarkedRef.current = false;
         setThrottled(true);
         setVisibleRelated(12);
         setShowComments(false);
@@ -71,78 +65,55 @@ export default function Watch() {
         return () => { setThrottled(false); };
     }, [id]);
 
+    // Data Loading Pipeline
     useEffect(() => {
         if (!id) return;
-        setLoading(true);
         
         const fetchData = async () => {
+            setLoading(true);
             try {
-                // 1. Obtener video actual
+                // 1. Carga del video principal (Necesario para los metadatos)
                 const v = await db.getVideo(id);
                 if (!v) { setLoading(false); return; }
-
                 setVideo(v); 
                 setLikes(Number(v.likes || 0));
                 setDislikes(Number(v.dislikes || 0));
 
-                // 2. Obtener videos relacionados según el contexto (Búsqueda o Carpeta)
-                let allVids: Video[] = [];
-                if (searchContext) {
-                    const res = await db.getVideos(0, 500, '', searchContext, 'TODOS');
-                    allVids = res.videos;
-                } else {
-                    allVids = await db.getAllVideos();
-                }
-
-                const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                
-                // Definimos la cola principal basada en el contexto
-                let contextQueue: Video[] = [];
-
-                if (searchContext) {
-                    // Si hay búsqueda, la cola es el resultado de la búsqueda preservando orden natural
-                    contextQueue = allVids.sort((a, b) => naturalCollator.compare(a.title, b.title));
-                } else {
-                    // Si no hay búsqueda, la cola es la carpeta actual
-                    contextQueue = allVids.filter(ov => {
-                        const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                        return ovPath === currentPath;
-                    }).sort((a, b) => naturalCollator.compare(a.title, b.title));
-                }
-
-                setSeriesQueue(contextQueue);
-
-                // Recomendados UI: Priorizar la cola de contexto, luego el resto
-                const suggestions = contextQueue.filter(ov => ov.id !== v.id);
-                
-                // Si la cola de contexto es corta y no es búsqueda, rellenamos con otros aleatorios
-                if (suggestions.length < 10 && !searchContext) {
-                    const global = await db.getAllVideos();
-                    const others = global.filter(gv => !suggestions.some(sv => sv.id === gv.id) && gv.id !== v.id)
-                                         .sort(() => Math.random() - 0.5);
-                    setRelatedVideos([...suggestions, ...others]);
-                } else {
-                    setRelatedVideos(suggestions);
-                }
-
+                // 2. Carga de relacionados (Ahora optimizada en servidor)
+                // No llamamos a getAllVideos para no saturar memoria
+                db.getRelatedVideos(v.id).then(setRelatedVideos);
                 db.getComments(v.id).then(setComments);
 
+                // 3. Verificación de permisos y suscripción
                 if (user) {
                     const [access, interact, sub] = await Promise.all([
                         db.hasPurchased(user.id, v.id),
                         db.getInteraction(user.id, v.id),
                         db.checkSubscription(user.id, v.creatorId)
                     ]);
-                    const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-                    const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-                    setIsUnlocked(Boolean(access || isAdmin || (isVipActive && v.creatorRole === 'ADMIN') || user.id === v.creatorId));
+                    
                     setInteraction(interact);
                     setIsSubscribed(sub);
+
+                    // Lógica de Desbloqueo Robusta
+                    const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
+                    const isCreator = String(user.id) === String(v.creatorId);
+                    const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
+                    const isPlatformOwner = isVipActive && v.creatorRole === 'ADMIN';
+
+                    setIsUnlocked(access || isAdmin || isCreator || isPlatformOwner);
+                } else {
+                    setIsUnlocked(false);
                 }
-            } catch (e) {} finally { setLoading(false); }
+            } catch (e) {
+                console.error("Watch Error:", e);
+            } finally {
+                setLoading(false);
+            }
         };
+
         fetchData();
-    }, [id, user?.id, searchContext]);
+    }, [id, user?.id]); // Re-ejecutar si cambia el usuario (login/logout)
 
     const handleRate = async (type: 'like' | 'dislike') => {
         if (!user || !video) return;
@@ -237,53 +208,21 @@ export default function Watch() {
                 }
             } catch (e) { console.warn("Lazy extraction failed for video", e); }
         }
-        
-        if (video.is_audio && el.currentTime > 0.5) {
-            setExtractionAttempted(true);
-            try {
-                const result = await generateThumbnail(streamUrl, true, false); 
-                if (result.thumbnail) {
-                    await db.updateVideoMetadata(video.id, Math.floor(el.duration || video.duration), result.thumbnail);
-                    setVideo(prev => prev ? { ...prev, thumbnailUrl: URL.createObjectURL(result.thumbnail!) } : null);
-                }
-            } catch (e) { console.warn("Lazy extraction failed for audio", e); }
-        }
     };
 
     const handleVideoEnded = async () => {
-        if (!video || !user) return;
-
-        // Buscamos el video actual en la cola de la serie (que ya está ordenada naturalmente)
-        const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
-        
-        // El siguiente es matemáticamente el índice + 1
-        let nextVid = seriesQueue[currentIndex + 1];
-
-        // Si no hay siguiente en el contexto actual, detenemos o vamos al primero de recomendados generales
-        if (!nextVid && !searchContext && relatedVideos.length > 0) {
-            nextVid = relatedVideos[0];
-        }
-
-        if (!nextVid) return;
-
-        const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-        const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-        const hasAccess = isAdmin || (isVip && nextVid.creatorRole === 'ADMIN') || user.id === nextVid.creatorId;
-
-        const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
-
-        if (hasAccess) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
-        
-        const purchased = await db.hasPurchased(user.id, nextVid.id);
-        if (purchased) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
-
-        if (Number(nextVid.price) <= Number(user.autoPurchaseLimit) && Number(user.balance) >= Number(nextVid.price)) {
-            try {
-                await db.purchaseVideo(user.id, nextVid.id);
-                refreshUser(); navigate(`/watch/${nextVid.id}${contextSuffix}`);
-            } catch (e) { navigate(`/watch/${nextVid.id}${contextSuffix}`); }
-        } else {
-            navigate(`/watch/${nextVid.id}${contextSuffix}`); 
+        if (relatedVideos.length > 0 && user) {
+            const nextVid = relatedVideos[0];
+            const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
+            
+            // Auto-compra inteligente si el usuario tiene saldo y está por debajo de su límite
+            if (!user.role?.includes('ADMIN') && Number(nextVid.price) <= Number(user.autoPurchaseLimit) && Number(user.balance) >= Number(nextVid.price)) {
+                try {
+                    await db.purchaseVideo(user.id, nextVid.id);
+                    refreshUser();
+                } catch(e) {}
+            }
+            navigate(`/watch/${nextVid.id}${contextSuffix}`);
         }
     };
 
@@ -426,13 +365,8 @@ export default function Watch() {
                 <div className="lg:w-80 space-y-4 shrink-0">
                     <div className="flex items-center justify-between px-2">
                         <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'En esta búsqueda' : 'Recomendados'}
+                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'En esta búsqueda' : 'Relacionados'}
                         </h3>
-                        {searchContext && (
-                            <Link to="/" className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-tighter flex items-center gap-1">
-                                <X size={10}/> Limpiar Contexto
-                            </Link>
-                        )}
                     </div>
                     
                     {searchContext && (
@@ -446,14 +380,12 @@ export default function Watch() {
 
                     <div className="space-y-4">
                         {relatedVideos.slice(0, visibleRelated).map((v, idx) => {
-                            const isNextInQueue = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
                             const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
-                            
                             return (
-                                <Link key={v.id} to={`/watch/${v.id}${contextSuffix}`} className={`group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all ${isNextInQueue ? 'bg-indigo-500/[0.03] border border-indigo-500/10' : ''}`}>
+                                <Link key={v.id} to={`/watch/${v.id}${contextSuffix}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
                                     <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
                                         <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
-                                        {isNextInQueue && (
+                                        {idx === 0 && (
                                             <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center animate-in fade-in">
                                                 <div className="flex flex-col items-center">
                                                     <Play size={20} className="text-white fill-current"/>

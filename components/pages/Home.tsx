@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Notification as AppNotification, User, SystemSettings } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History, Edit3, DollarSign, Save
+    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History, Edit3, DollarSign, Save, SortAsc, Clock
 } from 'lucide-react';
 import { useNavigate, Link, useLocation } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -77,7 +78,7 @@ const Breadcrumbs: React.FC<{
     showFolders: boolean,
     hasFolders: boolean
 }> = ({ path, onNavigate, onToggleFolders, showFolders, hasFolders }) => (
-    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in shrink-0">
+    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in duration-300 shrink-0">
         <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0">
             <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-white/10 rounded-lg text-white transition-colors">
                 <HomeIcon size={16}/>
@@ -130,6 +131,7 @@ export default function Home() {
     // Edit Folder State
     const [editingFolder, setEditingFolder] = useState<string | null>(null);
     const [newFolderPrice, setNewFolderPrice] = useState('1.00');
+    const [newFolderSort, setNewFolderSort] = useState('LATEST');
     const [isUpdatingPrice, setIsUpdatingPrice] = useState(false);
 
     // Filters State - Inicializar desde URL
@@ -296,7 +298,6 @@ export default function Home() {
         }
     };
 
-    // Added handleSuggestionClick to fix error on line 389
     const handleSuggestionClick = (s: any) => {
         setSearchQuery(s.label);
         updateUrlSearch(s.label);
@@ -310,8 +311,8 @@ export default function Home() {
         if (!editingFolder) return;
         setIsUpdatingPrice(true);
         try {
-            const res = await db.updateFolderPrice(editingFolder, currentFolder, parseFloat(newFolderPrice));
-            toast.success(`Actualización masiva completada: ${res.affected} videos afectados.`);
+            const res = await db.updateFolderPrice(editingFolder, currentFolder, parseFloat(newFolderPrice), newFolderSort);
+            toast.success(`Ajuste completado: ${res.affected} videos afectados.`);
             setEditingFolder(null);
             fetchVideos(0, true);
         } catch (e: any) {
@@ -560,27 +561,48 @@ export default function Home() {
             {/* Folder Edit Modal (Admin) */}
             {editingFolder && (
                 <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-slate-900 border border-white/10 rounded-[40px] w-full max-sm overflow-hidden shadow-2xl animate-in zoom-in-95">
+                    <div className="bg-slate-900 border border-white/10 rounded-[40px] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95">
                         <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
                             <div>
-                                <h4 className="font-black text-white uppercase text-xs tracking-widest">Ajuste Masivo</h4>
-                                <p className="text-[9px] text-indigo-400 font-bold uppercase mt-0.5">{editingFolder}</p>
+                                <h4 className="font-black text-white uppercase text-xs tracking-widest">Ajuste de Carpeta</h4>
+                                <p className="text-[9px] text-indigo-400 font-bold uppercase mt-0.5 truncate max-w-[200px]">{editingFolder}</p>
                             </div>
-                            <button onClick={() => setEditingFolder(null)} className="p-2 hover:bg-white/5 rounded-full text-slate-500"><X size={20}/></button>
+                            <button onClick={() => setEditingFolder(null)} className="p-2 hover:bg-white/10 rounded-full text-slate-500"><X size={20}/></button>
                         </div>
                         <div className="p-8 space-y-6">
                             <div className="space-y-2">
-                                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Nuevo Precio General ($)</label>
+                                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Precio Masivo ($)</label>
                                 <div className="relative">
                                     <DollarSign className="absolute left-4 top-3.5 text-emerald-500" size={18}/>
                                     <input 
                                         type="number" step="0.5" value={newFolderPrice} onChange={e => setNewFolderPrice(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-11 pr-4 py-4 text-white font-black text-2xl focus:border-emerald-500 outline-none transition-all shadow-inner"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-11 pr-4 py-4 text-white font-black text-xl focus:border-emerald-500 outline-none transition-all shadow-inner"
                                     />
                                 </div>
                             </div>
+                            
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Orden Predeterminado</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {[
+                                        { id: 'LATEST', icon: Clock, label: 'Novedad' },
+                                        { id: 'ALPHA', icon: SortAsc, label: 'A-Z' },
+                                        { id: 'RANDOM', icon: RefreshCw, label: 'Azar' }
+                                    ].map(opt => (
+                                        <button 
+                                            key={opt.id}
+                                            onClick={() => setNewFolderSort(opt.id)}
+                                            className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border transition-all ${newFolderSort === opt.id ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-slate-950 border-white/5 text-slate-500 hover:border-white/20'}`}
+                                        >
+                                            <opt.icon size={16}/>
+                                            <span className="text-[8px] font-black uppercase">{opt.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
                             <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                                <p className="text-[10px] text-slate-400 leading-snug">Esta acción cambiará el precio de <strong>todos</strong> los videos dentro de esta carpeta y sus sub-carpetas hijas.</p>
+                                <p className="text-[9px] text-slate-400 leading-snug uppercase font-bold text-center">Afectará a todos los videos hijos de esta rama jerárquica.</p>
                             </div>
                             <button 
                                 onClick={handleUpdateFolderPrice} disabled={isUpdatingPrice}

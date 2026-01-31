@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V19.0 (Full Integration + Mass Pricing)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V19.0 (Full Integration + Mass Pricing & Sorting)
  */
 
 function admin_get_settings($pdo) {
@@ -48,7 +48,7 @@ function admin_update_settings($pdo, $input) {
     respond(true);
 }
 
-// --- GESTIÓN DE PRECIOS ---
+// --- GESTIÓN DE PRECIOS Y ORDEN ---
 
 function admin_update_category_price($pdo, $input) {
     $catId = $input['categoryId'];
@@ -78,7 +78,8 @@ function admin_update_category_price($pdo, $input) {
 function admin_update_folder_price($pdo, $input) {
     $folderName = $input['folderName'];
     $navigationPath = $input['navigationPath'] ?? '';
-    $newPrice = floatval($input['newPrice']);
+    $newPrice = floatval($input['newPrice'] ?? -1);
+    $newSort = $input['newSort'] ?? null;
     
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $root = rtrim($stmtS->fetchColumn(), '/\\');
@@ -87,8 +88,24 @@ function admin_update_folder_price($pdo, $input) {
     $fullPathPrefix = str_replace('\\', '/', $root . '/' . $folderRel);
     $fullPathPrefix = rtrim($fullPathPrefix, '/') . '/';
     
-    $stmt = $pdo->prepare("UPDATE videos SET price = ? WHERE videoUrl LIKE ? AND isLocal = 1");
-    $stmt->execute([$newPrice, $fullPathPrefix . "%"]);
+    $updates = [];
+    $params = [];
+
+    if ($newPrice >= 0) {
+        $updates[] = "price = ?";
+        $params[] = $newPrice;
+    }
+    if ($newSort) {
+        $updates[] = "sort_preference = ?";
+        $params[] = $newSort;
+    }
+
+    if (empty($updates)) respond(false, null, "Nada que actualizar");
+
+    $params[] = $fullPathPrefix . "%";
+    $sql = "UPDATE videos SET " . implode(', ', $updates) . " WHERE videoUrl LIKE ? AND isLocal = 1";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     
     respond(true, ['affected' => $stmt->rowCount()]);
 }
