@@ -8,7 +8,7 @@ import { Video } from "../types";
  */
 
 const getAIClient = () => {
-    // Fix: Always use process.env.API_KEY string directly in named parameter
+    // El API_KEY viene exclusivamente de process.env.API_KEY
     if (!process.env.API_KEY) return null;
     return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
@@ -54,6 +54,7 @@ export const aiService = {
                 }
             });
 
+            // Usar propiedad .text directamente según directivas
             const text = response.text;
             if (!text) return null;
             return JSON.parse(text);
@@ -71,10 +72,9 @@ export const aiService = {
         const ai = getAIClient();
         if (!ai) return "La inteligencia del conserje no está disponible en este momento.";
 
-        // Inyectamos el catálogo actual como contexto para que la IA sepa qué recomendar
         const context = availableVideos
-            .slice(0, 50) // Limitamos para no exceder contexto básico
-            .map(v => `- ${v.title} (Cat: ${v.category}, Precio: ${v.price} Saldo, ID: ${v.id})`)
+            .slice(0, 50) 
+            .map(v => `- ${v.title} (Cat: ${v.category}, Precio: ${v.price}, ID: ${v.id})`)
             .join('\n');
 
         try {
@@ -82,22 +82,20 @@ export const aiService = {
                 model: 'gemini-3-flash-preview',
                 config: {
                     systemInstruction: `Eres el Conserje Premium de StreamPay. Tu misión es ayudar al usuario a encontrar qué ver.
-                    
                     CATÁLOGO ACTUAL DISPONIBLE:
                     ${context}
-                    
                     REGLAS DE ORO:
                     1. SOLO recomienda videos que estén en la lista anterior.
                     2. Responde con un tono elegante, servicial y entusiasta.
                     3. Si preguntan por precios, menciona que se paga con Saldo interno.
                     4. Mantén las respuestas breves y directas.
                     5. Responde SIEMPRE en español.`,
-                    thinkingConfig: { thinkingBudget: 0 } // Respuesta rápida para chat
+                    thinkingConfig: { thinkingBudget: 0 } 
                 }
             });
 
             const result = await chat.sendMessage({ message: userMessage });
-            return result.text || "Lo siento, mi mente se ha quedado en blanco. ¿Podrías repetir eso?";
+            return result.text || "Lo siento, mi mente se ha quedado en blanco.";
         } catch (e) {
             console.error("Concierge Error:", e);
             return "He tenido un pequeño contratiempo técnico. Por favor, inténtalo de nuevo.";
