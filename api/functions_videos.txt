@@ -1,6 +1,6 @@
 <?php
 /**
- * VIDEOS - CORE FUNCTIONS V18.0 (YouTube Bridge & Upload Support)
+ * VIDEOS - CORE FUNCTIONS V19.0 (Folder Discovery & Safety Patch)
  */
 
 function video_process_rows(&$rows) {
@@ -109,12 +109,27 @@ function video_get_all($pdo) {
     $offset = intval($_GET['offset'] ?? 0);
     $search = trim($_GET['search'] ?? '');
     $category = trim($_GET['category'] ?? ''); 
+    $currentFolder = trim($_GET['folder'] ?? '');
+
     $params = [];
     $where = ["v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
-    if (!empty($search)) { $where[] = "v.title LIKE ?"; $params[] = "%$search%"; }
-    if (!empty($category) && $category !== 'TODOS') {
-        $where[] = "v.category = ?"; $params[] = $category;
+
+    if (!empty($search)) { 
+        $where[] = "v.title LIKE ?"; 
+        $params[] = "%$search%"; 
     }
+
+    if (!empty($category) && $category !== 'TODOS') {
+        $where[] = "v.category = ?"; 
+        $params[] = $category;
+    }
+
+    // Filtro por carpeta
+    if (!empty($currentFolder) && empty($search)) {
+        $where[] = "v.videoUrl LIKE ?";
+        $params[] = "%/" . ltrim($currentFolder, '/') . "/%";
+    }
+
     $whereClause = implode(" AND ", $where);
     $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole 
             FROM videos v 
@@ -122,12 +137,77 @@ function video_get_all($pdo) {
             WHERE $whereClause 
             ORDER BY v.createdAt DESC 
             LIMIT $limit OFFSET $offset";
+    
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $total = $pdo->query("SELECT COUNT(*) FROM videos v WHERE $whereClause")->fetchColumn();
+    
+    $total = $pdo->prepare("SELECT COUNT(*) FROM videos v WHERE $whereClause");
+    $total->execute($params);
+    $totalCount = $total->fetchColumn();
+
+    // 1. Descubrimiento de Carpetas Dinámicas
+    $folders = [];
+    if (empty($search)) {
+        $folderSql = "SELECT videoUrl FROM videos v WHERE $whereClause";
+        $fStmt = $pdo->prepare($folderSql);
+        $fStmt->execute($params);
+        $allUrls = $fStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $folderCounts = [];
+        $prefix = $currentFolder ? rtrim($currentFolder, '/') . '/' : '';
+        
+        foreach ($allUrls as $url) {
+            $url = str_replace('\\', '/', $url);
+            if ($currentFolder && strpos($url, $currentFolder) === false) continue;
+            
+            $parts = explode('/', $url);
+            $foundIndex = -1;
+            
+            if (!$currentFolder) {
+                // Si estamos en la raíz, buscamos el primer segmento significativo después de uploads/videos o similar
+                foreach($parts as $idx => $p) {
+                    if ($p === 'videos' || $p === 'media' || $p === 'Libreria') {
+                        $foundIndex = $idx + 1; break;
+                    }
+                }
+            } else {
+                // Si ya estamos en una subcarpeta, buscamos el siguiente nivel
+                foreach($parts as $idx => $p) {
+                    if ($p === basename($currentFolder)) {
+                        $foundIndex = $idx + 1; break;
+                    }
+                }
+            }
+
+            if ($foundIndex !== -1 && isset($parts[$foundIndex]) && strpos($parts[$foundIndex], '.') === false) {
+                $folderName = $parts[$foundIndex];
+                $folderCounts[$folderName] = ($folderCounts[$folderName] ?? 0) + 1;
+            }
+        }
+
+        foreach ($folderCounts as $name => $count) {
+            $folders[] = ['name' => $name, 'count' => $count];
+        }
+        usort($folders, function($a, $b) { return strcmp($a['name'], $b['name']); });
+    }
+
+    // 2. Categorías Activas en el set actual
+    $activeCategories = [];
+    $catSql = "SELECT DISTINCT category FROM videos v WHERE $whereClause";
+    $cStmt = $pdo->prepare($catSql);
+    $cStmt->execute($params);
+    $activeCategories = $cStmt->fetchAll(PDO::FETCH_COLUMN);
+
     video_process_rows($videos);
-    respond(true, ['videos' => $videos, 'total' => (int)$total, 'hasMore' => ($offset + $limit) < $total, 'activeCategories' => []]);
+    
+    respond(true, [
+        'videos' => $videos, 
+        'total' => (int)$totalCount, 
+        'hasMore' => ($offset + $limit) < $totalCount, 
+        'folders' => $folders,
+        'activeCategories' => $activeCategories
+    ]);
 }
 
 function video_get_one($pdo, $id) {

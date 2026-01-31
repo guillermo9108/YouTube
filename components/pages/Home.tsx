@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
@@ -191,13 +190,18 @@ export default function Home() {
             const res = await db.getVideos(p, 40, currentFolder, searchQuery, selectedCategory);
             
             if (reset) {
-                setVideos(res.videos);
-                setFolders(res.folders);
-                setActiveCategories(['TODOS', ...res.activeCategories]);
+                // Programación defensiva para evitar el crash del .length
+                const fetchedVideos = res?.videos || [];
+                const fetchedFolders = res?.folders || [];
+                const fetchedCats = res?.activeCategories || [];
+
+                setVideos(fetchedVideos);
+                setFolders(fetchedFolders);
+                setActiveCategories(['TODOS', ...fetchedCats]);
 
                 // --- LÓGICA DE AUTO-NAVEGACIÓN AL PADRE ---
-                if (selectedCategory !== 'TODOS' && navigationPath.length === 0 && res.videos.length > 0 && systemSettings) {
-                    const firstVid = res.videos[0];
+                if (selectedCategory !== 'TODOS' && navigationPath.length === 0 && fetchedVideos.length > 0 && systemSettings) {
+                    const firstVid = fetchedVideos[0];
                     const rawPath = (firstVid as any).rawPath || firstVid.videoUrl;
                     const rootPath = systemSettings.localLibraryPath || '';
                     
@@ -222,10 +226,10 @@ export default function Home() {
                     }
                 }
             } else {
-                setVideos(prev => [...prev, ...res.videos]);
+                setVideos(prev => [...prev, ...(res?.videos || [])]);
             }
             
-            setHasMore(res.hasMore);
+            setHasMore(res?.hasMore ?? false);
             setPage(p);
         } catch (e) {
             toast.error("Error al sincronizar catálogo");
@@ -463,7 +467,7 @@ export default function Home() {
                     </div>
                 ) : (
                     <div className="space-y-12 animate-in fade-in duration-1000">
-                        {!searchQuery && folders.length > 0 && showFolderGrid && (
+                        {!searchQuery && folders && folders.length > 0 && showFolderGrid && (
                             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
                                 {folders.map(folder => (
                                     <div key={folder.name} className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300">
@@ -540,7 +544,7 @@ export default function Home() {
                                         />
                                     ))}
                                 </div>
-                            ) : folders.length === 0 && (
+                            ) : (!folders || folders.length === 0) && (
                                 <div className="text-center py-40 opacity-20 flex flex-col items-center gap-4">
                                     <Folder size={80} />
                                     <p className="font-black uppercase tracking-widest">Sin contenido disponible</p>
