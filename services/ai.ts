@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { Video } from "../types";
 
@@ -24,7 +23,7 @@ export const aiService = {
         try {
             const response: GenerateContentResponse = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
-                contents: `Analiza el nombre de archivo: "${filename}" y genera metadatos optimizados.`,
+                contents: `Analiza el nombre de archivo: "${filename}" y genera metadatos optimizados en formato JSON.`,
                 config: {
                     systemInstruction: "Eres un experto en curación de contenido y SEO de video. Extrae información de nombres de archivo y devuelve un JSON estructurado.",
                     responseMimeType: "application/json",
@@ -54,7 +53,7 @@ export const aiService = {
                 }
             });
 
-            // Usar propiedad .text directamente según directivas
+            // Usar propiedad .text directamente
             const text = response.text;
             if (!text) return null;
             return JSON.parse(text);
@@ -95,6 +94,7 @@ export const aiService = {
             });
 
             const result = await chat.sendMessage({ message: userMessage });
+            // Usar .text directamente
             return result.text || "Lo siento, mi mente se ha quedado en blanco.";
         } catch (e) {
             console.error("Concierge Error:", e);

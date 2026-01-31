@@ -1,6 +1,6 @@
 <?php ob_start();
 /**
- * StreamPay - Core Controller V13.4 (Full Integration)
+ * StreamPay - Core Controller V13.4.1 (Route Fixes)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -66,6 +66,7 @@ try {
         case 'get_video': video_get_one($pdo, $_GET['id'] ?? ''); break;
         case 'get_videos_by_creator': video_get_by_creator($pdo, $_GET['userId'] ?? ''); break;
         case 'get_related_videos': video_get_related($pdo, $_GET['videoId'] ?? ''); break;
+        case 'get_unprocessed_videos': video_get_unprocessed($pdo); break;
         case 'upload_video': video_upload($pdo, $_POST, $_FILES); break;
         case 'update_video_metadata': video_update_metadata($pdo, $_POST, $_FILES); break;
         case 'delete_video': video_delete($pdo, $input); break;
@@ -137,6 +138,11 @@ try {
         // --- LIBRARY ENGINE ---
         case 'get_admin_library_stats': video_get_admin_stats($pdo); break;
         case 'scan_local_library': video_scan_local($pdo, $input); break;
+        case 'process_scan_batch': 
+             // Soporte para contexto de tareas masivas
+             $res = video_smart_organize_batch($pdo); 
+             respond(true, $res);
+             break;
         case 'get_scan_folders': video_get_scan_folders($pdo); break;
         case 'smart_organize_library': video_smart_organize($pdo); break;
         case 'reorganize_all_videos': video_reorganize_all($pdo); break;
