@@ -1,4 +1,3 @@
-
 <?php
 
 /**
@@ -38,9 +37,14 @@ function video_get_all($pdo) {
     $search = trim($_GET['search'] ?? '');
     $folder = trim($_GET['folder'] ?? ''); 
     $category = trim($_GET['category'] ?? ''); 
+    $isShorts = !empty($_GET['shorts']); // Nuevo parámetro
     
     $params = [];
     $where = ["v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
+
+    if ($isShorts) {
+        $where[] = "v.duration < 180 AND v.is_audio = 0";
+    }
 
     if (!empty($search)) {
         $where[] = "v.title LIKE ?";
@@ -77,7 +81,7 @@ function video_get_all($pdo) {
             FROM videos v 
             LEFT JOIN users u ON v.creatorId = u.id 
             WHERE $whereClause 
-            ORDER BY v.createdAt DESC 
+            ORDER BY " . ($isShorts ? "RAND()" : "v.createdAt DESC") . " 
             LIMIT $limit OFFSET $offset";
             
     $stmt = $pdo->prepare($sql);
@@ -90,7 +94,7 @@ function video_get_all($pdo) {
     $total = $stmtCount->fetchColumn();
 
     $subfolders = [];
-    if (empty($search)) {
+    if (empty($search) && !$isShorts) {
         $subfolders = video_discover_subfolders($pdo, $folder);
     }
 

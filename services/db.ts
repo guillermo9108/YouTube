@@ -63,8 +63,18 @@ class DBService {
         return this.request<VideoPagedResponse>(query);
     }
 
+    /**
+     * Obtiene Shorts paginados filtrados por el servidor.
+     */
+    public async getShorts(page: number = 0, limit: number = 20): Promise<VideoPagedResponse> {
+        const offset = page * limit;
+        const query = `action=get_videos&limit=${limit}&offset=${offset}&shorts=1`;
+        return this.request<VideoPagedResponse>(query);
+    }
+
     public async getAllVideos(): Promise<Video[]> { 
-        const res = await this.getVideos(0, 10000);
+        // Límite de seguridad para evitar cuellos de botella masivos
+        const res = await this.getVideos(0, 100);
         return res.videos;
     }
 

@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -85,13 +84,14 @@ export default function Watch() {
                 setLikes(Number(v.likes || 0));
                 setDislikes(Number(v.dislikes || 0));
 
-                // 2. Obtener videos relacionados según el contexto (Búsqueda o Carpeta)
+                // 2. Obtener videos relacionados según el contexto (Optimizado a 40 para rendimiento)
                 let allVids: Video[] = [];
                 if (searchContext) {
-                    const res = await db.getVideos(0, 500, '', searchContext, 'TODOS');
+                    const res = await db.getVideos(0, 40, '', searchContext, 'TODOS');
                     allVids = res.videos;
                 } else {
-                    allVids = await db.getAllVideos();
+                    const res = await db.getVideos(0, 40);
+                    allVids = res.videos;
                 }
 
                 const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
@@ -117,8 +117,8 @@ export default function Watch() {
                 
                 // Si la cola de contexto es corta y no es búsqueda, rellenamos con otros aleatorios
                 if (suggestions.length < 10 && !searchContext) {
-                    const global = await db.getAllVideos();
-                    const others = global.filter(gv => !suggestions.some(sv => sv.id === gv.id) && gv.id !== v.id)
+                    const globalRes = await db.getVideos(0, 40);
+                    const others = globalRes.videos.filter(gv => !suggestions.some(sv => sv.id === gv.id) && gv.id !== v.id)
                                          .sort(() => Math.random() - 0.5);
                     setRelatedVideos([...suggestions, ...others]);
                 } else {
