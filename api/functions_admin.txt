@@ -1,8 +1,8 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V19.5 (Mass Pricing + Inheritance Sort)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V19.0 (Full Integration + Mass Pricing)
  */
-// ... (admin_get_settings y admin_update_settings se mantienen igual)
+
 function admin_get_settings($pdo) {
     $stmt = $pdo->query("SELECT * FROM system_settings WHERE id = 1");
     $settings = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -48,12 +48,16 @@ function admin_update_settings($pdo, $input) {
     respond(true);
 }
 
+// --- GESTIÓN DE PRECIOS ---
+
 function admin_update_category_price($pdo, $input) {
     $catId = $input['categoryId'];
     $newPrice = floatval($input['newPrice']);
     $syncVideos = !empty($input['syncVideos']);
+
     $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
     $categories = json_decode($stmtS->fetchColumn() ?: '[]', true);
+    
     $targetName = null;
     foreach ($categories as &$c) {
         if ($c['id'] === $catId) {
@@ -62,7 +66,9 @@ function admin_update_category_price($pdo, $input) {
             break;
         }
     }
+
     $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")->execute([json_encode($categories)]);
+
     if ($syncVideos && $targetName) {
         $pdo->prepare("UPDATE videos SET price = ? WHERE category = ? OR parent_category = ?")->execute([$newPrice, $targetName, $targetName]);
     }
@@ -73,28 +79,22 @@ function admin_update_folder_price($pdo, $input) {
     $folderName = $input['folderName'];
     $navigationPath = $input['navigationPath'] ?? '';
     $newPrice = floatval($input['newPrice']);
+    
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $root = rtrim($stmtS->fetchColumn(), '/\\');
+    
     $folderRel = trim($navigationPath . '/' . $folderName, '/');
-    $fullPathPrefix = rtrim(str_replace('\\', '/', $root . '/' . $folderRel), '/') . '/';
+    $fullPathPrefix = str_replace('\\', '/', $root . '/' . $folderRel);
+    $fullPathPrefix = rtrim($fullPathPrefix, '/') . '/';
+    
     $stmt = $pdo->prepare("UPDATE videos SET price = ? WHERE videoUrl LIKE ? AND isLocal = 1");
     $stmt->execute([$newPrice, $fullPathPrefix . "%"]);
+    
     respond(true, ['affected' => $stmt->rowCount()]);
 }
 
-function admin_update_folder_sort($pdo, $input) {
-    $folderName = $input['folderName'];
-    $navigationPath = $input['navigationPath'] ?? '';
-    $sortPref = $input['sortPref'] ?? 'LATEST';
-    $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
-    $root = rtrim($stmtS->fetchColumn(), '/\\');
-    $folderRel = trim($navigationPath . '/' . $folderName, '/');
-    $fullPathPrefix = rtrim(str_replace('\\', '/', $root . '/' . $folderRel), '/') . '/';
-    $stmt = $pdo->prepare("UPDATE videos SET sort_preference = ? WHERE videoUrl LIKE ? AND isLocal = 1");
-    $stmt->execute([$sortPref, $fullPathPrefix . "%"]);
-    respond(true, ['affected' => $stmt->rowCount()]);
-}
-// ...resto de funciones administrativas restauradas (Transcode, Stats, Cleanup, etc)
+// --- TRANSCODIFICACIÓN FFmpeg ---
+
 function admin_get_transcode_profiles($pdo) {
     $stmt = $pdo->query("SELECT * FROM transcode_profiles ORDER BY extension ASC");
     respond(true, $stmt->fetchAll());
@@ -172,6 +172,8 @@ function admin_clear_transcode_queue($pdo) {
     respond(true);
 }
 
+// --- ANALÍTICAS Y FINANZAS ---
+
 function get_real_stats($pdo) {
     $from = $_GET['from'] ?? (time() - (30 * 86400));
     $to = $_GET['to'] ?? time();
@@ -235,6 +237,8 @@ function admin_get_global_transactions($pdo) {
     $rev = $pdo->query("SELECT SUM(adminFee) FROM transactions")->fetchColumn() ?: 0;
     respond(true, ['history' => $history, 'systemRevenue' => floatval($rev)]);
 }
+
+// --- MANTENIMIENTO ---
 
 function admin_repair_db($pdo) {
     require_once 'functions_schema.php';

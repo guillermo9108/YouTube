@@ -21,7 +21,7 @@ export default function Watch() {
     const navigate = useNavigate();
     const toast = useToast();
     
-    // Contexto de búsqueda desde URL
+    // Obtener contexto de búsqueda desde la URL
     const searchContext = useMemo(() => {
         const hash = window.location.hash;
         if (!hash.includes('?')) return null;
@@ -35,6 +35,7 @@ export default function Watch() {
     const [isPurchasing, setIsPurchasing] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
+    const [seriesQueue, setSeriesQueue] = useState<Video[]>([]); 
     const [visibleRelated, setVisibleRelated] = useState(12);
     
     // Social State
@@ -56,10 +57,12 @@ export default function Watch() {
     const shareTimeout = useRef<any>(null);
 
     const videoRef = useRef<HTMLVideoElement>(null);
+    const viewMarkedRef = useRef(false);
 
     useEffect(() => { 
         window.scrollTo(0, 0); 
-        if (user) refreshUser(); 
+        refreshUser(); 
+        viewMarkedRef.current = false;
         setThrottled(true);
         setVisibleRelated(12);
         setShowComments(false);
@@ -76,37 +79,50 @@ export default function Watch() {
                 // 1. Obtener video actual
                 const v = await db.getVideo(id);
                 if (!v) { setLoading(false); return; }
+
                 setVideo(v); 
                 setLikes(Number(v.likes || 0));
                 setDislikes(Number(v.dislikes || 0));
 
-                // 2. Obtener relacionados directamente desde el servidor (Optimizado)
-                const rel = await db.getRelatedVideos(id);
-                setRelatedVideos(rel);
+                // 2. Obtener videos relacionados de forma optimizada
+                let contextQueue: Video[] = [];
+
+                if (searchContext) {
+                    // Si venimos de una búsqueda, pedimos el resultado de búsqueda (limitado a 500 en server)
+                    const res = await db.getVideos(0, 500, '', searchContext, 'TODOS');
+                    contextQueue = res.videos.sort((a, b) => naturalCollator.compare(a.title, b.title));
+                } else {
+                    // Si es navegación normal, el server ya tiene getRelatedVideos optimizado por carpeta
+                    contextQueue = await db.getRelatedVideos(id!);
+                    contextQueue = contextQueue.sort((a, b) => naturalCollator.compare(a.title, b.title));
+                }
+
+                setSeriesQueue(contextQueue);
+
+                // Recomendados UI: Priorizar la cola de contexto, luego el resto
+                const suggestions = contextQueue.filter(ov => ov.id !== v.id);
+                setRelatedVideos(suggestions);
 
                 db.getComments(v.id).then(setComments);
 
-                // 3. Validación de permisos sincronizada con el usuario
                 if (user) {
-                    const access = await db.hasPurchased(user.id, v.id);
-                    const interact = await db.getInteraction(user.id, v.id);
-                    const sub = await db.checkSubscription(user.id, v.creatorId);
-                    
+                    const [access, interact, sub] = await Promise.all([
+                        db.hasPurchased(user.id, v.id),
+                        db.getInteraction(user.id, v.id),
+                        db.checkSubscription(user.id, v.creatorId)
+                    ]);
                     const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
                     const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-                    
                     setIsUnlocked(Boolean(access || isAdmin || (isVipActive && v.creatorRole === 'ADMIN') || user.id === v.creatorId));
                     setInteraction(interact);
                     setIsSubscribed(sub);
-                } else {
-                    // Si no hay usuario (caso raro en PWA), solo permitimos ver si es administrador del servidor
-                    setIsUnlocked(false);
                 }
-            } catch (e) { console.error(e); } 
-            finally { setLoading(false); }
+            } catch (e) {
+                console.error("Watch Load Error", e);
+            } finally { setLoading(false); }
         };
         fetchData();
-    }, [id, user?.id]);
+    }, [id, user?.id, searchContext]);
 
     const handleRate = async (type: 'like' | 'dislike') => {
         if (!user || !video) return;
@@ -178,6 +194,7 @@ export default function Watch() {
     const handleTimeUpdate = async () => {
         const el = videoRef.current;
         if (!el || !video || extractionAttempted || !isUnlocked) return;
+
         const isDefault = video.thumbnailUrl.includes('default.jpg') || video.thumbnailUrl.includes('defaultaudio.jpg');
         if (!isDefault) return;
 
@@ -185,7 +202,8 @@ export default function Watch() {
             setExtractionAttempted(true);
             try {
                 const canvas = document.createElement('canvas');
-                canvas.width = el.videoWidth; canvas.height = el.videoHeight;
+                canvas.width = el.videoWidth;
+                canvas.height = el.videoHeight;
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
                     ctx.drawImage(el, 0, 0);
@@ -197,19 +215,45 @@ export default function Watch() {
                         }
                     }, 'image/jpeg', 0.8);
                 }
-            } catch (e) { console.warn(e); }
+            } catch (e) { console.warn("Lazy extraction failed for video", e); }
+        }
+        
+        if (video.is_audio && el.currentTime > 0.5) {
+            setExtractionAttempted(true);
+            try {
+                const result = await generateThumbnail(streamUrl, true, false); 
+                if (result.thumbnail) {
+                    await db.updateVideoMetadata(video.id, Math.floor(el.duration || video.duration), result.thumbnail);
+                    setVideo(prev => prev ? { ...prev, thumbnailUrl: URL.createObjectURL(result.thumbnail!) } : null);
+                }
+            } catch (e) { console.warn("Lazy extraction failed for audio", e); }
         }
     };
 
     const handleVideoEnded = async () => {
-        if (!video || !user || relatedVideos.length === 0) return;
-        const nextVid = relatedVideos[0];
+        if (!video || !user) return;
+
+        // Buscamos el video actual en la cola de la serie (que ya está ordenada naturalmente)
+        const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
+        
+        // El siguiente es matemáticamente el índice + 1
+        let nextVid = seriesQueue[currentIndex + 1];
+
+        // Si no hay siguiente en el contexto actual, detenemos o vamos al primero de recomendados generales
+        if (!nextVid && !searchContext && relatedVideos.length > 0) {
+            nextVid = relatedVideos[0];
+        }
+
+        if (!nextVid) return;
+
         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
         const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
         const hasAccess = isAdmin || (isVip && nextVid.creatorRole === 'ADMIN') || user.id === nextVid.creatorId;
+
         const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
 
         if (hasAccess) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
+        
         const purchased = await db.hasPurchased(user.id, nextVid.id);
         if (purchased) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
 
@@ -241,10 +285,17 @@ export default function Watch() {
                                 <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover blur-3xl opacity-30 scale-110" />
                             )}
                             <video 
-                                ref={videoRef} src={streamUrl} controls autoPlay poster={video?.thumbnailUrl} 
-                                className="w-full h-full object-contain" onEnded={handleVideoEnded} 
-                                crossOrigin="anonymous" onPlay={() => setThrottled(true)} 
-                                onPause={() => setThrottled(false)} onTimeUpdate={handleTimeUpdate}
+                                ref={videoRef} 
+                                src={streamUrl} 
+                                controls 
+                                autoPlay 
+                                poster={video?.thumbnailUrl} 
+                                className="w-full h-full object-contain" 
+                                onEnded={handleVideoEnded} 
+                                crossOrigin="anonymous" 
+                                onPlay={() => setThrottled(true)} 
+                                onPause={() => setThrottled(false)}
+                                onTimeUpdate={handleTimeUpdate}
                             />
                         </div>
                     ) : (
@@ -278,48 +329,118 @@ export default function Watch() {
                                 <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Creador Verificado</div>
                             </div>
                             {user?.id !== video?.creatorId && (
-                                <button onClick={handleToggleSubscribe} className={`ml-2 px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${isSubscribed ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-black hover:bg-slate-200 shadow-lg'}`}>{isSubscribed ? 'Suscrito' : 'Suscribirse'}</button>
+                                <button 
+                                    onClick={handleToggleSubscribe}
+                                    className={`ml-2 px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${isSubscribed ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-black hover:bg-slate-200 shadow-lg'}`}
+                                >
+                                    {isSubscribed ? 'Suscrito' : 'Suscribirse'}
+                                </button>
                             )}
                         </div>
 
                         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
                             <div className="flex bg-slate-900 rounded-2xl p-1 border border-white/5">
-                                <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.liked ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}><Heart size={18} fill={interaction?.liked ? "currentColor" : "none"} /><span className="text-xs font-black">{likes}</span></button>
+                                <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.liked ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
+                                    <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"} />
+                                    <span className="text-xs font-black">{likes}</span>
+                                </button>
                                 <div className="w-px h-6 bg-white/5 self-center"></div>
-                                <button onClick={() => handleRate('dislike')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.disliked ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}><ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"} /><span className="text-xs font-black">{dislikes}</span></button>
+                                <button onClick={() => handleRate('dislike')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.disliked ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
+                                    <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"} />
+                                    <span className="text-xs font-black">{dislikes}</span>
+                                </button>
                             </div>
-                            <button onClick={() => setShowShareModal(true)} className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95"><Share2 size={18}/></button>
-                            <button onClick={() => setShowComments(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95"><MessageCircle size={18}/><span className="text-[10px] font-black uppercase tracking-widest">{comments.length}</span></button>
+
+                            <button onClick={() => setShowShareModal(true)} className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95" title="Compartir">
+                                <Share2 size={18}/>
+                            </button>
+
+                            <button onClick={() => setShowComments(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95">
+                                <MessageCircle size={18}/>
+                                <span className="text-[10px] font-black uppercase tracking-widest">{comments.length}</span>
+                            </button>
                         </div>
                     </div>
 
-                    {video?.description && <div className="bg-slate-900/50 p-6 rounded-[32px] border border-white/5 text-sm text-slate-300 leading-relaxed whitespace-pre-wrap mb-8"><h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Descripción del Contenido</h3>{video.description}</div>}
+                    {video?.description && (
+                        <div className="bg-slate-900/50 p-6 rounded-[32px] border border-white/5 text-sm text-slate-300 leading-relaxed whitespace-pre-wrap mb-8">
+                            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Descripción del Contenido</h3>
+                            {video.description}
+                        </div>
+                    )}
 
                     <div className="hidden lg:block">
-                        <div className="flex items-center gap-3 mb-6"><MessageCircle size={20} className="text-indigo-400"/><h3 className="text-sm font-black text-white uppercase tracking-widest">Conversación ({comments.length})</h3></div>
+                        <div className="flex items-center gap-3 mb-6">
+                            <MessageCircle size={20} className="text-indigo-400"/>
+                            <h3 className="text-sm font-black text-white uppercase tracking-widest">Conversación ({comments.length})</h3>
+                        </div>
                         <form onSubmit={handleAddComment} className="flex gap-4 mb-8">
-                            <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">{user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{user?.username?.[0]}</div>}</div>
-                            <div className="flex-1 flex gap-2"><input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Escribe un comentario público..." className="flex-1 bg-transparent border-b border-white/10 focus:border-indigo-500 outline-none text-sm text-white py-2 transition-all" /><button type="submit" disabled={!newComment.trim() || isSubmitting} className="p-3 bg-indigo-600 text-white rounded-2xl disabled:opacity-30 active:scale-90 transition-all shadow-lg"><Send size={18}/></button></div>
+                            <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
+                                {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{user?.username?.[0]}</div>}
+                            </div>
+                            <div className="flex-1 flex gap-2">
+                                <input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Escribe un comentario público..." className="flex-1 bg-transparent border-b border-white/10 focus:border-indigo-500 outline-none text-sm text-white py-2 transition-all" />
+                                <button type="submit" disabled={!newComment.trim() || isSubmitting} className="p-3 bg-indigo-600 text-white rounded-2xl disabled:opacity-30 active:scale-90 transition-all shadow-lg"><Send size={18}/></button>
+                            </div>
                         </form>
                         <div className="space-y-6">
                             {comments.map(c => (
-                                <div key={c.id} className="flex gap-4 group"><div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">{c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-500">{c.username?.[0]}</div>}</div><div className="flex-1 min-w-0"><div className="flex items-center gap-2 mb-1"><span className="text-xs font-black text-slate-200">@{c.username}</span><span className="text-[9px] text-slate-600 font-bold uppercase">{new Date(c.timestamp * 1000).toLocaleDateString()}</span></div><p className="text-sm text-slate-400 leading-relaxed">{c.text}</p></div></div>
+                                <div key={c.id} className="flex gap-4 group">
+                                    <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
+                                        {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-500">{c.username?.[0]}</div>}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-xs font-black text-slate-200">@{c.username}</span>
+                                            <span className="text-[9px] text-slate-600 font-bold uppercase">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
+                                        </div>
+                                        <p className="text-sm text-slate-400 leading-relaxed">{c.text}</p>
+                                    </div>
+                                </div>
                             ))}
+                            {comments.length === 0 && <p className="text-center py-10 text-slate-600 italic text-xs">Sé el primero en comentar...</p>}
                         </div>
                     </div>
                 </div>
 
                 <div className="lg:w-80 space-y-4 shrink-0">
-                    <div className="flex items-center justify-between px-2"><h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2"><Play size={12} className="text-indigo-500"/> Siguiente en la serie</h3></div>
-                    {searchContext && <div className="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-2xl mb-2"><div className="flex items-center gap-2 text-indigo-400 font-black text-[9px] uppercase tracking-widest"><ListFilter size={12}/> Resultados de:</div><div className="text-xs font-bold text-white mt-1 italic line-clamp-1">"{searchContext}"</div></div>}
+                    <div className="flex items-center justify-between px-2">
+                        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'En esta búsqueda' : 'Recomendados'}
+                        </h3>
+                        {searchContext && (
+                            <Link to="/" className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-tighter flex items-center gap-1">
+                                <X size={10}/> Limpiar Contexto
+                            </Link>
+                        )}
+                    </div>
+                    
+                    {searchContext && (
+                        <div className="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-2xl mb-2">
+                            <div className="flex items-center gap-2 text-indigo-400 font-black text-[9px] uppercase tracking-widest">
+                                <ListFilter size={12}/> Viendo resultados de:
+                            </div>
+                            <div className="text-xs font-bold text-white mt-1 italic line-clamp-1">"{searchContext}"</div>
+                        </div>
+                    )}
+
                     <div className="space-y-4">
                         {relatedVideos.slice(0, visibleRelated).map((v, idx) => {
+                            const isNextInQueue = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
                             const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
+                            
                             return (
-                                <Link key={v.id} to={`/watch/${v.id}${contextSuffix}`} className={`group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all ${idx === 0 ? 'bg-indigo-500/[0.03] border border-indigo-500/10' : ''}`}>
+                                <Link key={v.id} to={`/watch/${v.id}${contextSuffix}`} className={`group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all ${isNextInQueue ? 'bg-indigo-500/[0.03] border border-indigo-500/10' : ''}`}>
                                     <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
                                         <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
-                                        {idx === 0 && <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center animate-in fade-in"><div className="flex flex-col items-center"><Play size={20} className="text-white fill-current"/><span className="text-[8px] font-black text-white uppercase mt-1">SIGUIENTE</span></div></div>}
+                                        {isNextInQueue && (
+                                            <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center animate-in fade-in">
+                                                <div className="flex flex-col items-center">
+                                                    <Play size={20} className="text-white fill-current"/>
+                                                    <span className="text-[8px] font-black text-white uppercase mt-1">Siguiente</span>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="flex-1 min-w-0 py-1">
                                         <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight group-hover:text-indigo-400 transition-colors">{v.title}</h4>
@@ -329,25 +450,106 @@ export default function Watch() {
                             );
                         })}
                     </div>
-                    {relatedVideos.length > visibleRelated && <button onClick={() => setVisibleRelated(prev => prev + 12)} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-3xl border border-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl"><ChevronDown size={14}/> Cargar más</button>}
+
+                    {relatedVideos.length > visibleRelated && (
+                        <button 
+                            onClick={() => setVisibleRelated(prev => prev + 12)}
+                            className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-3xl border border-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl"
+                        >
+                            <ChevronDown size={14}/> Cargar más contenido
+                        </button>
+                    )}
                 </div>
             </div>
-            {/* Modal Comments / Share se mantienen igual */}
+
+            {/* Mobile/Overlay Comments Drawer */}
             {showComments && (
                 <div className="fixed inset-0 z-[100] flex items-end bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
                     <div className="w-full lg:max-w-md lg:absolute lg:right-0 lg:top-0 lg:h-full bg-slate-900 rounded-t-[40px] lg:rounded-none h-[80%] flex flex-col border-t lg:border-t-0 lg:border-l border-white/10 shadow-2xl animate-in slide-in-from-bottom lg:slide-in-from-right duration-500">
-                        <div className="p-6 border-b border-white/5 flex justify-between items-center bg-slate-950/50"><div><h3 className="font-black text-white uppercase text-xs tracking-widest flex items-center gap-2"><MessageCircle size={14}/> Comentarios</h3><p className="text-[9px] text-indigo-400 font-bold uppercase mt-0.5">{comments.length} Mensajes</p></div><button onClick={() => setShowComments(false)} className="text-slate-400 bg-slate-800 p-2.5 rounded-2xl hover:text-white transition-all"><X size={20} /></button></div>
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">{comments.map(c => (<div key={c.id} className="flex gap-4 animate-in fade-in slide-in-from-bottom-2"><div className="w-10 h-10 rounded-2xl bg-slate-800 shrink-0 border border-white/5 overflow-hidden">{c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c.username?.[0]}</div>}</div><div className="flex-1 min-w-0"><div className="flex items-baseline justify-between gap-2 mb-1"><span className="text-xs font-black text-slate-200">@{c.username}</span><span className="text-[8px] text-slate-600 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span></div><p className="text-sm text-slate-400 leading-snug">{c.text}</p></div></div>))}</div>
-                        <form onSubmit={handleAddComment} className="p-6 bg-slate-950 border-t border-white/5 flex gap-3 pb-safe"><input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-3.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all shadow-inner" placeholder="Escribe un comentario..." /><button type="submit" disabled={!newComment.trim() || isSubmitting} className="bg-indigo-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center disabled:opacity-30 shadow-xl active:scale-90 transition-all">{isSubmitting ? <Loader2 className="animate-spin" size={18}/> : <Send size={20} />}</button></form>
+                        <div className="p-6 border-b border-white/5 flex justify-between items-center bg-slate-950/50">
+                            <div>
+                                <h3 className="font-black text-white uppercase text-xs tracking-widest flex items-center gap-2"><MessageCircle size={14}/> Comentarios</h3>
+                                <p className="text-[9px] text-indigo-400 font-bold uppercase mt-0.5">{comments.length} Mensajes</p>
+                            </div>
+                            <button onClick={() => setShowComments(false)} className="text-slate-400 bg-slate-800 p-2.5 rounded-2xl hover:text-white transition-all"><X size={20} /></button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                            {comments.map(c => (
+                                <div key={c.id} className="flex gap-4 animate-in fade-in slide-in-from-bottom-2">
+                                    <div className="w-10 h-10 rounded-2xl bg-slate-800 shrink-0 border border-white/5 overflow-hidden">
+                                        {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c.username?.[0]}</div>}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-baseline justify-between gap-2 mb-1">
+                                            <span className="text-xs font-black text-slate-200">@{c.username}</span>
+                                            <span className="text-[8px] text-slate-600 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
+                                        </div>
+                                        <p className="text-sm text-slate-400 leading-snug">{c.text}</p>
+                                    </div>
+                                </div>
+                            ))}
+                            {comments.length === 0 && <p className="text-center py-20 text-slate-600 italic uppercase text-[9px] font-bold tracking-widest">Sin comentarios aún</p>}
+                        </div>
+                        <form onSubmit={handleAddComment} className="p-6 bg-slate-950 border-t border-white/5 flex gap-3 pb-safe">
+                            <input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-3.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all shadow-inner" placeholder="Escribe un comentario..." />
+                            <button type="submit" disabled={!newComment.trim() || isSubmitting} className="bg-indigo-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center disabled:opacity-30 shadow-xl active:scale-90 transition-all">
+                                {isSubmitting ? <Loader2 className="animate-spin" size={18}/> : <Send size={20} />}
+                            </button>
+                        </form>
                     </div>
                     <div className="hidden lg:block flex-1" onClick={() => setShowComments(false)}></div>
                 </div>
             )}
+
+            {/* Share Modal */}
             {showShareModal && (
                 <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
                     <div className="bg-slate-900 border border-white/10 rounded-[40px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
-                        <div className="p-8 bg-slate-950 border-b border-white/5 flex justify-between items-center"><div><h3 className="font-black text-white uppercase tracking-widest text-sm flex items-center gap-2"><Share2 size={18} className="text-indigo-400"/> Compartir Video</h3><p className="text-[10px] text-slate-500 font-bold uppercase mt-1">Recomendar a un amigo</p></div><button onClick={() => { setShowShareModal(false); setShareSearch(''); setShareSuggestions([]); }} className="p-2.5 bg-slate-800 text-slate-500 hover:text-white rounded-2xl transition-all"><X/></button></div>
-                        <div className="p-8 space-y-6"><div className="relative"><Search className="absolute left-4 top-4 text-slate-500" size={18}/><input type="text" value={shareSearch} onChange={e => handleShareSearch(e.target.value)} placeholder="Buscar por @nombre_usuario..." className="w-full bg-slate-950 border border-white/5 rounded-[24px] pl-12 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all shadow-inner font-bold" /></div><div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-2">{shareSuggestions.map(s => (<button key={s.username} onClick={() => sendVideoToUser(s.username)} className="w-full p-4 flex items-center gap-4 hover:bg-indigo-600 rounded-[24px] transition-all group active:scale-95"><div className="w-12 h-12 rounded-2xl overflow-hidden bg-slate-800 shrink-0 border border-white/5 shadow-lg">{s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-black text-white bg-slate-700">{s.username?.[0]}</div>}</div><div className="text-left flex-1 min-w-0"><span className="text-sm font-black text-white group-hover:text-white block truncate">@{s.username}</span><span className="text-[9px] text-slate-500 group-hover:text-indigo-200 uppercase font-black tracking-widest">Enviar instantáneo</span></div><ArrowRightCircle size={20} className="text-white opacity-0 group-hover:opacity-100 transition-opacity"/></button>))}</div></div>
+                        <div className="p-8 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                            <div>
+                                <h3 className="font-black text-white uppercase tracking-widest text-sm flex items-center gap-2"><Share2 size={18} className="text-indigo-400"/> Compartir Video</h3>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">Recomendar a un amigo</p>
+                            </div>
+                            <button onClick={() => { setShowShareModal(false); setShareSearch(''); setShareSuggestions([]); }} className="p-2.5 bg-slate-800 text-slate-500 hover:text-white rounded-2xl transition-all"><X/></button>
+                        </div>
+                        <div className="p-8 space-y-6">
+                            <div className="relative">
+                                <Search className="absolute left-4 top-4 text-slate-500" size={18}/>
+                                <input 
+                                    type="text" value={shareSearch} onChange={e => handleShareSearch(e.target.value)}
+                                    placeholder="Buscar por @nombre_usuario..."
+                                    className="w-full bg-slate-950 border border-white/5 rounded-[24px] pl-12 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all shadow-inner font-bold"
+                                />
+                            </div>
+                            
+                            <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-2">
+                                {shareSuggestions.map(s => (
+                                    <button 
+                                        key={s.username} 
+                                        onClick={() => sendVideoToUser(s.username)}
+                                        className="w-full p-4 flex items-center gap-4 hover:bg-indigo-600 rounded-[24px] transition-all group active:scale-95"
+                                    >
+                                        <div className="w-12 h-12 rounded-2xl overflow-hidden bg-slate-800 shrink-0 border border-white/5 shadow-lg">
+                                            {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-black text-white bg-slate-700">{s.username?.[0]}</div>}
+                                        </div>
+                                        <div className="text-left flex-1 min-w-0">
+                                            <span className="text-sm font-black text-white group-hover:text-white block truncate">@{s.username}</span>
+                                            <span className="text-[9px] text-slate-500 group-hover:text-indigo-200 uppercase font-black tracking-widest">Enviar instantáneo</span>
+                                        </div>
+                                        <ArrowRightCircle size={20} className="text-white opacity-0 group-hover:opacity-100 transition-opacity"/>
+                                    </button>
+                                ))}
+                                {shareSearch.length >= 2 && shareSuggestions.length === 0 && (
+                                    <p className="text-center py-10 text-slate-600 font-bold uppercase text-[9px] tracking-widest">No se encontraron usuarios</p>
+                                )}
+                                {shareSearch.length < 2 && (
+                                    <div className="flex flex-col items-center justify-center py-10 text-slate-700">
+                                        <Search size={40} className="mb-3 opacity-20"/>
+                                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-center">Escribe el nombre del destinatario</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

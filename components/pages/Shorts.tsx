@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, ThumbsDown, Send, X, Loader2, ArrowLeft, Pause, Search, UserCheck } from 'lucide-react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { db } from '../../services/db';
 import { Video, Comment, UserInteraction } from '../../types';
 import { useAuth } from '../../context/AuthContext';
@@ -223,6 +223,10 @@ export default function Shorts() {
   const toast = useToast();
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [videoToShare, setVideoToShare] = useState<Video | null>(null);
@@ -230,11 +234,26 @@ export default function Shorts() {
   const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
   const shareTimeout = useRef<any>(null);
   
+  const loadShorts = async (p: number) => {
+    if (loading || !hasMore) return;
+    setLoading(true);
+    try {
+        const batch = await db.getShortsBatch(p, 20);
+        if (batch.length === 0) {
+            setHasMore(false);
+        } else {
+            setVideos(prev => p === 0 ? batch : [...prev, ...batch]);
+            setPage(p);
+        }
+    } catch(e) {
+        console.error("Error loading shorts batch", e);
+    } finally {
+        setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    db.getAllVideos().then((all: Video[]) => {
-        const shorts = all.filter(v => v.duration < 180 && !['PENDING', 'PROCESSING'].includes(v.category)).sort(() => Math.random() - 0.5);
-        setVideos(shorts);
-    });
+    loadShorts(0);
   }, []);
 
   useEffect(() => {
@@ -243,13 +262,19 @@ export default function Shorts() {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const index = Number((entry.target as HTMLElement).dataset.index);
-                if (!isNaN(index)) setActiveIndex(index);
+                if (!isNaN(index)) {
+                    setActiveIndex(index);
+                    // Cargar más si estamos cerca del final
+                    if (index >= videos.length - 5 && !loading && hasMore) {
+                        loadShorts(page + 1);
+                    }
+                }
             }
         });
     }, { root: container, threshold: 0.6 });
     Array.from(container.children).forEach((c) => observer.observe(c as Element));
     return () => observer.disconnect();
-  }, [videos]);
+  }, [videos, loading, hasMore, page]);
 
   const handleShareSearch = (val: string) => {
     setShareSearch(val);
@@ -279,7 +304,7 @@ export default function Shorts() {
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative">
       <div className="fixed top-4 left-4 z-50"><Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link></div>
-      {videos.length === 0 ? (
+      {videos.length === 0 && loading ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4"><Loader2 className="animate-spin text-indigo-500" size={32}/><p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p></div>
       ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">

@@ -1,4 +1,5 @@
 <?php
+
 /**
  * PROCESAMIENTO DE FILAS (URLs y Metadatos)
  */
@@ -36,26 +37,31 @@ function video_get_all($pdo) {
     $search = trim($_GET['search'] ?? '');
     $folder = trim($_GET['folder'] ?? ''); 
     $category = trim($_GET['category'] ?? ''); 
+    $mode = trim($_GET['mode'] ?? ''); // 'shorts' o vacío
     
     $params = [];
     $where = ["v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
+    $order = "v.createdAt DESC";
+
+    // MODO SHORTS: Filtrado extremo por duración y orden aleatorio
+    if ($mode === 'shorts') {
+        $where[] = "v.duration < 180";
+        $order = "RAND()";
+    }
 
     if (!empty($search)) {
         $where[] = "v.title LIKE ?";
         $params[] = "%$search%";
     }
 
-    $folderPath = null;
-    if (!empty($folder)) {
-        $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
-        $root = rtrim($stmtS->fetchColumn(), '/\\');
-        $folderPath = str_replace('\\', '/', $root . '/' . $folder);
-        $folderPath = rtrim($folderPath, '/') . '/';
-    }
-
     // Lógica Híbrida de Categoría + Carpeta
     if (!empty($category) && $category !== 'TODOS') {
-        if ($folderPath) {
+        if (!empty($folder)) {
+            $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
+            $root = rtrim($stmtS->fetchColumn(), '/\\');
+            $folderPath = str_replace('\\', '/', $root . '/' . $folder);
+            $folderPath = rtrim($folderPath, '/') . '/';
+            
             $where[] = "v.category = ? AND (v.videoUrl LIKE ? OR v.isLocal = 0)";
             $params[] = $category;
             $params[] = $folderPath . "%";
@@ -63,28 +69,22 @@ function video_get_all($pdo) {
             $where[] = "v.category = ?";
             $params[] = $category;
         }
-    } else if ($folderPath) {
+    } else if (!empty($folder)) {
+        $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
+        $root = rtrim($stmtS->fetchColumn(), '/\\');
+        $folderPath = str_replace('\\', '/', $root . '/' . $folder);
+        $folderPath = rtrim($folderPath, '/') . '/';
         $where[] = "v.videoUrl LIKE ?";
         $params[] = $folderPath . "%";
     }
 
     $whereClause = implode(" AND ", $where);
-
-    // --- LÓGICA DE ORDEN DINÁMICO POR CARPETA ---
-    $orderBy = "v.createdAt DESC";
-    if ($folderPath) {
-        $stmtPref = $pdo->prepare("SELECT sort_preference FROM videos WHERE videoUrl LIKE ? AND isLocal = 1 LIMIT 1");
-        $stmtPref->execute([$folderPath . "%"]);
-        $pref = $stmtPref->fetchColumn();
-        if ($pref === 'ALPHA') $orderBy = "v.title ASC";
-        elseif ($pref === 'RANDOM') $orderBy = "RAND()";
-    }
     
     $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole 
             FROM videos v 
             LEFT JOIN users u ON v.creatorId = u.id 
             WHERE $whereClause 
-            ORDER BY $orderBy 
+            ORDER BY $order 
             LIMIT $limit OFFSET $offset";
             
     $stmt = $pdo->prepare($sql);
@@ -96,21 +96,33 @@ function video_get_all($pdo) {
     $stmtCount->execute($params);
     $total = $stmtCount->fetchColumn();
 
-    $subfolders = (empty($search)) ? video_discover_subfolders($pdo, $folder) : [];
-
-    // Categorías contextuales
-    $catWhere = ["category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
-    $catParams = [];
-    if ($folderPath) {
-        $catWhere[] = "(videoUrl LIKE ? OR isLocal = 0)";
-        $catParams[] = $folderPath . "%";
+    $subfolders = [];
+    if (empty($search) && $mode !== 'shorts') {
+        $subfolders = video_discover_subfolders($pdo, $folder);
     }
-    $catSql = "SELECT DISTINCT category FROM videos WHERE " . implode(" AND ", $catWhere);
-    $stmtActiveCats = $pdo->prepare($catSql);
-    $stmtActiveCats->execute($catParams);
-    $activeCategories = $stmtActiveCats->fetchAll(PDO::FETCH_COLUMN);
+
+    // --- CATEGORÍAS CONTEXTUALES ---
+    $activeCategories = [];
+    if ($mode !== 'shorts') {
+        $catWhere = ["category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
+        $catParams = [];
+        if (!empty($folder)) {
+            $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
+            $root = rtrim($stmtS->fetchColumn(), '/\\');
+            $folderPath = str_replace('\\', '/', $root . '/' . $folder);
+            $folderPath = rtrim($folderPath, '/') . '/';
+            $catWhere[] = "(videoUrl LIKE ? OR isLocal = 0)";
+            $catParams[] = $folderPath . "%";
+        }
+        
+        $catSql = "SELECT DISTINCT category FROM videos WHERE " . implode(" AND ", $catWhere);
+        $stmtActiveCats = $pdo->prepare($catSql);
+        $stmtActiveCats->execute($catParams);
+        $activeCategories = $stmtActiveCats->fetchAll(PDO::FETCH_COLUMN);
+    }
 
     video_process_rows($videos);
+    
     respond(true, [
         'videos' => $videos,
         'folders' => $subfolders,
@@ -122,33 +134,51 @@ function video_get_all($pdo) {
 
 function video_discover_subfolders($pdo, $currentFolder) {
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
-    $root = rtrim($stmtS->fetchColumn(), '/\\');
-    $targetPath = rtrim(str_replace('\\', '/', $root . '/' . $currentFolder), '/') . '/';
+    $rootValue = $stmtS->fetchColumn();
+    if (!$rootValue) return [];
     
-    $sql = "SELECT DISTINCT videoUrl FROM videos WHERE videoUrl LIKE ? AND category NOT IN ('PENDING', 'PROCESSING') AND isLocal = 1";
+    $root = rtrim($rootValue, '/\\');
+    $rootNormalized = str_replace('\\', '/', $root);
+    $folderNormalized = str_replace('\\', '/', $currentFolder);
+    
+    $targetPath = empty($folderNormalized) ? $rootNormalized : $rootNormalized . '/' . $folderNormalized;
+    $targetPath = rtrim($targetPath, '/') . '/';
+    
+    $sql = "SELECT DISTINCT videoUrl FROM videos 
+            WHERE videoUrl LIKE ? 
+            AND category NOT IN ('PENDING', 'PROCESSING')
+            AND isLocal = 1";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$targetPath . "%"]);
     $urls = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
     $foldersMap = [];
     $targetLen = strlen($targetPath);
+
     foreach ($urls as $url) {
         $urlClean = str_replace('\\', '/', $url);
         $relative = substr($urlClean, $targetLen);
         if (!$relative) continue;
+        
         $parts = explode('/', $relative);
         if (count($parts) > 1) {
             $folderName = $parts[0];
-            $foldersMap[$folderName] = ($foldersMap[$folderName] ?? 0) + 1;
+            if (!isset($foldersMap[$folderName])) {
+                $foldersMap[$folderName] = 0;
+            }
+            $foldersMap[$folderName]++;
         }
     }
 
     $result = [];
-    foreach ($foldersMap as $name => $count) $result[] = ['name' => $name, 'count' => $count];
+    foreach ($foldersMap as $name => $count) {
+        $result[] = ['name' => $name, 'count' => $count];
+    }
+    
     usort($result, function($a, $b) { return strnatcasecmp($a['name'], $b['name']); });
     return $result;
 }
-// ...resto de funciones se mantienen igual
+
 function video_get_admin_stats($pdo) {
     $now = time();
     $timeout = $now - 300; 
@@ -276,18 +306,23 @@ function video_get_related($pdo, $videoId) {
     $stmt->execute([$videoId]);
     $current = $stmt->fetch();
     if (!$current) respond(true, []);
+    
+    // Obtener ruta de carpeta del video actual
+    $currentPath = str_replace('\\', '/', $current['videoUrl']);
+    $folderPath = substr($currentPath, 0, strrpos($currentPath, '/') + 1);
 
-    // Determinar la carpeta actual para priorizar la serie/cola
-    $currentPathPrefix = rtrim(dirname($current['videoUrl']), '/\\') . '/';
-
-    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
-            WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING') 
-            ORDER BY 
-                CASE WHEN v.videoUrl LIKE ? THEN 0 ELSE 1 END,
-                CASE WHEN v.collection = ? THEN 0 ELSE 1 END, 
-                CASE WHEN v.category = ? THEN 0 ELSE 1 END, 
-                RAND() LIMIT 40");
-    $stmt->execute([$videoId, $currentPathPrefix . "%", $current['collection'], $current['category']]);
+    // Búsqueda optimizada por carpeta primero (Misma serie/carpeta)
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole 
+                           FROM videos v 
+                           LEFT JOIN users u ON v.creatorId = u.id 
+                           WHERE v.id != ? 
+                           AND v.category NOT IN ('PENDING', 'PROCESSING') 
+                           AND (v.videoUrl LIKE ? OR v.category = ? OR v.collection = ?)
+                           ORDER BY CASE WHEN v.videoUrl LIKE ? THEN 0 ELSE 1 END, 
+                                    CASE WHEN v.collection = ? THEN 0 ELSE 1 END, 
+                                    v.createdAt DESC 
+                           LIMIT 60");
+    $stmt->execute([$videoId, $folderPath . "%", $current['category'], $current['collection'], $folderPath . "%", $current['collection']]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);

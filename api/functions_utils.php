@@ -17,18 +17,13 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
     $detectedParent = null;
     $detectedCollection = null;
 
-    // 1. Intentar encontrar coincidencia en jerarquía existente (Lógica Definida)
     $partsCount = count($pathParts);
-    $foundInHierarchy = false;
-    
     for ($i = $partsCount - 1; $i >= 0; $i--) {
         $segment = trim($pathParts[$i]);
         if (empty($segment) || $segment === basename($fullPath)) continue;
-        
         foreach ($hierarchy as $cat) {
             if (strcasecmp($segment, $cat['name']) === 0) {
                 $detectedCat = $cat['name'];
-                $foundInHierarchy = true;
                 if (!empty($cat['autoSub'])) {
                     if (isset($pathParts[$i + 1]) && $pathParts[$i + 1] !== basename($fullPath)) {
                         $detectedParent = $cat['name'];
@@ -41,16 +36,6 @@ function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []
                 }
                 break 2;
             }
-        }
-    }
-
-    // 2. Fallback: Si no está en jerarquía, usar la carpeta inmediata (Auto-Creación)
-    if (!$foundInHierarchy && $partsCount > 1) {
-        $lastFolder = trim($pathParts[$partsCount - 2]);
-        // Ignorar carpetas genéricas de sistema
-        $blacklist = ['uploads', 'videos', 'api', 'thumbnails', 'volume1', 'mnt', 'media'];
-        if (!in_array(strtolower($lastFolder), $blacklist)) {
-            $detectedCat = strtoupper($lastFolder);
         }
     }
 
@@ -131,6 +116,7 @@ function streamVideo($id, $pdo) {
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
     header("Access-Control-Allow-Headers: Range, Authorization, Content-Type");
+    header("Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges");
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
     if ($_SERVER['REQUEST_METHOD'] === 'HEAD') { header("Content-Length: $fileSize"); exit; }
