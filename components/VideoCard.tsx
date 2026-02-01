@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Video } from '../types';
 import { Link } from './Router';
@@ -52,6 +51,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [shouldLoadImg, setShouldLoadImg] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
   const isAudio = Boolean(video.is_audio);
@@ -73,17 +73,18 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
     return base;
   }, [video.id, context?.query]);
 
+  // Observer para carga perezosa de imágenes y procesamiento
   useEffect(() => {
-      if (!isAudio || !hasDefaultThumb || failedExtractions.has(video.id)) return;
       const observer = new IntersectionObserver((entries) => {
           if (entries[0].isIntersecting) {
               setIsVisible(true);
+              setShouldLoadImg(true); // Solo aquí pedimos la imagen
               observer.disconnect(); 
           }
-      }, { threshold: 0.1, rootMargin: '50px' });
+      }, { threshold: 0.05, rootMargin: '200px' });
       if (cardRef.current) observer.observe(cardRef.current);
       return () => observer.disconnect();
-  }, [video.id, isAudio, hasDefaultThumb]);
+  }, [video.id]);
 
   useEffect(() => {
       let isMounted = true;
@@ -130,7 +131,10 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
       } catch (e) {}
   };
 
-  const displayThumb = localThumb || (!imgError && video.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? video.thumbnailUrl : (isAudio ? "api/uploads/thumbnails/defaultaudio.jpg" : null));
+  const displayThumb = useMemo(() => {
+      if (!shouldLoadImg) return null; // No retornamos nada hasta ser visibles
+      return localThumb || (!imgError && video.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') ? video.thumbnailUrl : (isAudio ? "api/uploads/thumbnails/defaultaudio.jpg" : null));
+  }, [shouldLoadImg, localThumb, imgError, video.thumbnailUrl, isAudio]);
 
   return (
     <div ref={cardRef} className={`flex flex-col gap-3 group ${isWatched ? 'opacity-70 hover:opacity-100 transition-opacity' : ''}`}>
@@ -142,7 +146,7 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
             <img 
               src={displayThumb} 
               alt={video.title} 
-              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
+              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out animate-in fade-in"
               loading="lazy" 
               onError={() => setImgError(true)}
             />

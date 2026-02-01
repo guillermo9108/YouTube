@@ -93,6 +93,9 @@ function fix_url($url) {
 }
 
 function streamVideo($id, $pdo) {
+    // IMPORTANTE: Liberar sesión para evitar bloqueos de otros hilos del mismo usuario
+    if (session_id()) session_write_close();
+    
     while (ob_get_level()) ob_end_clean();
     
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
@@ -121,6 +124,7 @@ function streamVideo($id, $pdo) {
     header("Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges");
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
+    header("Cache-Control: public, max-age=3600");
 
     if ($_SERVER['REQUEST_METHOD'] === 'HEAD') {
         header("Content-Length: $fileSize");
@@ -144,7 +148,8 @@ function streamVideo($id, $pdo) {
         header("Content-Length: $fileSize");
     }
     
-    $bufferSize = 1024 * 128; 
+    // Aumentamos buffer para reducir ciclos de CPU en NAS/Servidores locales
+    $bufferSize = 1024 * 256; 
     while (!feof($fp)) {
         echo fread($fp, $bufferSize);
         flush();

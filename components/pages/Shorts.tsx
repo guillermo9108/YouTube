@@ -76,9 +76,14 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
     } else { 
         try {
             el.pause(); 
+            // IMPORTANTE: Limpiar el src para cerrar la conexión del worker PHP
+            if (!isNear) {
+                el.removeAttribute('src');
+                el.load();
+            }
         } catch (e) {}
     }
-  }, [isActive, isUnlocked, video.id]);
+  }, [isActive, isUnlocked, video.id, isNear]);
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
@@ -86,6 +91,7 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
         const res = await db.rateVideo(user.id, video.id, rating);
         setInteraction(res); 
         if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
+        // FIX: Changed setDislikes to setDislikeCount to match the state setter name on line 33
         if (res.newDislikeCount !== undefined) setDislikeCount(res.newDislikeCount);
     } catch(e) {}
   };
@@ -112,10 +118,11 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
   };
 
   const videoSrc = useMemo(() => {
+    if (!isNear) return ""; // No asignar src si no está cerca
     const token = localStorage.getItem('sp_session_token') || '';
     const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
     return `${window.location.origin}/${base}&token=${token}`;
-  }, [video.id]);
+  }, [video.id, isNear]);
 
   if (!isNear) return <div className="w-full h-full snap-start bg-black shrink-0 flex items-center justify-center"><Loader2 className="animate-spin text-slate-800" /></div>;
 
@@ -124,10 +131,12 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
       <div className="absolute inset-0 z-0 bg-black" onClick={handleScreenTouch}>
         {isUnlocked ? (
           <>
-            <video
-                ref={videoRef} src={videoSrc} poster={video.thumbnailUrl}
-                className="w-full h-full object-cover" loop playsInline preload="auto" crossOrigin="anonymous"
-            />
+            {videoSrc && (
+                <video
+                    ref={videoRef} src={videoSrc} poster={video.thumbnailUrl}
+                    className="w-full h-full object-cover" loop playsInline preload="metadata" crossOrigin="anonymous"
+                />
+            )}
             {paused && <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50"><Pause size={64} fill="currentColor" /></div>}
             {showHeart && <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in fade-in duration-300"><Heart size={120} className="text-red-500 fill-red-500 drop-shadow-2xl" /></div>}
           </>

@@ -36,7 +36,11 @@ export default function Watch() {
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
     const [seriesQueue, setSeriesQueue] = useState<Video[]>([]); 
-    const [visibleRelated, setVisibleRelated] = useState(12);
+    
+    // Paginación de Relacionados
+    const [relatedPage, setRelatedPage] = useState(0);
+    const [hasMoreRelated, setHasMoreRelated] = useState(true);
+    const [loadingMoreRelated, setLoadingMoreRelated] = useState(false);
     
     // Social State
     const [likes, setLikes] = useState<number>(0);
@@ -64,11 +68,28 @@ export default function Watch() {
         refreshUser(); 
         viewMarkedRef.current = false;
         setThrottled(true);
-        setVisibleRelated(12);
+        setRelatedPage(0);
+        setRelatedVideos([]);
         setShowComments(false);
         setExtractionAttempted(false); 
         return () => { setThrottled(false); };
     }, [id]);
+
+    const fetchRelated = async (p: number) => {
+        if (loadingMoreRelated || (!hasMoreRelated && p !== 0)) return;
+        setLoadingMoreRelated(true);
+        try {
+            const res = await db.getVideos(p, 40, '', searchContext || '', 'TODOS');
+            if (p === 0) {
+                setRelatedVideos(res.videos.filter(v => v.id !== id));
+                setSeriesQueue(res.videos.sort((a, b) => naturalCollator.compare(a.title, b.title)));
+            } else {
+                setRelatedVideos(prev => [...prev, ...res.videos.filter(v => v.id !== id)]);
+            }
+            setHasMoreRelated(res.hasMore);
+            setRelatedPage(p);
+        } catch (e) {} finally { setLoadingMoreRelated(false); }
+    };
 
     useEffect(() => {
         if (!id) return;
@@ -76,7 +97,6 @@ export default function Watch() {
         
         const fetchData = async () => {
             try {
-                // 1. Obtener video actual
                 const v = await db.getVideo(id);
                 if (!v) { setLoading(false); return; }
 
@@ -84,46 +104,7 @@ export default function Watch() {
                 setLikes(Number(v.likes || 0));
                 setDislikes(Number(v.dislikes || 0));
 
-                // 2. Obtener videos relacionados según el contexto (Optimizado a 40 para rendimiento)
-                let allVids: Video[] = [];
-                if (searchContext) {
-                    const res = await db.getVideos(0, 40, '', searchContext, 'TODOS');
-                    allVids = res.videos;
-                } else {
-                    const res = await db.getVideos(0, 40);
-                    allVids = res.videos;
-                }
-
-                const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                
-                // Definimos la cola principal basada en el contexto
-                let contextQueue: Video[] = [];
-
-                if (searchContext) {
-                    // Si hay búsqueda, la cola es el resultado de la búsqueda preservando orden natural
-                    contextQueue = allVids.sort((a, b) => naturalCollator.compare(a.title, b.title));
-                } else {
-                    // Si no hay búsqueda, la cola es la carpeta actual
-                    contextQueue = allVids.filter(ov => {
-                        const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                        return ovPath === currentPath;
-                    }).sort((a, b) => naturalCollator.compare(a.title, b.title));
-                }
-
-                setSeriesQueue(contextQueue);
-
-                // Recomendados UI: Priorizar la cola de contexto, luego el resto
-                const suggestions = contextQueue.filter(ov => ov.id !== v.id);
-                
-                // Si la cola de contexto es corta y no es búsqueda, rellenamos con otros aleatorios
-                if (suggestions.length < 10 && !searchContext) {
-                    const globalRes = await db.getVideos(0, 40);
-                    const others = globalRes.videos.filter(gv => !suggestions.some(sv => sv.id === gv.id) && gv.id !== v.id)
-                                         .sort(() => Math.random() - 0.5);
-                    setRelatedVideos([...suggestions, ...others]);
-                } else {
-                    setRelatedVideos(suggestions);
-                }
+                await fetchRelated(0);
 
                 db.getComments(v.id).then(setComments);
 
@@ -252,31 +233,19 @@ export default function Watch() {
 
     const handleVideoEnded = async () => {
         if (!video || !user) return;
-
-        // Buscamos el video actual en la cola de la serie (que ya está ordenada naturalmente)
         const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
-        
-        // El siguiente es matemáticamente el índice + 1
         let nextVid = seriesQueue[currentIndex + 1];
-
-        // Si no hay siguiente en el contexto actual, detenemos o vamos al primero de recomendados generales
         if (!nextVid && !searchContext && relatedVideos.length > 0) {
             nextVid = relatedVideos[0];
         }
-
         if (!nextVid) return;
-
         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
         const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
         const hasAccess = isAdmin || (isVip && nextVid.creatorRole === 'ADMIN') || user.id === nextVid.creatorId;
-
         const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
-
         if (hasAccess) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
-        
         const purchased = await db.hasPurchased(user.id, nextVid.id);
         if (purchased) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
-
         if (Number(nextVid.price) <= Number(user.autoPurchaseLimit) && Number(user.balance) >= Number(nextVid.price)) {
             try {
                 await db.purchaseVideo(user.id, nextVid.id);
@@ -445,7 +414,7 @@ export default function Watch() {
                     )}
 
                     <div className="space-y-4">
-                        {relatedVideos.slice(0, visibleRelated).map((v, idx) => {
+                        {relatedVideos.map((v, idx) => {
                             const isNextInQueue = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
                             const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
                             
@@ -471,12 +440,14 @@ export default function Watch() {
                         })}
                     </div>
 
-                    {relatedVideos.length > visibleRelated && (
+                    {hasMoreRelated && (
                         <button 
-                            onClick={() => setVisibleRelated(prev => prev + 12)}
+                            onClick={() => fetchRelated(relatedPage + 1)}
+                            disabled={loadingMoreRelated}
                             className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-3xl border border-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl"
                         >
-                            <ChevronDown size={14}/> Cargar más contenido
+                            {loadingMoreRelated ? <Loader2 size={14} className="animate-spin"/> : <ChevronDown size={14}/>} 
+                            {loadingMoreRelated ? 'Buscando...' : 'Cargar más contenido'}
                         </button>
                     )}
                 </div>
