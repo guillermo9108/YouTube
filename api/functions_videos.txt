@@ -1,3 +1,4 @@
+
 <?php
 
 /**
@@ -94,7 +95,6 @@ function video_get_all($pdo) {
     }
 
     // --- CATEGORÍAS CONTEXTUALES ---
-    // Solo mostramos categorías que tengan videos en el contexto actual (carpeta/búsqueda)
     $catWhere = ["category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
     $catParams = [];
     if (!empty($folder)) {
@@ -160,7 +160,18 @@ function video_discover_subfolders($pdo, $currentFolder) {
 
     $result = [];
     foreach ($foldersMap as $name => $count) {
-        $result[] = ['name' => $name, 'count' => $count];
+        // Buscar miniatura dinámica para la carpeta
+        $fullFolderPath = $targetPath . $name . '/%';
+        $stmtThumb = $pdo->prepare("SELECT thumbnailUrl FROM videos WHERE videoUrl LIKE ? AND thumbnailUrl NOT LIKE '%default.jpg' AND thumbnailUrl != '' LIMIT 1");
+        $stmtThumb->execute([$fullFolderPath]);
+        $thumb = $stmtThumb->fetchColumn() ?: 'api/uploads/thumbnails/default.jpg';
+        
+        $result[] = [
+            'name' => $name, 
+            'count' => $count,
+            'thumbnailUrl' => fix_url($thumb),
+            'relativePath' => ($currentFolder ? $currentFolder . '/' : '') . $name
+        ];
     }
     
     usort($result, function($a, $b) { return strnatcasecmp($a['name'], $b['name']); });

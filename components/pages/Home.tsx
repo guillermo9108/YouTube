@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Notification as AppNotification, User, SystemSettings } from '../../types';
 import { 
-    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History
+    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History, Edit3, DollarSign, SortAsc, Save
 } from 'lucide-react';
 import { useNavigate, Link, useLocation } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -106,6 +106,66 @@ const Breadcrumbs: React.FC<{
     </div>
 );
 
+const FolderEditModal: React.FC<{ 
+    folder: any, 
+    onClose: () => void, 
+    onSave: (price: number, sortOrder: string) => Promise<void> 
+}> = ({ folder, onClose, onSave }) => {
+    const [price, setPrice] = useState<number>(1.0);
+    const [sortOrder, setSortOrder] = useState<string>('LATEST');
+    const [loading, setLoading] = useState(false);
+
+    return (
+        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-slate-900 border border-white/10 rounded-[32px] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95">
+                <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                    <div>
+                        <h3 className="font-black text-white uppercase text-xs tracking-widest">Configurar Carpeta</h3>
+                        <p className="text-[10px] text-indigo-400 font-bold uppercase truncate max-w-[200px]">{folder.name}</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full text-slate-500"><X size={20}/></button>
+                </div>
+                <div className="p-6 space-y-6">
+                    <div className="space-y-2">
+                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1">Precio Sugerido ($)</label>
+                        <div className="relative">
+                            <DollarSign className="absolute left-4 top-3.5 text-emerald-500" size={18}/>
+                            <input 
+                                type="number" step="0.1" value={price} onChange={e => setPrice(parseFloat(e.target.value))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-10 pr-4 py-4 text-white font-black text-2xl focus:border-emerald-500 outline-none transition-all shadow-inner"
+                            />
+                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1">Orden de la Colección</label>
+                        <div className="relative">
+                            <SortAsc className="absolute left-4 top-3.5 text-indigo-400" size={18}/>
+                            <select 
+                                value={sortOrder} onChange={e => setSortOrder(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-10 pr-4 py-4 text-white font-black text-xs uppercase focus:border-indigo-500 outline-none transition-all shadow-inner appearance-none"
+                            >
+                                <option value="LATEST">Recientes (Default)</option>
+                                <option value="ALPHA">Alfabético (A-Z)</option>
+                                <option value="RANDOM">Aleatorio</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="p-4 bg-indigo-500/10 rounded-2xl border border-indigo-500/20">
+                         <p className="text-[9px] text-indigo-300 leading-snug font-bold uppercase">Esto aplicará recursivamente a todos los videos y subcarpetas dentro de: <span className="text-white italic">{folder.name}</span></p>
+                    </div>
+                    <button 
+                        onClick={() => { setLoading(true); onSave(price, sortOrder).finally(() => setLoading(false)); }} 
+                        disabled={loading} 
+                        className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-black py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all text-xs uppercase tracking-widest"
+                    >
+                        {loading ? <Loader2 size={16} className="animate-spin"/> : <Save size={16}/>} Aplicar a Jerarquía
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export default function Home() {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
@@ -118,10 +178,11 @@ export default function Home() {
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [showFolderGrid, setShowFolderGrid] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
+    const [editingFolder, setEditingFolder] = useState<any | null>(null);
     
     // Data State
     const [videos, setVideos] = useState<Video[]>([]);
-    const [folders, setFolders] = useState<{ name: string; count: number }[]>([]);
+    const [folders, setFolders] = useState<{ name: string; count: number; thumbnailUrl: string; relativePath: string }[]>([]);
     const [page, setPage] = useState(0);
     const [hasMore, setHasMore] = useState(true);
     const [loading, setLoading] = useState(false);
@@ -185,7 +246,7 @@ export default function Home() {
             
             if (reset) {
                 setVideos(res.videos);
-                setFolders(res.folders);
+                setFolders(res.folders as any);
                 setActiveCategories(['TODOS', ...res.activeCategories]);
 
                 // --- LÓGICA DE AUTO-NAVEGACIÓN AL PADRE ---
@@ -338,6 +399,25 @@ export default function Home() {
         }
     };
 
+    const handleBulkEditFolder = async (price: number, sortOrder: string) => {
+        if (!editingFolder) return;
+        try {
+            await db.request('action=admin_bulk_edit_folder', {
+                method: 'POST',
+                body: JSON.stringify({
+                    folderPath: editingFolder.relativePath,
+                    price,
+                    sortOrder
+                })
+            });
+            toast.success("Configuración aplicada a toda la rama");
+            setEditingFolder(null);
+            fetchVideos(0, true);
+        } catch (e: any) {
+            toast.error("Error al aplicar cambios: " + e.message);
+        }
+    };
+
     const handleNotifClick = async (n: AppNotification) => {
         if (Number(n.isRead) === 0) {
             try {
@@ -483,21 +563,43 @@ export default function Home() {
                         {!searchQuery && folders.length > 0 && showFolderGrid && (
                             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
                                 {folders.map(folder => (
-                                    <button 
+                                    <div 
                                         key={folder.name} 
-                                        onClick={() => { 
-                                            setNavigationPath([...navigationPath, folder.name]); 
-                                            setSelectedCategory('TODOS'); 
-                                            setShowFolderGrid(false); 
-                                        }}
                                         className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300"
                                     >
-                                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-indigo-500/10"></div>
-                                        <div className="relative h-full flex flex-col p-5">
+                                        <button 
+                                            onClick={() => { 
+                                                setNavigationPath([...navigationPath, folder.name]); 
+                                                setSelectedCategory('TODOS'); 
+                                                setShowFolderGrid(false); 
+                                            }}
+                                            className="absolute inset-0 z-0"
+                                        >
+                                            {folder.thumbnailUrl ? (
+                                                <img src={folder.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-60" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center bg-slate-950 text-slate-800">
+                                                    <Folder size={48} className="opacity-20" />
+                                                </div>
+                                            )}
+                                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-indigo-500/10"></div>
+                                        </button>
+
+                                        <div className="relative z-10 h-full flex flex-col p-5 pointer-events-none">
                                             <div className="flex justify-between items-start">
-                                                <div className="p-3 bg-slate-800/80 rounded-2xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform"><Folder size={24}/></div>
-                                                <div className="bg-indigo-600/20 backdrop-blur-md px-2 py-0.5 rounded-lg border border-indigo-500/30">
-                                                    <span className="text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} ITEMS</span>
+                                                <div className="p-2.5 bg-slate-800/80 rounded-xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform shadow-lg"><Folder size={20}/></div>
+                                                <div className="flex flex-col items-end gap-2">
+                                                    <div className="bg-indigo-600/30 backdrop-blur-md px-2 py-0.5 rounded-lg border border-indigo-500/30">
+                                                        <span className="text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} ITEMS</span>
+                                                    </div>
+                                                    {isAdmin && (
+                                                        <button 
+                                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingFolder(folder); }}
+                                                            className="p-2 bg-slate-950/80 hover:bg-indigo-600 text-white rounded-xl border border-white/10 shadow-xl transition-all active:scale-90 pointer-events-auto"
+                                                        >
+                                                            <Edit3 size={14}/>
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                             <div className="mt-auto">
@@ -505,7 +607,7 @@ export default function Home() {
                                                 <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-full transition-all duration-700"></div>
                                             </div>
                                         </div>
-                                    </button>
+                                    </div>
                                 ))}
                             </div>
                         )}
@@ -564,6 +666,14 @@ export default function Home() {
                     </div>
                 )}
             </div>
+
+            {editingFolder && (
+                <FolderEditModal 
+                    folder={editingFolder} 
+                    onClose={() => setEditingFolder(null)} 
+                    onSave={handleBulkEditFolder} 
+                />
+            )}
 
             <AIConcierge videos={videos} isVisible={geminiActive} />
         </div>
