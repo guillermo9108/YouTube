@@ -203,9 +203,18 @@ function video_scan_local($pdo, $input) {
     }
     $paths = array_unique(array_filter($paths));
     if (empty($paths)) respond(false, null, "No hay rutas configuradas.");
+
+    // Cargar jerarquía de categorías actual
+    $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
+    $categoriesJson = $stmtS->fetchColumn();
+    $hierarchy = json_decode($categoriesJson ?: '[]', true);
+    $knownCategoryNames = array_map('strtolower', array_column($hierarchy, 'name'));
+    $categoriesChanged = false;
+
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $added = 0; $found = 0; $errors = [];
-    $blacklist = ['#recycle', '@eaDir', '$RECYCLE.BIN', 'System Volume Information', '.Thumbnails', '.DS_Store', 'lost+found'];
+    $blacklist = ['#recycle', '@eaDir', '$RECYCLE.BIN', 'System Volume Information', '.Thumbnails', '.DS_Store', 'lost+found', 'uploads', 'videos', 'api'];
+
     foreach ($paths as $rootPath) {
         $rootPath = trim($rootPath);
         if (!is_dir($rootPath)) { $errors[] = "Ruta no encontrada: $rootPath"; continue; }
@@ -226,6 +235,24 @@ function video_scan_local($pdo, $input) {
                     $found++;
                     $fullPath = $file->getRealPath();
                     if (!$fullPath) continue;
+
+                    // --- LÓGICA DE AUTO-CREACIÓN DE CATEGORÍA POR CARPETA (PASO 1) ---
+                    $folderName = basename(dirname($fullPath));
+                    if (!empty($folderName) && !in_array(strtolower($folderName), $knownCategoryNames) && !in_array(strtolower($folderName), $blacklist)) {
+                        $newId = 'cat_' . uniqid();
+                        $hierarchy[] = [
+                            'id' => $newId,
+                            'name' => strtoupper($folderName),
+                            'price' => 1.0,
+                            'autoSub' => false,
+                            'sortOrder' => 'LATEST'
+                        ];
+                        $knownCategoryNames[] = strtolower($folderName);
+                        $categoriesChanged = true;
+                        write_log("Paso 1: Auto-creada categoría global: " . strtoupper($folderName));
+                    }
+                    // -----------------------------------------------------------------
+
                     $vidId = 'loc_' . md5($fullPath);
                     $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE id = ?");
                     $stmtCheck->execute([$vidId]);
@@ -242,6 +269,13 @@ function video_scan_local($pdo, $input) {
             }
         } catch (Exception $e) { $errors[] = "Error parcial en $rootPath: " . $e->getMessage(); }
     }
+
+    // Guardar cambios en la jerarquía si hubo nuevos nombres de carpeta detectados
+    if ($categoriesChanged) {
+        $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
+            ->execute([json_encode($hierarchy, JSON_UNESCAPED_UNICODE)]);
+    }
+
     respond(true, ['totalFound' => $found, 'newToImport' => $added, 'errors' => $errors]);
 }
 
@@ -386,7 +420,7 @@ function video_organize_single($pdo, $id, $settings) {
     // ANALIZAR METADATOS (Título y Categoría Sugerida)
     $meta = smartParseFilename($v['videoUrl'], $v['category'], $hierarchy);
     
-    // --- LÓGICA DE AUTO-REGISTRO DE CATEGORÍA ---
+    // --- LÓGICA DE AUTO-REGISTRO DE CATEGORÍA (Safeguard) ---
     $categoryToUse = $meta['category'];
     $existsInGlobal = false;
     foreach ($hierarchy as $c) {
@@ -396,7 +430,6 @@ function video_organize_single($pdo, $id, $settings) {
         }
     }
 
-    // Si la categoría sugerida no existe y no es "GENERAL", la creamos
     if (!$existsInGlobal && $categoryToUse !== 'GENERAL' && $categoryToUse !== 'PENDING' && $categoryToUse !== 'PROCESSING') {
         $newId = 'cat_' . uniqid();
         $newCategory = [
@@ -410,10 +443,9 @@ function video_organize_single($pdo, $id, $settings) {
         $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
             ->execute([json_encode($hierarchy, JSON_UNESCAPED_UNICODE)]);
         
-        // Registrar en log para debug
-        write_log("Auto-creada categoría: " . $categoryToUse);
+        write_log("Organizador: Auto-creada categoría: " . $categoryToUse);
     }
-    // ---------------------------------------------
+    // -------------------------------------------------------
 
     $price = (floatval($v['price'] ?? 0) > 0) ? $v['price'] : getPriceForCategory($meta['category'], $settings, $meta['parent_category']);
     
