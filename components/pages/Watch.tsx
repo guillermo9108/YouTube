@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -84,24 +85,45 @@ export default function Watch() {
                 setLikes(Number(v.likes || 0));
                 setDislikes(Number(v.dislikes || 0));
 
-                // 2. Obtener videos relacionados de forma optimizada
+                // 2. Obtener videos relacionados según el contexto (Búsqueda o Carpeta)
+                let allVids: Video[] = [];
+                if (searchContext) {
+                    const res = await db.getVideos(0, 500, '', searchContext, 'TODOS');
+                    allVids = res.videos;
+                } else {
+                    allVids = await db.getAllVideos();
+                }
+
+                const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                
+                // Definimos la cola principal basada en el contexto
                 let contextQueue: Video[] = [];
 
                 if (searchContext) {
-                    // Si venimos de una búsqueda, pedimos el resultado de búsqueda (limitado a 500 en server)
-                    const res = await db.getVideos(0, 500, '', searchContext, 'TODOS');
-                    contextQueue = res.videos.sort((a, b) => naturalCollator.compare(a.title, b.title));
+                    // Si hay búsqueda, la cola es el resultado de la búsqueda preservando orden natural
+                    contextQueue = allVids.sort((a, b) => naturalCollator.compare(a.title, b.title));
                 } else {
-                    // Si es navegación normal, el server ya tiene getRelatedVideos optimizado por carpeta
-                    contextQueue = await db.getRelatedVideos(id!);
-                    contextQueue = contextQueue.sort((a, b) => naturalCollator.compare(a.title, b.title));
+                    // Si no hay búsqueda, la cola es la carpeta actual
+                    contextQueue = allVids.filter(ov => {
+                        const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                        return ovPath === currentPath;
+                    }).sort((a, b) => naturalCollator.compare(a.title, b.title));
                 }
 
                 setSeriesQueue(contextQueue);
 
                 // Recomendados UI: Priorizar la cola de contexto, luego el resto
                 const suggestions = contextQueue.filter(ov => ov.id !== v.id);
-                setRelatedVideos(suggestions);
+                
+                // Si la cola de contexto es corta y no es búsqueda, rellenamos con otros aleatorios
+                if (suggestions.length < 10 && !searchContext) {
+                    const global = await db.getAllVideos();
+                    const others = global.filter(gv => !suggestions.some(sv => sv.id === gv.id) && gv.id !== v.id)
+                                         .sort(() => Math.random() - 0.5);
+                    setRelatedVideos([...suggestions, ...others]);
+                } else {
+                    setRelatedVideos(suggestions);
+                }
 
                 db.getComments(v.id).then(setComments);
 
@@ -117,9 +139,7 @@ export default function Watch() {
                     setInteraction(interact);
                     setIsSubscribed(sub);
                 }
-            } catch (e) {
-                console.error("Watch Load Error", e);
-            } finally { setLoading(false); }
+            } catch (e) {} finally { setLoading(false); }
         };
         fetchData();
     }, [id, user?.id, searchContext]);

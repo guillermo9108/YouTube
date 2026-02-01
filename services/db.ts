@@ -54,20 +54,17 @@ class DBService {
         });
     }
 
-    public async getVideos(page: number = 0, limit: number = 40, folder: string = '', search: string = '', category: string = '', mode: string = ''): Promise<VideoPagedResponse> {
+    /**
+     * Obtiene videos paginados con filtros de carpeta, búsqueda y categoría global.
+     */
+    public async getVideos(page: number = 0, limit: number = 40, folder: string = '', search: string = '', category: string = ''): Promise<VideoPagedResponse> {
         const offset = page * limit;
-        const query = `action=get_videos&limit=${limit}&offset=${offset}&folder=${encodeURIComponent(folder)}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&mode=${mode}`;
+        const query = `action=get_videos&limit=${limit}&offset=${offset}&folder=${encodeURIComponent(folder)}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`;
         return this.request<VideoPagedResponse>(query);
     }
 
-    public async getShortsBatch(page: number = 0, limit: number = 50): Promise<Video[]> {
-        const res = await this.getVideos(page, limit, '', '', '', 'shorts');
-        return res.videos;
-    }
-
     public async getAllVideos(): Promise<Video[]> { 
-        // Nota: Solo se usa ahora para propósitos muy específicos. Home y otros usan getVideos paginado.
-        const res = await this.getVideos(0, 500); 
+        const res = await this.getVideos(0, 10000);
         return res.videos;
     }
 
@@ -191,13 +188,6 @@ class DBService {
         });
     }
 
-    public async updateFolderPrice(folderName: string, navigationPath: string, newPrice: number): Promise<{affected: number}> {
-        return this.request<{affected: number}>('action=admin_update_folder_price', { 
-            method: 'POST', 
-            body: JSON.stringify({ folderName, navigationPath, newPrice }) 
-        });
-    }
-
     public async hasPurchased(userId: string, videoId: string): Promise<boolean> {
         const res = await this.request<{hasPurchased: boolean}>(`action=has_purchased&userId=${userId}&videoId=${videoId}`);
         return res.hasPurchased;
@@ -233,13 +223,6 @@ class DBService {
         return this.request<void>(`action=delete_video`, { method: 'POST', body: JSON.stringify({ id: videoId, userId }) });
     }
 
-    public async updateVideoDetails(videoId: string, userId: string, title: string, price: number): Promise<void> {
-        return this.request<void>(`action=update_video_details`, { 
-            method: 'POST', 
-            body: JSON.stringify({ id: videoId, userId, title, price }) 
-        });
-    }
-
     public async uploadVideo(title: string, desc: string, price: number, cat: string, dur: number, user: User, file: File, thumb: File | null, onProgress: (p: number, l: number, t: number) => void): Promise<void> {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest(); const fd = new FormData();
@@ -261,7 +244,6 @@ class DBService {
     public async getMarketplaceItem(id: string): Promise<MarketplaceItem | null> { return this.request<MarketplaceItem | null>(`action=get_marketplace_item&id=${id}`); }
     public async createListing(formData: FormData): Promise<void> { return this.request<void>(`action=create_listing`, { method: 'POST', body: formData }); }
     public async editListing(id: string, userId: string, data: any): Promise<void> { return this.request<void>(`action=edit_listing`, { method: 'POST', body: JSON.stringify({ id, userId, data }) }); }
-    // Fix: Removed non-existent 'shadow' property from RequestInit object
     public async adminDeleteListing(itemId: string): Promise<void> { return this.request<void>(`action=admin_delete_listing`, { method: 'POST', body: JSON.stringify({ id: itemId }) }); }
     public async checkoutCart(userId: string, cart: any[], shippingDetails: any): Promise<void> { return this.request<void>(`action=checkout_cart`, { method: 'POST', body: JSON.stringify({ userId, cart, shippingDetails }) }); }
     public async getReviews(itemId: string): Promise<MarketplaceReview[]> { return this.request<MarketplaceReview[]>(`action=get_reviews&itemId=${itemId}`); }
