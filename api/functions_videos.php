@@ -204,16 +204,16 @@ function video_scan_local($pdo, $input) {
     $paths = array_unique(array_filter($paths));
     if (empty($paths)) respond(false, null, "No hay rutas configuradas.");
 
-    // Cargar jerarquía de categorías actual
-    $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
-    $categoriesJson = $stmtS->fetchColumn();
-    $hierarchy = json_decode($categoriesJson ?: '[]', true);
-    $knownCategoryNames = array_map('strtolower', array_column($hierarchy, 'name'));
-    $categoriesChanged = false;
-
+    // Obtener administrador para asignación
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
+    
+    // Cache de nombres de categorías conocidas para evitar redundancia en el bucle
+    $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
+    $globalCategories = json_decode($stmtS->fetchColumn() ?: '[]', true);
+    $knownCategoryNames = array_map('strtolower', array_column($globalCategories, 'name'));
+
     $added = 0; $found = 0; $errors = [];
-    $blacklist = ['#recycle', '@eaDir', '$RECYCLE.BIN', 'System Volume Information', '.Thumbnails', '.DS_Store', 'lost+found', 'uploads', 'videos', 'api'];
+    $blacklist = ['#recycle', '@eaDir', '$RECYCLE.BIN', 'System Volume Information', '.Thumbnails', '.DS_Store', 'lost+found', 'uploads', 'videos', 'api', 'thumbnails', 'avatars', 'market', 'node_modules', 'temp'];
 
     foreach ($paths as $rootPath) {
         $rootPath = trim($rootPath);
@@ -222,12 +222,13 @@ function video_scan_local($pdo, $input) {
             $directory = new RecursiveDirectoryIterator($rootPath, RecursiveDirectoryIterator::SKIP_DOTS | RecursiveDirectoryIterator::FOLLOW_SYMLINKS);
             $filter = new RecursiveCallbackFilterIterator($directory, function ($current, $key, $iterator) use ($blacklist) {
                 if ($current->isDir()) {
-                    if (in_array($current->getFilename(), $blacklist)) return false;
+                    if (in_array(strtolower($current->getFilename()), $blacklist)) return false;
                     return @is_readable($current->getPathname());
                 }
                 return true;
             });
             $it = new RecursiveIteratorIterator($filter, RecursiveIteratorIterator::SELF_FIRST);
+            
             foreach ($it as $file) {
                 if ($file->isDir()) continue;
                 $ext = strtolower($file->getExtension());
@@ -236,22 +237,26 @@ function video_scan_local($pdo, $input) {
                     $fullPath = $file->getRealPath();
                     if (!$fullPath) continue;
 
-                    // --- LÓGICA DE AUTO-CREACIÓN DE CATEGORÍA POR CARPETA (PASO 1) ---
+                    // --- LÓGICA DE AUTO-REGISTRO INMEDIATO DE CATEGORÍA ---
                     $folderName = basename(dirname($fullPath));
-                    if (!empty($folderName) && !in_array(strtolower($folderName), $knownCategoryNames) && !in_array(strtolower($folderName), $blacklist)) {
+                    $cleanFolderName = strtoupper(trim($folderName));
+                    
+                    if (!empty($cleanFolderName) && !in_array(strtolower($cleanFolderName), $knownCategoryNames) && !in_array(strtolower($cleanFolderName), $blacklist)) {
+                        // Crear categoría en BD inmediatamente para persistencia
                         $newId = 'cat_' . uniqid();
-                        $hierarchy[] = [
+                        $globalCategories[] = [
                             'id' => $newId,
-                            'name' => strtoupper($folderName),
+                            'name' => $cleanFolderName,
                             'price' => 1.0,
                             'autoSub' => false,
                             'sortOrder' => 'LATEST'
                         ];
-                        $knownCategoryNames[] = strtolower($folderName);
-                        $categoriesChanged = true;
-                        write_log("Paso 1: Auto-creada categoría global: " . strtoupper($folderName));
+                        $knownCategoryNames[] = strtolower($cleanFolderName);
+                        $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
+                            ->execute([json_encode($globalCategories, JSON_UNESCAPED_UNICODE)]);
+                        write_log("Paso 1: Detectado contenido en '$cleanFolderName'. Categoría creada automáticamente.");
                     }
-                    // -----------------------------------------------------------------
+                    // ------------------------------------------------------
 
                     $vidId = 'loc_' . md5($fullPath);
                     $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE id = ?");
@@ -261,6 +266,7 @@ function video_scan_local($pdo, $input) {
                         $title = trim(str_replace(['.', '_', '-'], ' ', $title));
                         $isAudio = in_array($ext, ['mp3', 'wav', 'aac', 'm4a']) ? 1 : 0;
                         $thumb = $isAudio ? 'api/uploads/thumbnails/defaultaudio.jpg' : 'api/uploads/thumbnails/default.jpg';
+                        
                         $stmt = $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal, is_audio, thumbnailUrl) VALUES (?, ?, ?, ?, ?, 'PENDING', 1, ?, ?)");
                         $stmt->execute([$vidId, $title, $fullPath, $adminId, time(), $isAudio, $thumb]);
                         $added++;
@@ -269,13 +275,6 @@ function video_scan_local($pdo, $input) {
             }
         } catch (Exception $e) { $errors[] = "Error parcial en $rootPath: " . $e->getMessage(); }
     }
-
-    // Guardar cambios en la jerarquía si hubo nuevos nombres de carpeta detectados
-    if ($categoriesChanged) {
-        $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
-            ->execute([json_encode($hierarchy, JSON_UNESCAPED_UNICODE)]);
-    }
-
     respond(true, ['totalFound' => $found, 'newToImport' => $added, 'errors' => $errors]);
 }
 
@@ -317,15 +316,19 @@ function video_get_by_creator($pdo, $userId) {
 }
 
 function video_get_related($pdo, $videoId) {
-    $stmt = $pdo->prepare("SELECT category, videoUrl, collection FROM videos WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT category, parent_category, collection, videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$videoId]);
-    $curr = $stmt->fetch();
-    if (!$curr) respond(true, []);
-    $prefix = rtrim(dirname($curr['videoUrl']), '/\\') . '/';
-    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
+    $current = $stmt->fetch();
+    if (!$current) respond(true, []);
+    $currentPathPrefix = rtrim(dirname($current['videoUrl']), '/\\') . '/';
+    $stmt = $pdo->prepare("SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
             WHERE v.id != ? AND v.category NOT IN ('PENDING', 'PROCESSING') 
-            ORDER BY CASE WHEN v.videoUrl LIKE ? THEN 0 ELSE 1 END, RAND() LIMIT 40");
-    $stmt->execute([$videoId, $prefix . "%"]);
+            ORDER BY 
+                CASE WHEN v.videoUrl LIKE ? THEN 0 ELSE 1 END,
+                CASE WHEN v.collection = ? THEN 0 ELSE 1 END, 
+                CASE WHEN v.category = ? THEN 0 ELSE 1 END, 
+                RAND() LIMIT 40");
+    $stmt->execute([$videoId, $currentPathPrefix . "%", $current['collection'], $current['category']]);
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos);
     respond(true, $videos);
@@ -356,7 +359,7 @@ function video_upload($pdo, $post, $files) {
     $price = floatval($post['price']);
     $cat = $post['category'];
     $dur = intval($post['duration']);
-    $videoUrl = ''; $isAudio = 0;
+    $isAudio = 0;
     if (isset($files['video'])) {
         $ext = strtolower(pathinfo($files['video']['name'], PATHINFO_EXTENSION));
         if (!is_dir('uploads/videos')) mkdir('uploads/videos', 0777, true);
@@ -414,41 +417,9 @@ function video_organize_single($pdo, $id, $settings) {
     $stmt->execute([$id]);
     $v = $stmt->fetch();
     if (!$v) return;
-    
     $hierarchy = json_decode($settings['categories'] ?? '[]', true);
-    
-    // ANALIZAR METADATOS (Título y Categoría Sugerida)
     $meta = smartParseFilename($v['videoUrl'], $v['category'], $hierarchy);
-    
-    // --- LÓGICA DE AUTO-REGISTRO DE CATEGORÍA (Safeguard) ---
-    $categoryToUse = $meta['category'];
-    $existsInGlobal = false;
-    foreach ($hierarchy as $c) {
-        if (strcasecmp($c['name'], $categoryToUse) === 0) {
-            $existsInGlobal = true;
-            break;
-        }
-    }
-
-    if (!$existsInGlobal && $categoryToUse !== 'GENERAL' && $categoryToUse !== 'PENDING' && $categoryToUse !== 'PROCESSING') {
-        $newId = 'cat_' . uniqid();
-        $newCategory = [
-            'id' => $newId,
-            'name' => strtoupper($categoryToUse),
-            'price' => 1.0,
-            'autoSub' => false,
-            'sortOrder' => 'LATEST'
-        ];
-        $hierarchy[] = $newCategory;
-        $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
-            ->execute([json_encode($hierarchy, JSON_UNESCAPED_UNICODE)]);
-        
-        write_log("Organizador: Auto-creada categoría: " . $categoryToUse);
-    }
-    // -------------------------------------------------------
-
     $price = (floatval($v['price'] ?? 0) > 0) ? $v['price'] : getPriceForCategory($meta['category'], $settings, $meta['parent_category']);
-    
     $stmt = $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?");
     $stmt->execute([$meta['title'], $meta['category'], $meta['parent_category'], $meta['collection'], $price, $id]);
 }
