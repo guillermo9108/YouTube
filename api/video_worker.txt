@@ -1,6 +1,6 @@
 <?php
 /**
- * StreamPay - Server-Side Video Worker V1.4.5 (NAS Optimized - Resilient)
+ * StreamPay - Server-Side Video Worker V1.4.6 (NAS Optimized - Extreme Resilience)
  * Procesa la cola de videos PENDING con soporte para Audio y Video.
  */
 
@@ -74,22 +74,24 @@ for ($i = 0; $i < $batchSize; $i++) {
     
     $realPath = resolve_video_path($video['videoUrl']);
     
-    if (!$realPath || !file_exists($realPath) || filesize($realPath) === 0) {
-        $reason = (!$realPath || !file_exists($realPath)) ? '404: Archivo no encontrado' : 'Error: Archivo vacío (0 bytes)';
+    if (!$realPath || !file_exists($realPath) || filesize($realPath) < 1024) {
+        $reason = (!$realPath || !file_exists($realPath)) ? '404: Archivo no encontrado' : 'Error: Archivo corrupto o demasiado pequeño (< 1KB)';
         echo "[ERROR] $reason\n";
         $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = ?, locked_at = 0 WHERE id = ?")->execute([$reason, $video['id']]);
         $failed++;
         continue;
     }
 
-    // A. FFprobe con validación de "moov atom"
+    // A. FFprobe con validación de metadatos críticos
     $cmdProbe = "$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath) . " 2>&1";
     $durOutput = shell_exec($cmdProbe);
     
-    // Si FFprobe devuelve errores críticos de estructura
-    if (strpos($durOutput, 'moov atom not found') !== false || strpos($durOutput, 'Invalid data found') !== false) {
-        echo "[FATAL] Archivo corrupto o truncado.\n";
-        $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = 'Estructura corrupta (moov atom missing)', locked_at = 0 WHERE id = ?")->execute([$video['id']]);
+    // Gestión de errores de "moov atom" o "Invalid data"
+    $isCorrupt = (strpos($durOutput, 'moov atom not found') !== false || strpos($durOutput, 'Invalid data found') !== false || strpos($durOutput, 'Output file #0 does not contain any stream') !== false);
+    
+    if ($isCorrupt) {
+        echo "[FATAL] Archivo corrupto o sin flujo de datos válido.\n";
+        $pdo->prepare("UPDATE videos SET category = 'FAILED_METADATA', reason = 'Estructura corrupta (moov missing o stream error)', locked_at = 0 WHERE id = ?")->execute([$video['id']]);
         $failed++;
         continue;
     }
@@ -97,13 +99,13 @@ for ($i = 0; $i < $batchSize; $i++) {
     $duration = floor(floatval(trim($durOutput)));
 
     if ($duration <= 0) {
-        echo "[ERROR] Duración inválida. Reintentando...\n";
+        echo "[ERROR] Duración inválida o ilegible. Aumentando intentos...\n";
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, locked_at = 0 WHERE id = ?")->execute([$video['id']]);
         $failed++;
         continue;
     }
 
-    // B. Miniatura con corrección de pixel format
+    // B. Generación de Miniatura
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     $isAudio = (bool)$video['is_audio'] || in_array($ext, ['mp3', 'wav', 'aac', 'm4a', 'flac']);
     $thumbUrl = '';
@@ -111,34 +113,41 @@ for ($i = 0; $i < $batchSize; $i++) {
 
     if ($isAudio) {
         $thumbUrl = 'api/uploads/thumbnails/defaultaudio.jpg';
-        echo "[INFO] Audio: Usando predeterminado.\n";
+        echo "[INFO] Audio detectado: Usando carátula predeterminada.\n";
     } else {
         $thumbFile = 'uploads/thumbnails/' . $video['id'] . '.jpg';
         $fullThumbPath = __DIR__ . '/' . $thumbFile;
+        if (!is_dir(dirname($fullThumbPath))) mkdir(dirname($fullThumbPath), 0777, true);
+        
         $time = ($duration > 5) ? "00:00:03" : "00:00:01";
         
-        // Corrección: -pix_fmt yuv420p para asegurar que el frame extraído sea compatible con el encoder JPG
+        // Corrección de codec tag: -pix_fmt yuv420p asegura compatibilidad con frames MJPEG de carátulas o fotos
         $cmdFfmpeg = "$ffmpeg -y -ss $time -i " . escapeshellarg($realPath) . " -frames:v 1 -pix_fmt yuv420p -q:v 4 " . escapeshellarg($fullThumbPath) . " 2>&1";
         exec($cmdFfmpeg, $ffOutput, $ffCode);
         
-        if ($ffCode === 0) {
+        if ($ffCode === 0 && file_exists($fullThumbPath)) {
             $thumbUrl = 'api/' . $thumbFile;
+        } else {
+            echo "[WARN] Falló extracción de frame. Usando genérico de video.\n";
+            $thumbUrl = 'api/uploads/thumbnails/default.jpg';
+            $ffCode = 0; // Permitimos continuar aunque falle la thumb
         }
     }
 
     if ($ffCode === 0) {
-        echo "[SUCCESS] OK. $duration s.\n";
+        echo "[SUCCESS] Procesado OK. Duración: $duration s.\n";
         $pdo->prepare("UPDATE videos SET duration = ?, thumbnailUrl = ?, category = 'PROCESSING', locked_at = 0, processing_attempts = 0 WHERE id = ?")
             ->execute([$duration, $thumbUrl, $video['id']]);
         
+        // Organización instantánea tras éxito del worker
         $sets = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
         video_organize_single($pdo, $video['id'], $sets);
         $processed++;
     } else {
-        echo "[ERROR] FFmpeg falló.\n";
+        echo "[ERROR] FFmpeg devolvió error fatal.\n";
         $pdo->prepare("UPDATE videos SET processing_attempts = processing_attempts + 1, locked_at = 0 WHERE id = ?")->execute([$video['id']]);
         $failed++;
     }
 }
-echo "\nWorker finalizado.\n";
+echo "\nWorker finalizado. Procesados: $processed, Fallidos: $failed.\n";
 ?>

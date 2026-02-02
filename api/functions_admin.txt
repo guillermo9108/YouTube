@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V18.5 (Batch Processing Ready)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V18.6 (Transcoder Optimized)
  */
 
 function admin_get_settings($pdo) {
@@ -168,13 +168,21 @@ function admin_process_next_transcode($pdo) {
     $stmtP->execute([$ext]);
     $args = $stmtP->fetchColumn();
 
-    // Mejora: Si no hay perfil o es audio, aplicar parámetros de seguridad
+    // Mejora: Detección robusta de audio para conversión MP3 -> MP4
+    $isAudio = ($ext === 'mp3' || $ext === 'wav' || $ext === 'aac' || $ext === 'm4a');
+
     if (!$args) {
-        if ($ext === 'mp3') {
-            // Conversión de MP3 a MP4 con imagen fija (negra o carátula si existiera)
+        if ($isAudio) {
+            // Conversión de audio a contenedor MP4 compatible: omitir video para evitar errores de stream
             $args = "-c:a aac -b:a 192k -vn";
         } else {
+            // Video estándar: forzar yuv420p para compatibilidad de color en todos los navegadores
             $args = "-c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac";
+        }
+    } else {
+        // Si el admin configuró argumentos manuales, asegurar pix_fmt yuv420p si no está presente para evitar errores de tag
+        if (strpos($args, '-pix_fmt') === false && !$isAudio) {
+            $args .= " -pix_fmt yuv420p";
         }
     }
 
@@ -199,7 +207,7 @@ function admin_process_next_transcode($pdo) {
         respond(true, "Video convertido OK");
     } else {
         $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Error FFmpeg Code $returnCode' WHERE id = ?")->execute([$video['id']]);
-        respond(false, null, "Error en ejecución de FFmpeg");
+        respond(false, null, "Error en ejecución de FFmpeg. Ver log técnico.");
     }
 }
 

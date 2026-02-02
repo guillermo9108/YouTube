@@ -466,11 +466,21 @@ function video_smart_organize($pdo) {
 }
 
 function video_reorganize_all($pdo) {
+    // Implementación por lotes para evitar errores de Malformed JSON por timeouts
+    $limit = intval($_GET['limit'] ?? 100);
+    $offset = intval($_GET['offset'] ?? 0);
+    
     $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
-    $stmt = $pdo->query("SELECT id FROM videos WHERE category NOT IN ('PENDING', 'FAILED_METADATA')");
+    $stmt = $pdo->prepare("SELECT id FROM videos WHERE category NOT IN ('PENDING', 'FAILED_METADATA') LIMIT ? OFFSET ?");
+    // PDO::PARAM_INT es necesario para que MariaDB no trate el límite como string
+    $stmt->bindValue(1, $limit, PDO::PARAM_INT);
+    $stmt->bindValue(2, $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     foreach ($ids as $id) video_organize_single($pdo, $id, $settings);
-    respond(true, ['processed' => count($ids), 'total' => count($ids)]);
+    
+    respond(true, ['processed' => count($ids)]);
 }
 
 function video_fix_metadata($pdo) {

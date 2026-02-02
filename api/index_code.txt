@@ -1,11 +1,15 @@
 <?php
 ob_start();
 /**
- * StreamPay - Core Controller V11.51 (Header Fix)
+ * StreamPay - Core Controller V11.52 (Limits Optimized)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
 date_default_timezone_set('UTC');
+
+// Ajuste de límites para evitar Malformed JSON por timeouts
+ini_set('max_execution_time', 300);
+ini_set('memory_limit', '512M');
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
