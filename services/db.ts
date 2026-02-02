@@ -55,20 +55,20 @@ class DBService {
     }
 
     /**
-     * Obtiene videos paginados con filtros de carpeta, búsqueda y categoría global.
+     * Obtiene videos paginados con filtros de carpeta, búsqueda, categoría global y tipo de medio.
      */
-    public async getVideos(page: number = 0, limit: number = 40, folder: string = '', search: string = '', category: string = ''): Promise<VideoPagedResponse> {
+    public async getVideos(page: number = 0, limit: number = 40, folder: string = '', search: string = '', category: string = '', mediaType: string = 'ALL'): Promise<VideoPagedResponse> {
         const offset = page * limit;
-        const query = `action=get_videos&limit=${limit}&offset=${offset}&folder=${encodeURIComponent(folder)}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`;
+        const query = `action=get_videos&limit=${limit}&offset=${offset}&folder=${encodeURIComponent(folder)}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&media_type=${encodeURIComponent(mediaType)}`;
         return this.request<VideoPagedResponse>(query);
     }
 
     /**
-     * Obtiene Shorts paginados filtrados por el servidor.
+     * Obtiene Shorts paginados filtrados por el servidor. Fuerza media_type=VIDEO.
      */
     public async getShorts(page: number = 0, limit: number = 20): Promise<VideoPagedResponse> {
         const offset = page * limit;
-        const query = `action=get_videos&limit=${limit}&offset=${offset}&shorts=1`;
+        const query = `action=get_videos&limit=${limit}&offset=${offset}&shorts=1&media_type=VIDEO`;
         return this.request<VideoPagedResponse>(query);
     }
 

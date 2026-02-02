@@ -37,6 +37,7 @@ function video_get_all($pdo) {
     $search = trim($_GET['search'] ?? '');
     $folder = trim($_GET['folder'] ?? ''); 
     $category = trim($_GET['category'] ?? ''); 
+    $mediaType = trim($_GET['media_type'] ?? 'ALL');
     $isShorts = !empty($_GET['shorts']); 
     
     $params = [];
@@ -49,6 +50,13 @@ function video_get_all($pdo) {
     if (!empty($search)) {
         $where[] = "v.title LIKE ?";
         $params[] = "%$search%";
+    }
+
+    // Filtro de Naturaleza del Medio
+    if ($mediaType === 'VIDEO') {
+        $where[] = "v.is_audio = 0";
+    } elseif ($mediaType === 'AUDIO') {
+        $where[] = "v.is_audio = 1";
     }
 
     // Lógica Híbrida de Categoría + Carpeta

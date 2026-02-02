@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
@@ -127,7 +126,7 @@ const FolderEditModal: React.FC<{
                 </div>
                 <div className="p-6 space-y-6">
                     <div className="space-y-2">
-                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1">Precio Sugerido ($)</label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Precio Sugerido ($)</label>
                         <div className="relative">
                             <DollarSign className="absolute left-4 top-3.5 text-emerald-500" size={18}/>
                             <input 
@@ -137,7 +136,7 @@ const FolderEditModal: React.FC<{
                         </div>
                     </div>
                     <div className="space-y-2">
-                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1">Orden de la Colección</label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Orden de la Colección</label>
                         <div className="relative">
                             <SortAsc className="absolute left-4 top-3.5 text-indigo-400" size={18}/>
                             <select 
@@ -180,6 +179,11 @@ export default function Home() {
     const [navVisible, setNavVisible] = useState(true);
     const [editingFolder, setEditingFolder] = useState<any | null>(null);
     
+    // Filtro de Medio Persistente
+    const [mediaFilter, setMediaFilter] = useState<'ALL' | 'VIDEO' | 'AUDIO'>(() => {
+        return (localStorage.getItem('sp_media_filter') as any) || 'ALL';
+    });
+
     // Data State
     const [videos, setVideos] = useState<Video[]>([]);
     const [folders, setFolders] = useState<{ name: string; count: number; thumbnailUrl: string; relativePath: string }[]>([]);
@@ -217,6 +221,11 @@ export default function Home() {
     const currentFolder = navigationPath.join('/');
     const parentFolderName = navigationPath.length > 0 ? navigationPath[navigationPath.length - 1] : null;
 
+    // Persistir preferencia de filtro
+    useEffect(() => {
+        localStorage.setItem('sp_media_filter', mediaFilter);
+    }, [mediaFilter]);
+
     // 1. Cargar configuración inicial
     useEffect(() => {
         db.getSystemSettings().then(s => {
@@ -242,7 +251,7 @@ export default function Home() {
         }
 
         try {
-            const res = await db.getVideos(p, 40, currentFolder, searchQuery, selectedCategory);
+            const res = await db.getVideos(p, 40, currentFolder, searchQuery, selectedCategory, mediaFilter);
             
             if (reset) {
                 setVideos(res.videos);
@@ -305,7 +314,7 @@ export default function Home() {
     // 4. Trigger de carga cuando cambian filtros
     useEffect(() => {
         fetchVideos(0, true);
-    }, [currentFolder, searchQuery, selectedCategory]);
+    }, [currentFolder, searchQuery, selectedCategory, mediaFilter]);
 
     // 5. Infinite Scroll Observer
     useEffect(() => {
@@ -523,11 +532,39 @@ export default function Home() {
                 {!searchQuery && (
                     <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
                         <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-6 max-w-7xl mx-auto">
-                            <Breadcrumbs 
-                                path={navigationPath} onNavigate={handleNavigate} 
-                                onToggleFolders={() => setShowFolderGrid(!showFolderGrid)}
-                                showFolders={showFolderGrid} hasFolders={folders.length > 0}
-                            />
+                            <div className="flex items-center gap-4 shrink-0">
+                                <Breadcrumbs 
+                                    path={navigationPath} onNavigate={handleNavigate} 
+                                    onToggleFolders={() => setShowFolderGrid(!showFolderGrid)}
+                                    showFolders={showFolderGrid} hasFolders={folders.length > 0}
+                                />
+                                
+                                {/* FILTRO DE MEDIO (AUDIO/VIDEO) */}
+                                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
+                                    <button 
+                                        onClick={() => setMediaFilter('ALL')} 
+                                        className={`p-2 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                        title="Ver Todo"
+                                    >
+                                        <Layers size={14}/>
+                                    </button>
+                                    <button 
+                                        onClick={() => setMediaFilter('VIDEO')} 
+                                        className={`p-2 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                        title="Solo Video"
+                                    >
+                                        <Play size={14}/>
+                                    </button>
+                                    <button 
+                                        onClick={() => setMediaFilter('AUDIO')} 
+                                        className={`p-2 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                        title="Solo Audio"
+                                    >
+                                        <Music size={14}/>
+                                    </button>
+                                </div>
+                            </div>
+
                             <div className="flex-1 min-w-0 flex items-center gap-3 overflow-x-auto scrollbar-hide py-1">
                                 {parentFolderName && (
                                     <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3">
@@ -615,9 +652,10 @@ export default function Home() {
                         <div className="space-y-8">
                             {!searchQuery && (
                                 <div className="flex items-center gap-3 px-1">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${mediaFilter === 'AUDIO' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></div>
                                     <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-4">
-                                        {selectedCategory !== 'TODOS' ? `Filtrando por: ${selectedCategory}` : (parentFolderName ? `Videos en ${parentFolderName}` : 'Novedades')}
+                                        {selectedCategory !== 'TODOS' ? `Filtrando por: ${selectedCategory}` : (parentFolderName ? `Contenido en ${parentFolderName}` : 'Novedades')}
+                                        {mediaFilter !== 'ALL' && <span className="text-slate-500 text-[9px] lowercase italic">({mediaFilter.toLowerCase()}s)</span>}
                                         <span className="w-12 h-px bg-white/10"></span>
                                     </h2>
                                 </div>
