@@ -44,7 +44,6 @@ function video_get_all($pdo) {
     $where = ["v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
 
     if ($isShorts) {
-        // Se elimina la restricción de is_audio=0 para permitir shorts de audio si el filtro lo pide
         $where[] = "v.duration < 180";
     }
 
@@ -53,7 +52,7 @@ function video_get_all($pdo) {
         $params[] = "%$search%";
     }
 
-    // Filtro de Naturaleza del Medio (Aplica a Shorts y Videos normales)
+    // Filtro de Naturaleza del Medio
     if ($mediaType === 'VIDEO') {
         $where[] = "v.is_audio = 0";
     } elseif ($mediaType === 'AUDIO') {
@@ -107,9 +106,17 @@ function video_get_all($pdo) {
         $subfolders = video_discover_subfolders($pdo, $folder);
     }
 
-    // --- CATEGORÍAS CONTEXTUALES ---
+    // --- CATEGORÍAS CONTEXTUALES (Ajustadas por Filtro de Medio) ---
     $catWhere = ["category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
     $catParams = [];
+
+    // Aplicamos el filtro de medio a la detección de categorías para no mostrar vacías
+    if ($mediaType === 'VIDEO') {
+        $catWhere[] = "is_audio = 0";
+    } elseif ($mediaType === 'AUDIO') {
+        $catWhere[] = "is_audio = 1";
+    }
+
     if (!empty($folder)) {
         $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
         $root = rtrim($stmtS->fetchColumn(), '/\\');

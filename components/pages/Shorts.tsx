@@ -248,7 +248,7 @@ export default function Shorts() {
     if (loading || !hasMore) return;
     setLoading(true);
     
-    // Obtener el filtro persistente
+    // Obtener el filtro persistente (Leído desde localStorage para coherencia global)
     const mediaFilter = localStorage.getItem('sp_media_filter') || 'ALL';
     
     try {
