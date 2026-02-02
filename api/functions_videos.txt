@@ -44,7 +44,8 @@ function video_get_all($pdo) {
     $where = ["v.category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
 
     if ($isShorts) {
-        $where[] = "v.duration < 180 AND v.is_audio = 0";
+        // Se elimina la restricción de is_audio=0 para permitir shorts de audio si el filtro lo pide
+        $where[] = "v.duration < 180";
     }
 
     if (!empty($search)) {
@@ -52,7 +53,7 @@ function video_get_all($pdo) {
         $params[] = "%$search%";
     }
 
-    // Filtro de Naturaleza del Medio
+    // Filtro de Naturaleza del Medio (Aplica a Shorts y Videos normales)
     if ($mediaType === 'VIDEO') {
         $where[] = "v.is_audio = 0";
     } elseif ($mediaType === 'AUDIO') {

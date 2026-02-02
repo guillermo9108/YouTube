@@ -78,8 +78,12 @@ export default function Watch() {
     const fetchRelated = async (p: number) => {
         if (loadingMoreRelated || (!hasMoreRelated && p !== 0)) return;
         setLoadingMoreRelated(true);
+        
+        // Cargar el filtro persistente del sistema
+        const mediaFilter = localStorage.getItem('sp_media_filter') || 'ALL';
+        
         try {
-            const res = await db.getVideos(p, 40, '', searchContext || '', 'TODOS');
+            const res = await db.getVideos(p, 40, '', searchContext || '', 'TODOS', mediaFilter as any);
             if (p === 0) {
                 setRelatedVideos(res.videos.filter(v => v.id !== id));
                 setSeriesQueue(res.videos.sort((a, b) => naturalCollator.compare(a.title, b.title)));

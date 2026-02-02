@@ -64,11 +64,11 @@ class DBService {
     }
 
     /**
-     * Obtiene Shorts paginados filtrados por el servidor. Fuerza media_type=VIDEO.
+     * Obtiene Shorts paginados filtrados por el servidor. Respeta el filtro global de mediaType.
      */
-    public async getShorts(page: number = 0, limit: number = 20): Promise<VideoPagedResponse> {
+    public async getShorts(page: number = 0, limit: number = 20, mediaType: string = 'ALL'): Promise<VideoPagedResponse> {
         const offset = page * limit;
-        const query = `action=get_videos&limit=${limit}&offset=${offset}&shorts=1&media_type=VIDEO`;
+        const query = `action=get_videos&limit=${limit}&offset=${offset}&shorts=1&media_type=${encodeURIComponent(mediaType)}`;
         return this.request<VideoPagedResponse>(query);
     }
 

@@ -91,7 +91,6 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
         const res = await db.rateVideo(user.id, video.id, rating);
         setInteraction(res); 
         if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
-        // FIX: Changed setDislikes to setDislikeCount to match the state setter name on line 33
         if (res.newDislikeCount !== undefined) setDislikeCount(res.newDislikeCount);
     } catch(e) {}
   };
@@ -248,8 +247,12 @@ export default function Shorts() {
   const fetchShorts = async (p: number) => {
     if (loading || !hasMore) return;
     setLoading(true);
+    
+    // Obtener el filtro persistente
+    const mediaFilter = localStorage.getItem('sp_media_filter') || 'ALL';
+    
     try {
-        const res = await db.getShorts(p, 10);
+        const res = await db.getShorts(p, 10, mediaFilter);
         if (res.videos.length > 0) {
             setVideos(prev => p === 0 ? res.videos : [...prev, ...res.videos]);
             setHasMore(res.hasMore);
