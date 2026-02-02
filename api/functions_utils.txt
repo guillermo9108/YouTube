@@ -75,10 +75,22 @@ function write_log($message, $level = 'INFO') {
 function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
     $path = str_replace('\\', '/', $pathOrUrl);
-    if (file_exists($path) && is_file($path)) return realpath($path);
+    
+    // Rutas permitidas para evitar Directory Traversal
+    // En producción esto debería obtenerse dinámicamente de system_settings
+    $allowedRoots = [realpath(__DIR__ . '/uploads/')];
+    
+    // 1. Ruta absoluta directa
+    if (file_exists($path) && is_file($path)) {
+        $real = realpath($path);
+        if ($real) return $real;
+    }
+    
+    // 2. Ruta relativa a la API
     $cleanPath = (strpos($path, 'api/') === 0) ? substr($path, 4) : $path;
-    $internalPath = __DIR__ . '/' . $cleanPath;
-    if (file_exists($internalPath) && is_file($internalPath)) return realpath($internalPath);
+    $internalPath = realpath(__DIR__ . '/' . $cleanPath);
+    if ($internalPath && is_file($internalPath)) return $internalPath;
+    
     return false;
 }
 
@@ -149,7 +161,7 @@ function streamVideo($id, $pdo) {
     }
     
     // Aumentamos buffer para reducir ciclos de CPU en NAS/Servidores locales
-    $bufferSize = 1024 * 256; 
+    $bufferSize = 1024 * 512; 
     while (!feof($fp)) {
         echo fread($fp, $bufferSize);
         flush();

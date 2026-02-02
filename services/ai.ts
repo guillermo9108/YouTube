@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { Video } from "../types";
 
@@ -8,7 +7,6 @@ import { Video } from "../types";
  */
 
 const getAIClient = () => {
-    // Fix: Always use process.env.API_KEY string directly in named parameter
     if (!process.env.API_KEY) return null;
     return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
@@ -65,15 +63,33 @@ export const aiService = {
 
     /**
      * Chat interactivo para recomendar contenido basado en el catálogo disponible.
-     * Mantiene el contexto de los videos actuales para ofrecer respuestas precisas.
+     * Implementa una búsqueda previa para filtrar el catálogo y ofrecer contexto relevante.
      */
     async chatWithConcierge(userMessage: string, availableVideos: Video[]) {
         const ai = getAIClient();
         if (!ai) return "La inteligencia del conserje no está disponible en este momento.";
 
-        // Inyectamos el catálogo actual como contexto para que la IA sepa qué recomendar
-        const context = availableVideos
-            .slice(0, 50) // Limitamos para no exceder contexto básico
+        // --- BÚSQUEDA PREVIA DE RELEVANCIA ---
+        const queryTerms = userMessage.toLowerCase().split(/\s+/).filter(t => t.length > 3);
+        
+        let filteredVideos = availableVideos;
+        if (queryTerms.length > 0) {
+            filteredVideos = availableVideos.filter(v => 
+                queryTerms.some(term => 
+                    v.title.toLowerCase().includes(term) || 
+                    v.category.toLowerCase().includes(term) ||
+                    (v.description && v.description.toLowerCase().includes(term))
+                )
+            );
+        }
+
+        // Si la búsqueda no arroja nada, volvemos a los más recientes/populares
+        if (filteredVideos.length === 0) {
+            filteredVideos = availableVideos;
+        }
+
+        const context = filteredVideos
+            .slice(0, 40) // Limitamos para un prompt limpio y rápido
             .map(v => `- ${v.title} (Cat: ${v.category}, Precio: ${v.price} Saldo, ID: ${v.id})`)
             .join('\n');
 
@@ -81,18 +97,19 @@ export const aiService = {
             const chat = ai.chats.create({
                 model: 'gemini-3-flash-preview',
                 config: {
-                    systemInstruction: `Eres el Conserje Premium de StreamPay. Tu misión es ayudar al usuario a encontrar qué ver.
+                    systemInstruction: `Eres el Conserje Premium de StreamPay. Tu misión es ayudar al usuario a encontrar qué ver basándote exclusivamente en los videos que te proporciono en el contexto.
                     
-                    CATÁLOGO ACTUAL DISPONIBLE:
+                    CATÁLOGO RELEVANTE DETECTADO:
                     ${context}
                     
                     REGLAS DE ORO:
                     1. SOLO recomienda videos que estén en la lista anterior.
-                    2. Responde con un tono elegante, servicial y entusiasta.
-                    3. Si preguntan por precios, menciona que se paga con Saldo interno.
-                    4. Mantén las respuestas breves y directas.
-                    5. Responde SIEMPRE en español.`,
-                    thinkingConfig: { thinkingBudget: 0 } // Respuesta rápida para chat
+                    2. Si el catálogo relevante está vacío o no encuentras lo que piden, menciónalo amablemente y sugiere explorar el inicio.
+                    3. Responde con un tono elegante, servicial y entusiasta.
+                    4. Si preguntan por precios, menciona que se paga con Saldo interno.
+                    5. Mantén las respuestas directas.
+                    6. Responde SIEMPRE en español.`,
+                    thinkingConfig: { thinkingBudget: 0 }
                 }
             });
 

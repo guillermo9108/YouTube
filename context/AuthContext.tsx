@@ -23,8 +23,8 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const heartbeatRef = useRef<number | null>(null);
-  const userRef = useRef<User | null>(null); // Ref para evitar cierres obsoletos en el intervalo
+  const heartbeatTimerRef = useRef<number | null>(null);
+  const userRef = useRef<User | null>(null); 
   const toast = useToast();
   
   // Sincronizar Ref con State
@@ -38,7 +38,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     localStorage.removeItem('sp_current_user_id');
     localStorage.removeItem('sp_session_token');
     localStorage.removeItem('sp_offline_user');
-    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+    if (heartbeatTimerRef.current) window.clearTimeout(heartbeatTimerRef.current);
     window.dispatchEvent(new Event('sp_logout'));
   };
 
@@ -82,33 +82,33 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
+    const runHeartbeat = async () => {
+        if (userRef.current && !document.hidden) {
+            try {
+                const updatedUser = await db.heartbeat(userRef.current.id);
+                if (updatedUser) {
+                    if (Number(updatedUser.balance) !== Number(userRef.current.balance) || updatedUser.vipExpiry !== userRef.current.vipExpiry) {
+                        setUser(prev => prev ? ({ ...prev, ...updatedUser, balance: Number(updatedUser.balance) }) : null);
+                    }
+                }
+            } catch (e) {
+                // Interceptor handles 401
+            }
+        }
+        // Programar siguiente ejecución tras finalizar la actual
+        heartbeatTimerRef.current = window.setTimeout(runHeartbeat, 30000);
+    };
+
     if (user && user.sessionToken) {
         db.saveOfflineUser(user);
-
-        if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
-        
-        // HEARTBEAT SYNC (Actualiza saldo cada 30s)
-        heartbeatRef.current = window.setInterval(async () => {
-            if (userRef.current && !document.hidden) {
-                try {
-                    const updatedUser = await db.heartbeat(userRef.current.id);
-                    if (updatedUser) {
-                        // Actualizamos solo si hay cambios en balance o VIP
-                        if (Number(updatedUser.balance) !== Number(userRef.current.balance) || updatedUser.vipExpiry !== userRef.current.vipExpiry) {
-                            setUser(prev => prev ? ({ ...prev, ...updatedUser, balance: Number(updatedUser.balance) }) : null);
-                        }
-                    }
-                } catch (e) {
-                    // El interceptor de db.ts manejará el 401 si ocurre
-                }
-            }
-        }, 30000);
+        if (heartbeatTimerRef.current) window.clearTimeout(heartbeatTimerRef.current);
+        heartbeatTimerRef.current = window.setTimeout(runHeartbeat, 30000);
     }
 
     return () => {
-        if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+        if (heartbeatTimerRef.current) window.clearTimeout(heartbeatTimerRef.current);
     };
-  }, [!!user]); // Solo re-ejecutar cuando cambia el estado de logueado
+  }, [!!user]);
 
   const refreshUser = async () => {
      const currentToken = localStorage.getItem('sp_session_token');

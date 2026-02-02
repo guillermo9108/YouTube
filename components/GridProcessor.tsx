@@ -11,6 +11,7 @@ export default function GridProcessor() {
     const [isAudioMode, setIsAudioMode] = useState(false);
     const processedRef = useRef(false);
     const safetyTimeoutRef = useRef<number | null>(null);
+    const currentBlobUrlRef = useRef<string | null>(null);
 
     useEffect(() => {
         if (activeTask) {
@@ -59,17 +60,24 @@ export default function GridProcessor() {
         safetyTimeoutRef.current = window.setTimeout(() => {
             if (!processedRef.current && activeTask) {
                 const dur = (vid.duration && isFinite(vid.duration)) ? vid.duration : 0;
-                // Si llegamos aquí por timeout, marcamos como incompatible para que el servidor intente extraer miniatura
                 handleFinishTask(dur, dur > 0, true);
             }
-        }, 12000);
+        }, 15000);
 
         return () => {
-            if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+            if (safetyTimeoutRef.current) {
+                clearTimeout(safetyTimeoutRef.current);
+                safetyTimeoutRef.current = null;
+            }
             if (vid) {
                 vid.pause();
                 vid.removeAttribute('src');
                 vid.load();
+            }
+            // Cleanup references
+            if (currentBlobUrlRef.current) {
+                URL.revokeObjectURL(currentBlobUrlRef.current);
+                currentBlobUrlRef.current = null;
             }
         };
     }, [activeTask, isAudioMode]);
@@ -79,7 +87,6 @@ export default function GridProcessor() {
         setStatus('CAPTURING');
         
         try {
-            // Agilizado: skipImage=true para no perder tiempo buscando carátulas ID3 en colaboración
             const res = await generateThumbnail(url, true, true);
             if (!processedRef.current && activeTask) {
                 handleFinishTask(res.duration, res.duration > 0, false);
@@ -89,9 +96,6 @@ export default function GridProcessor() {
         }
     };
 
-    /**
-     * Centraliza la finalización de la tarea y el reporte al servidor
-     */
     const handleFinishTask = async (duration: number, isSuccess: boolean, isIncompatible: boolean) => {
         if (processedRef.current || !activeTask) return;
         processedRef.current = true;
@@ -101,15 +105,18 @@ export default function GridProcessor() {
             const fd = new FormData();
             fd.append('id', activeTask.id);
             fd.append('duration', String(duration));
-            // CRÍTICO: Si no hubo éxito, enviamos '0' para que el servidor incremente el intento o lo mande a mantenimiento
             fd.append('success', isSuccess ? '1' : '0');
             fd.append('clientIncompatible', isIncompatible ? '1' : '0');
             
             await db.request(`action=update_video_metadata`, { method: 'POST', body: fd });
             completeTask(duration, null);
         } catch(e) {
-            // Si falla la red al reportar, liberamos la tarea para que otro cliente o el worker la tome
             skipTask();
+        } finally {
+            if (currentBlobUrlRef.current) {
+                URL.revokeObjectURL(currentBlobUrlRef.current);
+                currentBlobUrlRef.current = null;
+            }
         }
     };
 

@@ -1,4 +1,3 @@
-
 <?php
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS V18.2 (Bulk Folder Edit)
@@ -414,15 +413,18 @@ function admin_get_local_stats($pdo) {
     $paths = json_decode($sets['libraryPaths'] ?: '[]', true);
     if ($sets['localLibraryPath']) $paths[] = $sets['localLibraryPath'];
     $volumes = [];
+    $stmtCount = $pdo->prepare("SELECT COUNT(*) FROM videos WHERE videoUrl LIKE ?");
     foreach (array_unique($paths) as $p) {
         if (is_dir($p)) {
             $total = @disk_total_space($p); $free = @disk_free_space($p);
+            $stmtCount->execute([$p . '%']);
+            $count = $stmtCount->fetchColumn();
             $volumes[] = [
                 'name' => basename($p) ?: 'Root',
                 'path' => $p,
                 'total' => round($total / 1073741824, 1),
                 'free' => round($free / 1073741824, 1),
-                'video_count' => $pdo->query("SELECT COUNT(*) FROM videos WHERE videoUrl LIKE '$p%'")->fetchColumn()
+                'video_count' => $count
             ];
         }
     }

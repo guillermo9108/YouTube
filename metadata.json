@@ -1,6 +1,6 @@
 {
-  "name": "StreamPay OFICIAL 0.0.14.1",
-  "description": "Agregar edición. Mejorar carga de videos.",
+  "name": "StreamPay OFICIAL 0.0.14.2",
+  "description": "Errores ",
   "requestFramePermissions": [
     "camera",
     "microphone"
