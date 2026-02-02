@@ -477,4 +477,3 @@ function video_delete($pdo, $input) {
     $pdo->prepare("DELETE FROM transactions WHERE videoId = ?")->execute([$id]);
     respond(true);
 }
-?>

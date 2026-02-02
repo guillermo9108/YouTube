@@ -281,4 +281,3 @@ function syncTable($pdo, $tableName, $def) {
         write_log("Sync Error en $tableName: " . $e->getMessage(), 'ERROR');
     }
 }
-?>

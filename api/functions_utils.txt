@@ -109,6 +109,7 @@ function streamVideo($id, $pdo) {
     if (session_id()) session_write_close();
     
     while (ob_get_level()) ob_end_clean();
+    header_remove(); // Crítico para resolver "Headers already sent"
     
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
@@ -170,4 +171,3 @@ function streamVideo($id, $pdo) {
     fclose($fp);
     exit;
 }
-?>

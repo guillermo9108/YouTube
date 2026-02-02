@@ -564,4 +564,3 @@ function admin_add_balance($pdo, $input) {
         respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
-?>

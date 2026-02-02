@@ -1,4 +1,3 @@
-
 <?php
 
 // --- TROPIPAY INTEGRATION ---
@@ -133,4 +132,3 @@ function payment_verify($pdo, $input) {
         respond(false, null, $e->getMessage());
     }
 }
-?>

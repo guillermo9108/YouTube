@@ -1,7 +1,7 @@
-
-<?php ob_start();
+<?php
+ob_start();
 /**
- * StreamPay - Core Controller V11.50 (Bulk Folder Edit)
+ * StreamPay - Core Controller V11.51 (Header Fix)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
@@ -51,7 +51,8 @@ $config = json_decode(file_get_contents($configFile), true);
 
 function respond($success, $data = null, $error = null) {
     while (ob_get_level()) ob_end_clean(); 
-    header('Content-Type: application/json');
+    header_remove(); // Limpia cabeceras previas que puedan haber fallado
+    header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['success' => $success, 'data' => $data, 'error' => $error], JSON_UNESCAPED_UNICODE);
     exit();
 }

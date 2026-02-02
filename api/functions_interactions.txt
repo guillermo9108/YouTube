@@ -1,4 +1,3 @@
-
 <?php
 /**
  * INTERACCIONES - CORE FUNCTIONS V12.1 (Search Suggestions Optimized)
@@ -212,4 +211,3 @@ function interact_request_content($pdo, $input) {
         ->execute([uniqid('req_'), $input['userId'], $input['query'], time(), $input['isVip'] ? 1 : 0]);
     respond(true);
 }
-?>

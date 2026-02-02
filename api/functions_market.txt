@@ -186,4 +186,3 @@ function market_checkout($pdo, $input) {
         $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
-?>
