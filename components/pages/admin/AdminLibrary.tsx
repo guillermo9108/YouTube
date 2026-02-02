@@ -39,7 +39,6 @@ const ScannerPlayer: React.FC<ScannerPlayerProps> = ({ video, onComplete }) => {
         
         try {
             const streamUrl = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
-            // Agilizado en Admin: skipImage=true
             const result = await generateThumbnail(streamUrl, force, true);
             
             if (!processedRef.current) {
@@ -338,20 +337,42 @@ export default function AdminLibrary() {
         finally { setIsFixing(false); }
     };
 
+    // --- REFACTORIZADO: Sincronización Global por lotes ---
     const handleStep5 = async () => {
-        if (!confirm("Esto analizará TODOS los videos de la base de datos y los moverá a sus categorías/precios correctos según la configuración actual de Admin. ¿Continuar?")) return;
+        if (!confirm("Esto analizará TODOS los videos de la base de datos y los moverá a sus categorías/precios correctos según la configuración actual de Admin. Se hará por lotes para evitar errores de servidor. ¿Continuar?")) return;
         
         setIsReorganizingAll(true);
-        addToLog("Iniciando Re-sincronización Global...");
+        addToLog("Iniciando Re-sincronización Global por lotes...");
+        
         try {
-            const res = await db.reorganizeAllVideos();
-            addToLog(`Re-sincronización finalizada.`);
-            addToLog(`- Videos actualizados: ${res.processed} de ${res.total}`);
+            let offset = 0;
+            const limit = 100;
+            let finished = false;
+
+            while (!finished) {
+                addToLog(`Procesando lote desde ${offset}...`);
+                const res = await db.request<any>(`action=reorganize_all_videos&limit=${limit}&offset=${offset}`, { method: 'POST' });
+                
+                if (!res || res.processed === 0) {
+                    finished = true;
+                } else {
+                    addToLog(`Lote OK: ${res.processed} videos actualizados.`);
+                    offset += limit;
+                    // Pequeña espera para no saturar CPU
+                    await new Promise(r => setTimeout(r, 300));
+                }
+            }
+
+            addToLog(`Re-sincronización finalizada con éxito.`);
             toast.success("Librería actualizada al 100%");
             db.setHomeDirty();
             loadStats();
-        } catch (e: any) { addToLog(`Error Global: ${e.message}`); }
-        finally { setIsReorganizingAll(false); }
+        } catch (e: any) { 
+            addToLog(`Error en el flujo de sincronización: ${e.message}`); 
+            toast.error("Sincronización interrumpida.");
+        } finally { 
+            setIsReorganizingAll(false); 
+        }
     };
 
     return (
@@ -488,8 +509,8 @@ export default function AdminLibrary() {
                     <button onClick={handleStep4} disabled={isFixing || (stats.broken === 0 && stats.failed === 0)} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] text-slate-400 flex items-center justify-center gap-2">
                         {isFixing ? <RefreshCw className="animate-spin" size={14}/> : <ShieldAlert size={14}/>} Mantenimiento ({stats.broken})
                     </button>
-                    <button onClick={handleStep5} disabled={isReorganizingAll || stats.total === 0} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] text-slate-400 flex items-center justify-center gap-2">
-                        {isReorganizingAll ? <Loader2 className="animate-spin" size={14}/> : <Layers size={14}/>} Sincronizar Todo
+                    <button onClick={handleStep5} disabled={isReorganizingAll || stats.total === 0} className={`py-3 rounded-xl font-bold text-[9px] uppercase tracking-[0.1em] flex items-center justify-center gap-2 transition-all ${isReorganizingAll ? 'bg-indigo-600 text-white animate-pulse' : 'bg-slate-800 border border-slate-700 text-slate-400 hover:bg-slate-700'}`}>
+                        {isReorganizingAll ? <Loader2 className="animate-spin" size={14}/> : <Layers size={14}/>} Sincronizar Todo (Lotes)
                     </button>
                 </div>
             </div>

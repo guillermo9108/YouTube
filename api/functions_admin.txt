@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V18.2 (Bulk Folder Edit)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V18.5 (Batch Processing Ready)
  */
 
 function admin_get_settings($pdo) {
@@ -59,11 +59,9 @@ function admin_bulk_edit_folder($pdo, $input) {
     $root = rtrim($settings['localLibraryPath'], '/\\');
     $fullPathPrefix = str_replace('\\', '/', $root . '/' . $relPath) . '/%';
 
-    // 1. Actualizar Precios de todos los videos en la jerarquía (recursivo)
     $pdo->prepare("UPDATE videos SET price = ? WHERE videoUrl LIKE ? AND isLocal = 1")
         ->execute([$price, $fullPathPrefix]);
 
-    // 2. Actualizar configuración de Categoría si el nombre coincide (Propaga la ordenación)
     $categories = json_decode($settings['categories'] ?: '[]', true);
     $changed = false;
     foreach ($categories as &$cat) {
@@ -154,7 +152,6 @@ function admin_transcode_scan_filters($pdo, $input) {
 }
 
 function admin_process_next_transcode($pdo) {
-    // Buscar el siguiente en cola
     $stmt = $pdo->query("SELECT * FROM videos WHERE transcode_status = 'WAITING' ORDER BY createdAt ASC LIMIT 1");
     $video = $stmt->fetch();
     
@@ -169,7 +166,17 @@ function admin_process_next_transcode($pdo) {
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     $stmtP = $pdo->prepare("SELECT command_args FROM transcode_profiles WHERE extension = ?");
     $stmtP->execute([$ext]);
-    $args = $stmtP->fetchColumn() ?: '-c:v libx264 -preset ultrafast -c:a aac';
+    $args = $stmtP->fetchColumn();
+
+    // Mejora: Si no hay perfil o es audio, aplicar parámetros de seguridad
+    if (!$args) {
+        if ($ext === 'mp3') {
+            // Conversión de MP3 a MP4 con imagen fija (negra o carátula si existiera)
+            $args = "-c:a aac -b:a 192k -vn";
+        } else {
+            $args = "-c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac";
+        }
+    }
 
     $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
     $ffmpeg = $stmtS->fetchColumn() ?: 'ffmpeg';
@@ -180,25 +187,18 @@ function admin_process_next_transcode($pdo) {
     $tempFile = $targetDir . 'trans_' . $video['id'] . '.mp4';
     $logFile = __DIR__ . '/transcode_log.txt';
     
-    // Comando FFmpeg con redirección a log
     $cmd = "$ffmpeg -y -i " . escapeshellarg($realPath) . " $args " . escapeshellarg($tempFile) . " 2>> " . escapeshellarg($logFile);
     
     $pdo->prepare("UPDATE videos SET transcode_status = 'PROCESSING' WHERE id = ?")->execute([$video['id']]);
-    
-    write_log("Iniciando FFmpeg: $cmd", 'INFO');
     exec($cmd, $output, $returnCode);
     
     if ($returnCode === 0 && file_exists($tempFile)) {
-        // Exito: Reemplazar original si estaba en uploads o actualizar path
         $newWebPath = 'uploads/videos/' . $video['id'] . '.mp4';
         rename($tempFile, __DIR__ . '/' . $newWebPath);
-        
-        $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE' WHERE id = ?")
-            ->execute([$newWebPath, $video['id']]);
+        $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE' WHERE id = ?")->execute([$newWebPath, $video['id']]);
         respond(true, "Video convertido OK");
     } else {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Error FFmpeg Code $returnCode' WHERE id = ?")
-            ->execute([$video['id']]);
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Error FFmpeg Code $returnCode' WHERE id = ?")->execute([$video['id']]);
         respond(false, null, "Error en ejecución de FFmpeg");
     }
 }
@@ -223,52 +223,25 @@ function admin_skip_transcode($pdo, $id) {
     respond(true);
 }
 
-// --- END TRANSCODE FUNCTIONS ---
-
 function get_real_stats($pdo) {
     $from = $_GET['from'] ?? (time() - (30 * 86400));
     $to = $_GET['to'] ?? time();
 
     $userCount = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn() ?: 1;
     
-    $stmtInflow = $pdo->prepare("
-        SELECT 
-            SUM(amount) as total_cash_in,
-            COUNT(*) as total_cash_tx
-        FROM transactions 
-        WHERE (timestamp BETWEEN ? AND ?) AND isExternal = 1
-    ");
+    $stmtInflow = $pdo->prepare("SELECT SUM(amount) as total_cash_in, COUNT(*) as total_cash_tx FROM transactions WHERE (timestamp BETWEEN ? AND ?) AND isExternal = 1");
     $stmtInflow->execute([$from, $to]);
     $inflow = $stmtInflow->fetch();
 
-    $stmtVolume = $pdo->prepare("
-        SELECT 
-            SUM(amount) as total_volume,
-            SUM(adminFee) as total_commissions
-        FROM transactions 
-        WHERE (timestamp BETWEEN ? AND ?) AND isExternal = 0
-    ");
+    $stmtVolume = $pdo->prepare("SELECT SUM(amount) as total_volume, SUM(adminFee) as total_commissions FROM transactions WHERE (timestamp BETWEEN ? AND ?) AND isExternal = 0");
     $stmtVolume->execute([$from, $to]);
     $volume = $stmtVolume->fetch();
 
-    $stmtMix = $pdo->prepare("
-        SELECT videoTitle as planName, COUNT(*) as qty 
-        FROM transactions 
-        WHERE type IN ('VIP', 'DEPOSIT') AND isExternal = 1 AND videoTitle IS NOT NULL AND timestamp BETWEEN ? AND ?
-        GROUP BY videoTitle
-    ");
+    $stmtMix = $pdo->prepare("SELECT videoTitle as planName, COUNT(*) as qty FROM transactions WHERE type IN ('VIP', 'DEPOSIT') AND isExternal = 1 AND videoTitle IS NOT NULL AND timestamp BETWEEN ? AND ? GROUP BY videoTitle");
     $stmtMix->execute([$from, $to]);
     $planMix = $stmtMix->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
 
-    $stmtD = $pdo->prepare("
-        SELECT FROM_UNIXTIME(timestamp, '%Y-%m-%d') as date, 
-               SUM(CASE WHEN isExternal = 1 THEN amount ELSE 0 END) as cash_in,
-               SUM(CASE WHEN isExternal = 0 THEN adminFee ELSE 0 END) as internal_rev
-        FROM transactions 
-        WHERE timestamp BETWEEN ? AND ? 
-        GROUP BY date 
-        ORDER BY date ASC
-    ");
+    $stmtD = $pdo->prepare("SELECT FROM_UNIXTIME(timestamp, '%Y-%m-%d') as date, SUM(CASE WHEN isExternal = 1 THEN amount ELSE 0 END) as cash_in, SUM(CASE WHEN isExternal = 0 THEN adminFee ELSE 0 END) as internal_rev FROM transactions WHERE timestamp BETWEEN ? AND ? GROUP BY date ORDER BY date ASC");
     $stmtD->execute([$from, $to]);
     $daily = $stmtD->fetchAll();
 
