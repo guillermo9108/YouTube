@@ -73,8 +73,8 @@ class DBService {
     }
 
     public async getAllVideos(): Promise<Video[]> { 
-        // Límite de seguridad para evitar cuellos de botella masivos
-        const res = await this.getVideos(0, 100);
+        // Aumentado a 10,000 para backups completos de colecciones grandes
+        const res = await this.getVideos(0, 10000);
         return res.videos;
     }
 

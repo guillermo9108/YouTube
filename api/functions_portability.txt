@@ -1,15 +1,18 @@
 <?php
 /**
- * StreamPay - Módulo de Portabilidad V1.2 (Soporte Jerárquico)
+ * StreamPay - Módulo de Portabilidad V1.3 (Restauración Masiva Optimizada)
  */
 
 function port_save_backup($pdo, $post, $files) {
+    // Aumentar límites para el proceso de guardado
+    set_time_limit(300);
+    
     $targetPath = rtrim($post['path'] ?? '', '/');
     if (empty($targetPath)) respond(false, null, "La ruta de destino es obligatoria.");
 
     if (!is_dir($targetPath)) {
         if (!@mkdir($targetPath, 0777, true)) {
-            respond(false, null, "No se pudo crear el directorio de destino. Verifique permisos o open_basedir.");
+            respond(false, null, "No se pudo crear el directorio de destino. Verifique permisos.");
         }
     }
 
@@ -28,11 +31,15 @@ function port_save_backup($pdo, $post, $files) {
 }
 
 function port_restore_backup($pdo, $input) {
+    // AJUSTES CRÍTICOS PARA 6,000+ REGISTROS
+    set_time_limit(900); // 15 minutos
+    ini_set('memory_limit', '1G'); // 1 GB RAM para el proceso PHP
+
     $zipPath = $input['zipPath'] ?? '';
     $videoLibraryPath = rtrim($input['videoLibraryPath'] ?? '', '/');
 
     if (empty($zipPath) || !file_exists($zipPath)) respond(false, null, "El archivo ZIP no existe o no es accesible.");
-    if (empty($videoLibraryPath)) respond(false, null, "Debe especificar la ubicación de los videos en este servidor.");
+    if (empty($videoLibraryPath)) respond(false, null, "Debe especificar la ubicación de los videos.");
 
     $zip = new ZipArchive();
     if ($zip->open($zipPath) !== TRUE) respond(false, null, "No se pudo abrir el archivo ZIP.");
@@ -46,21 +53,19 @@ function port_restore_backup($pdo, $input) {
     $jsonPath = $tempDir . '/database.json';
     if (!file_exists($jsonPath)) {
         port_cleanup($tempDir);
-        respond(false, null, "El ZIP no contiene un archivo database.json válido.");
+        respond(false, null, "El ZIP no contiene database.json.");
     }
 
     $data = json_decode(file_get_contents($jsonPath), true);
     if (!$data || !isset($data['videos'])) {
         port_cleanup($tempDir);
-        respond(false, null, "Formato de database.json inválido.");
+        respond(false, null, "Formato de base de datos inválido.");
     }
 
-    // 2. Restaurar/Crear Categorías (Metadata)
+    // 2. Restaurar Categorías
     $categoriesSynced = 0;
     if (isset($data['system_metadata']['categories'])) {
         $backupCats = $data['system_metadata']['categories'];
-        
-        // Obtener actuales
         $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
         $currentCats = json_decode($stmtS->fetchColumn() ?: '[]', true);
         
@@ -79,38 +84,33 @@ function port_restore_backup($pdo, $input) {
         }
         
         if ($categoriesSynced > 0) {
-            $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")
-                ->execute([json_encode($newCatList)]);
+            $pdo->prepare("UPDATE system_settings SET categories = ? WHERE id = 1")->execute([json_encode($newCatList)]);
         }
     }
 
-    // 3. Procesar miniaturas
+    // 3. Procesar miniaturas si existen
     $thumbDir = __DIR__ . '/uploads/thumbnails/';
     if (!is_dir($thumbDir)) mkdir($thumbDir, 0777, true);
 
-    $thumbFiles = glob($tempDir . '/thumbnails/*.jpg');
-    foreach ($thumbFiles as $f) {
-        copy($f, $thumbDir . basename($f));
+    if (is_dir($tempDir . '/thumbnails/')) {
+        $thumbFiles = glob($tempDir . '/thumbnails/*.jpg');
+        foreach ($thumbFiles as $f) {
+            @copy($f, $thumbDir . basename($f));
+        }
     }
 
-    // 4. Re-mapear videos jerárquicamente
+    // 4. Restauración Masiva
     $imported = 0;
     $errors = 0;
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
 
+    // Desactivar índices temporalmente para velocidad (Opcional, MariaDB suele manejar bien 6k sin esto)
     foreach ($data['videos'] as $v) {
-        // Obtenemos la ruta relativa (preserva subcarpetas)
-        // Ej: Pelis/Accion/Peli.mp4
-        $relPath = $v['relativePath'] ?? $v['fileName'] ?? basename($v['videoUrl'] ?? '');
+        $relPath = $v['relativePath'] ?? basename($v['videoUrl'] ?? '');
         if (empty($relPath)) continue;
 
-        // Limpiar separadores para compatibilidad multiplataforma
         $relPath = str_replace('\\', '/', $relPath);
-        
-        // Construir nueva ruta absoluta uniendo el nuevo root con el path relativo del backup
         $newAbsolutePath = $videoLibraryPath . '/' . $relPath;
-        
-        // El thumbnailUrl debe apuntar a la carpeta local del nuevo servidor
         $newThumbUrl = 'api/uploads/thumbnails/' . basename($v['thumbnailUrl'] ?? 'default.jpg');
 
         $sql = "INSERT INTO videos (id, title, description, price, thumbnailUrl, videoUrl, creatorId, createdAt, category, parent_category, collection, duration, isLocal, transcode_status) 
@@ -145,7 +145,6 @@ function port_restore_backup($pdo, $input) {
             ]);
             $imported++;
         } catch (Exception $e) {
-            write_log("Error restaurando video ID {$v['id']}: " . $e->getMessage(), 'ERROR');
             $errors++;
         }
     }
