@@ -310,13 +310,21 @@ export default function Home() {
         }
     };
 
-    // 3. Scroll Inteligente (Solo fila inferior)
+    // 3. Scroll Inteligente (Ocultar encabezado completo)
     useEffect(() => {
         const handleScroll = () => {
             const currentScrollY = window.scrollY;
-            if (currentScrollY < 80) { setNavVisible(true); lastScrollY.current = currentScrollY; return; }
-            if (currentScrollY > lastScrollY.current + 10) { setNavVisible(false); } 
-            else if (currentScrollY < lastScrollY.current - 10) { setNavVisible(true); }
+            if (currentScrollY < 120) { 
+                setNavVisible(true); 
+                lastScrollY.current = currentScrollY; 
+                return; 
+            }
+            if (currentScrollY > lastScrollY.current + 25) { 
+                setNavVisible(false); 
+            } 
+            else if (currentScrollY < lastScrollY.current - 25) { 
+                setNavVisible(true); 
+            }
             lastScrollY.current = currentScrollY;
         };
         window.addEventListener('scroll', handleScroll, { passive: true });
@@ -491,8 +499,9 @@ export default function Home() {
         <div className="relative pb-20 overflow-x-hidden">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
-            <div className="fixed top-0 left-0 right-0 z-[60]">
-                {/* CAPA SUPERIOR FIJA */}
+            {/* ENCABEZADO UNIFICADO CON LOGICA DE OCULTAMIENTO */}
+            <div className={`fixed top-0 left-0 right-0 z-[60] transition-transform duration-500 ease-in-out transform ${navVisible ? 'translate-y-0' : '-translate-y-full'}`}>
+                {/* CAPA SUPERIOR: BUSQUEDA */}
                 <div className="relative z-20 backdrop-blur-2xl bg-black/40 border-b border-white/5 pt-4 pb-2 px-4 md:px-8 shadow-xl">
                     <div className="flex gap-3 items-center max-w-7xl mx-auto">
                         <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform shrink-0"><Menu size={20}/></button>
@@ -539,7 +548,7 @@ export default function Home() {
                                 {unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-black">{unreadCount}</span>}
                             </button>
                             {showNotifMenu && (
-                                <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 border border-white/10 rounded-[32px] shadow-2xl overflow-hidden z-[60] animate-in fade-in zoom-in-95 origin-top-right">
+                                <div className="absolute top-full right-0 mt-3 w-80 bg-slate-900 border border-white/10 rounded-[32px] shadow-2xl overflow-hidden z-[80] animate-in fade-in zoom-in-95 origin-top-right">
                                     <div className="p-5 bg-slate-950 border-b border-white/5 flex justify-between items-center"><h4 className="font-black text-white uppercase text-[10px] tracking-widest">Notificaciones</h4></div>
                                     <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
                                         {notifs.length === 0 ? (
@@ -557,13 +566,13 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* CAPA INFERIOR DINÁMICA - OPTIMIZADA CON ZONAS FIJAS */}
-                <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
-                    <div className="flex flex-col gap-2 max-w-7xl mx-auto overflow-hidden">
+                {/* CAPA SECUNDARIA: NAVEGACION Y FILTROS */}
+                <div className="relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 shadow-sm">
+                    <div className="flex flex-col gap-2 max-w-7xl mx-auto">
                         
-                        {/* FILA 1: NAVEGACIÓN Y FILTROS (ZONIFICADO) */}
-                        <div className="flex items-center gap-2 w-full overflow-visible">
-                            {/* ZONA IZQUIERDA: INICIO & FOLDERS (FIXED - Z-INDEX ALTO) */}
+                        {/* FILA 1: BREADCRUMBS Y CONTROLES (SIN OVERFLOW HIDDEN) */}
+                        <div className="flex items-center gap-2 w-full">
+                            {/* ZONA IZQUIERDA: BOTONES DE VISTA */}
                             <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0 z-30">
                                 <button onClick={() => { handleNavigate(-1); setSearchQuery(''); updateUrlSearch(''); }} className="p-2.5 hover:bg-white/10 rounded-lg text-white transition-colors active:scale-90">
                                     <HomeIcon size={16}/>
@@ -579,14 +588,14 @@ export default function Home() {
                                 </button>
                             </div>
 
-                            {/* ZONA CENTRAL: BREADCRUMBS (SCROLLABLE CON MIN-W-0) */}
+                            {/* ZONA CENTRAL: RUTA ACTUAL */}
                             <div className="flex-1 min-w-0 z-10">
                                 <Breadcrumbs path={navigationPath} onNavigate={(idx) => { handleNavigate(idx); if(searchQuery) {setSearchQuery(''); updateUrlSearch('');} }} />
                             </div>
 
-                            {/* ZONA DERECHA: FILTROS & ORDEN (FIXED - Z-INDEX ALTO) */}
+                            {/* ZONA DERECHA: ORDEN Y TIPO */}
                             <div className="flex items-center gap-1.5 shrink-0 ml-auto z-30">
-                                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
+                                <div className="hidden sm:flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
                                     <button onClick={() => setMediaFilter('ALL')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Todo"><Layers size={13}/></button>
                                     <button onClick={() => setMediaFilter('VIDEO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Video"><Play size={13}/></button>
                                     <button onClick={() => setMediaFilter('AUDIO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Audio"><Music size={13}/></button>
@@ -600,7 +609,7 @@ export default function Home() {
                                         <ArrowDownUp size={15}/>
                                     </button>
                                     {showSortMenu && (
-                                        <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] animate-in fade-in zoom-in-95 origin-top-right">
+                                        <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[90] animate-in fade-in zoom-in-95 origin-top-right">
                                             <div className="p-2 bg-slate-950 border-b border-white/5"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Ordenar por</span></div>
                                             <div className="p-1">
                                                 {sortOptions.map(opt => (
@@ -621,7 +630,7 @@ export default function Home() {
                             </div>
                         </div>
 
-                        {/* FILA 2: CATEGORÍAS (SCROLLABLE INDEPENDIENTE) */}
+                        {/* FILA 2: CATEGORÍAS (DINÁMICA) */}
                         {!searchQuery && (
                             <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide py-1 animate-in fade-in duration-300">
                                 {parentFolderName && <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3"><Folder size={12}/> {parentFolderName}</div>}
@@ -643,7 +652,7 @@ export default function Home() {
                 </div>
             </div>
 
-            <div className="pt-36 px-4 md:px-8 max-w-7xl mx-auto">
+            <div className="pt-40 px-4 md:px-8 max-w-7xl mx-auto">
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-40 gap-4">
                         <Loader2 className="animate-spin text-indigo-500" size={48} />
