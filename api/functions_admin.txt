@@ -1,6 +1,7 @@
+
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V18.7 (Hierarchical Folder Edit)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V18.8 (Hierarchical Folder Edit & Safe Janitor)
  */
 
 function admin_get_settings($pdo) {
@@ -66,12 +67,10 @@ function admin_bulk_edit_folder($pdo, $input) {
         ->execute([$price, $fullPathMatch]);
 
     // 2. Identificar qué CATEGORÍAS están afectadas por esta ruta
-    // Buscamos todas las categorías de videos que se encuentran dentro de ese path
     $stmtCats = $pdo->prepare("SELECT DISTINCT category FROM videos WHERE videoUrl LIKE ? AND isLocal = 1");
     $stmtCats->execute([$fullPathMatch]);
     $affectedCatNames = $stmtCats->fetchAll(PDO::FETCH_COLUMN);
     
-    // Asegurarse de que el nombre de la carpeta base también se considere afectado si existe como categoría
     $baseFolderName = basename($relPath);
     if (!in_array($baseFolderName, $affectedCatNames)) {
         $affectedCatNames[] = $baseFolderName;
@@ -102,7 +101,7 @@ function admin_bulk_edit_folder($pdo, $input) {
             ->execute([json_encode($categories)]);
     }
 
-    respond(true, "Configuración aplicada recursivamente a " . $relPath . " y sub-categorías detectadas.");
+    respond(true, "Configuración aplicada recursivamente a " . $relPath + " y sub-categorías detectadas.");
 }
 
 function admin_update_category_price($pdo, $input) {
@@ -193,19 +192,15 @@ function admin_process_next_transcode($pdo) {
     $stmtP->execute([$ext]);
     $args = $stmtP->fetchColumn();
 
-    // Mejora: Detección robusta de audio para conversión MP3 -> MP4
     $isAudio = ($ext === 'mp3' || $ext === 'wav' || $ext === 'aac' || $ext === 'm4a');
 
     if (!$args) {
         if ($isAudio) {
-            // Conversión de audio a contenedor MP4 compatible: omitir video para evitar errores de stream
             $args = "-c:a aac -b:a 192k -vn";
         } else {
-            // Video estándar: forzar yuv420p para compatibilidad de color en todos los navegadores
             $args = "-c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac";
         }
     } else {
-        // Si el admin configuró argumentos manuales, asegurar pix_fmt yuv420p si no está presente para evitar errores de tag
         if (strpos($args, '-pix_fmt') === false && !$isAudio) {
             $args .= " -pix_fmt yuv420p";
         }
@@ -395,6 +390,14 @@ function admin_cleanup_files($pdo) {
         if ($p = resolve_video_path($url)) $dbFiles[] = $p;
     }
     $dbFiles = array_unique($dbFiles);
+    
+    // LISTA BLANCA: Archivos estáticos del sistema
+    $whitelist = [
+        realpath(__DIR__ . '/uploads/thumbnails/default.jpg'),
+        realpath(__DIR__ . '/uploads/thumbnails/defaultaudio.jpg'),
+        realpath(__DIR__ . '/uploads/avatars/default.jpg')
+    ];
+
     $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market', 'uploads/proofs'];
     $deleted = 0;
     foreach ($dirs as $d) {
@@ -404,7 +407,9 @@ function admin_cleanup_files($pdo) {
         foreach ($files as $f) {
             if ($f === '.' || $f === '..') continue;
             $full = realpath($path . '/' . $f);
-            if ($full && is_file($full) && !in_array($full, $dbFiles)) { 
+            
+            // Si el archivo no está en uso y no está en la whitelist, se borra
+            if ($full && is_file($full) && !in_array($full, $dbFiles) && !in_array($full, $whitelist)) { 
                 @unlink($full); 
                 $deleted++; 
             }
@@ -523,7 +528,7 @@ function admin_smart_cleaner_execute($pdo, $input) {
             $realVideo = resolve_video_path($v['videoUrl']);
             $realThumb = resolve_video_path($v['thumbnailUrl']);
             if ($realVideo && file_exists($realVideo)) @unlink($realVideo);
-            if ($realThumb && file_exists($realThumb)) @unlink($realThumb);
+            if ($realThumb && file_exists($realThumb) && !strpos($realThumb, 'default')) @unlink($realThumb);
             $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
             $deleted++;
         }

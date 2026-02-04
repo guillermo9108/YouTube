@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -75,6 +76,7 @@ export default function Watch() {
         setThrottled(true);
         setRelatedPage(navigationContext.p);
         setRelatedVideos([]);
+        setSeriesQueue([]);
         setShowComments(false);
         setExtractionAttempted(false); 
         return () => { setThrottled(false); };
@@ -89,12 +91,14 @@ export default function Watch() {
         
         try {
             const res = await db.getVideos(p, 40, navigationContext.f, navigationContext.q || '', navigationContext.c, mediaFilter as any);
+            const filteredResults = res.videos;
+            
             if (p === navigationContext.p) {
-                setRelatedVideos(res.videos.filter(v => v.id !== id));
-                // No aplicar orden alfabético manual, respetar orden del servidor
-                setSeriesQueue(res.videos);
+                setRelatedVideos(filteredResults.filter(v => v.id !== id));
+                setSeriesQueue(filteredResults);
             } else {
-                setRelatedVideos(prev => [...prev, ...res.videos.filter(v => v.id !== id)]);
+                setRelatedVideos(prev => [...prev, ...filteredResults.filter(v => v.id !== id)]);
+                setSeriesQueue(prev => [...prev, ...filteredResults]);
             }
             setHasMoreRelated(res.hasMore);
             setRelatedPage(p);
@@ -246,12 +250,10 @@ export default function Watch() {
         const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
         let nextVid = seriesQueue[currentIndex + 1];
         
-        // Si no hay siguiente en el lote actual y hay más por cargar, intentamos cargar el siguiente lote
         if (!nextVid && hasMoreRelated) {
              toast.info("Cargando siguiente episodio...");
              await fetchRelated(relatedPage + 1);
-             return; // fetchRelated actualizará seriesQueue y el usuario podrá hacer click o auto-play podrá dispararse de nuevo? 
-             // En realidad lo ideal es que handleVideoEnded maneje la navegación tras el fetch.
+             return;
         }
 
         if (!nextVid && !navigationContext.q && relatedVideos.length > 0) {
@@ -444,7 +446,7 @@ export default function Watch() {
 
                     <div className="space-y-4">
                         {seriesQueue.map((v, idx) => {
-                            if (v.id === id) return null; // Omitir el actual de la lista lateral? O resaltarlo?
+                            if (v.id === id) return null; 
                             
                             const isNextInQueue = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === idx;
                             

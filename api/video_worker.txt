@@ -1,6 +1,7 @@
+
 <?php
 /**
- * StreamPay - Server-Side Video Worker V1.4.6 (NAS Optimized - Extreme Resilience)
+ * StreamPay - Server-Side Video Worker V1.4.7 (NAS Optimized - Extreme Resilience)
  * Procesa la cola de videos PENDING con soporte para Audio y Video.
  */
 
@@ -121,8 +122,8 @@ for ($i = 0; $i < $batchSize; $i++) {
         
         $time = ($duration > 5) ? "00:00:03" : "00:00:01";
         
-        // Corrección de codec tag: -pix_fmt yuv420p asegura compatibilidad con frames MJPEG de carátulas o fotos
-        $cmdFfmpeg = "$ffmpeg -y -ss $time -i " . escapeshellarg($realPath) . " -frames:v 1 -pix_fmt yuv420p -q:v 4 " . escapeshellarg($fullThumbPath) . " 2>&1";
+        // OPTIMIZACIÓN DE PESO: -q:v 20 para archivos < 100kb manteniendo legibilidad
+        $cmdFfmpeg = "$ffmpeg -y -ss $time -i " . escapeshellarg($realPath) . " -frames:v 1 -pix_fmt yuv420p -q:v 20 " . escapeshellarg($fullThumbPath) . " 2>&1";
         exec($cmdFfmpeg, $ffOutput, $ffCode);
         
         if ($ffCode === 0 && file_exists($fullThumbPath)) {
@@ -130,7 +131,7 @@ for ($i = 0; $i < $batchSize; $i++) {
         } else {
             echo "[WARN] Falló extracción de frame. Usando genérico de video.\n";
             $thumbUrl = 'api/uploads/thumbnails/default.jpg';
-            $ffCode = 0; // Permitimos continuar aunque falle la thumb
+            $ffCode = 0; 
         }
     }
 

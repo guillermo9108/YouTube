@@ -1,4 +1,44 @@
+
 <?php
+
+/**
+ * Procesa una imagen de avatar para redimensionarla y comprimirla (GD Library)
+ */
+function process_avatar_image($tmp_path, $dest_path, $max_size = 400) {
+    if (!function_exists('imagecreatefromstring')) return move_uploaded_file($tmp_path, $dest_path);
+
+    $data = file_get_contents($tmp_path);
+    $src = @imagecreatefromstring($data);
+    if (!$src) return move_uploaded_file($tmp_path, $dest_path);
+
+    $w = imagesx($src);
+    $h = imagesy($src);
+    
+    // Calcular nuevas dimensiones
+    if ($w > $h) {
+        $new_w = $max_size;
+        $new_h = floor($h * ($max_size / $w));
+    } else {
+        $new_h = $max_size;
+        $new_w = floor($w * ($max_size / $h));
+    }
+
+    $dst = imagecreatetruecolor($new_w, $new_h);
+    
+    // Preservar transparencia para PNG
+    imagealphablending($dst, false);
+    imagesavealpha($dst, true);
+    
+    imagecopyresampled($dst, $src, 0, 0, 0, 0, $new_w, $new_h, $w, $h);
+    
+    // Guardar como JPEG con compresión moderada (75) para ahorrar espacio
+    $success = imagejpeg($dst, $dest_path, 75);
+    
+    imagedestroy($src);
+    imagedestroy($dst);
+    
+    return $success;
+}
 
 function getBearerToken() {
     $headers = getallheaders(); $auth = '';
@@ -56,9 +96,10 @@ function auth_register($pdo, $input) {
     if ($stmt->fetchColumn() > 0) respond(false, null, 'Usuario ya existe');
     $id = 'u_' . uniqid(); $hash = password_hash($password, PASSWORD_DEFAULT); $avatarUrl = null;
     if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
-        $ext = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION)); $name = "av_{$id}.{$ext}";
         if (!is_dir('uploads/avatars/')) mkdir('uploads/avatars/', 0777, true);
-        move_uploaded_file($_FILES['avatar']['tmp_name'], 'uploads/avatars/' . $name); $avatarUrl = 'uploads/avatars/' . $name;
+        $name = "av_{$id}.jpg"; // Forzamos JPG procesado
+        $dest = 'uploads/avatars/' . $name;
+        if (process_avatar_image($_FILES['avatar']['tmp_name'], $dest)) $avatarUrl = $dest;
     }
     $token = bin2hex(random_bytes(32));
     $pdo->prepare("INSERT INTO users (id, username, password_hash, role, balance, avatarUrl, currentSessionId, lastActive, lastDeviceId, watchLater) VALUES (?, ?, ?, 'USER', 0, ?, ?, ?, ?, '[]')")->execute([$id, $username, $hash, $avatarUrl, $token, time(), $deviceId]);
@@ -90,10 +131,14 @@ function auth_update_user($pdo, $input) {
     $data = !empty($_POST) ? $_POST : $input; $uid = trim($data['userId'] ?? '', '"\' '); if (!$uid) respond(false, null, "ID usuario requerido");
     $fields = []; $params = [];
     if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
-        $ext = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION)); $name = "av_{$uid}_" . time() . ".{$ext}";
         if (!is_dir('uploads/avatars/')) mkdir('uploads/avatars/', 0777, true);
-        $old = $pdo->query("SELECT avatarUrl FROM users WHERE id = '$uid'")->fetchColumn(); if ($old && file_exists($old)) @unlink($old);
-        move_uploaded_file($_FILES['avatar']['tmp_name'], 'uploads/avatars/' . $name); $fields[] = "avatarUrl = ?"; $params[] = 'uploads/avatars/' . $name;
+        $name = "av_{$uid}_" . time() . ".jpg";
+        $dest = 'uploads/avatars/' . $name;
+        $old = $pdo->query("SELECT avatarUrl FROM users WHERE id = '$uid'")->fetchColumn(); 
+        if (process_avatar_image($_FILES['avatar']['tmp_name'], $dest)) {
+            if ($old && file_exists($old)) @unlink($old);
+            $fields[] = "avatarUrl = ?"; $params[] = $dest;
+        }
     }
     if (!empty($data['newPassword'])) { $fields[] = "password_hash = ?"; $params[] = password_hash($data['newPassword'], PASSWORD_DEFAULT); }
     if (!empty($data['toggleWatchLater'])) {

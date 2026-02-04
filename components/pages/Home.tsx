@@ -1,9 +1,9 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Video, Notification as AppNotification, User, SystemSettings, Category } from '../../types';
-// Fix: Added missing imports Clock, Zap, and Check from lucide-react to resolve errors on lines 498, 500, and 613
 import { 
     RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History, Edit3, DollarSign, SortAsc, Save, ArrowDownUp, Clock, Zap, Check
 } from 'lucide-react';
@@ -431,8 +431,12 @@ export default function Home() {
     };
 
     const handleNavigate = (index: number) => {
-        if (index === -1) setNavigationPath([]);
-        else setNavigationPath(navigationPath.slice(0, index + 1));
+        if (index === -1) {
+            setNavigationPath([]);
+        } else {
+            setNavigationPath(navigationPath.slice(0, index + 1));
+        }
+        // No resetear mediaFilter aquí para persistencia profunda
         setSelectedCategory('TODOS');
         setShowFolderGrid(false);
         setNavVisible(true);
