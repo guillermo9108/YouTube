@@ -224,7 +224,7 @@ function interact_check_subscription($pdo, $uid, $cid) {
 
 function interact_get_subscriptions($pdo, $uid) {
     $stmt = $pdo->prepare("SELECT creatorId FROM subscriptions WHERE subscriberId = ?"); $stmt->execute([$uid]);
-    respond(true, $stmt->fetchAll(PDO::COLUMN));
+    respond(true, $stmt->fetchAll(PDO::FETCH_COLUMN));
 }
 
 function interact_request_content($pdo, $input) {

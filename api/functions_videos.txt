@@ -152,7 +152,7 @@ function video_get_all($pdo) {
     $catSql = "SELECT DISTINCT category FROM videos WHERE " . implode(" AND ", $catWhere);
     $stmtActiveCats = $pdo->prepare($catSql);
     $stmtActiveCats->execute($catParams);
-    $activeCategories = $stmtActiveCats->fetchAll(PDO::COLUMN);
+    $activeCategories = $stmtActiveCats->fetchAll(PDO::FETCH_COLUMN);
 
     video_process_rows($videos);
     
