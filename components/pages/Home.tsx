@@ -570,7 +570,7 @@ export default function Home() {
                 <div className="relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 shadow-sm">
                     <div className="flex flex-col gap-2 max-w-7xl mx-auto">
                         
-                        {/* FILA 1: BREADCRUMBS Y CONTROLES (SIN OVERFLOW HIDDEN) */}
+                        {/* FILA 1: BREADCRUMBS Y CONTROLES */}
                         <div className="flex items-center gap-2 w-full">
                             {/* ZONA IZQUIERDA: BOTONES DE VISTA */}
                             <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0 z-30">
@@ -595,7 +595,8 @@ export default function Home() {
 
                             {/* ZONA DERECHA: ORDEN Y TIPO */}
                             <div className="flex items-center gap-1.5 shrink-0 ml-auto z-30">
-                                <div className="hidden sm:flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
+                                {/* CORRECCIÓN: Se eliminó hidden sm: para que se vean siempre en el móvil */}
+                                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
                                     <button onClick={() => setMediaFilter('ALL')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Todo"><Layers size={13}/></button>
                                     <button onClick={() => setMediaFilter('VIDEO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Video"><Play size={13}/></button>
                                     <button onClick={() => setMediaFilter('AUDIO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Audio"><Music size={13}/></button>
@@ -652,7 +653,7 @@ export default function Home() {
                 </div>
             </div>
 
-            <div className="pt-40 px-4 md:px-8 max-w-7xl mx-auto">
+            <div className="pt-44 px-4 md:px-8 max-w-7xl mx-auto">
                 {loading ? (
                     <div className="flex flex-col items-center justify-center py-40 gap-4">
                         <Loader2 className="animate-spin text-indigo-500" size={48} />
