@@ -1,3 +1,4 @@
+
 import { 
     User, Video, Transaction, VipPlan, Comment, UserInteraction, 
     Notification as AppNotification, VideoResult, ContentRequest, 
@@ -28,12 +29,22 @@ class DBService {
     public request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
         const url = endpoint.startsWith('http') ? endpoint : `api/index.php?${endpoint}`;
         const token = localStorage.getItem('sp_session_token');
+        
+        const headers: Record<string, string> = { ...(options.headers as Record<string, string>) };
+        
         if (token) {
-            options.headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
+            headers['Authorization'] = `Bearer ${token}`;
         }
-        if (options.method === 'POST' && !(options.body instanceof FormData) && typeof options.body === 'string') {
-            options.headers = { ...options.headers, 'Content-Type': 'application/json' };
+
+        if (options.method === 'POST') {
+            if (!(options.body instanceof FormData)) {
+                headers['Content-Type'] = 'application/json';
+                if (!options.body) options.body = JSON.stringify({});
+            }
         }
+
+        options.headers = headers;
+
         return fetch(url, options).then(async (response) => {
             const rawText = await response.text();
             
@@ -54,18 +65,12 @@ class DBService {
         });
     }
 
-    /**
-     * Obtiene videos paginados con filtros de carpeta, búsqueda, categoría global, tipo de medio y ordenamiento.
-     */
     public async getVideos(page: number = 0, limit: number = 40, folder: string = '', search: string = '', category: string = '', mediaType: string = 'ALL', sortOrder: string = ''): Promise<VideoPagedResponse> {
         const offset = page * limit;
         const query = `action=get_videos&limit=${limit}&offset=${offset}&folder=${encodeURIComponent(folder)}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&media_type=${encodeURIComponent(mediaType)}&sort_order=${encodeURIComponent(sortOrder)}`;
         return this.request<VideoPagedResponse>(query);
     }
 
-    /**
-     * Obtiene Shorts paginados filtrados por el servidor. Respeta el filtro global de mediaType.
-     */
     public async getShorts(page: number = 0, limit: number = 20, mediaType: string = 'ALL', sortOrder: string = ''): Promise<VideoPagedResponse> {
         const offset = page * limit;
         const query = `action=get_videos&limit=${limit}&offset=${offset}&shorts=1&media_type=${encodeURIComponent(mediaType)}&sort_order=${encodeURIComponent(sortOrder)}`;
@@ -73,7 +78,6 @@ class DBService {
     }
 
     public async getAllVideos(): Promise<Video[]> { 
-        // Aumentado a 10,000 para backups completos de colecciones grandes
         const res = await this.getVideos(0, 10000);
         return res.videos;
     }

@@ -558,69 +558,72 @@ export default function Home() {
                 </div>
 
                 {/* CAPA INFERIOR DINÁMICA - OPTIMIZADA CON ZONAS FIJAS */}
-                {!searchQuery && (
-                    <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
-                        <div className="flex flex-col gap-2 max-w-7xl mx-auto overflow-hidden">
-                            
-                            {/* FILA 1: NAVEGACIÓN Y FILTROS (ZONIFICADO) */}
-                            <div className="flex items-center gap-2 w-full overflow-hidden">
-                                {/* ZONA IZQUIERDA: INICIO & FOLDERS (FIXED) */}
-                                <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0">
-                                    <button onClick={() => handleNavigate(-1)} className="p-2 hover:bg-white/10 rounded-lg text-white transition-colors">
-                                        <HomeIcon size={16}/>
-                                    </button>
-                                    {folders.length > 0 && (
-                                        <button 
-                                            onClick={() => setShowFolderGrid(!showFolderGrid)} 
-                                            className={`p-2 rounded-lg transition-all duration-300 ${showFolderGrid ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-300 hover:text-white'}`}
-                                        >
-                                            <ChevronDown size={16} className={`transition-transform duration-300 ${showFolderGrid ? 'rotate-180' : ''}`} />
-                                        </button>
-                                    )}
-                                </div>
-
-                                {/* ZONA CENTRAL: BREADCRUMBS (SCROLLABLE CON MIN-W-0) */}
-                                <Breadcrumbs path={navigationPath} onNavigate={handleNavigate} />
-
-                                {/* ZONA DERECHA: FILTROS & ORDEN (FIXED) */}
-                                <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-                                    <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
-                                        <button onClick={() => setMediaFilter('ALL')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Todo"><Layers size={13}/></button>
-                                        <button onClick={() => setMediaFilter('VIDEO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Video"><Play size={13}/></button>
-                                        <button onClick={() => setMediaFilter('AUDIO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Audio"><Music size={13}/></button>
-                                    </div>
-
-                                    <div className="relative" ref={sortMenuRef}>
-                                        <button 
-                                            onClick={() => setShowSortMenu(!showSortMenu)}
-                                            className={`p-2 rounded-xl transition-all border ${userSortOrder ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}
-                                        >
-                                            <ArrowDownUp size={15}/>
-                                        </button>
-                                        {showSortMenu && (
-                                            <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] animate-in fade-in zoom-in-95 origin-top-right">
-                                                <div className="p-2 bg-slate-950 border-b border-white/5"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Ordenar por</span></div>
-                                                <div className="p-1">
-                                                    {sortOptions.map(opt => (
-                                                        <button 
-                                                            key={opt.id}
-                                                            onClick={() => { setUserSortOrder(opt.id); setShowSortMenu(false); }}
-                                                            className={`w-full p-3 flex items-center gap-3 rounded-xl transition-colors text-left ${userSortOrder === opt.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}
-                                                        >
-                                                            <opt.icon size={14} className={userSortOrder === opt.id ? 'text-white' : 'text-slate-500'} />
-                                                            <span className="text-xs font-bold uppercase tracking-tight">{opt.label}</span>
-                                                            {userSortOrder === opt.id && <Check size={12} className="ml-auto" />}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
+                <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
+                    <div className="flex flex-col gap-2 max-w-7xl mx-auto overflow-hidden">
+                        
+                        {/* FILA 1: NAVEGACIÓN Y FILTROS (ZONIFICADO) */}
+                        <div className="flex items-center gap-2 w-full overflow-visible">
+                            {/* ZONA IZQUIERDA: INICIO & FOLDERS (FIXED - Z-INDEX ALTO) */}
+                            <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0 z-30">
+                                <button onClick={() => { handleNavigate(-1); setSearchQuery(''); updateUrlSearch(''); }} className="p-2.5 hover:bg-white/10 rounded-lg text-white transition-colors active:scale-90">
+                                    <HomeIcon size={16}/>
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        if (searchQuery) { setSearchQuery(''); updateUrlSearch(''); }
+                                        setShowFolderGrid(!showFolderGrid);
+                                    }} 
+                                    className={`p-2.5 rounded-lg transition-all duration-300 active:scale-90 ${showFolderGrid ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-300 hover:text-white'}`}
+                                >
+                                    <ChevronDown size={16} className={`transition-transform duration-300 ${showFolderGrid ? 'rotate-180' : ''}`} />
+                                </button>
                             </div>
 
-                            {/* FILA 2: CATEGORÍAS (SCROLLABLE INDEPENDIENTE) */}
-                            <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide py-1">
+                            {/* ZONA CENTRAL: BREADCRUMBS (SCROLLABLE CON MIN-W-0) */}
+                            <div className="flex-1 min-w-0 z-10">
+                                <Breadcrumbs path={navigationPath} onNavigate={(idx) => { handleNavigate(idx); if(searchQuery) {setSearchQuery(''); updateUrlSearch('');} }} />
+                            </div>
+
+                            {/* ZONA DERECHA: FILTROS & ORDEN (FIXED - Z-INDEX ALTO) */}
+                            <div className="flex items-center gap-1.5 shrink-0 ml-auto z-30">
+                                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
+                                    <button onClick={() => setMediaFilter('ALL')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Todo"><Layers size={13}/></button>
+                                    <button onClick={() => setMediaFilter('VIDEO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Video"><Play size={13}/></button>
+                                    <button onClick={() => setMediaFilter('AUDIO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Audio"><Music size={13}/></button>
+                                </div>
+
+                                <div className="relative" ref={sortMenuRef}>
+                                    <button 
+                                        onClick={() => setShowSortMenu(!showSortMenu)}
+                                        className={`p-2.5 rounded-xl transition-all border active:scale-90 ${userSortOrder ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}
+                                    >
+                                        <ArrowDownUp size={15}/>
+                                    </button>
+                                    {showSortMenu && (
+                                        <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] animate-in fade-in zoom-in-95 origin-top-right">
+                                            <div className="p-2 bg-slate-950 border-b border-white/5"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Ordenar por</span></div>
+                                            <div className="p-1">
+                                                {sortOptions.map(opt => (
+                                                    <button 
+                                                        key={opt.id}
+                                                        onClick={() => { setUserSortOrder(opt.id); setShowSortMenu(false); }}
+                                                        className={`w-full p-3 flex items-center gap-3 rounded-xl transition-colors text-left ${userSortOrder === opt.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}
+                                                    >
+                                                        <opt.icon size={14} className={userSortOrder === opt.id ? 'text-white' : 'text-slate-500'} />
+                                                        <span className="text-xs font-bold uppercase tracking-tight">{opt.label}</span>
+                                                        {userSortOrder === opt.id && <Check size={12} className="ml-auto" />}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* FILA 2: CATEGORÍAS (SCROLLABLE INDEPENDIENTE) */}
+                        {!searchQuery && (
+                            <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide py-1 animate-in fade-in duration-300">
                                 {parentFolderName && <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3"><Folder size={12}/> {parentFolderName}</div>}
                                 <div className="flex gap-2">
                                     {activeCategories.map(cat => (
@@ -635,9 +638,9 @@ export default function Home() {
                                     ))}
                                 </div>
                             </div>
-                        </div>
+                        )}
                     </div>
-                )}
+                </div>
             </div>
 
             <div className="pt-36 px-4 md:px-8 max-w-7xl mx-auto">

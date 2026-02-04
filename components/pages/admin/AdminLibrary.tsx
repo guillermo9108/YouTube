@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../../../services/db';
 import { Video, SystemSettings } from '../../../types';
@@ -309,13 +310,19 @@ export default function AdminLibrary() {
         addToLog("Iniciando Organización de videos...");
         try {
             const res = await db.smartOrganizeLibrary();
-            addToLog(`Procesados: ${res.processed}. Pendientes: ${res.remaining}`);
+            addToLog(`Procesados: ${res.processed}. Restantes en cola: ${res.remaining || 0}`);
+            
             if (res.processed > 0) {
-                toast.success("Publicación completada");
+                toast.success("Organización completada");
                 db.setHomeDirty();
-            } else addToLog("No hay videos en PROCESSING.");
+            } else {
+                addToLog("Nada pendiente para organizar.");
+            }
             loadStats();
-        } catch (e: any) { addToLog(`Error: ${e.message}`); }
+        } catch (e: any) { 
+            addToLog(`Error al organizar: ${e.message}`); 
+            toast.error("Error en el organizador");
+        }
         finally { setIsOrganizing(false); }
     };
 
@@ -337,7 +344,6 @@ export default function AdminLibrary() {
         finally { setIsFixing(false); }
     };
 
-    // --- REFACTORIZADO: Sincronización Global por lotes ---
     const handleStep5 = async () => {
         if (!confirm("Esto analizará TODOS los videos de la base de datos y los moverá a sus categorías/precios correctos según la configuración actual de Admin. Se hará por lotes para evitar errores de servidor. ¿Continuar?")) return;
         
@@ -358,7 +364,6 @@ export default function AdminLibrary() {
                 } else {
                     addToLog(`Lote OK: ${res.processed} videos actualizados.`);
                     offset += limit;
-                    // Pequeña espera para no saturar CPU
                     await new Promise(r => setTimeout(r, 300));
                 }
             }
@@ -499,9 +504,11 @@ export default function AdminLibrary() {
                             <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-black">3</div>
                             <h3 className="font-black text-white text-xs uppercase tracking-widest">Organización IA</h3>
                         </div>
-                        <button onClick={handleStep3} disabled={isOrganizing || stats.processing === 0} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2">
-                            {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} Publicar ({stats.processing})
+                        <button onClick={handleStep3} disabled={isOrganizing} className="w-full bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-white shadow-xl transition-all flex items-center justify-center gap-2 active:scale-95">
+                            {isOrganizing ? <RefreshCw className="animate-spin" size={18}/> : <Wand2 size={18}/>} 
+                            Organizar y Publicar {stats.processing > 0 ? `(${stats.processing})` : ''}
                         </button>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase text-center">Aplica precios y categorías finales</p>
                     </div>
                 </div>
 
