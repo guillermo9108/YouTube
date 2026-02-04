@@ -55,20 +55,20 @@ class DBService {
     }
 
     /**
-     * Obtiene videos paginados con filtros de carpeta, búsqueda, categoría global y tipo de medio.
+     * Obtiene videos paginados con filtros de carpeta, búsqueda, categoría global, tipo de medio y ordenamiento.
      */
-    public async getVideos(page: number = 0, limit: number = 40, folder: string = '', search: string = '', category: string = '', mediaType: string = 'ALL'): Promise<VideoPagedResponse> {
+    public async getVideos(page: number = 0, limit: number = 40, folder: string = '', search: string = '', category: string = '', mediaType: string = 'ALL', sortOrder: string = ''): Promise<VideoPagedResponse> {
         const offset = page * limit;
-        const query = `action=get_videos&limit=${limit}&offset=${offset}&folder=${encodeURIComponent(folder)}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&media_type=${encodeURIComponent(mediaType)}`;
+        const query = `action=get_videos&limit=${limit}&offset=${offset}&folder=${encodeURIComponent(folder)}&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}&media_type=${encodeURIComponent(mediaType)}&sort_order=${encodeURIComponent(sortOrder)}`;
         return this.request<VideoPagedResponse>(query);
     }
 
     /**
      * Obtiene Shorts paginados filtrados por el servidor. Respeta el filtro global de mediaType.
      */
-    public async getShorts(page: number = 0, limit: number = 20, mediaType: string = 'ALL'): Promise<VideoPagedResponse> {
+    public async getShorts(page: number = 0, limit: number = 20, mediaType: string = 'ALL', sortOrder: string = ''): Promise<VideoPagedResponse> {
         const offset = page * limit;
-        const query = `action=get_videos&limit=${limit}&offset=${offset}&shorts=1&media_type=${encodeURIComponent(mediaType)}`;
+        const query = `action=get_videos&limit=${limit}&offset=${offset}&shorts=1&media_type=${encodeURIComponent(mediaType)}&sort_order=${encodeURIComponent(sortOrder)}`;
         return this.request<VideoPagedResponse>(query);
     }
 

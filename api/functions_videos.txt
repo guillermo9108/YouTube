@@ -38,6 +38,7 @@ function video_get_all($pdo) {
     $folder = trim($_GET['folder'] ?? ''); 
     $category = trim($_GET['category'] ?? ''); 
     $mediaType = trim($_GET['media_type'] ?? 'ALL');
+    $userSort = trim($_GET['sort_order'] ?? ''); // Parámetro de orden del usuario
     $isShorts = !empty($_GET['shorts']); 
     
     $params = [];
@@ -84,12 +85,35 @@ function video_get_all($pdo) {
     }
 
     $whereClause = implode(" AND ", $where);
+
+    // --- LÓGICA DE ORDENAMIENTO (Prioridad Usuario > Admin) ---
+    $sortOrder = 'LATEST';
+    
+    if (!empty($userSort)) {
+        $sortOrder = $userSort;
+    } else if (!empty($category) && $category !== 'TODOS') {
+        $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
+        $allCats = json_decode($stmtS->fetchColumn() ?: '[]', true);
+        foreach ($allCats as $cat) {
+            if (strcasecmp($cat['name'], $category) === 0) {
+                $sortOrder = $cat['sortOrder'] ?? 'LATEST';
+                break;
+            }
+        }
+    }
+
+    $orderBy = "v.createdAt DESC";
+    if ($isShorts || $sortOrder === 'RANDOM') {
+        $orderBy = "RAND()";
+    } else if ($sortOrder === 'ALPHA') {
+        $orderBy = "v.title ASC";
+    }
     
     $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole 
             FROM videos v 
             LEFT JOIN users u ON v.creatorId = u.id 
             WHERE $whereClause 
-            ORDER BY " . ($isShorts ? "RAND()" : "v.createdAt DESC") . " 
+            ORDER BY $orderBy 
             LIMIT $limit OFFSET $offset";
             
     $stmt = $pdo->prepare($sql);
@@ -102,15 +126,14 @@ function video_get_all($pdo) {
     $total = $stmtCount->fetchColumn();
 
     $subfolders = [];
-    if (empty($search) && !$isShorts) {
-        $subfolders = video_discover_subfolders($pdo, $folder);
+    if (!$isShorts) {
+        $subfolders = video_discover_subfolders($pdo, $folder, $search);
     }
 
-    // --- CATEGORÍAS CONTEXTUALES (Ajustadas por Filtro de Medio) ---
+    // --- CATEGORÍAS CONTEXTUALES ---
     $catWhere = ["category NOT IN ('PENDING', 'PROCESSING', 'FAILED_METADATA')"];
     $catParams = [];
 
-    // Aplicamos el filtro de medio a la detección de categorías para no mostrar vacías
     if ($mediaType === 'VIDEO') {
         $catWhere[] = "is_audio = 0";
     } elseif ($mediaType === 'AUDIO') {
@@ -129,7 +152,7 @@ function video_get_all($pdo) {
     $catSql = "SELECT DISTINCT category FROM videos WHERE " . implode(" AND ", $catWhere);
     $stmtActiveCats = $pdo->prepare($catSql);
     $stmtActiveCats->execute($catParams);
-    $activeCategories = $stmtActiveCats->fetchAll(PDO::FETCH_COLUMN);
+    $activeCategories = $stmtActiveCats->fetchAll(PDO::COLUMN);
 
     video_process_rows($videos);
     
@@ -142,7 +165,7 @@ function video_get_all($pdo) {
     ]);
 }
 
-function video_discover_subfolders($pdo, $currentFolder) {
+function video_discover_subfolders($pdo, $currentFolder, $searchTerm = '') {
     $stmtS = $pdo->query("SELECT localLibraryPath FROM system_settings WHERE id = 1");
     $root = rtrim($stmtS->fetchColumn(), '/\\');
     
@@ -171,6 +194,12 @@ function video_discover_subfolders($pdo, $currentFolder) {
         $parts = explode('/', $relative);
         if (count($parts) > 1) {
             $folderName = $parts[0];
+            
+            // Si hay búsqueda, filtrar el nombre de la carpeta
+            if ($searchTerm && stripos($folderName, $searchTerm) === false) {
+                continue;
+            }
+
             if (!isset($foldersMap[$folderName])) {
                 $foldersMap[$folderName] = 0;
             }

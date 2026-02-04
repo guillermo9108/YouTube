@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
-import { Video, Notification as AppNotification, User, SystemSettings } from '../../types';
+import { Video, Notification as AppNotification, User, SystemSettings, Category } from '../../types';
+// Fix: Added missing imports Clock, Zap, and Check from lucide-react to resolve errors on lines 498, 500, and 613
 import { 
-    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History, Edit3, DollarSign, SortAsc, Save
+    RefreshCw, Search, X, ChevronRight, ChevronDown, Home as HomeIcon, Layers, Folder, Bell, Menu, Crown, User as UserIcon, LogOut, ShieldCheck, MessageSquare, Loader2, Tag, Play, Music, ShoppingBag, History, Edit3, DollarSign, SortAsc, Save, ArrowDownUp, Clock, Zap, Check
 } from 'lucide-react';
 import { useNavigate, Link, useLocation } from '../Router';
 import AIConcierge from '../AIConcierge';
@@ -62,7 +63,7 @@ const Sidebar: React.FC<{ isOpen: boolean, onClose: () => void, user: User | nul
                 </div>
                 <div className="p-4 bg-slate-950/50 border-t border-white/5">
                     <button onClick={() => { logout(); onClose(); }} className="w-full flex items-center gap-4 p-4 rounded-2xl text-red-400 hover:bg-red-500/10 transition-all">
-                        <LogOut size={20}/><span className="text-xs font-black uppercase tracking-widest">Cerrar Sesión</span>
+                        <LogOut size={20}/><span className="text-xs font-black uppercase tracking-widest">Cerrar Sesión Sesión</span>
                     </button>
                 </div>
             </div>
@@ -107,12 +108,20 @@ const Breadcrumbs: React.FC<{
 
 const FolderEditModal: React.FC<{ 
     folder: any, 
+    initialPrice: number,
+    initialSortOrder: string,
     onClose: () => void, 
     onSave: (price: number, sortOrder: string) => Promise<void> 
-}> = ({ folder, onClose, onSave }) => {
-    const [price, setPrice] = useState<number>(1.0);
-    const [sortOrder, setSortOrder] = useState<string>('LATEST');
+}> = ({ folder, initialPrice, initialSortOrder, onClose, onSave }) => {
+    const [price, setPrice] = useState<number>(initialPrice);
+    const [sortOrder, setSortOrder] = useState<string>(initialSortOrder);
     const [loading, setLoading] = useState(false);
+
+    // Actualizar estados locales si cambian los valores iniciales (al abrir para una carpeta diferente)
+    useEffect(() => {
+        setPrice(initialPrice);
+        setSortOrder(initialSortOrder);
+    }, [folder.relativePath, initialPrice, initialSortOrder]);
 
     return (
         <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
@@ -176,12 +185,17 @@ export default function Home() {
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [showFolderGrid, setShowFolderGrid] = useState(false);
+    const [showSortMenu, setShowSortMenu] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
     const [editingFolder, setEditingFolder] = useState<any | null>(null);
     
-    // Filtro de Medio Persistente
+    // Filtros Persistentes
     const [mediaFilter, setMediaFilter] = useState<'ALL' | 'VIDEO' | 'AUDIO'>(() => {
         return (localStorage.getItem('sp_media_filter') as any) || 'ALL';
+    });
+
+    const [userSortOrder, setUserSortOrder] = useState<string>(() => {
+        return localStorage.getItem('sp_user_sort') || ''; // Vacío significa usar el default de categoría/admin
     });
 
     // Data State
@@ -214,6 +228,7 @@ export default function Home() {
 
     const searchContainerRef = useRef<HTMLFormElement>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const sortMenuRef = useRef<HTMLDivElement>(null);
     const loadMoreRef = useRef<HTMLDivElement>(null);
     const searchTimeout = useRef<any>(null);
     const lastScrollY = useRef(0);
@@ -221,10 +236,24 @@ export default function Home() {
     const currentFolder = navigationPath.join('/');
     const parentFolderName = navigationPath.length > 0 ? navigationPath[navigationPath.length - 1] : null;
 
-    // Persistir preferencia de filtro
+    // Buscar configuración de categoría para la carpeta que se está editando
+    const editingFolderConfig = useMemo(() => {
+        if (!editingFolder || !systemSettings?.categories) return { price: 1.0, sortOrder: 'LATEST' };
+        const found = systemSettings.categories.find(c => c.name.toLowerCase() === editingFolder.name.toLowerCase());
+        return {
+            price: found ? Number(found.price) : 1.0,
+            sortOrder: found ? (found.sortOrder || 'LATEST') : 'LATEST'
+        };
+    }, [editingFolder, systemSettings]);
+
+    // Persistencia de preferencias
     useEffect(() => {
         localStorage.setItem('sp_media_filter', mediaFilter);
     }, [mediaFilter]);
+
+    useEffect(() => {
+        localStorage.setItem('sp_user_sort', userSortOrder);
+    }, [userSortOrder]);
 
     // 1. Cargar configuración inicial
     useEffect(() => {
@@ -251,7 +280,7 @@ export default function Home() {
         }
 
         try {
-            const res = await db.getVideos(p, 40, currentFolder, searchQuery, selectedCategory, mediaFilter);
+            const res = await db.getVideos(p, 40, currentFolder, searchQuery, selectedCategory, mediaFilter, userSortOrder);
             
             if (reset) {
                 setVideos(res.videos);
@@ -314,7 +343,7 @@ export default function Home() {
     // 4. Trigger de carga cuando cambian filtros
     useEffect(() => {
         fetchVideos(0, true);
-    }, [currentFolder, searchQuery, selectedCategory, mediaFilter]);
+    }, [currentFolder, searchQuery, selectedCategory, mediaFilter, userSortOrder]);
 
     // 5. Infinite Scroll Observer
     useEffect(() => {
@@ -326,11 +355,14 @@ export default function Home() {
         return () => observer.disconnect();
     }, [page, hasMore, loading, loadingMore]);
 
-    // Cerrar sugerencias al hacer click fuera
+    // Cerrar menús al hacer click fuera
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
             if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
                 setShowSuggestions(false);
+            }
+            if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) {
+                setShowSortMenu(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -383,6 +415,12 @@ export default function Home() {
             updateUrlSearch(s.label);
             if (s.type === 'CATEGORY') setSelectedCategory(s.label);
             db.saveSearch(s.label);
+        } else if (s.type === 'FOLDER') {
+            setSearchQuery('');
+            updateUrlSearch('');
+            setNavigationPath(prev => [...prev, s.label]);
+            setSelectedCategory('TODOS');
+            setShowFolderGrid(true);
         } else {
             db.saveSearch(searchQuery || s.label);
             const contextParam = searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : '';
@@ -421,6 +459,8 @@ export default function Home() {
             });
             toast.success("Configuración aplicada a toda la rama");
             setEditingFolder(null);
+            const s = await db.getSystemSettings();
+            setSystemSettings(s);
             fetchVideos(0, true);
         } catch (e: any) {
             toast.error("Error al aplicar cambios: " + e.message);
@@ -445,6 +485,7 @@ export default function Home() {
         switch (type) {
             case 'HISTORY': return <History size={14} className="text-slate-500" />;
             case 'CATEGORY': return <Tag size={14} className="text-pink-400" />;
+            case 'FOLDER': return <Folder size={14} className="text-amber-500" />;
             case 'VIDEO': return <Play size={14} className="text-indigo-400" />;
             case 'AUDIO': return <Music size={14} className="text-emerald-400" />;
             case 'MARKET': return <ShoppingBag size={14} className="text-amber-400" />;
@@ -452,6 +493,13 @@ export default function Home() {
             default: return <Layers size={14} className="text-slate-400" />;
         }
     };
+
+    const sortOptions = [
+        { id: '', label: 'Por Defecto', icon: RefreshCw },
+        { id: 'LATEST', label: 'Recientes', icon: Clock },
+        { id: 'ALPHA', label: 'A-Z (Título)', icon: SortAsc },
+        { id: 'RANDOM', label: 'Aleatorio', icon: Zap }
+    ];
 
     return (
         <div className="relative pb-20">
@@ -463,12 +511,7 @@ export default function Home() {
                     <div className="flex gap-3 items-center max-w-7xl mx-auto">
                         <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-white active:scale-95 transition-transform shrink-0"><Menu size={20}/></button>
                         
-                        {/* FORMULARIO DE BÚSQUEDA MEJORADO */}
-                        <form 
-                            className="relative flex-1 min-w-0" 
-                            ref={searchContainerRef}
-                            onSubmit={handleSearchSubmit}
-                        >
+                        <form className="relative flex-1 min-w-0" ref={searchContainerRef} onSubmit={handleSearchSubmit}>
                             <Search className="absolute left-4 top-3 text-slate-400" size={18} />
                             <input 
                                 ref={searchInputRef}
@@ -494,7 +537,7 @@ export default function Home() {
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="text-sm font-bold text-white group-hover:text-indigo-400 transition-colors truncate uppercase tracking-tighter">{s.label}</div>
-                                                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-0.5">{s.type === 'HISTORY' ? 'RECUPERAR BÚSQUEDA' : s.type}</div>
+                                                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-0.5">{s.type === 'HISTORY' ? 'RECUPERAR BÚSQUEDA' : (s.type === 'FOLDER' ? 'NAVEGAR A CARPETA' : s.type)}</div>
                                                 </div>
                                                 <ChevronRight size={14} className="text-slate-700 opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1" />
                                             </button>
@@ -539,38 +582,47 @@ export default function Home() {
                                     showFolders={showFolderGrid} hasFolders={folders.length > 0}
                                 />
                                 
-                                {/* FILTRO DE MEDIO (AUDIO/VIDEO) */}
-                                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
-                                    <button 
-                                        onClick={() => setMediaFilter('ALL')} 
-                                        className={`p-2 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                                        title="Ver Todo"
-                                    >
-                                        <Layers size={14}/>
-                                    </button>
-                                    <button 
-                                        onClick={() => setMediaFilter('VIDEO')} 
-                                        className={`p-2 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                                        title="Solo Video"
-                                    >
-                                        <Play size={14}/>
-                                    </button>
-                                    <button 
-                                        onClick={() => setMediaFilter('AUDIO')} 
-                                        className={`p-2 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
-                                        title="Solo Audio"
-                                    >
-                                        <Music size={14}/>
-                                    </button>
+                                <div className="flex items-center gap-2">
+                                    {/* FILTRO DE MEDIO (AUDIO/VIDEO) */}
+                                    <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
+                                        <button onClick={() => setMediaFilter('ALL')} className={`p-2 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Ver Todo"><Layers size={14}/></button>
+                                        <button onClick={() => setMediaFilter('VIDEO')} className={`p-2 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Solo Video"><Play size={14}/></button>
+                                        <button onClick={() => setMediaFilter('AUDIO')} className={`p-2 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Solo Audio"><Music size={14}/></button>
+                                    </div>
+
+                                    {/* SELECTOR DE ORDENAMIENTO (NUEVO) */}
+                                    <div className="relative" ref={sortMenuRef}>
+                                        <button 
+                                            onClick={() => setShowSortMenu(!showSortMenu)}
+                                            className={`p-2 rounded-xl transition-all border ${userSortOrder ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}
+                                            title="Cambiar Orden"
+                                        >
+                                            <ArrowDownUp size={16}/>
+                                        </button>
+                                        {showSortMenu && (
+                                            <div className="absolute top-full left-0 mt-2 w-48 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] animate-in fade-in zoom-in-95 origin-top-left">
+                                                <div className="p-2 bg-slate-950 border-b border-white/5"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Ordenar por</span></div>
+                                                <div className="p-1">
+                                                    {sortOptions.map(opt => (
+                                                        <button 
+                                                            key={opt.id}
+                                                            onClick={() => { setUserSortOrder(opt.id); setShowSortMenu(false); }}
+                                                            className={`w-full p-3 flex items-center gap-3 rounded-xl transition-colors text-left ${userSortOrder === opt.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'}`}
+                                                        >
+                                                            <opt.icon size={14} className={userSortOrder === opt.id ? 'text-white' : 'text-slate-500'} />
+                                                            <span className="text-xs font-bold uppercase tracking-tight">{opt.label}</span>
+                                                            {userSortOrder === opt.id && <Check size={12} className="ml-auto" />}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 
                             <div className="flex-1 min-w-0 flex items-center gap-3 overflow-x-auto scrollbar-hide py-1">
-                                {parentFolderName && (
-                                    <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3">
-                                        <Folder size={12}/> {parentFolderName}
-                                    </div>
-                                )}
+                                {parentFolderName && <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3"><Folder size={12}/> {parentFolderName}</div>}
                                 <div className="flex gap-2">
                                     {activeCategories.map(cat => (
                                         <button 
@@ -597,55 +649,65 @@ export default function Home() {
                     </div>
                 ) : (
                     <div className="space-y-12 animate-in fade-in duration-1000">
-                        {!searchQuery && folders.length > 0 && showFolderGrid && (
-                            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
-                                {folders.map(folder => (
-                                    <div 
-                                        key={folder.name} 
-                                        className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300"
-                                    >
-                                        <button 
-                                            onClick={() => { 
-                                                setNavigationPath([...navigationPath, folder.name]); 
-                                                setSelectedCategory('TODOS'); 
-                                                setShowFolderGrid(false); 
-                                            }}
-                                            className="absolute inset-0 z-0"
+                        {((!searchQuery && showFolderGrid) || (searchQuery && folders.length > 0)) && folders.length > 0 && (
+                            <div className="space-y-6">
+                                {searchQuery && (
+                                    <div className="flex items-center gap-3 px-1">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+                                        <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">Carpetas coincidentes</h2>
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
+                                    {folders.map(folder => (
+                                        <div 
+                                            key={folder.name} 
+                                            className="group relative aspect-[4/5] sm:aspect-video rounded-[32px] overflow-hidden bg-slate-900 border border-white/5 hover:border-indigo-500 shadow-2xl transition-all duration-300"
                                         >
-                                            {folder.thumbnailUrl ? (
-                                                <img src={folder.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-60" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center bg-slate-950 text-slate-800">
-                                                    <Folder size={48} className="opacity-20" />
-                                                </div>
-                                            )}
-                                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-indigo-500/10"></div>
-                                        </button>
-
-                                        <div className="relative z-10 h-full flex flex-col p-5 pointer-events-none">
-                                            <div className="flex justify-between items-start">
-                                                <div className="p-2.5 bg-slate-800/80 rounded-xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform shadow-lg"><Folder size={20}/></div>
-                                                <div className="flex flex-col items-end gap-2">
-                                                    <div className="bg-indigo-600/30 backdrop-blur-md px-2 py-0.5 rounded-lg border border-indigo-500/30">
-                                                        <span className="text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} ITEMS</span>
+                                            <button 
+                                                onClick={() => { 
+                                                    setSearchQuery('');
+                                                    updateUrlSearch('');
+                                                    setNavigationPath([...navigationPath, folder.name]); 
+                                                    setSelectedCategory('TODOS'); 
+                                                    setShowFolderGrid(true); 
+                                                }}
+                                                className="absolute inset-0 z-0"
+                                            >
+                                                {folder.thumbnailUrl ? (
+                                                    <img src={folder.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-60" />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center bg-slate-950 text-slate-800">
+                                                        <Folder size={48} className="opacity-20" />
                                                     </div>
-                                                    {isAdmin && (
-                                                        <button 
-                                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingFolder(folder); }}
-                                                            className="p-2 bg-slate-950/80 hover:bg-indigo-600 text-white rounded-xl border border-white/10 shadow-xl transition-all active:scale-90 pointer-events-auto"
-                                                        >
-                                                            <Edit3 size={14}/>
-                                                        </button>
-                                                    )}
+                                                )}
+                                                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-indigo-500/10"></div>
+                                            </button>
+
+                                            <div className="relative z-10 h-full flex flex-col p-5 pointer-events-none">
+                                                <div className="flex justify-between items-start">
+                                                    <div className="p-2.5 bg-slate-800/80 rounded-xl border border-white/5 text-indigo-400 group-hover:scale-110 transition-transform shadow-lg"><Folder size={20}/></div>
+                                                    <div className="flex flex-col items-end gap-2">
+                                                        <div className="bg-indigo-600/30 backdrop-blur-md px-2 py-0.5 rounded-lg border border-indigo-500/30">
+                                                            <span className="text-[8px] text-indigo-200 font-black uppercase tracking-widest">{folder.count} ITEMS</span>
+                                                        </div>
+                                                        {isAdmin && (
+                                                            <button 
+                                                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingFolder(folder); }}
+                                                                className="p-2 bg-slate-950/80 hover:bg-indigo-600 text-white rounded-xl border border-white/10 shadow-xl transition-all active:scale-90 pointer-events-auto"
+                                                            >
+                                                                <Edit3 size={14}/>
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div className="mt-auto">
-                                                <h3 className="text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-2">{folder.name}</h3>
-                                                <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-full transition-all duration-700"></div>
+                                                <div className="mt-auto">
+                                                    <h3 className="text-base font-black text-white uppercase tracking-tight text-left leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] group-hover:text-indigo-300 transition-colors line-clamp-2">{folder.name}</h3>
+                                                    <div className="w-6 h-1 bg-indigo-500 mt-2 rounded-full group-hover:w-full transition-all duration-700"></div>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
                         )}
 
@@ -656,6 +718,7 @@ export default function Home() {
                                     <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-4">
                                         {selectedCategory !== 'TODOS' ? `Filtrando por: ${selectedCategory}` : (parentFolderName ? `Contenido en ${parentFolderName}` : 'Novedades')}
                                         {mediaFilter !== 'ALL' && <span className="text-slate-500 text-[9px] lowercase italic">({mediaFilter.toLowerCase()}s)</span>}
+                                        {userSortOrder && <span className="text-indigo-400 text-[9px] lowercase border border-indigo-500/30 px-2 py-0.5 rounded-full">orden: {sortOptions.find(o => o.id === userSortOrder)?.label.toLowerCase()}</span>}
                                         <span className="w-12 h-px bg-white/10"></span>
                                     </h2>
                                 </div>
@@ -666,7 +729,7 @@ export default function Home() {
                                     <div className="flex items-center gap-3">
                                         <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
                                         <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-4">
-                                            Resultados para: {searchQuery}
+                                            Videos para: {searchQuery}
                                             <span className="w-12 h-px bg-white/10"></span>
                                         </h2>
                                     </div>
@@ -683,7 +746,7 @@ export default function Home() {
                                             key={v.id} video={v} 
                                             isUnlocked={isAdmin || user?.id === v.creatorId} 
                                             isWatched={watchedIds.includes(v.id)} 
-                                            context={{ query: searchQuery, category: selectedCategory }}
+                                            context={{ query: searchQuery, category: selectedCategory, folder: currentFolder, page: page }}
                                         />
                                     ))}
                                 </div>
@@ -708,6 +771,8 @@ export default function Home() {
             {editingFolder && (
                 <FolderEditModal 
                     folder={editingFolder} 
+                    initialPrice={editingFolderConfig.price}
+                    initialSortOrder={editingFolderConfig.sortOrder}
                     onClose={() => setEditingFolder(null)} 
                     onSave={handleBulkEditFolder} 
                 />

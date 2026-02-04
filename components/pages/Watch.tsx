@@ -21,12 +21,17 @@ export default function Watch() {
     const navigate = useNavigate();
     const toast = useToast();
     
-    // Obtener contexto de búsqueda desde la URL
-    const searchContext = useMemo(() => {
+    // Obtener contexto completo desde la URL
+    const navigationContext = useMemo(() => {
         const hash = window.location.hash;
-        if (!hash.includes('?')) return null;
+        if (!hash.includes('?')) return { q: null, f: '', c: 'TODOS', p: 0 };
         const params = new URLSearchParams(hash.split('?')[1]);
-        return params.get('q');
+        return {
+            q: params.get('q'),
+            f: params.get('f') || '',
+            c: params.get('c') || 'TODOS',
+            p: parseInt(params.get('p') || '0')
+        };
     }, [id, window.location.hash]);
 
     const [video, setVideo] = useState<Video | null>(null);
@@ -38,7 +43,7 @@ export default function Watch() {
     const [seriesQueue, setSeriesQueue] = useState<Video[]>([]); 
     
     // Paginación de Relacionados
-    const [relatedPage, setRelatedPage] = useState(0);
+    const [relatedPage, setRelatedPage] = useState(navigationContext.p);
     const [hasMoreRelated, setHasMoreRelated] = useState(true);
     const [loadingMoreRelated, setLoadingMoreRelated] = useState(false);
     
@@ -68,7 +73,7 @@ export default function Watch() {
         refreshUser(); 
         viewMarkedRef.current = false;
         setThrottled(true);
-        setRelatedPage(0);
+        setRelatedPage(navigationContext.p);
         setRelatedVideos([]);
         setShowComments(false);
         setExtractionAttempted(false); 
@@ -76,17 +81,18 @@ export default function Watch() {
     }, [id]);
 
     const fetchRelated = async (p: number) => {
-        if (loadingMoreRelated || (!hasMoreRelated && p !== 0)) return;
+        if (loadingMoreRelated || (!hasMoreRelated && p !== navigationContext.p)) return;
         setLoadingMoreRelated(true);
         
         // Cargar el filtro persistente del sistema
         const mediaFilter = localStorage.getItem('sp_media_filter') || 'ALL';
         
         try {
-            const res = await db.getVideos(p, 40, '', searchContext || '', 'TODOS', mediaFilter as any);
-            if (p === 0) {
+            const res = await db.getVideos(p, 40, navigationContext.f, navigationContext.q || '', navigationContext.c, mediaFilter as any);
+            if (p === navigationContext.p) {
                 setRelatedVideos(res.videos.filter(v => v.id !== id));
-                setSeriesQueue(res.videos.sort((a, b) => naturalCollator.compare(a.title, b.title)));
+                // No aplicar orden alfabético manual, respetar orden del servidor
+                setSeriesQueue(res.videos);
             } else {
                 setRelatedVideos(prev => [...prev, ...res.videos.filter(v => v.id !== id)]);
             }
@@ -108,7 +114,7 @@ export default function Watch() {
                 setLikes(Number(v.likes || 0));
                 setDislikes(Number(v.dislikes || 0));
 
-                await fetchRelated(0);
+                await fetchRelated(navigationContext.p);
 
                 db.getComments(v.id).then(setComments);
 
@@ -127,7 +133,7 @@ export default function Watch() {
             } catch (e) {} finally { setLoading(false); }
         };
         fetchData();
-    }, [id, user?.id, searchContext]);
+    }, [id, user?.id, navigationContext.q, navigationContext.f, navigationContext.c]);
 
     const handleRate = async (type: 'like' | 'dislike') => {
         if (!user || !video) return;
@@ -239,14 +245,31 @@ export default function Watch() {
         if (!video || !user) return;
         const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
         let nextVid = seriesQueue[currentIndex + 1];
-        if (!nextVid && !searchContext && relatedVideos.length > 0) {
+        
+        // Si no hay siguiente en el lote actual y hay más por cargar, intentamos cargar el siguiente lote
+        if (!nextVid && hasMoreRelated) {
+             toast.info("Cargando siguiente episodio...");
+             await fetchRelated(relatedPage + 1);
+             return; // fetchRelated actualizará seriesQueue y el usuario podrá hacer click o auto-play podrá dispararse de nuevo? 
+             // En realidad lo ideal es que handleVideoEnded maneje la navegación tras el fetch.
+        }
+
+        if (!nextVid && !navigationContext.q && relatedVideos.length > 0) {
             nextVid = relatedVideos[0];
         }
         if (!nextVid) return;
+
         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
         const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
         const hasAccess = isAdmin || (isVip && nextVid.creatorRole === 'ADMIN') || user.id === nextVid.creatorId;
-        const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
+        
+        const params = new URLSearchParams();
+        if (navigationContext.q) params.set('q', navigationContext.q);
+        if (navigationContext.f) params.set('f', navigationContext.f);
+        if (navigationContext.c !== 'TODOS') params.set('c', navigationContext.c);
+        params.set('p', String(relatedPage));
+        const contextSuffix = params.toString() ? `?${params.toString()}` : '';
+
         if (hasAccess) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
         const purchased = await db.hasPurchased(user.id, nextVid.id);
         if (purchased) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
@@ -265,6 +288,8 @@ export default function Watch() {
         const token = localStorage.getItem('sp_session_token') || '';
         return `api/index.php?action=stream&id=${video.id}&token=${token}&cb=${Date.now()}`;
     }, [video?.id]);
+
+    const searchContextLabel = navigationContext.q || (navigationContext.f ? `Carpeta: ${navigationContext.f.split('/').pop()}` : null);
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
@@ -399,28 +424,36 @@ export default function Watch() {
                 <div className="lg:w-80 space-y-4 shrink-0">
                     <div className="flex items-center justify-between px-2">
                         <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                            <Play size={12} className="text-indigo-500"/> {searchContext ? 'En esta búsqueda' : 'Recomendados'}
+                            <Play size={12} className="text-indigo-500"/> {searchContextLabel ? 'En esta lista' : 'Recomendados'}
                         </h3>
-                        {searchContext && (
+                        {searchContextLabel && (
                             <Link to="/" className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-tighter flex items-center gap-1">
-                                <X size={10}/> Limpiar Contexto
+                                <X size={10}/> Salir de Contexto
                             </Link>
                         )}
                     </div>
                     
-                    {searchContext && (
+                    {searchContextLabel && (
                         <div className="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-2xl mb-2">
                             <div className="flex items-center gap-2 text-indigo-400 font-black text-[9px] uppercase tracking-widest">
                                 <ListFilter size={12}/> Viendo resultados de:
                             </div>
-                            <div className="text-xs font-bold text-white mt-1 italic line-clamp-1">"{searchContext}"</div>
+                            <div className="text-xs font-bold text-white mt-1 italic line-clamp-1">"{searchContextLabel}"</div>
                         </div>
                     )}
 
                     <div className="space-y-4">
-                        {relatedVideos.map((v, idx) => {
-                            const isNextInQueue = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
-                            const contextSuffix = searchContext ? `?q=${encodeURIComponent(searchContext)}` : '';
+                        {seriesQueue.map((v, idx) => {
+                            if (v.id === id) return null; // Omitir el actual de la lista lateral? O resaltarlo?
+                            
+                            const isNextInQueue = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === idx;
+                            
+                            const params = new URLSearchParams();
+                            if (navigationContext.q) params.set('q', navigationContext.q);
+                            if (navigationContext.f) params.set('f', navigationContext.f);
+                            if (navigationContext.c !== 'TODOS') params.set('c', navigationContext.c);
+                            params.set('p', String(relatedPage));
+                            const contextSuffix = params.toString() ? `?${params.toString()}` : '';
                             
                             return (
                                 <Link key={v.id} to={`/watch/${v.id}${contextSuffix}`} className={`group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all ${isNextInQueue ? 'bg-indigo-500/[0.03] border border-indigo-500/10' : ''}`}>

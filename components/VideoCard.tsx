@@ -15,7 +15,7 @@ interface VideoCardProps {
   video: Video;
   isUnlocked: boolean;
   isWatched?: boolean;
-  context?: { query: string, category: string };
+  context?: { query?: string, category?: string, folder?: string, page?: number };
 }
 
 const formatTimeAgo = (timestamp: number) => {
@@ -69,9 +69,15 @@ const VideoCard: React.FC<VideoCardProps> = React.memo(({ video, isUnlocked, isW
 
   const watchUrl = useMemo(() => {
     const base = `/watch/${video.id}`;
-    if (context?.query) return `${base}?q=${encodeURIComponent(context.query)}`;
-    return base;
-  }, [video.id, context?.query]);
+    const params = new URLSearchParams();
+    if (context?.query) params.set('q', context.query);
+    if (context?.folder) params.set('f', context.folder);
+    if (context?.category && context.category !== 'TODOS') params.set('c', context.category);
+    if (context?.page !== undefined) params.set('p', String(context.page));
+    
+    const qs = params.toString();
+    return qs ? `${base}?${qs}` : base;
+  }, [video.id, context]);
 
   // Observer para carga perezosa de imágenes y procesamiento
   useEffect(() => {

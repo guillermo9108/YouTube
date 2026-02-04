@@ -1,6 +1,6 @@
 <?php
 /**
- * INTERACCIONES - CORE FUNCTIONS V12.1 (Search Suggestions Optimized)
+ * INTERACCIONES - CORE FUNCTIONS V12.2 (Folders in Search Suggestions)
  */
 
 function interact_save_search($pdo, $input) {
@@ -29,6 +29,27 @@ function interact_get_search_suggestions($pdo, $q) {
         if (stripos($cat['name'], $q) !== false) {
             $res[] = ['label' => $cat['name'], 'type' => 'CATEGORY', 'id' => $cat['id']];
         }
+    }
+
+    // 1.5. Carpetas físicas (Escaneo de rutas locales en DB)
+    $stmtF = $pdo->prepare("SELECT DISTINCT videoUrl FROM videos WHERE isLocal = 1 AND videoUrl LIKE ? LIMIT 50");
+    $stmtF->execute(["%$q%"]);
+    $paths = $stmtF->fetchAll(PDO::FETCH_COLUMN);
+    $foundFolders = [];
+    foreach($paths as $p) {
+        $p = str_replace('\\', '/', $p);
+        $parts = explode('/', $p);
+        foreach($parts as $part) {
+            if (empty($part)) continue;
+            // Si el nombre de la carpeta contiene la búsqueda y no está ya en la lista
+            if (stripos($part, $q) !== false && !in_array($part, $foundFolders)) {
+                $foundFolders[] = $part;
+                if (count($foundFolders) >= 4) break 2;
+            }
+        }
+    }
+    foreach($foundFolders as $ff) {
+        $res[] = ['label' => $ff, 'type' => 'FOLDER'];
     }
 
     // 2. Historial previo
