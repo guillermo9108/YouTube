@@ -75,7 +75,7 @@ const Breadcrumbs: React.FC<{
     path: string[], 
     onNavigate: (index: number) => void
 }> = ({ path, onNavigate }) => (
-    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-2 animate-in fade-in flex-1 [mask-image:linear-gradient(to_right,transparent,black_10%,black_90%,transparent)]">
+    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-2 animate-in fade-in flex-1 min-w-0 [mask-image:linear-gradient(to_right,transparent,black_5%,black_95%,transparent)]">
         {path.map((segment, i) => (
             <React.Fragment key={`${segment}-${i}`}>
                 {i > 0 && <ChevronRight size={10} className="text-white/20 shrink-0"/>}
@@ -488,7 +488,7 @@ export default function Home() {
     ];
 
     return (
-        <div className="relative pb-20">
+        <div className="relative pb-20 overflow-x-hidden">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
             <div className="fixed top-0 left-0 right-0 z-[60]">
@@ -560,10 +560,10 @@ export default function Home() {
                 {/* CAPA INFERIOR DINÁMICA - OPTIMIZADA CON ZONAS FIJAS */}
                 {!searchQuery && (
                     <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
-                        <div className="flex flex-col gap-2 max-w-7xl mx-auto">
+                        <div className="flex flex-col gap-2 max-w-7xl mx-auto overflow-hidden">
                             
                             {/* FILA 1: NAVEGACIÓN Y FILTROS (ZONIFICADO) */}
-                            <div className="flex items-center gap-2 w-full">
+                            <div className="flex items-center gap-2 w-full overflow-hidden">
                                 {/* ZONA IZQUIERDA: INICIO & FOLDERS (FIXED) */}
                                 <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0">
                                     <button onClick={() => handleNavigate(-1)} className="p-2 hover:bg-white/10 rounded-lg text-white transition-colors">
@@ -579,7 +579,7 @@ export default function Home() {
                                     )}
                                 </div>
 
-                                {/* ZONA CENTRAL: BREADCRUMBS (SCROLLABLE) */}
+                                {/* ZONA CENTRAL: BREADCRUMBS (SCROLLABLE CON MIN-W-0) */}
                                 <Breadcrumbs path={navigationPath} onNavigate={handleNavigate} />
 
                                 {/* ZONA DERECHA: FILTROS & ORDEN (FIXED) */}

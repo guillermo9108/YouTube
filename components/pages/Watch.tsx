@@ -296,7 +296,7 @@ export default function Watch() {
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
     return (
-        <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in relative">
+        <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in relative overflow-x-hidden">
             <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-white/5">
                 <div className="relative aspect-video max-w-[1600px] mx-auto bg-black overflow-hidden">
                     {isUnlocked ? (
@@ -335,8 +335,8 @@ export default function Watch() {
             </div>
 
             <div className="max-w-7xl mx-auto w-full p-4 lg:p-8 flex flex-col lg:flex-row gap-8">
-                <div className="flex-1">
-                    <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">{video?.title}</h1>
+                <div className="flex-1 min-w-0">
+                    <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter break-words">{video?.title}</h1>
                     <div className="text-[10px] text-slate-500 font-bold uppercase mb-6">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                     
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-white/5 pb-8 mb-8">
@@ -351,15 +351,15 @@ export default function Watch() {
                             {user?.id !== video?.creatorId && (
                                 <button 
                                     onClick={handleToggleSubscribe}
-                                    className={`ml-2 px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${isSubscribed ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-black hover:bg-slate-200 shadow-lg'}`}
+                                    className={`ml-2 px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 shrink-0 ${isSubscribed ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-black hover:bg-slate-200 shadow-lg'}`}
                                 >
                                     {isSubscribed ? 'Suscrito' : 'Suscribirse'}
                                 </button>
                             )}
                         </div>
 
-                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                            <div className="flex bg-slate-900 rounded-2xl p-1 border border-white/5">
+                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide max-w-full">
+                            <div className="flex bg-slate-900 rounded-2xl p-1 border border-white/5 shrink-0">
                                 <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.liked ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
                                     <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"} />
                                     <span className="text-xs font-black">{likes}</span>
@@ -371,11 +371,11 @@ export default function Watch() {
                                 </button>
                             </div>
 
-                            <button onClick={() => setShowShareModal(true)} className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95" title="Compartir">
+                            <button onClick={() => setShowShareModal(true)} className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95 shrink-0" title="Compartir">
                                 <Share2 size={18}/>
                             </button>
 
-                            <button onClick={() => setShowComments(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95">
+                            <button onClick={() => setShowComments(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95 shrink-0">
                                 <MessageCircle size={18}/>
                                 <span className="text-[10px] font-black uppercase tracking-widest">{comments.length}</span>
                             </button>
@@ -423,7 +423,7 @@ export default function Watch() {
                     </div>
                 </div>
 
-                <div className="lg:w-80 space-y-4 shrink-0">
+                <div className="lg:w-80 space-y-4 shrink-0 overflow-hidden">
                     <div className="flex items-center justify-between px-2">
                         <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
                             <Play size={12} className="text-indigo-500"/> {searchContextLabel ? 'En esta lista' : 'Recomendados'}
