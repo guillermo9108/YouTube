@@ -73,31 +73,15 @@ const Sidebar: React.FC<{ isOpen: boolean, onClose: () => void, user: User | nul
 
 const Breadcrumbs: React.FC<{ 
     path: string[], 
-    onNavigate: (index: number) => void,
-    onToggleFolders: () => void,
-    showFolders: boolean,
-    hasFolders: boolean
-}> = ({ path, onNavigate, onToggleFolders, showFolders, hasFolders }) => (
-    <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-2 animate-in fade-in shrink-0">
-        <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0">
-            <button onClick={() => onNavigate(-1)} className="p-2 hover:bg-white/10 rounded-lg text-white transition-colors">
-                <HomeIcon size={16}/>
-            </button>
-            {hasFolders && (
-                <button 
-                    onClick={onToggleFolders} 
-                    className={`p-2 rounded-lg transition-all duration-300 ${showFolders ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-300 hover:text-white'}`}
-                >
-                    <ChevronDown size={16} className={`transition-transform duration-300 ${showFolders ? 'rotate-180' : ''}`} />
-                </button>
-            )}
-        </div>
+    onNavigate: (index: number) => void
+}> = ({ path, onNavigate }) => (
+    <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-hide py-2 animate-in fade-in flex-1 [mask-image:linear-gradient(to_right,transparent,black_10%,black_90%,transparent)]">
         {path.map((segment, i) => (
             <React.Fragment key={`${segment}-${i}`}>
-                <ChevronRight size={12} className="text-white/40 shrink-0"/>
+                {i > 0 && <ChevronRight size={10} className="text-white/20 shrink-0"/>}
                 <button 
                     onClick={() => onNavigate(i)}
-                    className={`whitespace-nowrap px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${i === path.length - 1 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-300 hover:text-white hover:bg-white/5'}`}
+                    className={`whitespace-nowrap px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shrink-0 ${i === path.length - 1 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
                 >
                     {segment}
                 </button>
@@ -117,7 +101,6 @@ const FolderEditModal: React.FC<{
     const [sortOrder, setSortOrder] = useState<string>(initialSortOrder);
     const [loading, setLoading] = useState(false);
 
-    // Actualizar estados locales si cambian los valores iniciales (al abrir para una carpeta diferente)
     useEffect(() => {
         setPrice(initialPrice);
         setSortOrder(initialSortOrder);
@@ -195,7 +178,7 @@ export default function Home() {
     });
 
     const [userSortOrder, setUserSortOrder] = useState<string>(() => {
-        return localStorage.getItem('sp_user_sort') || ''; // Vacío significa usar el default de categoría/admin
+        return localStorage.getItem('sp_user_sort') || ''; 
     });
 
     // Data State
@@ -436,7 +419,6 @@ export default function Home() {
         } else {
             setNavigationPath(navigationPath.slice(0, index + 1));
         }
-        // No resetear mediaFilter aquí para persistencia profunda
         setSelectedCategory('TODOS');
         setShowFolderGrid(false);
         setNavVisible(true);
@@ -575,36 +557,48 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* CAPA INFERIOR DINÁMICA */}
+                {/* CAPA INFERIOR DINÁMICA - OPTIMIZADA CON ZONAS FIJAS */}
                 {!searchQuery && (
                     <div className={`relative z-10 backdrop-blur-xl bg-black/20 border-b border-white/5 pb-2 px-4 md:px-8 transition-all duration-500 ease-in-out transform ${navVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}>
-                        <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-6 max-w-7xl mx-auto">
-                            <div className="flex items-center gap-4 shrink-0">
-                                <Breadcrumbs 
-                                    path={navigationPath} onNavigate={handleNavigate} 
-                                    onToggleFolders={() => setShowFolderGrid(!showFolderGrid)}
-                                    showFolders={showFolderGrid} hasFolders={folders.length > 0}
-                                />
-                                
-                                <div className="flex items-center gap-2">
-                                    {/* FILTRO DE MEDIO (AUDIO/VIDEO) */}
+                        <div className="flex flex-col gap-2 max-w-7xl mx-auto">
+                            
+                            {/* FILA 1: NAVEGACIÓN Y FILTROS (ZONIFICADO) */}
+                            <div className="flex items-center gap-2 w-full">
+                                {/* ZONA IZQUIERDA: INICIO & FOLDERS (FIXED) */}
+                                <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md p-1 rounded-xl border border-white/10 shrink-0">
+                                    <button onClick={() => handleNavigate(-1)} className="p-2 hover:bg-white/10 rounded-lg text-white transition-colors">
+                                        <HomeIcon size={16}/>
+                                    </button>
+                                    {folders.length > 0 && (
+                                        <button 
+                                            onClick={() => setShowFolderGrid(!showFolderGrid)} 
+                                            className={`p-2 rounded-lg transition-all duration-300 ${showFolderGrid ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' : 'text-slate-300 hover:text-white'}`}
+                                        >
+                                            <ChevronDown size={16} className={`transition-transform duration-300 ${showFolderGrid ? 'rotate-180' : ''}`} />
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* ZONA CENTRAL: BREADCRUMBS (SCROLLABLE) */}
+                                <Breadcrumbs path={navigationPath} onNavigate={handleNavigate} />
+
+                                {/* ZONA DERECHA: FILTROS & ORDEN (FIXED) */}
+                                <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                                     <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
-                                        <button onClick={() => setMediaFilter('ALL')} className={`p-2 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Ver Todo"><Layers size={14}/></button>
-                                        <button onClick={() => setMediaFilter('VIDEO')} className={`p-2 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Solo Video"><Play size={14}/></button>
-                                        <button onClick={() => setMediaFilter('AUDIO')} className={`p-2 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Solo Audio"><Music size={14}/></button>
+                                        <button onClick={() => setMediaFilter('ALL')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Todo"><Layers size={13}/></button>
+                                        <button onClick={() => setMediaFilter('VIDEO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Video"><Play size={13}/></button>
+                                        <button onClick={() => setMediaFilter('AUDIO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'AUDIO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Audio"><Music size={13}/></button>
                                     </div>
 
-                                    {/* SELECTOR DE ORDENAMIENTO (NUEVO) */}
                                     <div className="relative" ref={sortMenuRef}>
                                         <button 
                                             onClick={() => setShowSortMenu(!showSortMenu)}
                                             className={`p-2 rounded-xl transition-all border ${userSortOrder ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg' : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'}`}
-                                            title="Cambiar Orden"
                                         >
-                                            <ArrowDownUp size={16}/>
+                                            <ArrowDownUp size={15}/>
                                         </button>
                                         {showSortMenu && (
-                                            <div className="absolute top-full left-0 mt-2 w-48 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] animate-in fade-in zoom-in-95 origin-top-left">
+                                            <div className="absolute top-full right-0 mt-2 w-48 bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[70] animate-in fade-in zoom-in-95 origin-top-right">
                                                 <div className="p-2 bg-slate-950 border-b border-white/5"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Ordenar por</span></div>
                                                 <div className="p-1">
                                                     {sortOptions.map(opt => (
@@ -625,7 +619,8 @@ export default function Home() {
                                 </div>
                             </div>
 
-                            <div className="flex-1 min-w-0 flex items-center gap-3 overflow-x-auto scrollbar-hide py-1">
+                            {/* FILA 2: CATEGORÍAS (SCROLLABLE INDEPENDIENTE) */}
+                            <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide py-1">
                                 {parentFolderName && <div className="flex items-center gap-1 text-indigo-400 font-black text-[10px] uppercase tracking-tighter shrink-0 border-r border-white/10 pr-3"><Folder size={12}/> {parentFolderName}</div>}
                                 <div className="flex gap-2">
                                     {activeCategories.map(cat => (
