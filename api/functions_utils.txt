@@ -76,10 +76,6 @@ function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
     $path = str_replace('\\', '/', $pathOrUrl);
     
-    // Rutas permitidas para evitar Directory Traversal
-    // En producción esto debería obtenerse dinámicamente de system_settings
-    $allowedRoots = [realpath(__DIR__ . '/uploads/')];
-    
     // 1. Ruta absoluta directa
     if (file_exists($path) && is_file($path)) {
         $real = realpath($path);
@@ -109,8 +105,13 @@ function streamVideo($id, $pdo) {
     if (session_id()) session_write_close();
     
     while (ob_get_level()) ob_end_clean();
-    header_remove(); // Crítico para resolver "Headers already sent"
+    header_remove(); 
     
+    $stmtS = $pdo->query("SELECT videoDeliveryMode, localLibraryPath FROM system_settings WHERE id = 1");
+    $settings = $stmtS->fetch();
+    $mode = $settings['videoDeliveryMode'] ?? 'PHP';
+    $rootLib = rtrim(str_replace('\\', '/', $settings['localLibraryPath'] ?? ''), '/');
+
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $videoUrl = $stmt->fetchColumn();
@@ -144,6 +145,30 @@ function streamVideo($id, $pdo) {
         exit;
     }
 
+    // --- DELEGACIÓN AL SERVIDOR WEB ---
+    if ($mode === 'NGINX') {
+        // Nginx requiere una ruta interna configurada. Intentamos mapear basándonos en la librería.
+        // Si el archivo está en la librería local:
+        $normalizedRealPath = str_replace('\\', '/', $realPath);
+        if ($rootLib && strpos($normalizedRealPath, $rootLib) === 0) {
+            $relativePath = substr($normalizedRealPath, strlen($rootLib));
+            header("X-Accel-Redirect: /internal_media" . $relativePath);
+            exit;
+        } else {
+            // Si es un archivo subido a api/uploads/
+            $apiRoot = str_replace('\\', '/', realpath(__DIR__ . '/../'));
+            if (strpos($normalizedRealPath, $apiRoot) === 0) {
+                $relativePath = substr($normalizedRealPath, strlen($apiRoot));
+                header("X-Accel-Redirect: /internal_api" . $relativePath);
+                exit;
+            }
+        }
+    } else if ($mode === 'APACHE') {
+        header("X-Sendfile: $realPath");
+        exit;
+    }
+
+    // --- FALLBACK: STREAMING POR SOFTWARE (PHP) ---
     $fp = @fopen($realPath, 'rb');
     if (!$fp) { header("HTTP/1.1 403 Forbidden"); exit; }
     
@@ -161,7 +186,6 @@ function streamVideo($id, $pdo) {
         header("Content-Length: $fileSize");
     }
     
-    // Aumentamos buffer para reducir ciclos de CPU en NAS/Servidores locales
     $bufferSize = 1024 * 512; 
     while (!feof($fp)) {
         echo fread($fp, $bufferSize);

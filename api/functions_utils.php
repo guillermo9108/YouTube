@@ -97,15 +97,26 @@ function fix_url($url) {
 }
 
 function streamVideo($id, $pdo) {
+    if (session_id()) session_write_close();
     while (ob_get_level()) ob_end_clean();
+    header_remove();
+
+    $stmtS = $pdo->query("SELECT videoDeliveryMode, localLibraryPath FROM system_settings WHERE id = 1");
+    $settings = $stmtS->fetch();
+    $mode = $settings['videoDeliveryMode'] ?? 'PHP';
+    $rootLib = rtrim(str_replace('\\', '/', $settings['localLibraryPath'] ?? ''), '/');
+
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
     $videoUrl = $stmt->fetchColumn();
     if (!$videoUrl) { header("HTTP/1.1 404 Not Found"); exit; }
+    
     $realPath = resolve_video_path($videoUrl);
     if (!$realPath || !file_exists($realPath)) { header("HTTP/1.1 404 Not Found"); exit; }
+    
     $fileSize = filesize($realPath);
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    
     if ($ext === 'mp3') $mime = 'audio/mpeg';
     else if ($ext === 'wav') $mime = 'audio/wav';
     else if ($ext === 'm4a') $mime = 'audio/mp4';
@@ -113,13 +124,35 @@ function streamVideo($id, $pdo) {
     else if ($ext === 'mkv') $mime = 'video/x-matroska';
     else if ($ext === 'webm') $mime = 'video/webm';
     else $mime = 'video/mp4';
+
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
     header("Access-Control-Allow-Headers: Range, Authorization, Content-Type");
     header("Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges");
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
+
     if ($_SERVER['REQUEST_METHOD'] === 'HEAD') { header("Content-Length: $fileSize"); exit; }
+
+    if ($mode === 'NGINX') {
+        $normalizedRealPath = str_replace('\\', '/', $realPath);
+        if ($rootLib && strpos($normalizedRealPath, $rootLib) === 0) {
+            $relativePath = substr($normalizedRealPath, strlen($rootLib));
+            header("X-Accel-Redirect: /internal_media" . $relativePath);
+            exit;
+        } else {
+            $apiRoot = str_replace('\\', '/', realpath(__DIR__ . '/../'));
+            if (strpos($normalizedRealPath, $apiRoot) === 0) {
+                $relativePath = substr($normalizedRealPath, strlen($apiRoot));
+                header("X-Accel-Redirect: /internal_api" . $relativePath);
+                exit;
+            }
+        }
+    } else if ($mode === 'APACHE') {
+        header("X-Sendfile: $realPath");
+        exit;
+    }
+
     $fp = @fopen($realPath, 'rb');
     if (!$fp) { header("HTTP/1.1 403 Forbidden"); exit; }
     set_time_limit(0); 
@@ -132,7 +165,7 @@ function streamVideo($id, $pdo) {
         header("Content-Length: " . ($end - $offset + 1));
         fseek($fp, $offset);
     } else { header("Content-Length: $fileSize"); }
-    $bufferSize = 1024 * 128; 
+    $bufferSize = 1024 * 512; 
     while (!feof($fp)) {
         echo fread($fp, $bufferSize);
         flush();

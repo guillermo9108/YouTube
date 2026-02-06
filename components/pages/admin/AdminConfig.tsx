@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, Category, VipPlan, FtpSettings } from '../../../types';
@@ -8,7 +7,7 @@ import {
     CreditCard, ChevronRight, DollarSign, Database,
     Clock, Percent, HardDrive, Crown, X, Info, Smartphone, Wallet, Globe,
     Cpu, Settings2, Shield, Activity, Network, ListPlus, Bug, Watch, Maximize,
-    Zap, Trash, SortAsc
+    Zap, Trash, SortAsc, Server
 } from 'lucide-react';
 
 export default function AdminConfig() {
@@ -38,18 +37,14 @@ export default function AdminConfig() {
             // Asegurar que cada plan tiene un "type"
             plans = plans.map(p => {
                 if (!p.type) {
-                    // Heurística: si tiene días de duración, es de acceso total
                     if (p.durationDays && Number(p.durationDays) > 0) return { ...p, type: 'ACCESS' };
-                    // Si tiene bono y no días, es de saldo
                     if (p.bonusPercent && Number(p.bonusPercent) > 0) return { ...p, type: 'BALANCE' };
-                    // Por defecto, acceso
                     return { ...p, type: 'ACCESS' };
                 }
                 return p;
             });
 
             s.vipPlans = plans;
-            // ------------------------------------------------------------------
 
             if (!s.categories) s.categories = [];
             if (!s.libraryPaths) s.libraryPaths = [];
@@ -60,6 +55,7 @@ export default function AdminConfig() {
                 manual: { enabled: true, instructions: 'Contacta al admin para recargar.' }
             };
             if (!s.ftpSettings) s.ftpSettings = { host: '', port: 21, user: '', pass: '', rootPath: '/' };
+            if (!s.videoDeliveryMode) s.videoDeliveryMode = 'PHP';
             
             setSettings(s);
         } catch(e) { 
@@ -265,6 +261,33 @@ export default function AdminConfig() {
             <SectionHeader id="SYSTEM" label="Almacenamiento & NAS" icon={Database} color="text-blue-400" />
             {activeSection === 'SYSTEM' && (
                 <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-2">
+                    {/* VIDEO DELIVERY MODE SELECTOR */}
+                    <div className="bg-slate-950 p-5 rounded-3xl border border-indigo-500/20 space-y-4">
+                        <div className="flex items-center gap-3">
+                            <Server size={18} className="text-indigo-400"/>
+                            <h3 className="font-black text-white text-xs uppercase tracking-widest">Optimización de Streaming</h3>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed uppercase font-bold italic">
+                            Cambia esto si sufres pausas constantes. Nginx/Apache delegan la carga y liberan la RAM del servidor.
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {[
+                                { id: 'PHP', label: 'Manual (PHP)', desc: 'Compatible con todo' },
+                                { id: 'NGINX', label: 'Nginx X-Accel', desc: 'Rendimiento Extremo' },
+                                { id: 'APACHE', label: 'Apache Sendfile', desc: 'Soporte NAS/Pro' }
+                            ].map(m => (
+                                <button 
+                                    key={m.id}
+                                    onClick={() => updateValue('videoDeliveryMode', m.id)}
+                                    className={`p-4 rounded-2xl border text-left transition-all ${settings?.videoDeliveryMode === m.id ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
+                                >
+                                    <div className="text-[11px] font-black uppercase tracking-tighter">{m.label}</div>
+                                    <div className="text-[8px] font-bold opacity-60 uppercase mt-1">{m.desc}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     <div className="space-y-3">
                         <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 ml-1"><HardDrive size={12}/> Gestión de Volúmenes (Librería)</label>
                         
