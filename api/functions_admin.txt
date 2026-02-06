@@ -1,4 +1,3 @@
-
 <?php
 /**
  * ADMINISTRACIÓN - CORE FUNCTIONS V18.8 (Hierarchical Folder Edit & Safe Janitor)
@@ -33,7 +32,7 @@ function admin_update_settings($pdo, $input) {
         'paymentInstructions', 'currencyConversion', 'enableDebugLog', 
         'autoTranscode', 'transcodePreset', 'proxyUrl', 'ftpSettings', 
         'categories', 'is_transcoder_active', 'tropipayClientId', 'tropipayClientSecret', 
-        'geminiKey', 'paymentMethods'
+        'geminiKey', 'paymentMethods', 'videoDeliveryMode'
     ];
     $fields = []; $params = [];
     foreach ($input as $key => $val) {
