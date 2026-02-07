@@ -1,5 +1,5 @@
 <?php
-// DEFINICIÓN DEL ESQUEMA MAESTRO
+// DEFINICIÓN DEL ESQUEMA MAESTRO V1.5 (Cleaned)
 function getAppSchema() {
     return [
         'users' => [
@@ -179,8 +179,7 @@ function getAppSchema() {
                 'transferFee' => 'DECIMAL(10, 2) DEFAULT 5.00',
                 'vipPlans' => 'JSON DEFAULT NULL',
                 'paymentMethods' => 'JSON DEFAULT NULL',
-                'enableDebugLog' => 'TINYINT(1) DEFAULT 1',
-                'videoDeliveryMode' => "ENUM('PHP', 'NGINX', 'APACHE') DEFAULT 'PHP'"
+                'enableDebugLog' => 'TINYINT(1) DEFAULT 1'
             ]
         ],
         'transactions' => [
@@ -258,11 +257,6 @@ function syncTable($pdo, $tableName, $def) {
                 if (!in_array(strtolower($colName), $existingCols)) {
                     $alterDef = str_ireplace("PRIMARY KEY", "", $colDef);
                     $pdo->exec("ALTER TABLE $tableName ADD COLUMN $colName $alterDef");
-                } else {
-                    if (strpos(strtolower($colDef), 'varchar') !== false || strpos(strtolower($colDef), 'decimal') !== false) {
-                        $modifyDef = str_ireplace("PRIMARY KEY", "", $colDef);
-                        $pdo->exec("ALTER TABLE $tableName MODIFY COLUMN $colName $modifyDef");
-                    }
                 }
             }
         }
@@ -282,3 +276,4 @@ function syncTable($pdo, $tableName, $def) {
         write_log("Sync Error en $tableName: " . $e->getMessage(), 'ERROR');
     }
 }
+?>

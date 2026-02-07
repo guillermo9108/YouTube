@@ -66,7 +66,6 @@ function write_log($message, $level = 'INFO') {
     $formattedMessage = "[$timestamp] [$level] $message" . PHP_EOL;
     @file_put_contents($logFile, $formattedMessage, FILE_APPEND);
     
-    // Si estamos en CLI (Worker), también imprimir a pantalla
     if (php_sapi_name() === 'cli') {
         echo $formattedMessage;
     }
@@ -76,13 +75,11 @@ function resolve_video_path($pathOrUrl) {
     if (!$pathOrUrl) return false;
     $path = str_replace('\\', '/', $pathOrUrl);
     
-    // 1. Ruta absoluta directa
     if (file_exists($path) && is_file($path)) {
         $real = realpath($path);
         if ($real) return $real;
     }
     
-    // 2. Ruta relativa a la API
     $cleanPath = (strpos($path, 'api/') === 0) ? substr($path, 4) : $path;
     $internalPath = realpath(__DIR__ . '/' . $cleanPath);
     if ($internalPath && is_file($internalPath)) return $internalPath;
@@ -100,17 +97,14 @@ function fix_url($url) {
     return 'api/' . $clean;
 }
 
+/**
+ * Función de Streaming Fallback (PHP). 
+ * Se mantiene solo como respaldo si el motor Node.js (3001) falla.
+ */
 function streamVideo($id, $pdo) {
-    // IMPORTANTE: Liberar sesión para evitar bloqueos de otros hilos del mismo usuario
     if (session_id()) session_write_close();
-    
     while (ob_get_level()) ob_end_clean();
     header_remove(); 
-    
-    $stmtS = $pdo->query("SELECT videoDeliveryMode, localLibraryPath FROM system_settings WHERE id = 1");
-    $settings = $stmtS->fetch();
-    $mode = $settings['videoDeliveryMode'] ?? 'PHP';
-    $rootLib = rtrim(str_replace('\\', '/', $settings['localLibraryPath'] ?? ''), '/');
 
     $stmt = $pdo->prepare("SELECT videoUrl FROM videos WHERE id = ?");
     $stmt->execute([$id]);
@@ -123,14 +117,13 @@ function streamVideo($id, $pdo) {
     $fileSize = filesize($realPath);
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     
-    // Mime detection
+    $mime = 'video/mp4';
     if ($ext === 'mp3') $mime = 'audio/mpeg';
     else if ($ext === 'wav') $mime = 'audio/wav';
     else if ($ext === 'm4a') $mime = 'audio/mp4';
     else if ($ext === 'aac') $mime = 'audio/aac';
     else if ($ext === 'mkv') $mime = 'video/x-matroska';
     else if ($ext === 'webm') $mime = 'video/webm';
-    else $mime = 'video/mp4';
 
     header("Access-Control-Allow-Origin: *");
     header("Access-Control-Allow-Methods: GET, HEAD, OPTIONS");
@@ -138,37 +131,12 @@ function streamVideo($id, $pdo) {
     header("Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges");
     header("Accept-Ranges: bytes");
     header("Content-Type: $mime");
-    header("Cache-Control: public, max-age=3600");
 
     if ($_SERVER['REQUEST_METHOD'] === 'HEAD') {
         header("Content-Length: $fileSize");
         exit;
     }
 
-    // --- DELEGACIÓN AL SERVIDOR WEB ---
-    if ($mode === 'NGINX') {
-        // Nginx requiere una ruta interna configurada. Intentamos mapear basándonos en la librería.
-        // Si el archivo está en la librería local:
-        $normalizedRealPath = str_replace('\\', '/', $realPath);
-        if ($rootLib && strpos($normalizedRealPath, $rootLib) === 0) {
-            $relativePath = substr($normalizedRealPath, strlen($rootLib));
-            header("X-Accel-Redirect: /internal_media" . $relativePath);
-            exit;
-        } else {
-            // Si es un archivo subido a api/uploads/
-            $apiRoot = str_replace('\\', '/', realpath(__DIR__ . '/../'));
-            if (strpos($normalizedRealPath, $apiRoot) === 0) {
-                $relativePath = substr($normalizedRealPath, strlen($apiRoot));
-                header("X-Accel-Redirect: /internal_api" . $relativePath);
-                exit;
-            }
-        }
-    } else if ($mode === 'APACHE') {
-        header("X-Sendfile: $realPath");
-        exit;
-    }
-
-    // --- FALLBACK: STREAMING POR SOFTWARE (PHP) ---
     $fp = @fopen($realPath, 'rb');
     if (!$fp) { header("HTTP/1.1 403 Forbidden"); exit; }
     
@@ -195,3 +163,4 @@ function streamVideo($id, $pdo) {
     fclose($fp);
     exit;
 }
+?>

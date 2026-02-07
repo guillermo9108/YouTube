@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -296,9 +295,10 @@ export default function Watch() {
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
     return (
-        <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in relative overflow-x-hidden">
-            <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-white/5">
-                <div className="relative aspect-video max-w-[1600px] mx-auto bg-black overflow-hidden">
+        <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in relative">
+            {/* Contenedor de Video Pegajoso */}
+            <div className="w-full bg-black sticky top-0 z-[45] shadow-2xl border-b border-white/5">
+                <div className="relative aspect-video max-w-[1400px] mx-auto bg-black overflow-hidden group">
                     {isUnlocked ? (
                         <div className={`relative z-10 w-full h-full flex flex-col items-center justify-center ${video?.is_audio ? 'bg-slate-900/40 backdrop-blur-md' : ''}`}>
                             {video?.is_audio && video?.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') && (

@@ -130,7 +130,6 @@ export interface SystemSettings {
   is_transcoder_active?: boolean;
   maxResolution?: number;
   ftpSettings?: FtpSettings;
-  videoDeliveryMode?: 'PHP' | 'NGINX' | 'APACHE';
 }
 
 export interface Transaction {
