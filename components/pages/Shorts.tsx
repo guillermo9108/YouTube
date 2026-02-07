@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Heart, MessageCircle, Share2, ThumbsDown, Send, X, Loader2, ArrowLeft, Pause, Search, UserCheck } from 'lucide-react';
 import { db } from '../../services/db';
@@ -117,10 +118,9 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
   };
 
   const videoSrc = useMemo(() => {
-    if (!isNear) return ""; // No asignar src si no está cerca
-    const token = localStorage.getItem('sp_session_token') || '';
-    const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
-    return `${window.location.origin}/${base}&token=${token}`;
+    if (!isNear) return ""; 
+    // Redirigir al puerto 3001 del streamer en Node.js
+    return db.getStreamerUrl(video.id);
   }, [video.id, isNear]);
 
   if (!isNear) return <div className="w-full h-full snap-start bg-black shrink-0 flex items-center justify-center"><Loader2 className="animate-spin text-slate-800" /></div>;

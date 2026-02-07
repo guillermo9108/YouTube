@@ -287,8 +287,8 @@ export default function Watch() {
 
     const streamUrl = useMemo(() => {
         if (!video) return '';
-        const token = localStorage.getItem('sp_session_token') || '';
-        return `api/index.php?action=stream&id=${video.id}&token=${token}&cb=${Date.now()}`;
+        // Usamos el helper de Streamer en Node.js (Puerto 3001)
+        return db.getStreamerUrl(video.id);
     }, [video?.id]);
 
     const searchContextLabel = navigationContext.q || (navigationContext.f ? `Carpeta: ${navigationContext.f.split('/').pop()}` : null);
