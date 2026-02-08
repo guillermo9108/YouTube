@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import VideoCard from '../VideoCard';
 import { useAuth } from '../../context/AuthContext';
@@ -166,7 +167,7 @@ export default function Home() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const [showFolderGrid, setShowFolderGrid] = useState(true); 
+    const [showFolderGrid, setShowFolderGrid] = useState(false);
     const [showSortMenu, setShowSortMenu] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
     const [editingFolder, setEditingFolder] = useState<any | null>(null);
@@ -411,7 +412,6 @@ export default function Home() {
             setNavigationPath(prev => [...prev, s.label]);
             setSelectedCategory('TODOS');
             setShowFolderGrid(true);
-            setVideos([]); 
         } else {
             db.saveSearch(searchQuery || s.label);
             const contextParam = searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : '';
@@ -428,7 +428,7 @@ export default function Home() {
             setNavigationPath(navigationPath.slice(0, index + 1));
         }
         setSelectedCategory('TODOS');
-        setShowFolderGrid(true); 
+        setShowFolderGrid(false);
         setNavVisible(true);
     };
 
@@ -496,7 +496,7 @@ export default function Home() {
     ];
 
     return (
-        <div className="relative pb-20">
+        <div className="relative pb-20 overflow-x-hidden">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
             {/* ENCABEZADO UNIFICADO CON LOGICA DE OCULTAMIENTO */}
@@ -595,6 +595,7 @@ export default function Home() {
 
                             {/* ZONA DERECHA: ORDEN Y TIPO */}
                             <div className="flex items-center gap-1.5 shrink-0 ml-auto z-30">
+                                {/* CORRECCIÓN: Se eliminó hidden sm: para que se vean siempre en el móvil */}
                                 <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 shrink-0 shadow-inner">
                                     <button onClick={() => setMediaFilter('ALL')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'ALL' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Todo"><Layers size={13}/></button>
                                     <button onClick={() => setMediaFilter('VIDEO')} className={`p-1.5 rounded-lg transition-all ${mediaFilter === 'VIDEO' ? 'bg-white text-black shadow-lg' : 'text-slate-500 hover:text-slate-300'}`} title="Video"><Play size={13}/></button>
@@ -660,12 +661,14 @@ export default function Home() {
                     </div>
                 ) : (
                     <div className="space-y-12 animate-in fade-in duration-1000">
-                        {showFolderGrid && folders.length > 0 && (
+                        {((!searchQuery && showFolderGrid) || (searchQuery && folders.length > 0)) && folders.length > 0 && (
                             <div className="space-y-6">
-                                <div className="flex items-center gap-3 px-1">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
-                                    <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">{searchQuery ? 'Carpetas coincidentes' : 'Explorar Carpetas'}</h2>
-                                </div>
+                                {searchQuery && (
+                                    <div className="flex items-center gap-3 px-1">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+                                        <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">Carpetas coincidentes</h2>
+                                    </div>
+                                )}
                                 <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500">
                                     {folders.map(folder => (
                                         <div 
@@ -738,7 +741,7 @@ export default function Home() {
                                     <div className="flex items-center gap-3">
                                         <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
                                         <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em] flex items-center gap-4">
-                                            Resultados para: {searchQuery}
+                                            Videos para: {searchQuery}
                                             <span className="w-12 h-px bg-white/10"></span>
                                         </h2>
                                     </div>
@@ -759,7 +762,7 @@ export default function Home() {
                                         />
                                     ))}
                                 </div>
-                            ) : (folders.length === 0 && !loading) && (
+                            ) : folders.length === 0 && (
                                 <div className="text-center py-40 opacity-20 flex flex-col items-center gap-4">
                                     <Folder size={80} />
                                     <p className="font-black uppercase tracking-widest">Sin contenido disponible</p>

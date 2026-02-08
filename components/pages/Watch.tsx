@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Video, Comment, UserInteraction, Category } from '../../types';
 import { db } from '../../services/db';
@@ -286,8 +287,8 @@ export default function Watch() {
 
     const streamUrl = useMemo(() => {
         if (!video) return '';
-        // Usamos el helper de Streamer en Node.js (Puerto 3001)
-        return db.getStreamerUrl(video.id);
+        const token = localStorage.getItem('sp_session_token') || '';
+        return `api/index.php?action=stream&id=${video.id}&token=${token}&cb=${Date.now()}`;
     }, [video?.id]);
 
     const searchContextLabel = navigationContext.q || (navigationContext.f ? `Carpeta: ${navigationContext.f.split('/').pop()}` : null);
@@ -295,10 +296,9 @@ export default function Watch() {
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
     return (
-        <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in relative">
-            {/* Contenedor de Video Pegajoso - Mejorado para móviles */}
-            <div className="w-full bg-black sticky top-0 z-[45] shadow-2xl border-b border-white/5 overflow-hidden">
-                <div className="relative aspect-video w-full max-w-[1400px] mx-auto bg-black overflow-hidden group">
+        <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in relative overflow-x-hidden">
+            <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-white/5">
+                <div className="relative aspect-video max-w-[1600px] mx-auto bg-black overflow-hidden">
                     {isUnlocked ? (
                         <div className={`relative z-10 w-full h-full flex flex-col items-center justify-center ${video?.is_audio ? 'bg-slate-900/40 backdrop-blur-md' : ''}`}>
                             {video?.is_audio && video?.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') && (
@@ -321,7 +321,7 @@ export default function Watch() {
                     ) : (
                         <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
                             {video && <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover blur-3xl opacity-30 scale-110"/>}
-                            <div className="relative z-10 bg-slate-900/60 backdrop-blur-xl border border-white/10 p-8 rounded-[48px] shadow-2xl flex flex-col items-center text-center max-w-md animate-in zoom-in-95 mx-4">
+                            <div className="relative z-10 bg-slate-900/60 backdrop-blur-xl border border-white/10 p-8 rounded-[48px] shadow-2xl flex flex-col items-center text-center max-w-md animate-in zoom-in-95">
                                 <Lock size={24} className="text-amber-500 mb-4"/>
                                 <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-6">Contenido Premium</h2>
                                 <button onClick={handlePurchase} disabled={isPurchasing} className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-3xl transition-all shadow-xl active:scale-95">

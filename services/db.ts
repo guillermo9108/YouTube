@@ -1,3 +1,4 @@
+
 import { 
     User, Video, Transaction, VipPlan, Comment, UserInteraction, 
     Notification as AppNotification, VideoResult, ContentRequest, 
@@ -62,17 +63,6 @@ class DBService {
             if (json.success === false) throw new Error(json.error || 'Error desconocido');
             return json.data as T;
         });
-    }
-
-    /**
-     * Genera la URL para el reproductor usando el microservicio Node.js (Puerto 3001)
-     * Utiliza la IP actual del navegador para evitar problemas de configuración
-     */
-    public getStreamerUrl(videoId: string): string {
-        const token = localStorage.getItem('sp_session_token') || '';
-        const host = window.location.hostname;
-        // Apuntamos directo al puerto 3001 de Node.js
-        return `http://${host}:3001/video?id=${videoId}&token=${token}`;
     }
 
     public async getVideos(page: number = 0, limit: number = 40, folder: string = '', search: string = '', category: string = '', mediaType: string = 'ALL', sortOrder: string = ''): Promise<VideoPagedResponse> {
