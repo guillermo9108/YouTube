@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Home, Upload, User, ShieldCheck, Smartphone, Bell, X, Menu, DownloadCloud, LogOut, ShoppingBag, Server, ChevronRight, Crown, Smartphone as MobileIcon, MonitorDown, AlertTriangle, CheckCircle2, Clock, ShoppingCart as SaleIcon, Zap, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -42,9 +41,15 @@ const ServerTaskIndicator = () => {
 export default function Layout() {
   const location = useLocation();
   const { user } = useAuth();
+
+  // Reset scroll automatically when changing sections
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
   
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-400' : 'text-slate-400 hover:text-indigo-200';
   const isShortsMode = location.pathname === '/shorts';
+  const isWatchMode = location.pathname.startsWith('/watch/');
   
   if (isShortsMode) {
       return (
@@ -62,7 +67,8 @@ export default function Layout() {
 
   return (
     <div className={`min-h-screen flex flex-col bg-black pb-20 md:pb-24`}>
-      <main className={'flex-1 container mx-auto px-4 pt-4 max-w-5xl'}>
+      {/* Container removed or made fluid for Watch mode to allow full-width player and proper sticky behavior */}
+      <main className={`flex-1 ${isWatchMode ? 'w-full' : 'container mx-auto px-4 pt-4 max-w-5xl'}`}>
         <Outlet />
       </main>
 

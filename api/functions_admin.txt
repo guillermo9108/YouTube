@@ -1,7 +1,6 @@
-
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V18.8 (Hierarchical Folder Edit & Safe Janitor)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V18.9 (Cleanup and Portability focus)
  */
 
 function admin_get_settings($pdo) {
@@ -101,7 +100,7 @@ function admin_bulk_edit_folder($pdo, $input) {
             ->execute([json_encode($categories)]);
     }
 
-    respond(true, "Configuración aplicada recursivamente a " . $relPath + " y sub-categorías detectadas.");
+    respond(true, "Configuración aplicada recursivamente.");
 }
 
 function admin_update_category_price($pdo, $input) {
@@ -575,3 +574,4 @@ function admin_add_balance($pdo, $input) {
         respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
+?>

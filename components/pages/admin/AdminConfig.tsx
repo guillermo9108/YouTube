@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, Category, VipPlan, FtpSettings } from '../../../types';
@@ -8,7 +7,7 @@ import {
     CreditCard, ChevronRight, DollarSign, Database,
     Clock, Percent, HardDrive, Crown, X, Info, Smartphone, Wallet, Globe,
     Cpu, Settings2, Shield, Activity, Network, ListPlus, Bug, Watch, Maximize,
-    Zap, Trash, SortAsc
+    Zap, Trash, SortAsc, Server
 } from 'lucide-react';
 
 export default function AdminConfig() {
@@ -38,18 +37,14 @@ export default function AdminConfig() {
             // Asegurar que cada plan tiene un "type"
             plans = plans.map(p => {
                 if (!p.type) {
-                    // Heurística: si tiene días de duración, es de acceso total
                     if (p.durationDays && Number(p.durationDays) > 0) return { ...p, type: 'ACCESS' };
-                    // Si tiene bono y no días, es de saldo
                     if (p.bonusPercent && Number(p.bonusPercent) > 0) return { ...p, type: 'BALANCE' };
-                    // Por defecto, acceso
                     return { ...p, type: 'ACCESS' };
                 }
                 return p;
             });
 
             s.vipPlans = plans;
-            // ------------------------------------------------------------------
 
             if (!s.categories) s.categories = [];
             if (!s.libraryPaths) s.libraryPaths = [];
@@ -265,6 +260,7 @@ export default function AdminConfig() {
             <SectionHeader id="SYSTEM" label="Almacenamiento & NAS" icon={Database} color="text-blue-400" />
             {activeSection === 'SYSTEM' && (
                 <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-800 space-y-6 animate-in slide-in-from-top-2">
+                    
                     <div className="space-y-3">
                         <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 ml-1"><HardDrive size={12}/> Gestión de Volúmenes (Librería)</label>
                         

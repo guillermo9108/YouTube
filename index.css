@@ -1,22 +1,19 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Seguridad anti-desbordamiento global */
+/* Seguridad anti-desbordamiento global - Optimizada para permitir sticky */
 html, body {
   max-width: 100%;
-  overflow-x: hidden;
   position: relative;
   width: 100%;
-  height: 100%;
+  min-height: 100vh;
   -webkit-overflow-scrolling: touch;
 }
 
 #root {
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
 }
 
 /* Custom Scrollbar for Webkit */

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'streampay-static-v5';
+const CACHE_NAME = 'streampay-static-v6';
 const IMAGE_CACHE = 'streampay-images-v1';
 const DATA_CACHE = 'streampay-data-v1';
 
@@ -26,6 +26,8 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
+    }).then(() => {
+      return self.clients.claim();
     })
   );
 });
