@@ -8,7 +8,6 @@ html, body {
   overflow-x: hidden;
   position: relative;
   width: 100%;
-  /* Eliminado height: 100% para permitir que el sticky CSS funcione correctamente */
   min-height: 100vh;
   -webkit-overflow-scrolling: touch;
 }

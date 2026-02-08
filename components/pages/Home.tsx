@@ -166,7 +166,7 @@ export default function Home() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [showNotifMenu, setShowNotifMenu] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const [showFolderGrid, setShowFolderGrid] = useState(true); // Cambiado a TRUE por defecto para que se vean al entrar
+    const [showFolderGrid, setShowFolderGrid] = useState(true); 
     const [showSortMenu, setShowSortMenu] = useState(false);
     const [navVisible, setNavVisible] = useState(true);
     const [editingFolder, setEditingFolder] = useState<any | null>(null);
@@ -406,13 +406,12 @@ export default function Home() {
             if (s.type === 'CATEGORY') setSelectedCategory(s.label);
             db.saveSearch(s.label);
         } else if (s.type === 'FOLDER') {
-            // Mejorada la navegación desde sugerencia de carpeta
             setSearchQuery('');
             updateUrlSearch('');
             setNavigationPath(prev => [...prev, s.label]);
             setSelectedCategory('TODOS');
             setShowFolderGrid(true);
-            setVideos([]); // Limpiar videos actuales para forzar recarga visual limpia
+            setVideos([]); 
         } else {
             db.saveSearch(searchQuery || s.label);
             const contextParam = searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : '';
@@ -429,7 +428,7 @@ export default function Home() {
             setNavigationPath(navigationPath.slice(0, index + 1));
         }
         setSelectedCategory('TODOS');
-        setShowFolderGrid(true); // Siempre mostrar cuadrícula al navegar
+        setShowFolderGrid(true); 
         setNavVisible(true);
     };
 
