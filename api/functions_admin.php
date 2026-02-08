@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V18.8 (Hierarchical Folder Edit & Safe Janitor)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V19.0 (Auto-Transcoder Engine)
  */
 
 function admin_get_settings($pdo) {
@@ -100,7 +100,7 @@ function admin_bulk_edit_folder($pdo, $input) {
             ->execute([json_encode($categories)]);
     }
 
-    respond(true, "Configuración aplicada recursivamente a " . $relPath + " y sub-categorías detectadas.");
+    respond(true, "Configuración aplicada recursivamente.");
 }
 
 function admin_update_category_price($pdo, $input) {
@@ -174,19 +174,19 @@ function admin_transcode_scan_filters($pdo, $input) {
     respond(true, ['count' => count($matches)]);
 }
 
-function admin_process_next_transcode($pdo) {
-    $stmt = $pdo->query("SELECT * FROM videos WHERE transcode_status = 'WAITING' ORDER BY createdAt ASC LIMIT 1");
-    $video = $stmt->fetch();
-    
-    if (!$video) respond(false, null, "Sin videos en espera");
-    
+/**
+ * Función interna de ejecución de transcodificación (Mantenible)
+ */
+function _admin_perform_transcode_single($pdo, $video, $bins) {
     $realPath = resolve_video_path($video['videoUrl']);
-    if (!$realPath) {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Path invalid' WHERE id = ?")->execute([$video['id']]);
-        respond(false, null, "Archivo no accesible");
+    if (!$realPath || !file_exists($realPath)) {
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no accesible' WHERE id = ?")->execute([$video['id']]);
+        return false;
     }
 
+    $ffmpeg = $bins['ffmpeg'];
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    
     $stmtP = $pdo->prepare("SELECT command_args FROM transcode_profiles WHERE extension = ?");
     $stmtP->execute([$ext]);
     $args = $stmtP->fetchColumn();
@@ -204,9 +204,6 @@ function admin_process_next_transcode($pdo) {
             $args .= " -pix_fmt yuv420p";
         }
     }
-
-    $stmtS = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
-    $ffmpeg = $stmtS->fetchColumn() ?: 'ffmpeg';
     
     $targetDir = __DIR__ . '/uploads/videos/';
     if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
@@ -223,11 +220,29 @@ function admin_process_next_transcode($pdo) {
         $newWebPath = 'uploads/videos/' . $video['id'] . '.mp4';
         rename($tempFile, __DIR__ . '/' . $newWebPath);
         $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE' WHERE id = ?")->execute([$newWebPath, $video['id']]);
-        respond(true, "Video convertido OK");
+        return true;
     } else {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Error FFmpeg Code $returnCode' WHERE id = ?")->execute([$video['id']]);
-        respond(false, null, "Error en ejecución de FFmpeg. Ver log técnico.");
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg Error Code $returnCode' WHERE id = ?")->execute([$video['id']]);
+        return false;
     }
+}
+
+function admin_process_next_transcode($pdo) {
+    $check = shell_exec('pgrep ffmpeg');
+    if (!empty($check)) {
+        respond(false, null, "FFmpeg ya está en ejecución en el sistema");
+    }
+
+    $stmt = $pdo->query("SELECT * FROM videos WHERE transcode_status = 'WAITING' ORDER BY createdAt ASC LIMIT 1");
+    $video = $stmt->fetch();
+    
+    if (!$video) respond(false, null, "Sin videos en espera");
+
+    $bins = get_ffmpeg_binaries($pdo);
+    $res = _admin_perform_transcode_single($pdo, $video, $bins);
+    
+    if ($res) respond(true, "Conversión terminada");
+    else respond(false, null, "La conversión falló. Revisa el log.");
 }
 
 function admin_retry_failed_transcodes($pdo) {
@@ -574,3 +589,4 @@ function admin_add_balance($pdo, $input) {
         respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
+?>

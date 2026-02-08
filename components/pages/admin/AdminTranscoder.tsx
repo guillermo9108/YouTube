@@ -4,14 +4,15 @@ import {
     Cpu, RefreshCw, Play, CheckCircle2, Terminal, Layers, Clock, Zap, Pause, 
     Filter, History, AlertCircle, Activity, Box, Radio, Trash2, Settings2, 
     Plus, X, ChevronRight, FileVideo, AlertTriangle, RotateCcw, ShieldAlert, 
-    FileText, ScrollText, Copy, FastForward, Save, PlusCircle, Loader2, Gauge, HardDrive, Edit3
+    FileText, ScrollText, Copy, FastForward, Save, PlusCircle, Loader2, Gauge, HardDrive, Edit3, ToggleLeft, ToggleRight
 } from 'lucide-react';
 import { useToast } from '../../../context/ToastContext';
-import { Video } from '../../../types';
+import { Video, SystemSettings } from '../../../types';
 
 export default function AdminTranscoder() {
     const toast = useToast();
     const [isRunning, setIsRunning] = useState(false);
+    const [autoTranscode, setAutoTranscode] = useState(false);
     const [isProcessingSingle, setIsProcessingSingle] = useState(false);
     const [stats, setStats] = useState({ waiting: 0, processing: 0, failed: 0, done: 0 });
     const [allVideos, setAllVideos] = useState<Video[]>([]);
@@ -55,6 +56,7 @@ export default function AdminTranscoder() {
             setProfiles(profileData || []);
             setActiveProcesses(lStats.active_processes || []);
             setIsRunning(!!settings.is_transcoder_active);
+            setAutoTranscode(!!settings.autoTranscode);
             if (Array.isArray(realLogs)) setLog(realLogs);
             
         } catch (e) {}
@@ -67,6 +69,18 @@ export default function AdminTranscoder() {
     }, []);
 
     const failedVideos = useMemo(() => allVideos.filter(v => v.transcode_status === 'FAILED'), [allVideos]);
+
+    const handleToggleAuto = async () => {
+        const newValue = !autoTranscode;
+        setAutoTranscode(newValue);
+        try {
+            await db.updateSystemSettings({ autoTranscode: newValue });
+            toast.success(newValue ? "Modo Automático Activado" : "Modo Automático Desactivado");
+        } catch (e: any) {
+            toast.error("Fallo al actualizar configuración");
+            setAutoTranscode(!newValue);
+        }
+    };
 
     const handleScanFilter = async (mode: 'PREVIEW' | 'EXECUTE') => {
         setIsScanning(true);
@@ -96,7 +110,7 @@ export default function AdminTranscoder() {
             toast.success("Tarea completada");
             loadData();
         } catch (e: any) {
-            toast.error("Fallo FFmpeg");
+            toast.error(e.message || "Fallo FFmpeg");
         } finally {
             setIsProcessingSingle(false);
         }
@@ -171,6 +185,25 @@ export default function AdminTranscoder() {
                     </div>
                     <div className="text-2xl font-black text-blue-400">{stats.done}</div>
                 </div>
+            </div>
+
+            {/* BARRA DE MODO AUTOMÁTICO */}
+            <div className={`p-4 rounded-3xl border transition-all flex flex-col md:flex-row justify-between items-center gap-4 ${autoTranscode ? 'bg-indigo-600/10 border-indigo-500/30' : 'bg-slate-900 border-slate-800'}`}>
+                <div className="flex items-center gap-4">
+                    <div className={`p-3 rounded-2xl ${autoTranscode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/40' : 'bg-slate-800 text-slate-500'}`}>
+                        <Zap size={24} className={autoTranscode ? 'animate-pulse' : ''} />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-widest">Modo Automático (Worker)</h3>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase">{autoTranscode ? 'El servidor procesará la cola vía Cron cada minuto' : 'Procesamiento manual activado'}</p>
+                    </div>
+                </div>
+                <button 
+                    onClick={handleToggleAuto}
+                    className={`flex items-center gap-3 px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${autoTranscode ? 'bg-indigo-600 text-white shadow-xl' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                >
+                    {autoTranscode ? <><ToggleRight size={20}/> Encendido</> : <><ToggleLeft size={20}/> Apagado</>}
+                </button>
             </div>
 
             {activeProcesses.length > 0 && (

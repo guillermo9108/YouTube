@@ -1,5 +1,74 @@
 <?php
 
+/**
+ * Detecta las rutas de ffmpeg y ffprobe basándose en los ajustes y rutas comunes de Synology/Linux.
+ */
+function get_ffmpeg_binaries($pdo) {
+    $stmt = $pdo->query("SELECT ffmpegPath FROM system_settings WHERE id = 1");
+    $adminFfmpeg = $stmt->fetchColumn();
+
+    $ffmpeg = 'ffmpeg';
+    $ffprobe = 'ffprobe';
+
+    $search_ffmpeg = array_filter([
+        $adminFfmpeg,
+        '/volume1/@appstore/ffmpeg/bin/ffmpeg',
+        '/volume1/@appstore/VideoStation/bin/ffmpeg',
+        '/volume1/@appstore/MediaServer/bin/ffmpeg',
+        '/usr/bin/ffmpeg',
+        '/bin/ffmpeg'
+    ]);
+
+    foreach ($search_ffmpeg as $path) {
+        if (@is_executable($path)) {
+            $ffmpeg = $path;
+            break;
+        }
+    }
+
+    $nearby_ffprobe = dirname($ffmpeg) . DIRECTORY_SEPARATOR . 'ffprobe';
+    if (@is_executable($nearby_ffprobe)) {
+        $ffprobe = $nearby_ffprobe;
+    } else {
+        $search_ffprobe = [
+            '/volume1/@appstore/ffmpeg/bin/ffprobe',
+            '/volume1/@appstore/VideoStation/bin/ffprobe',
+            '/volume1/@appstore/MediaServer/bin/ffprobe',
+            '/usr/bin/ffprobe',
+            '/bin/ffprobe'
+        ];
+        foreach ($search_ffprobe as $path) {
+            if (@is_executable($path)) {
+                $ffprobe = $path;
+                break;
+            }
+        }
+    }
+
+    return ['ffmpeg' => $ffmpeg, 'ffprobe' => $ffprobe];
+}
+
+/**
+ * Obtiene la duración de un archivo multimedia de forma robusta.
+ */
+function get_media_duration($realPath, $ffprobe) {
+    $cmdProbe = "$ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath) . " 2>&1";
+    $durOutput = trim(shell_exec($cmdProbe));
+    $duration = floatval($durOutput);
+
+    if ($duration <= 0 || strpos($durOutput, 'N/A') !== false) {
+        $cmdDeep = "$ffprobe -v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath) . " 2>&1";
+        $deepOutput = trim(shell_exec($cmdDeep));
+        
+        if (floatval($deepOutput) <= 0) {
+            $cmdDeep = "$ffprobe -v error -select_streams a:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 " . escapeshellarg($realPath) . " 2>&1";
+            $deepOutput = trim(shell_exec($cmdDeep));
+        }
+        $duration = floatval($deepOutput);
+    }
+    return $duration;
+}
+
 function smartParseFilename($fullPath, $existingCategory = null, $hierarchy = []) {
     $filename = pathinfo($fullPath, PATHINFO_FILENAME);
     $fullPathNormalized = str_replace('\\', '/', $fullPath);
