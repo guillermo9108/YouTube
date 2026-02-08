@@ -496,7 +496,7 @@ export default function Home() {
     ];
 
     return (
-        <div className="relative pb-20 overflow-x-hidden">
+        <div className="relative pb-20">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} user={user} isAdmin={isAdmin} logout={logout}/>
 
             {/* ENCABEZADO UNIFICADO CON LOGICA DE OCULTAMIENTO */}
@@ -660,8 +660,8 @@ export default function Home() {
                     </div>
                 ) : (
                     <div className="space-y-12 animate-in fade-in duration-1000">
-                        {folders.length > 0 && (
-                            <div className={`space-y-6 transition-all duration-500 ${showFolderGrid ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>
+                        {showFolderGrid && folders.length > 0 && (
+                            <div className="space-y-6">
                                 <div className="flex items-center gap-3 px-1">
                                     <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
                                     <h2 className="text-[11px] font-black text-white uppercase tracking-[0.3em]">{searchQuery ? 'Carpetas coincidentes' : 'Explorar Carpetas'}</h2>
@@ -759,7 +759,7 @@ export default function Home() {
                                         />
                                     ))}
                                 </div>
-                            ) : folders.length === 0 && (
+                            ) : (folders.length === 0 && !loading) && (
                                 <div className="text-center py-40 opacity-20 flex flex-col items-center gap-4">
                                     <Folder size={80} />
                                     <p className="font-black uppercase tracking-widest">Sin contenido disponible</p>
