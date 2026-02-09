@@ -1,6 +1,6 @@
 <?php
 /**
- * INTERACCIONES - CORE FUNCTIONS V15.0 (Full Integration - No Omissions)
+ * INTERACCIONES - CORE FUNCTIONS V16.0 (Global Notification Trigger)
  */
 
 function interact_save_search($pdo, $input) {
@@ -51,6 +51,7 @@ function interact_purchase($pdo, $input) {
     $bid = $input['userId']; $vid = $input['videoId']; $pdo->beginTransaction();
     try {
         $v = $pdo->query("SELECT * FROM videos WHERE id = '$vid'")->fetch();
+        $buyerName = $pdo->query("SELECT username FROM users WHERE id = '$bid'")->fetchColumn();
         $bal = $pdo->query("SELECT balance FROM users WHERE id = '$bid'")->fetchColumn();
         if ($bal < $v['price']) throw new Exception("Saldo insuficiente");
         $fee = $v['price'] * 0.20; $part = $v['price'] - $fee;
@@ -59,6 +60,10 @@ function interact_purchase($pdo, $input) {
         $aid = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
         if ($aid) $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$fee, $aid]);
         $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, adminFee, timestamp, type, videoTitle, isExternal) VALUES (?, ?, ?, ?, ?, ?, ?, 'PURCHASE', ?, 0)")->execute([uniqid('tx_'), $bid, $v['creatorId'], $vid, $v['price'], $fee, time(), $v['title']]);
+        
+        // NOTIFICACIÓN: Avisar al creador sobre la venta del video
+        send_direct_notification($pdo, $v['creatorId'], 'SALE', "@{$buyerName} compró tu video: {$v['title']}", "/profile");
+        
         $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
@@ -167,8 +172,14 @@ function interact_transfer_balance($pdo, $input) {
     try {
         $sBal = $pdo->query("SELECT balance FROM users WHERE id = '$sid'")->fetchColumn(); if ($sBal < $amt) throw new Exception("Saldo insuficiente");
         $tid = $pdo->query("SELECT id FROM users WHERE username = '$term'")->fetchColumn(); if (!$tid) throw new Exception("Usuario no encontrado");
+        $senderName = $pdo->query("SELECT username FROM users WHERE id = '$sid'")->fetchColumn();
+        
         $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$amt, $sid]);
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amt, $tid]);
+        
+        // NOTIFICACIÓN: Avisar al receptor sobre el saldo recibido
+        send_direct_notification($pdo, $tid, 'SYSTEM', "Has recibido {$amt} $ de @{$senderName}", "/profile");
+        
         $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * VIDEOS - CORE FUNCTIONS V19.0 (Full Integration - No Omissions)
+ * VIDEOS - CORE FUNCTIONS V20.0 (Notification Integration)
  */
 
 function video_process_rows(&$rows) {
@@ -117,6 +117,11 @@ function video_upload($pdo, $post, $files) {
     }
     $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, category, duration, videoUrl, thumbnailUrl, creatorId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->execute([$id, $post['title'], $post['description'], floatval($post['price']), $post['category'], intval($post['duration']), $videoPath, $thumbPath, $post['userId'], time()]);
+    
+    // NOTIFICACIÓN: Avisar a seguidores sobre el nuevo contenido
+    require_once 'functions_interactions.php';
+    interact_notify_subscribers($pdo, $post['userId'], 'UPLOAD', "Nuevo contenido: {$post['title']}", "/watch/{$id}");
+    
     respond(true);
 }
 
@@ -138,6 +143,10 @@ function video_organize_single($pdo, $id, $settings) {
     $meta = smartParseFilename($v['videoUrl'], $v['category'], json_decode($settings['categories'] ?? '[]', true));
     $price = (floatval($v['price'] ?? 0) > 0) ? $v['price'] : getPriceForCategory($meta['category'], $settings, $meta['parent_category']);
     $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?")->execute([$meta['title'], $meta['category'], $meta['parent_category'], $meta['collection'], $price, $id]);
+    
+    // NOTIFICACIÓN: Si el video ha sido "publicado" (Salió de PENDING), notificar
+    require_once 'functions_interactions.php';
+    interact_notify_subscribers($pdo, $v['creatorId'], 'UPLOAD', "¡Nuevo contenido disponible! {$meta['title']}", "/watch/{$id}");
 }
 
 function video_scan_local($pdo, $input) {
