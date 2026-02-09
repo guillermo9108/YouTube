@@ -41,10 +41,13 @@ export default function VipStore() {
         });
     }, []);
 
+    // Hooks definidos en el nivel superior para evitar Error #310
     const mostPopularPlanName = useMemo(() => {
         let max = 0;
         let winner = null;
-        Object.entries(popularityData).forEach(([name, count]) => {
+        Object.entries(popularityData).forEach(([name, val]) => {
+            // Fix: Explicitly cast val to number as it might be inferred as unknown in some environments
+            const count = val as number;
             if (count > max) {
                 max = count;
                 winner = name;
@@ -53,6 +56,28 @@ export default function VipStore() {
         return winner;
     }, [popularityData]);
 
+    const activeMethods = useMemo(() => {
+        return settings?.paymentMethods || {
+            manual: { enabled: true, instructions: '', exchangeRate: 1, currencySymbol: '$' }
+        };
+    }, [settings]);
+
+    const convertedAmountDisplay = useMemo(() => {
+        if (!selectedPlan || !selectedMethod) return null;
+        const methodKey = selectedMethod as keyof typeof activeMethods;
+        const config = (activeMethods as any)[methodKey];
+        if (!config) return null;
+        
+        const rate = Number(config.exchangeRate || 1);
+        const symbol = config.currencySymbol || '$';
+        const converted = (selectedPlan.price * rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        return { value: converted, symbol };
+    }, [selectedPlan, selectedMethod, activeMethods]);
+
+    const isVip = user && user.vipExpiry && Number(user.vipExpiry) > (Date.now() / 1000);
+
+    // Handlers
     const resetProof = () => {
         setProofText('');
         setProofImage(null);
@@ -124,26 +149,6 @@ export default function VipStore() {
     };
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-amber-500" /></div>;
-
-    const activeMethods = settings?.paymentMethods || {
-        manual: { enabled: true, instructions: '', exchangeRate: 1, currencySymbol: '$' }
-    };
-
-    const isVip = user && user.vipExpiry && Number(user.vipExpiry) > (Date.now() / 1000);
-
-    // Cálculo de precio convertido basado en el método seleccionado
-    const convertedAmountDisplay = useMemo(() => {
-        if (!selectedPlan || !selectedMethod) return null;
-        const methodKey = selectedMethod as keyof typeof activeMethods;
-        const config = (activeMethods as any)[methodKey];
-        if (!config) return null;
-        
-        const rate = Number(config.exchangeRate || 1);
-        const symbol = config.currencySymbol || '$';
-        const converted = (selectedPlan.price * rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        
-        return { value: converted, symbol };
-    }, [selectedPlan, selectedMethod, activeMethods]);
 
     return (
         <div className="pb-24 pt-6 px-4 max-w-5xl mx-auto animate-in fade-in">
