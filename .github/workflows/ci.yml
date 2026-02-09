@@ -30,6 +30,14 @@ jobs:
     - name: Build Frontend
       run: npm run build
 
+    - name: Prepare Backend Node Deps
+      run: |
+        cd api
+        # Crear un package.json si no existe para gestionar yt-search y ytdl
+        echo '{"type":"commonjs"}' > package.json
+        npm install yt-search @distube/ytdl-core
+        cd ..
+
     - name: Prepare Release Structure
       run: |
         mkdir -p dist/api
@@ -38,6 +46,7 @@ jobs:
         cp api/index_code.txt dist/api/index.php 2>/dev/null || :
         cp api/install_code.txt dist/api/install.php 2>/dev/null || :
         cp api/video_worker.txt dist/api/video_worker.php 2>/dev/null || :
+        cp api/transcode_worker.txt dist/api/transcode_worker.php 2>/dev/null || :
         
         # Copiar módulos de funciones
         for file in api/functions_*.txt; do
