@@ -1,13 +1,13 @@
+
 <?php
 ob_start();
 /**
- * StreamPay - Core Controller V11.52 (Limits Optimized)
+ * StreamPay - Core Controller V11.6 (Seller Verification Enabled)
  */
 ini_set('display_errors', 0); 
 error_reporting(E_ALL);
 date_default_timezone_set('UTC');
 
-// Ajuste de límites para evitar Malformed JSON por timeouts
 ini_set('max_execution_time', 300);
 ini_set('memory_limit', '512M');
 
@@ -27,11 +27,6 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
     if (!(error_reporting() & $errno)) return false;
     write_log("$errstr in $errfile on line $errline", 'ERROR');
     return false;
-});
-
-set_exception_handler(function($e) {
-    write_log("Uncaught Exception: " . $e->getMessage(), 'FATAL');
-    respond(false, null, "Error interno: " . $e->getMessage());
 });
 
 register_shutdown_function(function() {
@@ -55,16 +50,10 @@ $config = json_decode(file_get_contents($configFile), true);
 
 function respond($success, $data = null, $error = null) {
     while (ob_get_level()) ob_end_clean(); 
-    header_remove(); // Limpia cabeceras previas que puedan haber fallado
+    header_remove(); 
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['success' => $success, 'data' => $data, 'error' => $error], JSON_UNESCAPED_UNICODE);
     exit();
-}
-
-if (($_GET['action'] ?? '') === 'client_log') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    write_log("CLIENT: " . ($input['message'] ?? 'Empty'), $input['level'] ?? 'ERROR');
-    respond(true);
 }
 
 try {
@@ -92,6 +81,30 @@ $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
 
 try {
     switch ($action) {
+        case 'submit_seller_verification': interact_submit_seller_verification($pdo, $input); break;
+        case 'get_seller_verification_requests': admin_get_seller_verification_requests($pdo); break;
+        case 'admin_handle_seller_verification': admin_handle_seller_verification($pdo, $input); break;
+        case 'submit_manual_vip_request': 
+            $uid = $_POST['userId'];
+            $planRaw = $_POST['planSnapshot'];
+            $plan = json_decode($planRaw, true);
+            $text = $_POST['proofText'] ?? null;
+            $img = null;
+            if (isset($_FILES['proofImage']) && $_FILES['proofImage']['error'] === UPLOAD_ERR_OK) {
+                $ext = strtolower(pathinfo($_FILES['proofImage']['name'], PATHINFO_EXTENSION));
+                $name = "proof_" . uniqid() . ".{$ext}";
+                if (!is_dir('uploads/proofs/')) mkdir('uploads/proofs/', 0777, true);
+                move_uploaded_file($_FILES['proofImage']['tmp_name'], 'uploads/proofs/' . $name);
+                $img = 'api/uploads/proofs/' . $name;
+            }
+            $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, proofText, proofImageUrl) VALUES (?, ?, ?, 'PENDING', ?, ?, ?)")
+                ->execute([uniqid('mpr_'), $uid, $planRaw, time(), $text, $img]);
+            
+            // Notificar al usuario que la solicitud está en espera
+            send_direct_notification($pdo, $uid, 'SYSTEM', "Tu solicitud de membresía '{$plan['name']}' ha sido recibida y está en espera de revisión.", "/profile");
+            
+            respond(true);
+            break;
         case 'port_save_backup': port_save_backup($pdo, $_POST, $_FILES); break;
         case 'port_restore_backup': port_restore_backup($pdo, $input); break;
         case 'login': auth_login($pdo, $input); break;
@@ -146,22 +159,6 @@ try {
         case 'check_subscription': interact_check_subscription($pdo, $_GET['userId'] ?? '', $_GET['creatorId'] ?? ''); break;
         case 'get_subscriptions': interact_get_subscriptions($pdo, $_GET['userId'] ?? ''); break;
         case 'request_content': interact_request_content($pdo, $input); break;
-        case 'submit_manual_vip_request': 
-            $uid = $_POST['userId'];
-            $plan = $_POST['planSnapshot'];
-            $text = $_POST['proofText'] ?? null;
-            $img = null;
-            if (isset($_FILES['proofImage']) && $_FILES['proofImage']['error'] === UPLOAD_ERR_OK) {
-                $ext = strtolower(pathinfo($_FILES['proofImage']['name'], PATHINFO_EXTENSION));
-                $name = "proof_" . uniqid() . ".{$ext}";
-                if (!is_dir('uploads/proofs/')) mkdir('uploads/proofs/', 0777, true);
-                move_uploaded_file($_FILES['proofImage']['tmp_name'], 'uploads/proofs/' . $name);
-                $img = 'api/uploads/proofs/' . $name;
-            }
-            $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, proofText, proofImageUrl) VALUES (?, ?, ?, 'PENDING', ?, ?, ?)")
-                ->execute([uniqid('mpr_'), $uid, $plan, time(), $text, $img]);
-            respond(true);
-            break;
         case 'create_pay_link': if(function_exists('payment_create_link')) payment_create_link($pdo, $input); else respond(false, null, "Módulo de pago no disponible"); break;
         case 'verify_payment': if(function_exists('payment_verify')) payment_verify($pdo, $input); else respond(false, null, "Módulo de pago no disponible"); break;
         case 'get_marketplace_items': market_get_items($pdo); break;
@@ -214,3 +211,4 @@ try {
 } catch (Exception $e) {
     respond(false, null, $e->getMessage());
 }
+?>

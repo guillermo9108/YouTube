@@ -1,5 +1,6 @@
+
 <?php
-// DEFINICIÓN DEL ESQUEMA MAESTRO V1.5 (Cleaned)
+// DEFINICIÓN DEL ESQUEMA MAESTRO V1.6 (Identity Verification)
 function getAppSchema() {
     return [
         'users' => [
@@ -17,7 +18,8 @@ function getAppSchema() {
                 'avatarUrl' => 'VARCHAR(255) DEFAULT NULL',
                 'defaultPrices' => 'JSON DEFAULT NULL',
                 'shippingDetails' => 'JSON DEFAULT NULL',
-                'vipExpiry' => 'BIGINT DEFAULT 0'
+                'vipExpiry' => 'BIGINT DEFAULT 0',
+                'is_verified_seller' => 'TINYINT(1) DEFAULT 0'
             ]
         ],
         'videos' => [
@@ -132,6 +134,18 @@ function getAppSchema() {
                 'paymentRef' => 'VARCHAR(100)',
                 'proofText' => 'TEXT DEFAULT NULL',
                 'proofImageUrl' => 'VARCHAR(255) DEFAULT NULL',
+                'status' => "ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING'",
+                'createdAt' => 'BIGINT'
+            ]
+        ],
+        'seller_verifications' => [
+            'cols' => [
+                'id' => 'VARCHAR(50) PRIMARY KEY',
+                'userId' => 'VARCHAR(50)',
+                'fullName' => 'VARCHAR(100)',
+                'idNumber' => 'VARCHAR(50)',
+                'address' => 'TEXT',
+                'mobile' => 'VARCHAR(20)',
                 'status' => "ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING'",
                 'createdAt' => 'BIGINT'
             ]

@@ -41,6 +41,7 @@ export interface User {
   defaultPrices?: Record<string, number>;
   shippingDetails?: any;
   vipExpiry?: number;
+  is_verified_seller?: boolean | number;
 }
 
 export interface Video {
@@ -129,6 +130,7 @@ export interface SystemSettings {
     card?: PaymentMethodConfig;
     mobile?: PaymentMethodConfig;
     manual?: PaymentMethodConfig;
+    cash?: PaymentMethodConfig;
   };
   is_transcoder_active?: boolean;
   maxResolution?: number;
@@ -190,6 +192,7 @@ export interface MarketplaceItem {
     rating?: number;
     reviewCount?: number;
     sellerAvatarUrl?: string;
+    isVerifiedSeller?: boolean | number;
 }
 
 export interface MarketplaceReview {
@@ -259,4 +262,16 @@ export interface VipPlan {
   durationDays?: number;
   bonusPercent?: number;
   highlight?: boolean;
+}
+
+export interface SellerVerificationRequest {
+    id: string;
+    userId: string;
+    username: string;
+    fullName: string;
+    idNumber: string;
+    address: string;
+    mobile: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    createdAt: number;
 }

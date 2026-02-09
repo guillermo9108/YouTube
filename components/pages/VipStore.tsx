@@ -153,6 +153,19 @@ export default function VipStore() {
         toast.success("Copiado al portapapeles");
     };
 
+    const getPriceDisplayForMethod = (methodKey: string) => {
+        if (!selectedPlan) return null;
+        const config = (activeMethods as any)[methodKey];
+        if (!config) return null;
+        const rate = Number(config.exchangeRate || 1);
+        const symbol = config.currencySymbol || '$';
+        const rawValue = rate > 0 ? (selectedPlan.price / rate) : selectedPlan.price;
+        return {
+            value: rawValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            symbol
+        };
+    };
+
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-amber-500" /></div>;
 
     return (
@@ -242,7 +255,7 @@ export default function VipStore() {
 
             {/* Modal de Pagos Externos */}
             {showPaymentModal && selectedPlan && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in">
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in">
                     <div className="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95">
                         <div className="p-6 bg-slate-950 border-b border-white/5 flex justify-between items-center">
                             <div>
@@ -256,27 +269,53 @@ export default function VipStore() {
                             {!selectedMethod ? (
                                 <div className="grid grid-cols-2 gap-3">
                                     {activeMethods.tropipay?.enabled && (
-                                        <button onClick={() => setSelectedMethod('tropipay')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-3 hover:border-indigo-500/50 transition-all group">
+                                        <button onClick={() => setSelectedMethod('tropipay')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-2 hover:border-indigo-500/50 transition-all group">
                                             <Globe size={24} className="text-blue-400 group-hover:scale-110 transition-transform"/>
-                                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Tropipay Directo</span>
+                                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Tropipay</span>
+                                            {(() => {
+                                                const d = getPriceDisplayForMethod('tropipay');
+                                                return d && <div className="mt-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 text-[9px] text-emerald-400 font-black">Pagas: {d.value} {d.symbol}</div>;
+                                            })()}
                                         </button>
                                     )}
                                     {activeMethods.card?.enabled && (
-                                        <button onClick={() => setSelectedMethod('card')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-3 hover:border-indigo-500/50 transition-all group">
+                                        <button onClick={() => setSelectedMethod('card')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-2 hover:border-indigo-500/50 transition-all group">
                                             <CreditCard size={24} className="text-emerald-400 group-hover:scale-110 transition-transform"/>
-                                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Tarjeta / Transfer</span>
+                                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Tarjeta / Zelle</span>
+                                            {(() => {
+                                                const d = getPriceDisplayForMethod('card');
+                                                return d && <div className="mt-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 text-[9px] text-emerald-400 font-black">Pagas: {d.value} {d.symbol}</div>;
+                                            })()}
                                         </button>
                                     )}
                                     {activeMethods.mobile?.enabled && (
-                                        <button onClick={() => setSelectedMethod('mobile')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-3 hover:border-indigo-500/50 transition-all group">
+                                        <button onClick={() => setSelectedMethod('mobile')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-2 hover:border-indigo-500/50 transition-all group">
                                             <Smartphone size={24} className="text-pink-400 group-hover:scale-110 transition-transform"/>
                                             <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Saldo Móvil</span>
+                                            {(() => {
+                                                const d = getPriceDisplayForMethod('mobile');
+                                                return d && <div className="mt-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 text-[9px] text-emerald-400 font-black">Pagas: {d.value} {d.symbol}</div>;
+                                            })()}
+                                        </button>
+                                    )}
+                                    {activeMethods.cash?.enabled && (
+                                        <button onClick={() => setSelectedMethod('cash')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-2 hover:border-indigo-500/50 transition-all group">
+                                            <Banknote size={24} className="text-emerald-400 group-hover:scale-110 transition-transform"/>
+                                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Efectivo</span>
+                                            {(() => {
+                                                const d = getPriceDisplayForMethod('cash');
+                                                return d && <div className="mt-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 text-[9px] text-emerald-400 font-black">Pagas: {d.value} {d.symbol}</div>;
+                                            })()}
                                         </button>
                                     )}
                                     {activeMethods.manual?.enabled && (
-                                        <button onClick={() => setSelectedMethod('manual')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-3 hover:border-indigo-500/50 transition-all group">
+                                        <button onClick={() => setSelectedMethod('manual')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-2 hover:border-indigo-500/50 transition-all group">
                                             <Wallet size={24} className="text-amber-400 group-hover:scale-110 transition-transform"/>
-                                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Solicitud Manual</span>
+                                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Soporte Admin</span>
+                                            {(() => {
+                                                const d = getPriceDisplayForMethod('manual');
+                                                return d && <div className="mt-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 text-[9px] text-emerald-400 font-black">Pagas: {d.value} {d.symbol}</div>;
+                                            })()}
                                         </button>
                                     )}
                                 </div>
@@ -289,7 +328,7 @@ export default function VipStore() {
                                         {convertedAmountDisplay && (
                                             <div className="bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-full flex items-center gap-2">
                                                 <Banknote size={12} className="text-emerald-400"/>
-                                                <span className="text-[10px] font-black text-emerald-400 uppercase">Beneficio: {convertedAmountDisplay.rate}x1 en {convertedAmountDisplay.symbol}</span>
+                                                <span className="text-[10px] font-black text-emerald-400 uppercase">Tasa: {convertedAmountDisplay.rate}x1 en {convertedAmountDisplay.symbol}</span>
                                             </div>
                                         )}
                                     </div>
@@ -306,7 +345,7 @@ export default function VipStore() {
 
                                     <div className="bg-slate-950 p-5 rounded-3xl border border-indigo-500/20 relative">
                                         <h4 className="text-xs font-black text-white uppercase mb-3 tracking-widest flex items-center gap-2">
-                                            <Info size={14} className="text-indigo-400"/> Instrucciones
+                                            <span className="p-1 bg-slate-900 rounded-lg"><Info size={14} className="text-indigo-400"/></span> Instrucciones
                                         </h4>
                                         <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap italic mb-4">
                                             {(activeMethods as any)[selectedMethod]?.instructions || "Consulte con el administrador."}
@@ -342,7 +381,7 @@ export default function VipStore() {
                                                 <textarea 
                                                     value={proofText}
                                                     onChange={e => setProofText(e.target.value)}
-                                                    placeholder="Pega aquí el contenido del SMS de confirmación..."
+                                                    placeholder={selectedMethod === 'cash' ? "Escribe un mensaje para el admin (ej: 'Ya te entregué el dinero')" : "Pega aquí el contenido del SMS de confirmación..."}
                                                     className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-white focus:border-indigo-500 outline-none transition-all min-h-[100px] resize-none"
                                                 />
                                             </div>

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../services/db';
 import { Transaction, Notification as AppNotification } from '../../types';
-import { Wallet, Send, ArrowDownLeft, ArrowUpRight, History, Shield, LogOut, ChevronRight, User as UserIcon, RefreshCw, Smartphone, Loader2, Settings, Save, Zap, Heart, Truck, Camera, Lock, Eye, EyeOff, UserCheck, Bell, MessageSquare, Trash2, CheckCircle2, Crown, Calendar, Clock as ClockIcon } from 'lucide-react';
+import { Wallet, Send, ArrowDownLeft, ArrowUpRight, History, Shield, LogOut, ChevronRight, User as UserIcon, RefreshCw, Smartphone, Loader2, Settings, Save, Zap, Heart, Truck, Camera, Lock, Eye, EyeOff, UserCheck, Bell, MessageSquare, Trash2, CheckCircle2, Crown, Calendar, Clock as ClockIcon, ShieldCheck, AlertTriangle, Fingerprint, MapPin, Smartphone as PhoneIcon, X } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { useNavigate } from '../Router';
 
@@ -18,6 +18,15 @@ export default function Profile() {
   const [transferData, setTransferData] = useState({ target: '', amount: '' });
   const [userSuggestions, setUserSuggestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Seller Verification Modal
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [verificationForm, setVerificationForm] = useState({
+      fullName: '',
+      idNumber: '',
+      address: '',
+      mobile: ''
+  });
 
   const hasUnread = useMemo(() => notifications.some(n => Number(n.isRead) === 0), [notifications]);
 
@@ -108,6 +117,21 @@ export default function Profile() {
       navigate(n.link);
   };
 
+  const handleVerificationSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!user) return;
+      setLoading(true);
+      try {
+          await db.request('action=submit_seller_verification', {
+              method: 'POST',
+              body: JSON.stringify({ userId: user.id, ...verificationForm })
+          });
+          toast.success("Solicitud de verificación enviada con éxito.");
+          setShowVerificationModal(false);
+      } catch (e: any) { toast.error(e.message); }
+      finally { setLoading(false); }
+  };
+
   // Helper para tiempo restante VIP
   const getVipTimeLeft = (expiry: number) => {
       const now = Math.floor(Date.now() / 1000);
@@ -126,6 +150,7 @@ export default function Profile() {
   if (!user) return null;
 
   const vipTimeLeft = user.vipExpiry ? getVipTimeLeft(Number(user.vipExpiry)) : null;
+  const isVerified = Number(user.is_verified_seller) === 1;
 
   return (
     <div className="space-y-6 pb-24 px-2 max-w-4xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -156,6 +181,11 @@ export default function Profile() {
                                 </span>
                             </div>
                         )}
+                        {isVerified && (
+                             <span className="bg-emerald-500 text-black px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1">
+                                <ShieldCheck size={12}/> VERIFICADO
+                            </span>
+                        )}
                     </div>
                   </div>
               </div>
@@ -169,6 +199,27 @@ export default function Profile() {
               </div>
           </div>
       </div>
+
+      {/* Seller Verification Banner */}
+      {!isVerified && (
+          <div className="bg-slate-900 border border-indigo-500/20 rounded-[32px] p-6 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4 group hover:border-indigo-500/40 transition-all">
+              <div className="flex items-center gap-4 text-center md:text-left">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0">
+                      <Fingerprint size={24}/>
+                  </div>
+                  <div>
+                      <h4 className="text-white font-black text-sm uppercase tracking-widest">Estatus de Vendedor</h4>
+                      <p className="text-slate-500 text-[10px] font-bold uppercase tracking-tight">Tu identidad no ha sido validada. Solicítalo para ganar confianza.</p>
+                  </div>
+              </div>
+              <button 
+                  onClick={() => setShowVerificationModal(true)}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-[0.1em] rounded-xl shadow-lg active:scale-95 transition-all"
+              >
+                  Verificar Identidad
+              </button>
+          </div>
+      )}
 
       {/* VIP Status Card (Solo si es VIP) */}
       {vipTimeLeft && (
@@ -409,6 +460,70 @@ export default function Profile() {
               </div>
           )}
       </div>
+
+      {/* Seller Verification Modal */}
+      {showVerificationModal && (
+          <div className="fixed inset-0 z-[200] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-slate-900 border border-white/10 w-full max-w-lg rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95">
+                  <div className="p-8 bg-slate-950 border-b border-white/5 flex justify-between items-center">
+                      <div className="flex items-center gap-4">
+                          <div className="p-3 rounded-2xl bg-indigo-600 text-white shadow-lg">
+                              <Fingerprint size={24}/>
+                          </div>
+                          <div>
+                              <h3 className="font-black text-white uppercase text-sm tracking-widest leading-none">Validación de Identidad</h3>
+                              <p className="text-[10px] text-indigo-400 font-bold uppercase mt-1">Auditoría para Vendedores</p>
+                          </div>
+                      </div>
+                      <button onClick={() => setShowVerificationModal(false)} className="p-2.5 bg-slate-800 text-slate-500 hover:text-white rounded-2xl transition-all"><X/></button>
+                  </div>
+
+                  <form onSubmit={handleVerificationSubmit} className="p-8 space-y-5">
+                      <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex gap-3 mb-2">
+                          <AlertTriangle size={18} className="text-amber-500 shrink-0"/>
+                          <p className="text-[9px] text-amber-200 font-bold uppercase leading-relaxed">Estos datos son confidenciales y solo serán visibles para la administración para asegurar la legitimidad de tus ventas.</p>
+                      </div>
+
+                      <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Nombre Completo (Real)</label>
+                          <div className="relative">
+                              <UserIcon size={16} className="absolute left-4 top-3.5 text-slate-600"/>
+                              <input required type="text" value={verificationForm.fullName} onChange={e => setVerificationForm({...verificationForm, fullName: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-12 pr-4 py-4 text-white text-sm focus:border-indigo-500 outline-none transition-all" placeholder="Juan Pérez Pérez" />
+                          </div>
+                      </div>
+
+                      <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Carnet de Identidad / Pasaporte</label>
+                          <div className="relative">
+                              <Shield size={16} className="absolute left-4 top-3.5 text-slate-600"/>
+                              <input required type="text" value={verificationForm.idNumber} onChange={e => setVerificationForm({...verificationForm, idNumber: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-12 pr-4 py-4 text-white text-sm focus:border-indigo-500 outline-none transition-all" placeholder="ID Nacional" />
+                          </div>
+                      </div>
+
+                      <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Dirección de Residencia</label>
+                          <div className="relative">
+                              <MapPin size={16} className="absolute left-4 top-3.5 text-slate-600"/>
+                              <input required type="text" value={verificationForm.address} onChange={e => setVerificationForm({...verificationForm, address: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-12 pr-4 py-4 text-white text-sm focus:border-indigo-500 outline-none transition-all" placeholder="Calle, ciudad..." />
+                          </div>
+                      </div>
+
+                      <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Número Móvil de Contacto</label>
+                          <div className="relative">
+                              <PhoneIcon size={16} className="absolute left-4 top-3.5 text-slate-600"/>
+                              <input required type="tel" value={verificationForm.mobile} onChange={e => setVerificationForm({...verificationForm, mobile: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-12 pr-4 py-4 text-white text-sm focus:border-indigo-500 outline-none transition-all" placeholder="+53..." />
+                          </div>
+                      </div>
+
+                      <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-5 rounded-[24px] shadow-2xl transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest active:scale-95">
+                          {loading ? <Loader2 className="animate-spin" size={20}/> : <ShieldCheck size={20}/>}
+                          Enviar para Aprobación
+                      </button>
+                  </form>
+              </div>
+          </div>
+      )}
 
       <div className="flex flex-col md:flex-row gap-4 pt-6 border-t border-slate-800/50">
           <button onClick={logout} className="flex-1 bg-red-950/20 hover:bg-red-950/40 text-red-400 font-bold py-4 rounded-2xl border border-red-900/30 flex items-center justify-center gap-2 transition-all">

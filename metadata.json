@@ -1,6 +1,6 @@
 {
-  "name": " StreamPay OFICIAL 0.0.15.9",
-  "description": "Otras modificaciones ",
+  "name": "StreamPay OFICIAL 0.0.16.1",
+  "description": "Otras modificaciones  en notificaciones ",
   "requestFramePermissions": [
     "camera",
     "microphone"

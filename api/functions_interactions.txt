@@ -1,6 +1,7 @@
+
 <?php
 /**
- * INTERACCIONES - CORE FUNCTIONS V12.2 (Folders in Search Suggestions)
+ * INTERACCIONES - CORE FUNCTIONS V13.1 (Notification Engine & Verification)
  */
 
 function interact_save_search($pdo, $input) {
@@ -14,15 +15,11 @@ function interact_get_search_suggestions($pdo, $q) {
     $q = trim($q);
     $res = [];
 
-    // Caso A: Entrada vacía -> Mostrar historial de tendencias (Top 6)
     if (empty($q)) {
         $stmt = $pdo->query("SELECT term as label, 'HISTORY' as type FROM search_history ORDER BY count DESC, last_searched DESC LIMIT 6");
         respond(true, $stmt->fetchAll());
     }
 
-    // Caso B: Con texto -> Búsqueda multi-tabla agrupada
-    
-    // 1. Categorías (Coincidencia exacta o parcial en nombres de categorías del sistema)
     $stmtS = $pdo->query("SELECT categories FROM system_settings WHERE id = 1");
     $allCats = json_decode($stmtS->fetchColumn() ?: '[]', true);
     foreach ($allCats as $cat) {
@@ -31,7 +28,6 @@ function interact_get_search_suggestions($pdo, $q) {
         }
     }
 
-    // 1.5. Carpetas físicas (Escaneo de rutas locales en DB)
     $stmtF = $pdo->prepare("SELECT DISTINCT videoUrl FROM videos WHERE isLocal = 1 AND videoUrl LIKE ? LIMIT 50");
     $stmtF->execute(["%$q%"]);
     $paths = $stmtF->fetchAll(PDO::FETCH_COLUMN);
@@ -41,7 +37,6 @@ function interact_get_search_suggestions($pdo, $q) {
         $parts = explode('/', $p);
         foreach($parts as $part) {
             if (empty($part)) continue;
-            // Si el nombre de la carpeta contiene la búsqueda y no está ya en la lista
             if (stripos($part, $q) !== false && !in_array($part, $foundFolders)) {
                 $foundFolders[] = $part;
                 if (count($foundFolders) >= 4) break 2;
@@ -52,23 +47,115 @@ function interact_get_search_suggestions($pdo, $q) {
         $res[] = ['label' => $ff, 'type' => 'FOLDER'];
     }
 
-    // 2. Historial previo
     $stmt = $pdo->prepare("SELECT term as label, 'HISTORY' as type FROM search_history WHERE term LIKE ? ORDER BY count DESC LIMIT 2");
     $stmt->execute(["%$q%"]); $res = array_merge($res, $stmt->fetchAll());
 
-    // 3. Videos & Audios
     $stmt = $pdo->prepare("SELECT title as label, id, CASE WHEN is_audio = 1 THEN 'AUDIO' ELSE 'VIDEO' END as type FROM videos WHERE title LIKE ? AND category NOT IN ('PENDING','PROCESSING','FAILED_METADATA') LIMIT 4");
     $stmt->execute(["%$q%"]); $res = array_merge($res, $stmt->fetchAll());
 
-    // 4. Marketplace
     $stmt = $pdo->prepare("SELECT title as label, id, 'MARKET' as type FROM marketplace_items WHERE title LIKE ? AND status = 'ACTIVO' LIMIT 3");
     $stmt->execute(["%$q%"]); $res = array_merge($res, $stmt->fetchAll());
 
-    // 5. Usuarios/Canales
     $stmt = $pdo->prepare("SELECT username as label, id, 'USER' as type FROM users WHERE username LIKE ? LIMIT 2");
     $stmt->execute(["%$q%"]); $res = array_merge($res, $stmt->fetchAll());
 
     respond(true, $res);
+}
+
+/**
+ * Función interna para enviar una notificación simple
+ */
+function send_direct_notification($pdo, $userId, $type, $text, $link, $avatarUrl = null) {
+    $id = uniqid('n_');
+    $stmt = $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp, avatarUrl) VALUES (?, ?, ?, ?, ?, 0, ?, ?)");
+    $stmt->execute([$id, $userId, $type, $text, $link, time(), $avatarUrl]);
+}
+
+/**
+ * Difusión masiva para todos los suscriptores de un canal
+ */
+function interact_notify_subscribers($pdo, $creatorId, $type, $text, $link) {
+    $stmt = $pdo->prepare("SELECT subscriberId FROM subscriptions WHERE creatorId = ?");
+    $stmt->execute([$creatorId]);
+    $subs = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    if (empty($subs)) return;
+
+    $u = $pdo->query("SELECT avatarUrl FROM users WHERE id = '$creatorId'")->fetch();
+    $avatar = $u['avatarUrl'] ?? null;
+    $now = time();
+
+    // Inserción masiva para evitar sobrecarga del servidor
+    $sql = "INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp, avatarUrl) VALUES ";
+    $values = [];
+    $params = [];
+    foreach ($subs as $index => $subId) {
+        $nid = uniqid('n_') . $index;
+        $values[] = "(?, ?, ?, ?, ?, 0, ?, ?)";
+        array_push($params, $nid, $subId, $type, $text, $link, $now, $avatar);
+    }
+    
+    $stmt = $pdo->prepare($sql . implode(',', $values));
+    $stmt->execute($params);
+}
+
+function interact_submit_seller_verification($pdo, $input) {
+    $userId = $input['userId'];
+    $fullName = trim($input['fullName'] ?? '');
+    $idNumber = trim($input['idNumber'] ?? '');
+    $address = trim($input['address'] ?? '');
+    $mobile = trim($input['mobile'] ?? '');
+
+    if (empty($fullName) || empty($idNumber) || empty($mobile)) {
+        respond(false, null, "Por favor complete los campos obligatorios.");
+    }
+
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM seller_verifications WHERE userId = ? AND status = 'PENDING'");
+    $stmt->execute([$userId]);
+    if ($stmt->fetchColumn() > 0) {
+        respond(false, null, "Ya tienes una solicitud de verificación en espera.");
+    }
+
+    $id = uniqid('sv_');
+    $stmt = $pdo->prepare("INSERT INTO seller_verifications (id, userId, fullName, idNumber, address, mobile, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)");
+    $stmt->execute([$id, $userId, $fullName, $idNumber, $address, $mobile, time()]);
+
+    send_direct_notification($pdo, $userId, 'SYSTEM', "Tu solicitud de vendedor verificado ha sido enviada. El administrador revisará tus datos pronto.", "/profile");
+
+    respond(true);
+}
+
+function admin_get_seller_verification_requests($pdo) {
+    $stmt = $pdo->query("SELECT sv.*, u.username FROM seller_verifications sv JOIN users u ON sv.userId = u.id WHERE sv.status = 'PENDING' ORDER BY sv.createdAt DESC");
+    respond(true, $stmt->fetchAll());
+}
+
+function admin_handle_seller_verification($pdo, $input) {
+    $reqId = $input['reqId'];
+    $status = $input['status']; // APPROVED or REJECTED
+
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT userId FROM seller_verifications WHERE id = ?");
+        $stmt->execute([$reqId]);
+        $userId = $stmt->fetchColumn();
+
+        if (!$userId) throw new Exception("Solicitud no encontrada.");
+
+        $pdo->prepare("UPDATE seller_verifications SET status = ? WHERE id = ?")->execute([$status, $reqId]);
+
+        if ($status === 'APPROVED') {
+            $pdo->prepare("UPDATE users SET is_verified_seller = 1 WHERE id = ?")->execute([$userId]);
+            send_direct_notification($pdo, $userId, 'SYSTEM', "¡Felicidades! Tu identidad ha sido validada. Ahora eres un Vendedor Verificado.", "/profile");
+        } else {
+            send_direct_notification($pdo, $userId, 'SYSTEM', "Tu solicitud de verificación de vendedor ha sido rechazada. Contacta con soporte para más detalles.", "/profile");
+        }
+
+        $pdo->commit();
+        respond(true);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        respond(false, null, $e->getMessage());
+    }
 }
 
 function interact_has_purchased($pdo, $userId, $videoId) {
@@ -91,6 +178,8 @@ function interact_purchase_vip_instant($pdo, $input) {
             $seconds = intval($plan['durationDays'] ?? 30) * 86400; $newExpiry = (intval($user['vipExpiry'] ?? 0) > $now) ? ($user['vipExpiry'] + $seconds) : ($now + $seconds);
             $pdo->prepare("UPDATE users SET vipExpiry = ? WHERE id = ?")->execute([$newExpiry, $userId]);
             $pdo->prepare("INSERT INTO transactions (id, buyerId, amount, type, timestamp, videoTitle, isExternal) VALUES (?, ?, ?, 'VIP', ?, ?, 0)")->execute([uniqid('tx_v_'), $userId, $plan['price'], $now, "Canje: " . $plan['name']]);
+            
+            send_direct_notification($pdo, $userId, 'SYSTEM', "¡Canje exitoso! Tu membresía {$plan['name']} está activa por {$plan['durationDays']} días.", "/profile");
         }
         $adminId = $pdo->query("SELECT id FROM users WHERE role = 'ADMIN' LIMIT 1")->fetchColumn();
         if ($adminId) $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$plan['price'], $adminId]);
@@ -113,6 +202,9 @@ function interact_purchase($pdo, $input) {
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$creatorShare, $video['creatorId']]);
         if ($adminId) $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$fee, $adminId]);
         $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, adminFee, timestamp, type, videoTitle, isExternal) VALUES (?, ?, ?, ?, ?, ?, ?, 'PURCHASE', ?, 0)")->execute([uniqid('tx_'), $buyerId, $video['creatorId'], $videoId, $price, $fee, time(), $video['title']]);
+        
+        send_direct_notification($pdo, $video['creatorId'], 'SALE', "Has vendido acceso a: {$video['title']}. Ganancia: " . number_format($creatorShare, 2) . "$", "/profile");
+
         $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
@@ -164,7 +256,7 @@ function interact_transfer_balance($pdo, $input) {
     $senderId = $input['userId']; $targetName = trim($input['targetUsername'], '@ '); $amount = floatval($input['amount']);
     $pdo->beginTransaction();
     try {
-        $stmt = $pdo->prepare("SELECT id, balance FROM users WHERE id = ? FOR UPDATE"); $stmt->execute([$senderId]); $sender = $stmt->fetch();
+        $stmt = $pdo->prepare("SELECT id, username, balance FROM users WHERE id = ? FOR UPDATE"); $stmt->execute([$senderId]); $sender = $stmt->fetch();
         if ($sender['balance'] < $amount) throw new Exception("Saldo insuficiente");
         $stmt = $pdo->prepare("SELECT id, username FROM users WHERE username = ?"); $stmt->execute([$targetName]); $target = $stmt->fetch();
         if (!$target) throw new Exception("Usuario no encontrado");
@@ -172,7 +264,10 @@ function interact_transfer_balance($pdo, $input) {
         $pdo->prepare("UPDATE users SET balance = balance - ? WHERE id = ?")->execute([$amount, $senderId]);
         $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$amount, $target['id']]);
         $pdo->prepare("INSERT INTO transactions (id, buyerId, recipientName, amount, type, timestamp, isExternal) VALUES (?, ?, ?, ?, 'TRANSFER_SENT', ?, 0)")->execute([uniqid('txs_'), $senderId, $target['username'], $amount, time()]);
-        $pdo->prepare("INSERT INTO transactions (id, buyerId, senderName, amount, type, timestamp, isExternal) VALUES (?, ?, ?, ?, 'TRANSFER_RECV', ?, 0)")->execute([uniqid('txr_'), $target['id'], $pdo->query("SELECT username FROM users WHERE id = '$senderId'")->fetchColumn(), $amount, time()]);
+        $pdo->prepare("INSERT INTO transactions (id, buyerId, senderName, amount, type, timestamp, isExternal) VALUES (?, ?, ?, ?, 'TRANSFER_RECV', ?, 0)")->execute([uniqid('txr_'), $target['id'], $sender['username'], $amount, time()]);
+        
+        send_direct_notification($pdo, $target['id'], 'SYSTEM', "Has recibido una transferencia de {$amount}$ de @{$sender['username']}", "/profile");
+        
         $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
 }
@@ -232,3 +327,4 @@ function interact_request_content($pdo, $input) {
         ->execute([uniqid('req_'), $input['userId'], $input['query'], time(), $input['isVip'] ? 1 : 0]);
     respond(true);
 }
+?>

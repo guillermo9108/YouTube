@@ -51,7 +51,8 @@ export default function AdminConfig() {
                 tropipay: { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: 'EUR' },
                 card: { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: '$' },
                 mobile: { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: 'CUP' },
-                manual: { enabled: true, instructions: 'Contacta al admin para recargar.', exchangeRate: 1, currencySymbol: '$' }
+                manual: { enabled: true, instructions: 'Contacta al admin para recargar.', exchangeRate: 1, currencySymbol: '$' },
+                cash: { enabled: false, instructions: 'Pago directo en persona.', exchangeRate: 1, currencySymbol: '$' }
             };
             if (!s.ftpSettings) s.ftpSettings = { host: '', port: 21, user: '', pass: '', rootPath: '/' };
             
@@ -120,7 +121,7 @@ export default function AdminConfig() {
     };
 
     const updatePaymentMethod = (
-        method: 'tropipay' | 'card' | 'mobile' | 'manual', 
+        method: 'tropipay' | 'card' | 'mobile' | 'manual' | 'cash', 
         field: string, 
         val: any
     ) => {
@@ -346,9 +347,10 @@ export default function AdminConfig() {
                         { id: 'tropipay', label: 'Tropipay (Automático)', icon: Globe, color: 'text-blue-400' },
                         { id: 'card', label: 'Tarjeta / Zelle (Manual)', icon: CreditCard, color: 'text-emerald-400' },
                         { id: 'mobile', label: 'Saldo Móvil / Transfer', icon: Smartphone, color: 'text-pink-400' },
+                        { id: 'cash', label: 'Pago en Efectivo', icon: Banknote, color: 'text-emerald-400' },
                         { id: 'manual', label: 'Soporte Directo', icon: Wallet, color: 'text-amber-400' }
                     ].map(m => {
-                        const methodKey = m.id as 'tropipay' | 'card' | 'mobile' | 'manual';
+                        const methodKey = m.id as 'tropipay' | 'card' | 'mobile' | 'manual' | 'cash';
                         const config = settings?.paymentMethods?.[methodKey] || { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: '$' };
                         return (
                             <div key={m.id} className="space-y-4 p-4 bg-slate-950 rounded-2xl border border-slate-800 shadow-xl group">
