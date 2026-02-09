@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V19.1 (Progress & Debug Optimized)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V19.2 (Boolean & Type Optimized)
  */
 
 function admin_get_settings($pdo) {
@@ -38,7 +38,12 @@ function admin_update_settings($pdo, $input) {
     foreach ($input as $key => $val) {
         if (in_array($key, $allowed)) {
             $fields[] = "`$key` = ?";
-            $params[] = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
+            // Conversión explícita de booleanos a 1/0 para MariaDB TINYINT
+            if (is_bool($val)) {
+                $params[] = $val ? 1 : 0;
+            } else {
+                $params[] = (is_array($val) || is_object($val)) ? json_encode($val, JSON_UNESCAPED_UNICODE) : $val;
+            }
         }
     }
     if (empty($fields)) respond(true);

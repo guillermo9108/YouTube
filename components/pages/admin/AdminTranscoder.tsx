@@ -56,7 +56,8 @@ export default function AdminTranscoder() {
             setProfiles(profileData || []);
             setActiveProcesses(lStats.active_processes || []);
             setIsRunning(!!settings.is_transcoder_active);
-            setAutoTranscode(!!settings.autoTranscode);
+            // CORRECCIÓN: Evitar que "0" sea evaluado como true en JS
+            setAutoTranscode(Number(settings.autoTranscode) === 1);
             if (Array.isArray(realLogs)) setLog(realLogs);
             
         } catch (e) {}
@@ -74,7 +75,8 @@ export default function AdminTranscoder() {
         const newValue = !autoTranscode;
         setAutoTranscode(newValue);
         try {
-            await db.updateSystemSettings({ autoTranscode: newValue });
+            // Aseguramos enviar número 1/0 en lugar de booleano
+            await db.updateSystemSettings({ autoTranscode: newValue ? 1 : 0 });
             toast.success(newValue ? "Modo Automático Activado" : "Modo Automático Desactivado");
         } catch (e: any) {
             toast.error("Fallo al actualizar configuración");
