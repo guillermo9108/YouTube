@@ -41,12 +41,12 @@ export default function VipStore() {
         });
     }, []);
 
-    // Hooks definidos en el nivel superior para evitar Error #310
+    // --- Hooks movidos arriba para evitar Error #310 ---
+    
     const mostPopularPlanName = useMemo(() => {
         let max = 0;
         let winner = null;
         Object.entries(popularityData).forEach(([name, val]) => {
-            // Fix: Explicitly cast val to number as it might be inferred as unknown in some environments
             const count = val as number;
             if (count > max) {
                 max = count;
@@ -62,6 +62,9 @@ export default function VipStore() {
         };
     }, [settings]);
 
+    const isVip = useMemo(() => user && user.vipExpiry && Number(user.vipExpiry) > (Date.now() / 1000), [user]);
+
+    // Cálculo de precio convertido basado en el método seleccionado (DIVISIÓN PARA TASA INVERSA)
     const convertedAmountDisplay = useMemo(() => {
         if (!selectedPlan || !selectedMethod) return null;
         const methodKey = selectedMethod as keyof typeof activeMethods;
@@ -70,14 +73,16 @@ export default function VipStore() {
         
         const rate = Number(config.exchangeRate || 1);
         const symbol = config.currencySymbol || '$';
-        const converted = (selectedPlan.price * rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
-        return { value: converted, symbol };
+        // CORRECCIÓN LÓGICA: DIVIDIR PRECIO POR TASA (2x1 -> Precio 100 / Tasa 2 = Paga 50)
+        const rawValue = rate > 0 ? (selectedPlan.price / rate) : selectedPlan.price;
+        const converted = rawValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        return { value: converted, symbol, rate };
     }, [selectedPlan, selectedMethod, activeMethods]);
 
-    const isVip = user && user.vipExpiry && Number(user.vipExpiry) > (Date.now() / 1000);
+    // --- Fin de Hooks de nivel superior ---
 
-    // Handlers
     const resetProof = () => {
         setProofText('');
         setProofImage(null);
@@ -170,7 +175,7 @@ export default function VipStore() {
                         <div>
                             <h2 className="text-white font-black uppercase text-sm tracking-widest">Suscripción VIP Activa</h2>
                             <p className="text-amber-400 text-xs font-bold mt-1">
-                                Vence el: {new Date(Number(user.vipExpiry) * 1000).toLocaleDateString(undefined, { day:'2-digit', month:'long', year:'numeric' })}
+                                Vence el: {new Date(Number(user?.vipExpiry || 0) * 1000).toLocaleDateString(undefined, { day:'2-digit', month:'long', year:'numeric' })}
                             </p>
                         </div>
                     </div>
@@ -284,7 +289,7 @@ export default function VipStore() {
                                         {convertedAmountDisplay && (
                                             <div className="bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-full flex items-center gap-2">
                                                 <Banknote size={12} className="text-emerald-400"/>
-                                                <span className="text-[10px] font-black text-emerald-400 uppercase">1 USD = {(activeMethods as any)[selectedMethod]?.exchangeRate} {(activeMethods as any)[selectedMethod]?.currencySymbol}</span>
+                                                <span className="text-[10px] font-black text-emerald-400 uppercase">Beneficio: {convertedAmountDisplay.rate}x1 en {convertedAmountDisplay.symbol}</span>
                                             </div>
                                         )}
                                     </div>
@@ -349,7 +354,7 @@ export default function VipStore() {
                                                 <div className="relative group">
                                                     {proofPreview ? (
                                                         <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-700 bg-black">
-                                                            <img src={proofPreview} className="w-full h-full object-contain" />
+                                                            <img src={proofPreview} className="w-full h-full object-contain" alt="Proof" />
                                                             <button onClick={() => { setProofImage(null); setProofPreview(null); }} className="absolute top-2 right-2 bg-red-600 text-white p-1.5 rounded-full shadow-lg">
                                                                 <X size={14}/>
                                                             </button>

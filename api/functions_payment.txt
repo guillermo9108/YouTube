@@ -1,6 +1,6 @@
 <?php
 
-// --- TROPIPAY INTEGRATION V2.2 (Specific Rate per Method) ---
+// --- TROPIPAY INTEGRATION V2.3 (Inverse Rate Support - 2x1 Logic) ---
 
 function getTropipayToken($clientId, $clientSecret) {
     $curl = curl_init();
@@ -46,16 +46,16 @@ function payment_create_link($pdo, $input) {
     $stmtS = $pdo->query("SELECT tropipayClientId, tropipayClientSecret, paymentMethods FROM system_settings LIMIT 1");
     $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
 
-    // Obtener la configuración específica de Tropipay (Tasa y Moneda)
     $methods = json_decode($settings['paymentMethods'] ?? '{}', true);
-    $tropiConfig = $methods['tropipay'] ?? ['exchangeRate' => 1.08, 'currencySymbol' => 'EUR', 'enabled' => true];
+    $tropiConfig = $methods['tropipay'] ?? ['exchangeRate' => 1, 'currencySymbol' => 'EUR'];
 
-    $rate = floatval($tropiConfig['exchangeRate'] ?? 1.08);
+    $rate = floatval($tropiConfig['exchangeRate'] ?? 1);
+    if ($rate <= 0) $rate = 1;
     $currency = $tropiConfig['currencySymbol'] ?? 'EUR';
     
-    // El monto real a cobrar se multiplica por la tasa configurada
+    // CORRECCIÓN LÓGICA: DIVIDIR PRECIO POR TASA (2x1 -> Precio 100 / Tasa 2 = Paga 50)
     // Tropipay requiere el monto en centavos (monto * 100)
-    $finalAmount = round(floatval($plan['price']) * $rate * 100);
+    $finalAmount = round((floatval($plan['price']) / $rate) * 100);
     
     try {
         $token = getTropipayToken($settings['tropipayClientId'], $settings['tropipayClientSecret']);

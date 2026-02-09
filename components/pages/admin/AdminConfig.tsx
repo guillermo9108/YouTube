@@ -48,9 +48,9 @@ export default function AdminConfig() {
             if (!s.categories) s.categories = [];
             if (!s.libraryPaths) s.libraryPaths = [];
             if (!s.paymentMethods) s.paymentMethods = {
-                tropipay: { enabled: false, instructions: '', exchangeRate: 1.08, currencySymbol: 'EUR' },
+                tropipay: { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: 'EUR' },
                 card: { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: '$' },
-                mobile: { enabled: false, instructions: '', exchangeRate: 300, currencySymbol: 'CUP' },
+                mobile: { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: 'CUP' },
                 manual: { enabled: true, instructions: 'Contacta al admin para recargar.', exchangeRate: 1, currencySymbol: '$' }
             };
             if (!s.ftpSettings) s.ftpSettings = { host: '', port: 21, user: '', pass: '', rootPath: '/' };
@@ -366,7 +366,7 @@ export default function AdminConfig() {
                                 {/* Nuevos campos de Tasa y Símbolo */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-1">
-                                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1 flex items-center gap-1"><Coins size={10}/> Tasa de Cambio</label>
+                                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1 flex items-center gap-1"><Coins size={10}/> Tasa de Cambio (Divisora)</label>
                                         <input 
                                             type="number" step="0.01" 
                                             value={config.exchangeRate || 1} 
@@ -400,7 +400,7 @@ export default function AdminConfig() {
 
             <div className="p-10 text-center opacity-5 pointer-events-none">
                 <Shield size={32} className="mx-auto mb-2"/>
-                <p className="text-[8px] font-black uppercase tracking-[0.8em]">StreamPay V1.9.1 Core Security</p>
+                <p className="text-[8px] font-black uppercase tracking-[0.8em]">StreamPay V1.9.2 Core Security</p>
             </div>
         </div>
     );
