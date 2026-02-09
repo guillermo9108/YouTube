@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { db } from '../../../services/db';
 import { SystemSettings, Category, VipPlan, FtpSettings } from '../../../types';
@@ -7,7 +8,7 @@ import {
     CreditCard, ChevronRight, DollarSign, Database,
     Clock, Percent, HardDrive, Crown, X, Info, Smartphone, Wallet, Globe,
     Cpu, Settings2, Shield, Activity, Network, ListPlus, Bug, Watch, Maximize,
-    Zap, Trash, SortAsc, Server
+    Zap, Trash, SortAsc, Server, Banknote, Coins
 } from 'lucide-react';
 
 export default function AdminConfig() {
@@ -24,7 +25,6 @@ export default function AdminConfig() {
         try {
             const s: any = await db.getSystemSettings();
             
-            // --- Normalización de planes VIP (Corrección para datos antiguos) ---
             let rawVip = s.vipPlans;
             let plans: VipPlan[] = [];
             
@@ -34,7 +34,6 @@ export default function AdminConfig() {
                 try { plans = JSON.parse(rawVip); } catch(e) { plans = []; }
             }
 
-            // Asegurar que cada plan tiene un "type"
             plans = plans.map(p => {
                 if (!p.type) {
                     if (p.durationDays && Number(p.durationDays) > 0) return { ...p, type: 'ACCESS' };
@@ -49,10 +48,10 @@ export default function AdminConfig() {
             if (!s.categories) s.categories = [];
             if (!s.libraryPaths) s.libraryPaths = [];
             if (!s.paymentMethods) s.paymentMethods = {
-                tropipay: { enabled: false, instructions: '' },
-                card: { enabled: false, instructions: '' },
-                mobile: { enabled: false, instructions: '' },
-                manual: { enabled: true, instructions: 'Contacta al admin para recargar.' }
+                tropipay: { enabled: false, instructions: '', exchangeRate: 1.08, currencySymbol: 'EUR' },
+                card: { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: '$' },
+                mobile: { enabled: false, instructions: '', exchangeRate: 300, currencySymbol: 'CUP' },
+                manual: { enabled: true, instructions: 'Contacta al admin para recargar.', exchangeRate: 1, currencySymbol: '$' }
             };
             if (!s.ftpSettings) s.ftpSettings = { host: '', port: 21, user: '', pass: '', rootPath: '/' };
             
@@ -122,14 +121,13 @@ export default function AdminConfig() {
 
     const updatePaymentMethod = (
         method: 'tropipay' | 'card' | 'mobile' | 'manual', 
-        field: 'enabled' | 'instructions', 
+        field: string, 
         val: any
     ) => {
         if (!settings) return;
-        const currentMethods = { ...(settings.paymentMethods || {}) };
-        const methodConfig = { ...(currentMethods[method] || { enabled: false, instructions: '' }) };
+        const currentMethods = { ...(settings.paymentMethods || {}) } as any;
+        const methodConfig = { ...(currentMethods[method] || { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: '$' }) };
         
-        // @ts-ignore
         methodConfig[field] = val;
         currentMethods[method] = methodConfig;
         
@@ -172,7 +170,7 @@ export default function AdminConfig() {
             <SectionHeader id="GENERAL" label="Economía & AI" icon={Shield} color="text-emerald-400" />
             {activeSection === 'GENERAL' && (
                 <div className="bg-slate-900/50 p-5 rounded-3xl border border-slate-800 space-y-5 animate-in slide-in-from-top-2">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
                             <label className="text-[9px] font-black text-slate-500 uppercase ml-1">Comisión Video %</label>
                             <input type="number" value={settings?.videoCommission} onChange={e => updateValue('videoCommission', parseInt(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs focus:border-indigo-500 outline-none" />
@@ -184,10 +182,6 @@ export default function AdminConfig() {
                         <div className="space-y-1">
                             <label className="text-[9px] font-black text-slate-500 uppercase ml-1">Tarifa Envío $</label>
                             <input type="number" value={settings?.transferFee} onChange={e => updateValue('transferFee', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs focus:border-indigo-500 outline-none" />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-[9px] font-black text-amber-500 uppercase ml-1">Tasa CUP/EUR</label>
-                            <input type="number" value={settings?.currencyConversion} onChange={e => updateValue('currencyConversion', parseFloat(e.target.value))} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold text-xs focus:border-indigo-500 outline-none" />
                         </div>
                     </div>
                     
@@ -355,9 +349,9 @@ export default function AdminConfig() {
                         { id: 'manual', label: 'Soporte Directo', icon: Wallet, color: 'text-amber-400' }
                     ].map(m => {
                         const methodKey = m.id as 'tropipay' | 'card' | 'mobile' | 'manual';
-                        const config = settings?.paymentMethods?.[methodKey] || { enabled: false, instructions: '' };
+                        const config = settings?.paymentMethods?.[methodKey] || { enabled: false, instructions: '', exchangeRate: 1, currencySymbol: '$' };
                         return (
-                            <div key={m.id} className="space-y-2 p-4 bg-slate-950 rounded-2xl border border-slate-800 shadow-xl group">
+                            <div key={m.id} className="space-y-4 p-4 bg-slate-950 rounded-2xl border border-slate-800 shadow-xl group">
                                 <div className="flex justify-between items-center">
                                     <div className="flex items-center gap-3">
                                         <div className={`p-2 rounded-xl bg-slate-900 ${m.color} shadow-inner group-hover:scale-110 transition-transform`}><m.icon size={18}/></div>
@@ -368,6 +362,30 @@ export default function AdminConfig() {
                                         <div className="w-10 h-5 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 shadow-inner"></div>
                                     </label>
                                 </div>
+
+                                {/* Nuevos campos de Tasa y Símbolo */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1 flex items-center gap-1"><Coins size={10}/> Tasa de Cambio</label>
+                                        <input 
+                                            type="number" step="0.01" 
+                                            value={config.exchangeRate || 1} 
+                                            onChange={e => updatePaymentMethod(methodKey, 'exchangeRate', parseFloat(e.target.value))} 
+                                            className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-black text-xs outline-none focus:border-indigo-500" 
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1 flex items-center gap-1"><Banknote size={10}/> Símbolo Moneda</label>
+                                        <input 
+                                            type="text" 
+                                            value={config.currencySymbol || '$'} 
+                                            onChange={e => updatePaymentMethod(methodKey, 'currencySymbol', e.target.value.toUpperCase())} 
+                                            className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-white font-black text-xs outline-none focus:border-indigo-500" 
+                                            placeholder="CUP, EUR..."
+                                        />
+                                    </div>
+                                </div>
+
                                 <textarea 
                                     value={config.instructions} 
                                     onChange={e => updatePaymentMethod(methodKey, 'instructions', e.target.value)}
@@ -382,7 +400,7 @@ export default function AdminConfig() {
 
             <div className="p-10 text-center opacity-5 pointer-events-none">
                 <Shield size={32} className="mx-auto mb-2"/>
-                <p className="text-[8px] font-black uppercase tracking-[0.8em]">StreamPay V1.8 Core Security</p>
+                <p className="text-[8px] font-black uppercase tracking-[0.8em]">StreamPay V1.9.1 Core Security</p>
             </div>
         </div>
     );

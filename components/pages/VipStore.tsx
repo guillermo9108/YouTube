@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../services/db';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -7,7 +7,7 @@ import { VipPlan, SystemSettings } from '../../types';
 import { 
     Crown, Check, Zap, Loader2, ArrowLeft, Wallet, 
     CreditCard, Coins, TrendingUp, ShieldCheck, 
-    Smartphone, Globe, X, Copy, Info, Clock, Camera, FileText, Send, Calendar
+    Smartphone, Globe, X, Copy, Info, Clock, Camera, FileText, Send, Calendar, Banknote
 } from 'lucide-react';
 import { useNavigate, useLocation } from '../Router';
 
@@ -20,6 +20,7 @@ export default function VipStore() {
     const [settings, setSettings] = useState<SystemSettings | null>(null);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
+    const [popularityData, setPopularityData] = useState<Record<string, number>>({});
     
     // Modal State
     const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -32,12 +33,25 @@ export default function VipStore() {
     const [proofPreview, setProofPreview] = useState<string | null>(null);
 
     useEffect(() => {
-        db.getSystemSettings().then((s: SystemSettings) => {
+        db.getSystemSettings().then((s: any) => {
             setSettings(s);
             if (s.vipPlans) setPlans(s.vipPlans);
+            if (s.planPopularity) setPopularityData(s.planPopularity);
             setLoading(false);
         });
     }, []);
+
+    const mostPopularPlanName = useMemo(() => {
+        let max = 0;
+        let winner = null;
+        Object.entries(popularityData).forEach(([name, count]) => {
+            if (count > max) {
+                max = count;
+                winner = name;
+            }
+        });
+        return winner;
+    }, [popularityData]);
 
     const resetProof = () => {
         setProofText('');
@@ -112,10 +126,24 @@ export default function VipStore() {
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-amber-500" /></div>;
 
     const activeMethods = settings?.paymentMethods || {
-        manual: { enabled: true, instructions: 'Contacta con soporte.' }
+        manual: { enabled: true, instructions: '', exchangeRate: 1, currencySymbol: '$' }
     };
 
     const isVip = user && user.vipExpiry && Number(user.vipExpiry) > (Date.now() / 1000);
+
+    // Cálculo de precio convertido basado en el método seleccionado
+    const convertedAmountDisplay = useMemo(() => {
+        if (!selectedPlan || !selectedMethod) return null;
+        const methodKey = selectedMethod as keyof typeof activeMethods;
+        const config = (activeMethods as any)[methodKey];
+        if (!config) return null;
+        
+        const rate = Number(config.exchangeRate || 1);
+        const symbol = config.currencySymbol || '$';
+        const converted = (selectedPlan.price * rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        
+        return { value: converted, symbol };
+    }, [selectedPlan, selectedMethod, activeMethods]);
 
     return (
         <div className="pb-24 pt-6 px-4 max-w-5xl mx-auto animate-in fade-in">
@@ -128,7 +156,6 @@ export default function VipStore() {
                 <p className="text-slate-400 text-sm uppercase font-bold tracking-widest">Mejora tu experiencia en StreamPay</p>
             </div>
 
-            {/* Current VIP Banner */}
             {isVip && (
                 <div className="mb-10 bg-gradient-to-r from-amber-600/20 to-indigo-600/20 border border-amber-500/30 rounded-[32px] p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-2xl backdrop-blur-sm">
                     <div className="flex items-center gap-5">
@@ -155,10 +182,11 @@ export default function VipStore() {
                 {plans.map(plan => {
                     const isBalance = plan.type && plan.type.toString().toUpperCase() === 'BALANCE';
                     const finalRecharge = plan.price * (1 + (plan.bonusPercent || 0) / 100);
+                    const isWinner = plan.name === mostPopularPlanName;
 
                     return (
-                        <div key={plan.id} className={`bg-slate-900 border ${plan.highlight ? 'border-amber-500/50 ring-2 ring-amber-500/10' : 'border-slate-800'} rounded-[32px] p-8 flex flex-col hover:border-indigo-500/50 transition-all group relative overflow-hidden shadow-2xl`}>
-                            {plan.highlight && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[10px] font-black px-4 py-1 rounded-bl-xl">POPULAR</div>}
+                        <div key={plan.id} className={`bg-slate-900 border ${isWinner ? 'border-amber-500/50 ring-2 ring-amber-500/10' : 'border-slate-800'} rounded-[32px] p-8 flex flex-col hover:border-indigo-500/50 transition-all group relative overflow-hidden shadow-2xl`}>
+                            {isWinner && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[10px] font-black px-4 py-1 rounded-bl-xl">POPULAR</div>}
                             <div className="mb-4">
                                 <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${isBalance ? 'bg-emerald-500/20 text-emerald-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
                                     {isBalance ? 'Recarga de Saldo' : 'Acceso VIP'}
@@ -218,7 +246,7 @@ export default function VipStore() {
                             {!selectedMethod ? (
                                 <div className="grid grid-cols-2 gap-3">
                                     {activeMethods.tropipay?.enabled && (
-                                        <button onClick={() => handleTropipayDirect(selectedPlan)} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-3 hover:border-indigo-500/50 transition-all group">
+                                        <button onClick={() => setSelectedMethod('tropipay')} className="p-4 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center gap-3 hover:border-indigo-500/50 transition-all group">
                                             <Globe size={24} className="text-blue-400 group-hover:scale-110 transition-transform"/>
                                             <span className="text-[10px] font-black text-white uppercase tracking-widest text-center leading-tight">Tropipay Directo</span>
                                         </button>
@@ -244,8 +272,28 @@ export default function VipStore() {
                                 </div>
                             ) : (
                                 <div className="space-y-6 animate-in slide-in-from-right-4">
-                                    <button onClick={() => setSelectedMethod(null)} className="text-[10px] font-black text-indigo-400 uppercase flex items-center gap-1"><ArrowLeft size={12}/> Cambiar Método</button>
+                                    <div className="flex justify-between items-center">
+                                        <button onClick={() => setSelectedMethod(null)} className="text-[10px] font-black text-indigo-400 uppercase flex items-center gap-1"><ArrowLeft size={12}/> Cambiar Método</button>
+                                        
+                                        {/* Badge de Tasa de Cambio */}
+                                        {convertedAmountDisplay && (
+                                            <div className="bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-full flex items-center gap-2">
+                                                <Banknote size={12} className="text-emerald-400"/>
+                                                <span className="text-[10px] font-black text-emerald-400 uppercase">1 USD = {(activeMethods as any)[selectedMethod]?.exchangeRate} {(activeMethods as any)[selectedMethod]?.currencySymbol}</span>
+                                            </div>
+                                        )}
+                                    </div>
                                     
+                                    {/* Monto Final Calculado */}
+                                    {convertedAmountDisplay && (
+                                        <div className="bg-slate-950 p-6 rounded-[32px] border border-emerald-500/20 text-center shadow-inner">
+                                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Monto total a transferir</p>
+                                            <h4 className="text-3xl font-black text-white tracking-tighter">
+                                                {convertedAmountDisplay.value} <span className="text-lg text-emerald-500 ml-1">{convertedAmountDisplay.symbol}</span>
+                                            </h4>
+                                        </div>
+                                    )}
+
                                     <div className="bg-slate-950 p-5 rounded-3xl border border-indigo-500/20 relative">
                                         <h4 className="text-xs font-black text-white uppercase mb-3 tracking-widest flex items-center gap-2">
                                             <Info size={14} className="text-indigo-400"/> Instrucciones
@@ -258,55 +306,69 @@ export default function VipStore() {
                                         </button>
                                     </div>
 
-                                    {/* Proof Submission Section */}
-                                    <div className="space-y-4">
-                                        <h4 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2 border-l-2 border-amber-500 pl-3">
-                                            Adjuntar Comprobante
-                                        </h4>
-                                        
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
-                                                <FileText size={12}/> Texto del SMS o Referencia
-                                            </label>
-                                            <textarea 
-                                                value={proofText}
-                                                onChange={e => setProofText(e.target.value)}
-                                                placeholder="Pega aquí el contenido del SMS de confirmación..."
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-white focus:border-indigo-500 outline-none transition-all min-h-[100px] resize-none"
-                                            />
-                                        </div>
+                                    {/* Tropipay Automatic Trigger */}
+                                    {selectedMethod === 'tropipay' && (
+                                        <button 
+                                            onClick={() => handleTropipayDirect(selectedPlan)}
+                                            disabled={submitting}
+                                            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-5 rounded-[24px] shadow-xl transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest"
+                                        >
+                                            {submitting ? <Loader2 className="animate-spin" size={20}/> : <Globe size={20}/>}
+                                            Pagar con Tropipay
+                                        </button>
+                                    )}
 
-                                        <div className="space-y-2">
-                                            <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
-                                                <Camera size={12}/> Captura de Pantalla (Opcional)
-                                            </label>
-                                            <div className="relative group">
-                                                {proofPreview ? (
-                                                    <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-700 bg-black">
-                                                        <img src={proofPreview} className="w-full h-full object-contain" />
-                                                        <button onClick={() => { setProofImage(null); setProofPreview(null); }} className="absolute top-2 right-2 bg-red-600 text-white p-1.5 rounded-full shadow-lg">
-                                                            <X size={14}/>
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <label className="flex flex-col items-center justify-center aspect-video bg-slate-950 border-2 border-dashed border-slate-800 rounded-2xl cursor-pointer hover:bg-slate-900 hover:border-indigo-500/50 transition-all">
-                                                        <Camera size={24} className="text-slate-600 mb-2" />
-                                                        <span className="text-[9px] font-black text-slate-500 uppercase">Click para subir imagen</span>
-                                                        <input type="file" accept="image/*" onChange={handleProofFileChange} className="hidden" />
-                                                    </label>
-                                                )}
+                                    {/* Manual Proof Submission Section */}
+                                    {selectedMethod !== 'tropipay' && (
+                                        <div className="space-y-4">
+                                            <h4 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2 border-l-2 border-amber-500 pl-3">
+                                                Adjuntar Comprobante
+                                            </h4>
+                                            
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
+                                                    <FileText size={12}/> Texto del SMS o Referencia
+                                                </label>
+                                                <textarea 
+                                                    value={proofText}
+                                                    onChange={e => setProofText(e.target.value)}
+                                                    placeholder="Pega aquí el contenido del SMS de confirmación..."
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-white focus:border-indigo-500 outline-none transition-all min-h-[100px] resize-none"
+                                                />
                                             </div>
-                                        </div>
-                                    </div>
 
-                                    <button 
-                                        onClick={handleSubmitManualRequest}
-                                        disabled={submitting || (!proofText.trim() && !proofImage)}
-                                        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-black py-5 rounded-[24px] shadow-xl transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest active:scale-95"
-                                    >
-                                        {submitting ? <Loader2 className="animate-spin" size={20}/> : <Send size={20}/>}
-                                        Enviar para Revisión
-                                    </button>
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2">
+                                                    <Camera size={12}/> Captura de Pantalla (Opcional)
+                                                </label>
+                                                <div className="relative group">
+                                                    {proofPreview ? (
+                                                        <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-700 bg-black">
+                                                            <img src={proofPreview} className="w-full h-full object-contain" />
+                                                            <button onClick={() => { setProofImage(null); setProofPreview(null); }} className="absolute top-2 right-2 bg-red-600 text-white p-1.5 rounded-full shadow-lg">
+                                                                <X size={14}/>
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <label className="flex flex-col items-center justify-center aspect-video bg-slate-950 border-2 border-dashed border-slate-800 rounded-2xl cursor-pointer hover:bg-slate-900 hover:border-indigo-500/50 transition-all">
+                                                            <Camera size={24} className="text-slate-600 mb-2" />
+                                                            <span className="text-[9px] font-black text-slate-500 uppercase">Click para subir imagen</span>
+                                                            <input type="file" accept="image/*" onChange={handleProofFileChange} className="hidden" />
+                                                        </label>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <button 
+                                                onClick={handleSubmitManualRequest}
+                                                disabled={submitting || (!proofText.trim() && !proofImage)}
+                                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-black py-5 rounded-[24px] shadow-xl transition-all flex items-center justify-center gap-3 uppercase text-xs tracking-widest active:scale-95"
+                                            >
+                                                {submitting ? <Loader2 className="animate-spin" size={20}/> : <Send size={20}/>}
+                                                Enviar para Revisión
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

@@ -1,6 +1,6 @@
 <?php
 
-// --- TROPIPAY INTEGRATION ---
+// --- TROPIPAY INTEGRATION V2.1 (Multi-Currency Rate Support) ---
 
 function getTropipayToken($clientId, $clientSecret) {
     $curl = curl_init();
@@ -37,6 +37,72 @@ function getTropipayToken($clientId, $clientSecret) {
     if (!isset($json['access_token'])) throw new Exception("Tropipay Auth Failed: " . ($json['error'] ?? 'Unknown'));
     
     return $json['access_token'];
+}
+
+function payment_create_link($pdo, $input) {
+    $userId = $input['userId'];
+    $plan = $input['plan'];
+
+    $stmtS = $pdo->query("SELECT tropipayClientId, tropipayClientSecret, paymentMethods FROM system_settings LIMIT 1");
+    $settings = $stmtS->fetch(PDO::FETCH_ASSOC);
+
+    $methods = json_decode($settings['paymentMethods'] ?? '{}', true);
+    $tropiConfig = $methods['tropipay'] ?? ['exchangeRate' => 1.08, 'currencySymbol' => 'EUR'];
+
+    $rate = floatval($tropiConfig['exchangeRate'] ?? 1.08);
+    $currency = $tropiConfig['currencySymbol'] ?? 'EUR';
+    
+    // El monto real a cobrar se multiplica por la tasa configurada
+    // Tropipay requiere el monto en centavos (monto * 100)
+    $finalAmount = round(floatval($plan['price']) * $rate * 100);
+    
+    try {
+        $token = getTropipayToken($settings['tropipayClientId'], $settings['tropipayClientSecret']);
+        $ref = 'tp_' . uniqid();
+
+        // 1. Crear el PayLink en Tropipay
+        $curl = curl_init();
+        $payload = json_encode([
+            "amount" => $finalAmount,
+            "currency" => $currency,
+            "description" => "VIP Plan: " . $plan['name'],
+            "reference" => $ref,
+            "urlSuccess" => "http://localhost/#/profile", // Idealmente dinámico según el HOST
+            "urlFailed" => "http://localhost/#/vip",
+            "serviceId" => 1,
+            "lang" => "es"
+        ]);
+
+        curl_setopt_array($curl, [
+            CURLOPT_URL => "https://tropipay.com/api/v2/paymentcards",
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_CUSTOMREQUEST => "POST",
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => [
+                "Authorization: Bearer " . $token,
+                "Content-Type: application/json"
+            ],
+        ]);
+
+        $response = curl_exec($curl);
+        curl_close($curl);
+        $resJson = json_decode($response, true);
+
+        if (!isset($resJson['shortUrl'])) {
+            throw new Exception("Error al crear PayLink: " . ($resJson['error']['message'] ?? 'Respuesta inválida'));
+        }
+
+        // 2. Registrar la solicitud en la base de datos para seguimiento
+        $pdo->prepare("INSERT INTO vip_requests (id, userId, planSnapshot, status, createdAt, paymentRef) VALUES (?, ?, ?, 'PENDING', ?, ?)")
+            ->execute([uniqid('vpr_'), $userId, json_encode($plan), time(), $ref]);
+
+        respond(true, ['paymentUrl' => $resJson['shortUrl']]);
+
+    } catch (Exception $e) {
+        respond(false, null, $e->getMessage());
+    }
 }
 
 function payment_verify($pdo, $input) {

@@ -1,3 +1,4 @@
+
 /**
  * Global Type Definitions for StreamPay
  */
@@ -89,6 +90,8 @@ export interface UserInteraction {
 export interface PaymentMethodConfig {
   enabled: boolean;
   instructions: string;
+  exchangeRate?: number;
+  currencySymbol?: string;
 }
 
 export interface FtpSettings {

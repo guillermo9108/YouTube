@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V19.2 (Boolean & Type Optimized)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V19.3 (NAS-Aware Transcoder)
  */
 
 function admin_get_settings($pdo) {
@@ -18,6 +18,12 @@ function admin_get_settings($pdo) {
                 }
             }
         }
+
+        // Obtener popularidad real de los planes (Conteo de ventas)
+        $popStmt = $pdo->query("SELECT videoTitle, COUNT(*) as count FROM transactions WHERE type = 'VIP' AND videoTitle IS NOT NULL GROUP BY videoTitle");
+        $popularity = $popStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        $settings['planPopularity'] = $popularity ?: new stdClass();
+
         respond(true, $settings);
     }
     respond(false, null, "No se pudo cargar la configuración");
@@ -147,8 +153,14 @@ function admin_delete_transcode_profile($pdo, $ext) {
 function admin_transcode_scan_filters($pdo, $input) {
     $onlyNonMp4 = !empty($input['onlyNonMp4']);
     $mode = $input['mode'] ?? 'PREVIEW';
-    $sql = "SELECT id, videoUrl FROM videos WHERE transcode_status NOT IN ('DONE', 'WAITING', 'PROCESSING')";
-    if ($onlyNonMp4) { $sql .= " AND videoUrl NOT LIKE '%.mp4'"; }
+    
+    // CORRECCIÓN: Ignorar archivos marcados como audio (is_audio = 1)
+    $sql = "SELECT id, videoUrl FROM videos WHERE transcode_status NOT IN ('DONE', 'WAITING', 'PROCESSING') AND is_audio = 0";
+    
+    if ($onlyNonMp4) { 
+        $sql .= " AND videoUrl NOT LIKE '%.mp4'"; 
+    }
+    
     $stmt = $pdo->query($sql);
     $matches = $stmt->fetchAll();
     if ($mode === 'EXECUTE' && count($matches) > 0) {
@@ -160,23 +172,26 @@ function admin_transcode_scan_filters($pdo, $input) {
 }
 
 /**
- * Función interna de ejecución de transcodificación (Con reporte de estados)
+ * Función interna de ejecución de transcodificación (Con reporte de estados y reemplazo físico)
  */
 function _admin_perform_transcode_single($pdo, $video, $bins) {
     $realPath = resolve_video_path($video['videoUrl']);
     if (!$realPath || !file_exists($realPath)) {
-        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no accesible' WHERE id = ?")->execute([$video['id']]);
+        $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Archivo no accesible', transcode_progress = 0 WHERE id = ?")->execute([$video['id']]);
         write_log("FFMPEG: Archivo no accesible: " . $video['videoUrl'], 'ERROR');
         return false;
     }
 
     $ffmpeg = $bins['ffmpeg'];
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
+    $originalDir = dirname($realPath);
+    $originalName = pathinfo($realPath, PATHINFO_FILENAME);
     
     $stmtP = $pdo->prepare("SELECT command_args FROM transcode_profiles WHERE extension = ?");
     $stmtP->execute([$ext]);
     $args = $stmtP->fetchColumn();
 
+    // No debería ocurrir por el filtro de audio en el scan, pero por seguridad:
     $isAudio = ($ext === 'mp3' || $ext === 'wav' || $ext === 'aac' || $ext === 'm4a');
     if (!$args) {
         if ($isAudio) $args = "-c:a aac -b:a 192k -vn";
@@ -185,6 +200,7 @@ function _admin_perform_transcode_single($pdo, $video, $bins) {
         if (strpos($args, '-pix_fmt') === false && !$isAudio) $args .= " -pix_fmt yuv420p";
     }
     
+    // Carpeta temporal para la conversión
     $targetDir = __DIR__ . '/uploads/videos/';
     if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
     
@@ -200,11 +216,27 @@ function _admin_perform_transcode_single($pdo, $video, $bins) {
     exec($cmd, $output, $returnCode);
     
     if ($returnCode === 0 && file_exists($tempFile)) {
-        $newWebPath = 'uploads/videos/' . $video['id'] . '.mp4';
-        rename($tempFile, __DIR__ . '/' . $newWebPath);
-        $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE', transcode_progress = 100 WHERE id = ?")->execute([$newWebPath, $video['id']]);
-        write_log("FFMPEG: Éxito ID {$video['id']}", 'INFO');
-        return true;
+        // LÓGICA DE REEMPLAZO FÍSICO
+        $finalPath = $originalDir . DIRECTORY_SEPARATOR . $originalName . '.mp4';
+        
+        // Si el archivo original tenía otra extensión (ej: mkv), lo borramos
+        if (strtolower($realPath) !== strtolower($finalPath)) {
+            @unlink($realPath);
+            write_log("FFMPEG: Eliminado original: $realPath", 'INFO');
+        }
+
+        // Mover el temporal a la ubicación definitiva
+        if (rename($tempFile, $finalPath)) {
+            // Actualizar la base de datos con la ruta física real (el streamer la resolverá)
+            $pdo->prepare("UPDATE videos SET videoUrl = ?, transcode_status = 'DONE', transcode_progress = 100 WHERE id = ?")
+                ->execute([$finalPath, $video['id']]);
+            
+            write_log("FFMPEG: Éxito ID {$video['id']} -> Guardado en $finalPath", 'INFO');
+            return true;
+        } else {
+            $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'Error al mover archivo final', transcode_progress = 0 WHERE id = ?")->execute([$video['id']]);
+            return false;
+        }
     } else {
         $pdo->prepare("UPDATE videos SET transcode_status = 'FAILED', reason = 'FFmpeg Error Code $returnCode', transcode_progress = 0 WHERE id = ?")->execute([$video['id']]);
         write_log("FFMPEG: Fallo ID {$video['id']} - Code $returnCode", 'ERROR');
