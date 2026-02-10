@@ -1,6 +1,6 @@
 <?php
 /**
- * INTERACCIONES - CORE FUNCTIONS V16.0 (Global Notification Trigger)
+ * INTERACCIONES - CORE FUNCTIONS V17.0 (Rich Notifications & Fixes)
  */
 
 function interact_save_search($pdo, $input) {
@@ -15,13 +15,15 @@ function interact_get_search_suggestions($pdo, $q) {
     $stmt->execute(["%$q%"]); respond(true, $stmt->fetchAll());
 }
 
-function send_direct_notification($pdo, $userId, $type, $text, $link, $avatarUrl = null) {
-    $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp, avatarUrl) VALUES (?, ?, ?, ?, ?, 0, ?, ?)")->execute([uniqid('n_'), $userId, $type, $text, $link, time(), $avatarUrl]);
+function send_direct_notification($pdo, $userId, $type, $text, $link, $avatarUrl = null, $metadata = null) {
+    $jsonMeta = is_array($metadata) ? json_encode($metadata) : $metadata;
+    $pdo->prepare("INSERT INTO notifications (id, userId, type, text, link, isRead, timestamp, avatarUrl, metadata) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)")
+        ->execute([uniqid('n_'), $userId, $type, $text, $link, time(), $avatarUrl, $jsonMeta]);
 }
 
-function interact_notify_subscribers($pdo, $creatorId, $type, $text, $link) {
+function interact_notify_subscribers($pdo, $creatorId, $type, $text, $link, $imageOverride = null) {
     $stmt = $pdo->prepare("SELECT subscriberId FROM subscriptions WHERE creatorId = ?"); $stmt->execute([$creatorId]); $subs = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    $avatar = $pdo->query("SELECT avatarUrl FROM users WHERE id = '$creatorId'")->fetchColumn();
+    $avatar = $imageOverride ?: $pdo->query("SELECT avatarUrl FROM users WHERE id = '$creatorId'")->fetchColumn();
     foreach ($subs as $subId) send_direct_notification($pdo, $subId, $type, $text, $link, $avatar);
 }
 
@@ -61,8 +63,8 @@ function interact_purchase($pdo, $input) {
         if ($aid) $pdo->prepare("UPDATE users SET balance = balance + ? WHERE id = ?")->execute([$fee, $aid]);
         $pdo->prepare("INSERT INTO transactions (id, buyerId, creatorId, videoId, amount, adminFee, timestamp, type, videoTitle, isExternal) VALUES (?, ?, ?, ?, ?, ?, ?, 'PURCHASE', ?, 0)")->execute([uniqid('tx_'), $bid, $v['creatorId'], $vid, $v['price'], $fee, time(), $v['title']]);
         
-        // NOTIFICACIÓN: Avisar al creador sobre la venta del video
-        send_direct_notification($pdo, $v['creatorId'], 'SALE', "@{$buyerName} compró tu video: {$v['title']}", "/profile");
+        // NOTIFICACIÓN ENRIQUECIDA: Incluir miniatura del video en la venta
+        send_direct_notification($pdo, $v['creatorId'], 'SALE', "@{$buyerName} compró: {$v['title']}", "/profile", $v['thumbnailUrl'], ['amount' => $v['price'], 'net' => $part]);
         
         $pdo->commit(); respond(true);
     } catch (Exception $e) { $pdo->rollBack(); respond(false, null, $e->getMessage()); }
@@ -139,7 +141,15 @@ function interact_get_subscriptions($pdo, $userId) {
 
 function interact_get_notifications($pdo, $uid) {
     $stmt = $pdo->prepare("SELECT * FROM notifications WHERE userId = ? ORDER BY timestamp DESC LIMIT 30"); $stmt->execute([$uid]);
-    respond(true, $stmt->fetchAll());
+    $notifs = $stmt->fetchAll();
+    foreach ($notifs as &$n) {
+        $n['avatarUrl'] = fix_url($n['avatarUrl']);
+        if ($n['metadata']) {
+            $decoded = json_decode($n['metadata'], true);
+            $n['metadata'] = $decoded ?: $n['metadata'];
+        }
+    }
+    respond(true, $notifs);
 }
 
 function interact_mark_notification_read($pdo, $input) {
@@ -162,8 +172,8 @@ function interact_share_video($pdo, $input) {
     $tid = $pdo->query("SELECT id FROM users WHERE username = '$term'")->fetchColumn();
     if (!$tid) respond(false, null, "Destinatario no existe");
     $u = $pdo->query("SELECT username FROM users WHERE id = '$sid'")->fetch();
-    $v = $pdo->query("SELECT title FROM videos WHERE id = '$vid'")->fetch();
-    send_direct_notification($pdo, $tid, 'SYSTEM', "@{$u['username']} te recomendó: {$v['title']}", "/watch/{$vid}");
+    $v = $pdo->query("SELECT title, thumbnailUrl FROM videos WHERE id = '$vid'")->fetch();
+    send_direct_notification($pdo, $tid, 'SYSTEM', "@{$u['username']} te recomendó un video", "/watch/{$vid}", $v['thumbnailUrl'], ['videoTitle' => $v['title']]);
     respond(true);
 }
 

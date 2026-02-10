@@ -1,6 +1,6 @@
 <?php
 /**
- * VIDEOS - CORE FUNCTIONS V20.0 (Notification Integration)
+ * VIDEOS - CORE FUNCTIONS V21.1 (Notification Media Fix)
  */
 
 function video_process_rows(&$rows) {
@@ -118,9 +118,9 @@ function video_upload($pdo, $post, $files) {
     $stmt = $pdo->prepare("INSERT INTO videos (id, title, description, price, category, duration, videoUrl, thumbnailUrl, creatorId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->execute([$id, $post['title'], $post['description'], floatval($post['price']), $post['category'], intval($post['duration']), $videoPath, $thumbPath, $post['userId'], time()]);
     
-    // NOTIFICACIÓN: Avisar a seguidores sobre el nuevo contenido
+    // NOTIFICACIÓN: Avisar a seguidores sobre el nuevo contenido con su propia miniatura
     require_once 'functions_interactions.php';
-    interact_notify_subscribers($pdo, $post['userId'], 'UPLOAD', "Nuevo contenido: {$post['title']}", "/watch/{$id}");
+    interact_notify_subscribers($pdo, $post['userId'], 'UPLOAD', "Nuevo contenido: {$post['title']}", "/watch/{$id}", $thumbPath);
     
     respond(true);
 }
@@ -144,28 +144,49 @@ function video_organize_single($pdo, $id, $settings) {
     $price = (floatval($v['price'] ?? 0) > 0) ? $v['price'] : getPriceForCategory($meta['category'], $settings, $meta['parent_category']);
     $pdo->prepare("UPDATE videos SET title = ?, category = ?, parent_category = ?, collection = ?, price = ? WHERE id = ?")->execute([$meta['title'], $meta['category'], $meta['parent_category'], $meta['collection'], $price, $id]);
     
-    // NOTIFICACIÓN: Si el video ha sido "publicado" (Salió de PENDING), notificar
+    // NOTIFICACIÓN: Si el video ha sido "publicado" (Salió de PENDING), notificar con su miniatura real
     require_once 'functions_interactions.php';
-    interact_notify_subscribers($pdo, $v['creatorId'], 'UPLOAD', "¡Nuevo contenido disponible! {$meta['title']}", "/watch/{$id}");
+    interact_notify_subscribers($pdo, $v['creatorId'], 'UPLOAD', "¡Nuevo contenido! {$meta['title']}", "/watch/{$id}", $v['thumbnailUrl']);
 }
 
 function video_scan_local($pdo, $input) {
     $scanPath = rtrim($input['path'], '/\\'); if (!is_dir($scanPath)) respond(false, null, "Ruta inválida");
     $adminId = $pdo->query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")->fetchColumn();
     $exts = ['mp4', 'mkv', 'webm', 'avi', 'mov', 'mp3', 'wav', 'flac', 'm4a'];
-    $di = new RecursiveDirectoryIterator($scanPath, RecursiveDirectoryIterator::SKIP_DOTS);
-    $it = new RecursiveIteratorIterator($di); $found = 0; $new = 0;
+    
+    try {
+        $di = new RecursiveDirectoryIterator($scanPath, RecursiveDirectoryIterator::SKIP_DOTS);
+        $it = new RecursiveIteratorIterator($di);
+    } catch (Exception $e) {
+        respond(false, null, "No se pudo acceder a la carpeta: " . $e->getMessage());
+    }
+
+    $found = 0; $new = 0; $errors = [];
+    
     foreach ($it as $file) {
         if ($file->isDir() || !in_array(strtolower($file->getExtension()), $exts)) continue;
-        $found++; $path = str_replace('\\', '/', $file->getRealPath());
-        $stmt = $pdo->prepare("SELECT id FROM videos WHERE videoUrl = ?"); $stmt->execute([$path]);
-        if (!$stmt->fetch()) {
-            $id = 'loc_' . md5($path); $title = pathinfo($path, PATHINFO_FILENAME);
-            $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal) VALUES (?, ?, ?, ?, ?, 'PENDING', 1)")->execute([$id, $title, $path, $adminId, time()]);
-            $new++;
+        $found++; 
+        $path = str_replace('\\', '/', $file->getRealPath());
+        $id = 'loc_' . md5($path);
+        
+        try {
+            // VERIFICACIÓN RESILIENTE: Comprobar tanto URL como ID primario para evitar colisiones 1062
+            $stmt = $pdo->prepare("SELECT id FROM videos WHERE videoUrl = ? OR id = ?");
+            $stmt->execute([$path, $id]);
+            
+            if (!$stmt->fetch()) {
+                $title = pathinfo($path, PATHINFO_FILENAME);
+                $pdo->prepare("INSERT INTO videos (id, title, videoUrl, creatorId, createdAt, category, isLocal) VALUES (?, ?, ?, ?, ?, 'PENDING', 1)")
+                    ->execute([$id, $title, $path, $adminId, time()]);
+                $new++;
+            }
+        } catch (Exception $e) {
+            // Registrar error específico pero continuar con el siguiente archivo
+            $errors[] = "Error en '" . basename($path) . "': " . $e->getMessage();
+            write_log("Scanner Error on file $path: " . $e->getMessage(), 'ERROR');
         }
     }
-    respond(true, ['totalFound' => $found, 'newToImport' => $new]);
+    respond(true, ['totalFound' => $found, 'newToImport' => $new, 'errors' => $errors]);
 }
 
 function video_get_scan_folders($pdo) {

@@ -1,6 +1,6 @@
 <?php
 /**
- * ADMINISTRACIÓN - CORE FUNCTIONS V23.0 (Fixed Transcoder + Notifications)
+ * ADMINISTRACIÓN - CORE FUNCTIONS V24.0 (Enhanced File Protection & Orphan Sync)
  */
 
 function admin_get_settings($pdo) {
@@ -115,9 +115,6 @@ function admin_transcode_scan_filters($pdo, $input) {
     respond(true, ['count' => count($matches)]);
 }
 
-/**
- * MOTOR DE CONVERSIÓN FFmpeg - RECUERDA: Esta es la función que faltaba (Core Transcoder)
- */
 function _admin_perform_transcode_single($pdo, $video, $bins) {
     $realPath = resolve_video_path($video['videoUrl']);
     if (!$realPath || !file_exists($realPath)) {
@@ -128,7 +125,6 @@ function _admin_perform_transcode_single($pdo, $video, $bins) {
     $ffmpeg = $bins['ffmpeg'];
     $ext = strtolower(pathinfo($realPath, PATHINFO_EXTENSION));
     
-    // Buscar perfil personalizado o usar default
     $stmtP = $pdo->prepare("SELECT command_args FROM transcode_profiles WHERE extension = ?");
     $stmtP->execute([$ext]);
     $args = $stmtP->fetchColumn();
@@ -309,7 +305,6 @@ function admin_update_request_status($pdo, $input) {
     $status = $input['status'];
     $pdo->prepare("UPDATE requests SET status = ? WHERE id = ?")->execute([$status, $id]);
     
-    // NOTIFICACIÓN: Avisar al usuario sobre el estado de su petición
     $stmt = $pdo->prepare("SELECT userId, query FROM requests WHERE id = ?");
     $stmt->execute([$id]);
     $req = $stmt->fetch();
@@ -322,7 +317,7 @@ function admin_update_request_status($pdo, $input) {
     respond(true);
 }
 
-// --- MAINTENANCE & CLEANUP ---
+// --- MAINTENANCE & CLEANUP V2.0 ---
 
 function admin_repair_db($pdo, $input) {
     require_once 'functions_schema.php';
@@ -330,20 +325,85 @@ function admin_repair_db($pdo, $input) {
     respond(true, "MariaDB Reparada");
 }
 
+/**
+ * LIMPIEZA DE DISCO REFORZADA (Protege fotos de perfil y tienda)
+ */
 function admin_cleanup_files($pdo) {
     $deleted = 0; $dbFiles = [];
+    
+    // 1. Recolectar todos los archivos válidos en uso por el sistema
+    // Videos y Miniaturas
     $vids = $pdo->query("SELECT videoUrl, thumbnailUrl FROM videos")->fetchAll();
-    foreach ($vids as $v) { $dbFiles[] = resolve_video_path($v['videoUrl']); $dbFiles[] = resolve_video_path($v['thumbnailUrl']); }
-    $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market'];
+    foreach ($vids as $v) { 
+        if ($p1 = resolve_video_path($v['videoUrl'])) $dbFiles[] = $p1; 
+        if ($p2 = resolve_video_path($v['thumbnailUrl'])) $dbFiles[] = $p2; 
+    }
+    
+    // Fotos de Perfil
+    $avatars = $pdo->query("SELECT avatarUrl FROM users WHERE avatarUrl IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($avatars as $a) { if ($p = resolve_video_path($a)) $dbFiles[] = $p; }
+    
+    // Imágenes del Marketplace (JSON Array)
+    $market = $pdo->query("SELECT images FROM marketplace_items")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($market as $json) {
+        $imgs = json_decode($json, true);
+        if (is_array($imgs)) {
+            foreach ($imgs as $url) { if ($p = resolve_video_path($url)) $dbFiles[] = $p; }
+        }
+    }
+    
+    // Comprobantes VIP
+    $proofs = $pdo->query("SELECT proofImageUrl FROM vip_requests WHERE proofImageUrl IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($proofs as $url) { if ($p = resolve_video_path($url)) $dbFiles[] = $p; }
+
+    $dbFiles = array_unique(array_filter($dbFiles));
+
+    // 2. Whitelist de archivos base del sistema
+    $whitelist = [
+        realpath(__DIR__ . '/uploads/thumbnails/default.jpg'),
+        realpath(__DIR__ . '/uploads/thumbnails/defaultaudio.jpg'),
+        realpath(__DIR__ . '/uploads/avatars/default.jpg')
+    ];
+
+    $dirs = ['uploads/videos', 'uploads/thumbnails', 'uploads/avatars', 'uploads/market', 'uploads/proofs'];
     foreach ($dirs as $d) {
         $path = __DIR__ . '/' . $d; if (!is_dir($path)) continue;
         foreach (scandir($path) as $f) {
-            if ($f === '.' || $f === '..' || strpos($f, 'default') !== false) continue;
+            if ($f === '.' || $f === '..') continue;
             $full = realpath($path . '/' . $f);
-            if ($full && !in_array($full, array_filter($dbFiles))) { @unlink($full); $deleted++; }
+            if ($full && !in_array($full, $dbFiles) && !in_array($full, $whitelist)) { 
+                @unlink($full); $deleted++; 
+            }
         }
     }
     respond(true, ['videos' => $deleted]);
+}
+
+/**
+ * PREVIEW DE LIMPIEZA MEJORADO
+ */
+function admin_file_cleanup_preview($pdo, $type) {
+    $matches = [];
+    
+    if ($type === 'ORPHAN_DB') {
+        // Busca registros en la DB cuyos archivos físicos NO existen (Manual Delete Recovery)
+        $all = $pdo->query("SELECT id, title, videoUrl, views FROM videos WHERE isLocal = 1")->fetchAll();
+        foreach ($all as $v) { 
+            $realPath = resolve_video_path($v['videoUrl']);
+            if (!$realPath || !file_exists($realPath)) {
+                $v['reason'] = "Archivo físico faltante (404)";
+                $matches[] = $v; 
+            }
+        }
+    } elseif ($type === 'LOW_ROI') {
+        $ts = time() - (30 * 86400); // 30 dias
+        $stmt = $pdo->prepare("SELECT id, title, videoUrl, views FROM videos WHERE createdAt < ? AND views < 5");
+        $stmt->execute([$ts]);
+        $matches = $stmt->fetchAll();
+        foreach ($matches as &$m) { $m['reason'] = "Bajo rendimiento"; }
+    }
+    
+    respond(true, $matches);
 }
 
 function admin_smart_cleaner_preview($pdo, $input) {
@@ -361,19 +421,13 @@ function admin_smart_cleaner_preview($pdo, $input) {
 function admin_smart_cleaner_execute($pdo, $input) {
     foreach ($input['videoIds'] as $id) {
         $stmt = $pdo->prepare("SELECT videoUrl, thumbnailUrl FROM videos WHERE id = ?"); $stmt->execute([$id]); $v = $stmt->fetch();
-        if ($v) { @unlink(resolve_video_path($v['videoUrl'])); @unlink(resolve_video_path($v['thumbnailUrl'])); }
+        if ($v) { 
+            if ($p1 = resolve_video_path($v['videoUrl'])) @unlink($p1); 
+            if ($p2 = resolve_video_path($v['thumbnailUrl'])) @unlink($p2); 
+        }
         $pdo->prepare("DELETE FROM videos WHERE id = ?")->execute([$id]);
     }
     respond(true, ['deleted' => count($input['videoIds'])]);
-}
-
-function admin_file_cleanup_preview($pdo, $type) {
-    $matches = [];
-    if ($type === 'ORPHAN_DB') {
-        $all = $pdo->query("SELECT id, title, videoUrl, views FROM videos")->fetchAll();
-        foreach ($all as $v) { if (!file_exists(resolve_video_path($v['videoUrl']))) $matches[] = $v; }
-    }
-    respond(true, $matches);
 }
 
 function admin_organize_paquete($pdo, $input) {
