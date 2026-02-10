@@ -1,6 +1,6 @@
 <?php
 /**
- * VIDEOS - CORE FUNCTIONS V21.1 (Notification Media Fix)
+ * VIDEOS - CORE FUNCTIONS V21.2 (SQL Syntax & Pagination Fix)
  */
 
 function video_process_rows(&$rows) {
@@ -40,9 +40,12 @@ function video_get_all($pdo) {
     }
     $whereClause = implode(" AND ", $where);
     $orderBy = ($isShorts || $userSort === 'RANDOM') ? "RAND()" : ($userSort === 'ALPHA' ? "v.title ASC" : "v.createdAt DESC");
+    
+    // Aquí concatenamos los números directamente ya que han pasado por intval(), evitando problemas de comillas de PDO::execute
     $sql = "SELECT v.*, u.username as creatorName, u.avatarUrl as creatorAvatarUrl, u.role as creatorRole 
             FROM videos v LEFT JOIN users u ON v.creatorId = u.id 
             WHERE $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
+            
     $stmt = $pdo->prepare($sql); $stmt->execute($params); $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $total = $pdo->prepare("SELECT COUNT(*) FROM videos v WHERE $whereClause"); $total->execute($params);
     $totalCount = $total->fetchColumn();
@@ -71,10 +74,17 @@ function video_get_related($pdo, $videoId) {
     video_process_rows($videos); respond(true, $videos);
 }
 
+/**
+ * FIXED: Uso de bindValue para evitar comillas en LIMIT
+ */
 function video_get_unprocessed($pdo) {
     $limit = intval($_GET['limit'] ?? 50);
-    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < ? ORDER BY createdAt ASC LIMIT ?");
-    $stmt->execute([time() - 300, $limit]); $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $timeLimit = time() - 300;
+    $stmt = $pdo->prepare("SELECT * FROM videos WHERE category = 'PENDING' AND processing_attempts < 3 AND locked_at < :time ORDER BY createdAt ASC LIMIT :limit");
+    $stmt->bindValue(':time', $timeLimit, PDO::PARAM_INT);
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     video_process_rows($videos); respond(true, $videos);
 }
 
@@ -213,11 +223,16 @@ function video_smart_organize($pdo) {
     respond(true, ['processed' => $processed]);
 }
 
+/**
+ * FIXED: Uso de bindValue para evitar comillas en LIMIT y OFFSET
+ */
 function video_reorganize_all($pdo) {
     $settings = $pdo->query("SELECT * FROM system_settings WHERE id = 1")->fetch();
     $limit = intval($_GET['limit'] ?? 100); $offset = intval($_GET['offset'] ?? 0);
-    $stmt = $pdo->prepare("SELECT id FROM videos LIMIT ? OFFSET ?");
-    $stmt->execute([$limit, $offset]);
+    $stmt = $pdo->prepare("SELECT id FROM videos LIMIT :limit OFFSET :offset");
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
     foreach ($ids as $id) video_organize_single($pdo, $id, $settings);
     respond(true, ['processed' => count($ids)]);
