@@ -1,5 +1,4 @@
-
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { Heart, MessageCircle, Share2, ThumbsDown, Send, X, Loader2, ArrowLeft, Pause, Search, UserCheck } from 'lucide-react';
 import { db } from '../../services/db';
 import { Video, Comment, UserInteraction } from '../../types';
@@ -7,17 +6,82 @@ import { useAuth } from '../../context/AuthContext';
 import { Link } from '../Router';
 import { useToast } from '../../context/ToastContext';
 
+// Utilidad para obtener la carpeta de un video
+const getVideoFolder = (video: Video): string => {
+    return ((video as any).rawPath || video.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+};
+
+// Sistema de tracking de preferencias del usuario
+const useUserPreferences = (userId: string | undefined) => {
+    const STORAGE_KEY = `shorts_prefs_${userId || 'guest'}`;
+    
+    const getPrefs = useCallback(() => {
+        try {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            return stored ? JSON.parse(stored) : { 
+                watchedIds: [] as string[],
+                likedFolders: {} as Record<string, number>,
+                completedFolders: {} as Record<string, number>,
+                likedCreators: {} as Record<string, number>,
+            };
+        } catch { return { watchedIds: [], likedFolders: {}, completedFolders: {}, likedCreators: {} }; }
+    }, [STORAGE_KEY]);
+    
+    const savePrefs = useCallback((prefs: any) => {
+        try {
+            if (prefs.watchedIds.length > 500) {
+                prefs.watchedIds = prefs.watchedIds.slice(-500);
+            }
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+        } catch {}
+    }, [STORAGE_KEY]);
+    
+    const markWatched = useCallback((videoId: string) => {
+        const prefs = getPrefs();
+        if (!prefs.watchedIds.includes(videoId)) {
+            prefs.watchedIds.push(videoId);
+            savePrefs(prefs);
+        }
+    }, [getPrefs, savePrefs]);
+    
+    const markCompleted = useCallback((video: Video) => {
+        const prefs = getPrefs();
+        const folder = getVideoFolder(video);
+        if (folder) {
+            prefs.completedFolders[folder] = (prefs.completedFolders[folder] || 0) + 1;
+            savePrefs(prefs);
+        }
+    }, [getPrefs, savePrefs]);
+    
+    const markLiked = useCallback((video: Video) => {
+        const prefs = getPrefs();
+        const folder = getVideoFolder(video);
+        if (folder) {
+            prefs.likedFolders[folder] = (prefs.likedFolders[folder] || 0) + 1;
+        }
+        prefs.likedCreators[video.creatorId] = (prefs.likedCreators[video.creatorId] || 0) + 1;
+        savePrefs(prefs);
+    }, [getPrefs, savePrefs]);
+    
+    return { getPrefs, markWatched, markCompleted, markLiked };
+};
+
 interface ShortItemProps {
   video: Video;
   isActive: boolean;
   isNear: boolean;
   onOpenShare: (v: Video) => void;
+  onWatched: (videoId: string) => void;
+  onCompleted: (video: Video) => void;
+  onLiked: (video: Video) => void;
 }
 
-const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => {
+const ShortItem = ({ video, isActive, isNear, onOpenShare, onWatched, onCompleted, onLiked }: ShortItemProps) => {
   const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const clickTimerRef = useRef<number | null>(null);
+  const hasTrackedWatch = useRef(false);
+  const hasTrackedComplete = useRef(false);
   
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
@@ -32,7 +96,6 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
   const [dislikeCount, setDislikeCount] = useState(Number(video.dislikes || 0));
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  // Validación de Acceso Inteligente
   useEffect(() => {
     if (!user) return;
     
@@ -68,23 +131,34 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
     if (isActive && isUnlocked) {
         el.currentTime = 0; 
         setPaused(false);
+        hasTrackedWatch.current = false;
+        hasTrackedComplete.current = false;
         el.muted = false; 
         el.play().catch(() => {
             el.muted = true;
             el.play().catch(() => {});
         });
         db.incrementView(video.id);
+        
+        const handleTimeUpdate = () => {
+            if (!hasTrackedWatch.current && el.duration > 0 && el.currentTime / el.duration > 0.3) {
+                hasTrackedWatch.current = true;
+                onWatched(video.id);
+            }
+            if (!hasTrackedComplete.current && el.duration > 0 && el.currentTime / el.duration > 0.7) {
+                hasTrackedComplete.current = true;
+                onCompleted(video);
+            }
+        };
+        
+        el.addEventListener('timeupdate', handleTimeUpdate);
+        return () => el.removeEventListener('timeupdate', handleTimeUpdate);
     } else { 
         try {
             el.pause(); 
-            // IMPORTANTE: Limpiar el src para cerrar la conexión del worker PHP
-            if (!isNear) {
-                el.removeAttribute('src');
-                el.load();
-            }
         } catch (e) {}
     }
-  }, [isActive, isUnlocked, video.id, isNear]);
+  }, [isActive, isUnlocked, video.id, onWatched, onCompleted]);
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
@@ -93,6 +167,10 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
         setInteraction(res); 
         if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
         if (res.newDislikeCount !== undefined) setDislikeCount(res.newDislikeCount);
+        
+        if (rating === 'like' && !interaction?.liked) {
+            onLiked(video);
+        }
     } catch(e) {}
   };
 
@@ -118,10 +196,10 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
   };
 
   const videoSrc = useMemo(() => {
-    if (!isNear) return ""; 
-    // Redirigir al puerto 3001 del streamer en Node.js
-    return db.getStreamerUrl(video.id);
-  }, [video.id, isNear]);
+    const token = localStorage.getItem('sp_session_token') || '';
+    const base = video.videoUrl.includes('action=stream') ? video.videoUrl : `api/index.php?action=stream&id=${video.id}`;
+    return `${window.location.origin}/${base}&token=${token}`;
+  }, [video.id]);
 
   if (!isNear) return <div className="w-full h-full snap-start bg-black shrink-0 flex items-center justify-center"><Loader2 className="animate-spin text-slate-800" /></div>;
 
@@ -130,12 +208,10 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
       <div className="absolute inset-0 z-0 bg-black" onClick={handleScreenTouch}>
         {isUnlocked ? (
           <>
-            {videoSrc && (
-                <video
-                    ref={videoRef} src={videoSrc} poster={video.thumbnailUrl}
-                    className="w-full h-full object-cover" loop playsInline preload="metadata" crossOrigin="anonymous"
-                />
-            )}
+            <video
+                ref={videoRef} src={videoSrc} poster={video.thumbnailUrl}
+                className="w-full h-full object-cover" loop playsInline preload="auto" crossOrigin="anonymous"
+            />
             {paused && <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white/50"><Pause size={64} fill="currentColor" /></div>}
             {showHeart && <div className="absolute inset-0 flex items-center justify-center pointer-events-none animate-in zoom-in fade-in duration-300"><Heart size={120} className="text-red-500 fill-red-500 drop-shadow-2xl" /></div>}
           </>
@@ -229,47 +305,83 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare }: ShortItemProps) => 
 export default function Shorts() {
   const { user } = useAuth();
   const toast = useToast();
-  
   const [videos, setVideos] = useState<Video[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(false);
-  
   const containerRef = useRef<HTMLDivElement>(null);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const [videoToShare, setVideoToShare] = useState<Video | null>(null);
   const [shareSearch, setShareSearch] = useState('');
   const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
   const shareTimeout = useRef<any>(null);
-
-  const fetchShorts = async (p: number) => {
-    if (loading || !hasMore) return;
-    setLoading(true);
+  
+  const { getPrefs, markWatched, markCompleted, markLiked } = useUserPreferences(user?.id);
+  
+  const sortVideosByRelevance = useCallback((allVideos: Video[]): Video[] => {
+    const prefs = getPrefs();
+    const { watchedIds, likedFolders, completedFolders, likedCreators } = prefs;
     
-    // Obtener el filtro persistente (Leído desde localStorage para coherencia global)
-    const mediaFilter = localStorage.getItem('sp_media_filter') || 'ALL';
-    
-    try {
-        const res = await db.getShorts(p, 10, mediaFilter);
-        if (res.videos.length > 0) {
-            setVideos(prev => p === 0 ? res.videos : [...prev, ...res.videos]);
-            setHasMore(res.hasMore);
-            setPage(p);
-        } else {
-            setHasMore(false);
+    const scoredVideos = allVideos.map(video => {
+        let score = 0;
+        const folder = getVideoFolder(video);
+        
+        const wasWatched = watchedIds.includes(video.id);
+        if (wasWatched) {
+            score -= 100;
         }
-    } catch (e) {
-        toast.error("Error al cargar shorts");
-    } finally {
-        setLoading(false);
-    }
-  };
+        
+        if (folder && completedFolders[folder]) {
+            score += completedFolders[folder] * 15;
+        }
+        
+        if (folder && likedFolders[folder]) {
+            score += likedFolders[folder] * 10;
+        }
+        
+        if (likedCreators[video.creatorId]) {
+            score += likedCreators[video.creatorId] * 8;
+        }
+        
+        const likes = Number(video.likes || 0);
+        const views = Number(video.views || 1);
+        const engagementRatio = likes / views;
+        score += engagementRatio * 50;
+        
+        score += Math.min(likes * 0.5, 30);
+        
+        const ageInDays = (Date.now() / 1000 - video.createdAt) / 86400;
+        if (ageInDays < 7) {
+            score += (7 - ageInDays) * 2;
+        }
+        
+        score += (Math.random() - 0.5) * (Math.abs(score) * 0.2);
+        
+        return { video, score, wasWatched };
+    });
+    
+    scoredVideos.sort((a, b) => b.score - a.score);
+    
+    const result: Video[] = [];
+    const notWatched = scoredVideos.filter(s => !s.wasWatched);
+    const watched = scoredVideos.filter(s => s.wasWatched);
+    
+    result.push(...notWatched.map(s => s.video));
+    
+    const rewatchCandidates = watched
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.ceil(watched.length * 0.3))
+        .map(s => s.video);
+    result.push(...rewatchCandidates);
+    
+    return result;
+  }, [getPrefs]);
   
   useEffect(() => {
-    fetchShorts(0);
-  }, []);
+    db.getAllVideos().then((all: Video[]) => {
+        const shorts = all.filter(v => v.duration < 180 && !['PENDING', 'PROCESSING'].includes(v.category));
+        const sortedShorts = sortVideosByRelevance(shorts);
+        setVideos(sortedShorts);
+    });
+  }, [sortVideosByRelevance]);
 
   useEffect(() => {
     const container = containerRef.current; if (!container || videos.length === 0) return;
@@ -278,17 +390,12 @@ export default function Shorts() {
             if (entry.isIntersecting) {
                 const index = Number((entry.target as HTMLElement).dataset.index);
                 if (!isNaN(index)) setActiveIndex(index);
-                
-                // Lógica de "Load More" cuando el usuario llega al penúltimo Short
-                if (index === videos.length - 2 && hasMore && !loading) {
-                    fetchShorts(page + 1);
-                }
             }
         });
     }, { root: container, threshold: 0.6 });
     Array.from(container.children).forEach((c) => observer.observe(c as Element));
     return () => observer.disconnect();
-  }, [videos, page, hasMore, loading]);
+  }, [videos]);
 
   const handleShareSearch = (val: string) => {
     setShareSearch(val);
@@ -318,8 +425,7 @@ export default function Shorts() {
   return (
     <div ref={containerRef} className="w-full h-full overflow-y-scroll snap-y snap-mandatory bg-black scrollbar-hide relative">
       <div className="fixed top-4 left-4 z-50"><Link to="/" className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white flex items-center justify-center active:scale-90 transition-all"><ArrowLeft size={24} /></Link></div>
-      
-      {videos.length === 0 && loading ? (
+      {videos.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-4"><Loader2 className="animate-spin text-indigo-500" size={32}/><p className="font-black uppercase text-[10px] tracking-widest italic opacity-50">Sintonizando...</p></div>
       ) : videos.map((video, idx) => (
         <div key={video.id} data-index={idx} className="w-full h-full snap-start">
@@ -328,16 +434,12 @@ export default function Shorts() {
                 isActive={idx === activeIndex} 
                 isNear={Math.abs(idx - activeIndex) <= 2}
                 onOpenShare={(v) => setVideoToShare(v)}
+                onWatched={markWatched}
+                onCompleted={markCompleted}
+                onLiked={markLiked}
              />
         </div>
       ))}
-
-      {/* Indicador de carga al final */}
-      {hasMore && videos.length > 0 && (
-          <div className="w-full h-20 flex items-center justify-center bg-black snap-start">
-              <Loader2 className="animate-spin text-indigo-500" />
-          </div>
-      )}
 
       {videoToShare && (
           <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
