@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useParams, Link, useNavigate } from '../Router';
 import { 
     Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart, Music, ChevronDown, Bell, BellOff, ListFilter
+    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart, Music, ChevronDown, Bell, BellOff, Download
 } from 'lucide-react';
 import VideoCard from '../VideoCard';
 import { useToast } from '../../context/ToastContext';
@@ -21,33 +21,15 @@ export default function Watch() {
     const navigate = useNavigate();
     const toast = useToast();
     
-    // Obtener contexto completo desde la URL
-    const navigationContext = useMemo(() => {
-        const hash = window.location.hash;
-        if (!hash.includes('?')) return { q: null, f: '', c: 'TODOS', p: 0 };
-        const params = new URLSearchParams(hash.split('?')[1]);
-        return {
-            q: params.get('q'),
-            f: params.get('f') || '',
-            c: params.get('c') || 'TODOS',
-            p: parseInt(params.get('p') || '0')
-        };
-    }, [id, window.location.hash]);
-
     const [video, setVideo] = useState<Video | null>(null);
     const [loading, setLoading] = useState(true);
     const [isUnlocked, setIsUnlocked] = useState(false);
     const [isPurchasing, setIsPurchasing] = useState(false);
     const [interaction, setInteraction] = useState<UserInteraction | null>(null);
     const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
-    const [seriesQueue, setSeriesQueue] = useState<Video[]>([]); 
+    const [seriesQueue, setSeriesQueue] = useState<Video[]>([]);
+    const [visibleRelated, setVisibleRelated] = useState(12);
     
-    // Paginación de Relacionados
-    const [relatedPage, setRelatedPage] = useState(navigationContext.p);
-    const [hasMoreRelated, setHasMoreRelated] = useState(true);
-    const [loadingMoreRelated, setLoadingMoreRelated] = useState(false);
-    
-    // Social State
     const [likes, setLikes] = useState<number>(0);
     const [dislikes, setDislikes] = useState<number>(0);
     const [comments, setComments] = useState<Comment[]>([]);
@@ -56,10 +38,8 @@ export default function Watch() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSubscribed, setIsSubscribed] = useState(false);
 
-    // Auto-Extraction State
     const [extractionAttempted, setExtractionAttempted] = useState(false);
 
-    // Share Modal State
     const [showShareModal, setShowShareModal] = useState(false);
     const [shareSearch, setShareSearch] = useState('');
     const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
@@ -73,36 +53,11 @@ export default function Watch() {
         refreshUser(); 
         viewMarkedRef.current = false;
         setThrottled(true);
-        setRelatedPage(navigationContext.p);
-        setRelatedVideos([]);
-        setSeriesQueue([]);
+        setVisibleRelated(12);
         setShowComments(false);
         setExtractionAttempted(false); 
         return () => { setThrottled(false); };
     }, [id]);
-
-    const fetchRelated = async (p: number) => {
-        if (loadingMoreRelated || (!hasMoreRelated && p !== navigationContext.p)) return;
-        setLoadingMoreRelated(true);
-        
-        // Cargar el filtro persistente del sistema
-        const mediaFilter = localStorage.getItem('sp_media_filter') || 'ALL';
-        
-        try {
-            const res = await db.getVideos(p, 40, navigationContext.f, navigationContext.q || '', navigationContext.c, mediaFilter as any);
-            const filteredResults = res.videos;
-            
-            if (p === navigationContext.p) {
-                setRelatedVideos(filteredResults.filter(v => v.id !== id));
-                setSeriesQueue(filteredResults);
-            } else {
-                setRelatedVideos(prev => [...prev, ...filteredResults.filter(v => v.id !== id)]);
-                setSeriesQueue(prev => [...prev, ...filteredResults]);
-            }
-            setHasMoreRelated(res.hasMore);
-            setRelatedPage(p);
-        } catch (e) {} finally { setLoadingMoreRelated(false); }
-    };
 
     useEffect(() => {
         if (!id) return;
@@ -110,33 +65,52 @@ export default function Watch() {
         
         const fetchData = async () => {
             try {
-                const v = await db.getVideo(id);
-                if (!v) { setLoading(false); return; }
+                const [v, settings, all] = await Promise.all([
+                    db.getVideo(id),
+                    db.getSystemSettings(),
+                    db.getAllVideos()
+                ]);
 
-                setVideo(v); 
-                setLikes(Number(v.likes || 0));
-                setDislikes(Number(v.dislikes || 0));
+                if (v) {
+                    setVideo(v); 
+                    setLikes(Number(v.likes || 0));
+                    setDislikes(Number(v.dislikes || 0));
 
-                await fetchRelated(navigationContext.p);
+                    const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                    
+                    const series = all.filter(ov => {
+                        const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                        return ovPath === currentPath;
+                    }).sort((a, b) => naturalCollator.compare(a.title, b.title));
 
-                db.getComments(v.id).then(setComments);
+                    setSeriesQueue(series);
 
-                if (user) {
-                    const [access, interact, sub] = await Promise.all([
-                        db.hasPurchased(user.id, v.id),
-                        db.getInteraction(user.id, v.id),
-                        db.checkSubscription(user.id, v.creatorId)
-                    ]);
-                    const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-                    const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-                    setIsUnlocked(Boolean(access || isAdmin || (isVipActive && v.creatorRole === 'ADMIN') || user.id === v.creatorId));
-                    setInteraction(interact);
-                    setIsSubscribed(sub);
+                    const siblings = series.filter(ov => ov.id !== v.id);
+                    const others = all.filter(ov => {
+                        const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                        return ovPath !== currentPath;
+                    }).sort(() => Math.random() - 0.5);
+
+                    setRelatedVideos([...siblings, ...others]);
+                    db.getComments(v.id).then(setComments);
+
+                    if (user) {
+                        const [access, interact, sub] = await Promise.all([
+                            db.hasPurchased(user.id, v.id),
+                            db.getInteraction(user.id, v.id),
+                            db.checkSubscription(user.id, v.creatorId)
+                        ]);
+                        const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
+                        const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
+                        setIsUnlocked(Boolean(access || isAdmin || (isVipActive && v.creatorRole === 'ADMIN') || user.id === v.creatorId));
+                        setInteraction(interact);
+                        setIsSubscribed(sub);
+                    }
                 }
             } catch (e) {} finally { setLoading(false); }
         };
         fetchData();
-    }, [id, user?.id, navigationContext.q, navigationContext.f, navigationContext.c]);
+    }, [id, user?.id]);
 
     const handleRate = async (type: 'like' | 'dislike') => {
         if (!user || !video) return;
@@ -205,6 +179,33 @@ export default function Watch() {
         } catch (e: any) { toast.error(e.message); } finally { setIsPurchasing(false); }
     };
 
+    const handleDownloadVideo = () => {
+        if (!video || !isUnlocked) return;
+        
+        const filename = `${video.title.replace(/[^a-zA-Z0-9\s]/g, '').trim()}.mp4`;
+        
+        const baseUrl = window.location.origin;
+        const downloadUrl = `${baseUrl}/${streamUrl}`;
+        
+        if ((window as any).ReactNativeWebView) {
+            (window as any).ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'download',
+                url: downloadUrl,
+                filename: filename
+            }));
+            toast.success("Descarga iniciada en la app");
+        } else {
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = filename;
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            toast.success("Descarga iniciada");
+        }
+    };
+
     const handleTimeUpdate = async () => {
         const el = videoRef.current;
         if (!el || !video || extractionAttempted || !isUnlocked) return;
@@ -246,59 +247,53 @@ export default function Watch() {
 
     const handleVideoEnded = async () => {
         if (!video || !user) return;
+
         const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
-        let nextVid = seriesQueue[currentIndex + 1];
         
-        if (!nextVid && hasMoreRelated) {
-             toast.info("Cargando siguiente episodio...");
-             await fetchRelated(relatedPage + 1);
-             return;
+        let nextVid = seriesQueue[currentIndex + 1];
+
+        if (!nextVid && relatedVideos.length > 0) {
+            const externalVids = relatedVideos.filter(rv => {
+                const rvPath = ((rv as any).rawPath || rv.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                const curPath = ((video as any).rawPath || video.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
+                return rvPath !== curPath;
+            });
+            nextVid = externalVids[0];
         }
 
-        if (!nextVid && !navigationContext.q && relatedVideos.length > 0) {
-            nextVid = relatedVideos[0];
-        }
         if (!nextVid) return;
 
         const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
         const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
         const hasAccess = isAdmin || (isVip && nextVid.creatorRole === 'ADMIN') || user.id === nextVid.creatorId;
-        
-        const params = new URLSearchParams();
-        if (navigationContext.q) params.set('q', navigationContext.q);
-        if (navigationContext.f) params.set('f', navigationContext.f);
-        if (navigationContext.c !== 'TODOS') params.set('c', navigationContext.c);
-        params.set('p', String(relatedPage));
-        const contextSuffix = params.toString() ? `?${params.toString()}` : '';
 
-        if (hasAccess) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
+        if (hasAccess) { navigate(`/watch/${nextVid.id}`); return; }
+        
         const purchased = await db.hasPurchased(user.id, nextVid.id);
-        if (purchased) { navigate(`/watch/${nextVid.id}${contextSuffix}`); return; }
+        if (purchased) { navigate(`/watch/${nextVid.id}`); return; }
+
         if (Number(nextVid.price) <= Number(user.autoPurchaseLimit) && Number(user.balance) >= Number(nextVid.price)) {
             try {
                 await db.purchaseVideo(user.id, nextVid.id);
-                refreshUser(); navigate(`/watch/${nextVid.id}${contextSuffix}`);
-            } catch (e) { navigate(`/watch/${nextVid.id}${contextSuffix}`); }
+                refreshUser(); navigate(`/watch/${nextVid.id}`);
+            } catch (e) { navigate(`/watch/${nextVid.id}`); }
         } else {
-            navigate(`/watch/${nextVid.id}${contextSuffix}`); 
+            navigate(`/watch/${nextVid.id}`); 
         }
     };
 
     const streamUrl = useMemo(() => {
         if (!video) return '';
-        // Usamos el helper de Streamer en Node.js (Puerto 3001)
-        return db.getStreamerUrl(video.id);
+        const token = localStorage.getItem('sp_session_token') || '';
+        return `api/index.php?action=stream&id=${video.id}&token=${token}&cb=${Date.now()}`;
     }, [video?.id]);
-
-    const searchContextLabel = navigationContext.q || (navigationContext.f ? `Carpeta: ${navigationContext.f.split('/').pop()}` : null);
 
     if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
     return (
         <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in relative">
-            {/* Contenedor de Video Pegajoso - Mejorado para móviles */}
-            <div className="w-full bg-black sticky top-0 z-[45] shadow-2xl border-b border-white/5 overflow-hidden">
-                <div className="relative aspect-video w-full max-w-[1400px] mx-auto bg-black overflow-hidden group">
+            <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-white/5">
+                <div className="relative aspect-video max-w-[1600px] mx-auto bg-black overflow-hidden">
                     {isUnlocked ? (
                         <div className={`relative z-10 w-full h-full flex flex-col items-center justify-center ${video?.is_audio ? 'bg-slate-900/40 backdrop-blur-md' : ''}`}>
                             {video?.is_audio && video?.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') && (
@@ -321,7 +316,7 @@ export default function Watch() {
                     ) : (
                         <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
                             {video && <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover blur-3xl opacity-30 scale-110"/>}
-                            <div className="relative z-10 bg-slate-900/60 backdrop-blur-xl border border-white/10 p-8 rounded-[48px] shadow-2xl flex flex-col items-center text-center max-w-md animate-in zoom-in-95 mx-4">
+                            <div className="relative z-10 bg-slate-900/60 backdrop-blur-xl border border-white/10 p-8 rounded-[48px] shadow-2xl flex flex-col items-center text-center max-w-md animate-in zoom-in-95">
                                 <Lock size={24} className="text-amber-500 mb-4"/>
                                 <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-6">Contenido Premium</h2>
                                 <button onClick={handlePurchase} disabled={isPurchasing} className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-3xl transition-all shadow-xl active:scale-95">
@@ -335,8 +330,8 @@ export default function Watch() {
             </div>
 
             <div className="max-w-7xl mx-auto w-full p-4 lg:p-8 flex flex-col lg:flex-row gap-8">
-                <div className="flex-1 min-w-0">
-                    <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter break-words">{video?.title}</h1>
+                <div className="flex-1">
+                    <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">{video?.title}</h1>
                     <div className="text-[10px] text-slate-500 font-bold uppercase mb-6">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
                     
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-white/5 pb-8 mb-8">
@@ -351,15 +346,15 @@ export default function Watch() {
                             {user?.id !== video?.creatorId && (
                                 <button 
                                     onClick={handleToggleSubscribe}
-                                    className={`ml-2 px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 shrink-0 ${isSubscribed ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-black hover:bg-slate-200 shadow-lg'}`}
+                                    className={`ml-2 px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${isSubscribed ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-black hover:bg-slate-200 shadow-lg'}`}
                                 >
                                     {isSubscribed ? 'Suscrito' : 'Suscribirse'}
                                 </button>
                             )}
                         </div>
 
-                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide max-w-full">
-                            <div className="flex bg-slate-900 rounded-2xl p-1 border border-white/5 shrink-0">
+                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+                            <div className="flex bg-slate-900 rounded-2xl p-1 border border-white/5">
                                 <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.liked ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
                                     <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"} />
                                     <span className="text-xs font-black">{likes}</span>
@@ -371,11 +366,21 @@ export default function Watch() {
                                 </button>
                             </div>
 
-                            <button onClick={() => setShowShareModal(true)} className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95 shrink-0" title="Compartir">
+                            <button onClick={() => setShowShareModal(true)} className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95" title="Compartir">
                                 <Share2 size={18}/>
                             </button>
 
-                            <button onClick={() => setShowComments(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95 shrink-0">
+                            {isUnlocked && (
+                                <button 
+                                    onClick={handleDownloadVideo} 
+                                    className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-emerald-400 transition-all active:scale-95" 
+                                    title="Descargar video"
+                                >
+                                    <Download size={18}/>
+                                </button>
+                            )}
+
+                            <button onClick={() => setShowComments(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95">
                                 <MessageCircle size={18}/>
                                 <span className="text-[10px] font-black uppercase tracking-widest">{comments.length}</span>
                             </button>
@@ -423,45 +428,18 @@ export default function Watch() {
                     </div>
                 </div>
 
-                <div className="lg:w-80 space-y-4 shrink-0 overflow-hidden">
-                    <div className="flex items-center justify-between px-2">
-                        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                            <Play size={12} className="text-indigo-500"/> {searchContextLabel ? 'En esta lista' : 'Recomendados'}
-                        </h3>
-                        {searchContextLabel && (
-                            <Link to="/" className="text-[9px] font-black text-indigo-400 hover:text-white uppercase tracking-tighter flex items-center gap-1">
-                                <X size={10}/> Salir de Contexto
-                            </Link>
-                        )}
-                    </div>
-                    
-                    {searchContextLabel && (
-                        <div className="bg-indigo-600/10 border border-indigo-500/20 p-3 rounded-2xl mb-2">
-                            <div className="flex items-center gap-2 text-indigo-400 font-black text-[9px] uppercase tracking-widest">
-                                <ListFilter size={12}/> Viendo resultados de:
-                            </div>
-                            <div className="text-xs font-bold text-white mt-1 italic line-clamp-1">"{searchContextLabel}"</div>
-                        </div>
-                    )}
-
+                <div className="lg:w-80 space-y-4 shrink-0">
+                    <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-2 flex items-center gap-2">
+                        <Play size={12} className="text-indigo-500"/> Recomendados
+                    </h3>
                     <div className="space-y-4">
-                        {seriesQueue.map((v, idx) => {
-                            if (v.id === id) return null; 
-                            
-                            const isNextInQueue = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === idx;
-                            
-                            const params = new URLSearchParams();
-                            if (navigationContext.q) params.set('q', navigationContext.q);
-                            if (navigationContext.f) params.set('f', navigationContext.f);
-                            if (navigationContext.c !== 'TODOS') params.set('c', navigationContext.c);
-                            params.set('p', String(relatedPage));
-                            const contextSuffix = params.toString() ? `?${params.toString()}` : '';
-                            
+                        {relatedVideos.slice(0, visibleRelated).map((v, idx) => {
+                            const isNextInSeries = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
                             return (
-                                <Link key={v.id} to={`/watch/${v.id}${contextSuffix}`} className={`group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all ${isNextInQueue ? 'bg-indigo-500/[0.03] border border-indigo-500/10' : ''}`}>
+                                <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
                                     <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
                                         <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
-                                        {isNextInQueue && (
+                                        {isNextInSeries && (
                                             <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center animate-in fade-in">
                                                 <div className="flex flex-col items-center">
                                                     <Play size={20} className="text-white fill-current"/>
@@ -479,20 +457,17 @@ export default function Watch() {
                         })}
                     </div>
 
-                    {hasMoreRelated && (
+                    {relatedVideos.length > visibleRelated && (
                         <button 
-                            onClick={() => fetchRelated(relatedPage + 1)}
-                            disabled={loadingMoreRelated}
+                            onClick={() => setVisibleRelated(prev => prev + 12)}
                             className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-3xl border border-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl"
                         >
-                            {loadingMoreRelated ? <Loader2 size={14} className="animate-spin"/> : <ChevronDown size={14}/>} 
-                            {loadingMoreRelated ? 'Buscando...' : 'Cargar más contenido'}
+                            <ChevronDown size={14}/> Cargar más contenido
                         </button>
                     )}
                 </div>
             </div>
 
-            {/* Mobile/Overlay Comments Drawer */}
             {showComments && (
                 <div className="fixed inset-0 z-[100] flex items-end bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
                     <div className="w-full lg:max-w-md lg:absolute lg:right-0 lg:top-0 lg:h-full bg-slate-900 rounded-t-[40px] lg:rounded-none h-[80%] flex flex-col border-t lg:border-t-0 lg:border-l border-white/10 shadow-2xl animate-in slide-in-from-bottom lg:slide-in-from-right duration-500">
@@ -531,7 +506,6 @@ export default function Watch() {
                 </div>
             )}
 
-            {/* Share Modal */}
             {showShareModal && (
                 <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
                     <div className="bg-slate-900 border border-white/10 rounded-[40px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
