@@ -85,13 +85,23 @@ export default function Watch() {
 
                     setSeriesQueue(series);
 
-                    const siblings = series.filter(ov => ov.id !== v.id);
+                    // Encontrar índice del video actual en la serie
+                    const currentIndex = series.findIndex(sv => sv.id === v.id);
+                    
+                    // Videos SIGUIENTES en la serie (desde el actual hacia adelante)
+                    const nextInSeries = series.slice(currentIndex + 1);
+                    
+                    // Videos ANTERIORES en la serie (para "volver a ver")
+                    const previousInSeries = series.slice(0, currentIndex);
+                    
+                    // Contenido de otras carpetas (descubrimiento aleatorio)
                     const others = all.filter(ov => {
                         const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
                         return ovPath !== currentPath;
                     }).sort(() => Math.random() - 0.5);
 
-                    setRelatedVideos([...siblings, ...others]);
+                    // Orden final: Siguientes → Anteriores → Otros
+                    setRelatedVideos([...nextInSeries, ...previousInSeries, ...others]);
                     db.getComments(v.id).then(setComments);
 
                     if (user) {
