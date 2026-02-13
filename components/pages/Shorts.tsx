@@ -6,12 +6,10 @@ import { useAuth } from '../../context/AuthContext';
 import { Link } from '../Router';
 import { useToast } from '../../context/ToastContext';
 
-// Utilidad para obtener la carpeta de un video
 const getVideoFolder = (video: Video): string => {
     return ((video as any).rawPath || video.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
 };
 
-// Sistema de tracking de preferencias del usuario
 const useUserPreferences = (userId: string | undefined) => {
     const STORAGE_KEY = `shorts_prefs_${userId || 'guest'}`;
     
@@ -95,6 +93,7 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare, onWatched, onComplete
   const [likeCount, setLikeCount] = useState(Number(video.likes || 0));
   const [dislikeCount, setDislikeCount] = useState(Number(video.dislikes || 0));
   const [dataLoaded, setDataLoaded] = useState(false);
+  const prevVideoId = useRef(video.id);
 
   useEffect(() => {
     if (!user) return;
@@ -116,15 +115,25 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare, onWatched, onComplete
   }, [user, video.id, video.creatorId, video.creatorRole]);
 
   useEffect(() => {
+    if (prevVideoId.current !== video.id) {
+        prevVideoId.current = video.id;
+        setDataLoaded(false);
+    }
+    
     setLikeCount(Number(video.likes || 0));
     setDislikeCount(Number(video.dislikes || 0));
     
     if (user && isNear && !dataLoaded) {
-      db.getInteraction(user.id, video.id).then(setInteraction);
-      db.getComments(video.id).then(setComments);
-      setDataLoaded(true);
+        Promise.all([
+            db.getInteraction(user.id, video.id),
+            db.getComments(video.id)
+        ]).then(([interact, comms]) => {
+            setInteraction(interact);
+            setComments(comms);
+            setDataLoaded(true);
+        });
     }
-  }, [user, video.id, isNear, video.likes, video.dislikes]);
+  }, [user, video.id, isNear, video.likes, video.dislikes, dataLoaded]);
 
   useEffect(() => {
     const el = videoRef.current; if (!el) return;
@@ -162,16 +171,41 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare, onWatched, onComplete
 
   const handleRate = async (rating: 'like' | 'dislike') => {
     if (!user) return;
+    
+    const wasLiked = interaction?.liked;
+    const wasDisliked = interaction?.disliked;
+    
+    if (rating === 'like') {
+        if (!wasLiked) {
+            setLikeCount(prev => prev + 1);
+            if (wasDisliked) setDislikeCount(prev => Math.max(0, prev - 1));
+        } else {
+            setLikeCount(prev => Math.max(0, prev - 1));
+        }
+        setInteraction(prev => ({ ...prev, liked: !wasLiked, disliked: false } as UserInteraction));
+    } else {
+        if (!wasDisliked) {
+            setDislikeCount(prev => prev + 1);
+            if (wasLiked) setLikeCount(prev => Math.max(0, prev - 1));
+        } else {
+            setDislikeCount(prev => Math.max(0, prev - 1));
+        }
+        setInteraction(prev => ({ ...prev, disliked: !wasDisliked, liked: false } as UserInteraction));
+    }
+    
     try {
         const res = await db.rateVideo(user.id, video.id, rating);
         setInteraction(res); 
         if (res.newLikeCount !== undefined) setLikeCount(res.newLikeCount);
         if (res.newDislikeCount !== undefined) setDislikeCount(res.newDislikeCount);
         
-        if (rating === 'like' && !interaction?.liked) {
+        if (rating === 'like' && !wasLiked) {
             onLiked(video);
         }
-    } catch(e) {}
+    } catch(e) {
+        setLikeCount(Number(video.likes || 0));
+        setDislikeCount(Number(video.dislikes || 0));
+    }
   };
 
   const handleScreenTouch = (e: React.MouseEvent) => {
@@ -231,27 +265,27 @@ const ShortItem = ({ video, isActive, isNear, onOpenShare, onWatched, onComplete
       
       <div className="absolute right-2 bottom-24 z-30 flex flex-col items-center gap-5 pb-safe">
         <div className="flex flex-col items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-colors ${interaction?.liked ? 'text-red-500' : 'text-white'}`}>
+          <button onClick={(e) => { e.stopPropagation(); handleRate('like'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-all active:scale-90 ${interaction?.liked ? 'text-red-500 bg-red-500/20' : 'text-white'}`}>
              <Heart size={26} fill={interaction?.liked ? "currentColor" : "white"} fillOpacity={interaction?.liked ? 1 : 0.2} />
           </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{likeCount}</span>
         </div>
 
         <div className="flex flex-col items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); handleRate('dislike'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-colors ${interaction?.disliked ? 'text-red-500' : 'text-white'}`}>
+          <button onClick={(e) => { e.stopPropagation(); handleRate('dislike'); }} className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 transition-all active:scale-90 ${interaction?.disliked ? 'text-blue-400 bg-blue-500/20' : 'text-white'}`}>
              <ThumbsDown size={26} fill={interaction?.disliked ? "currentColor" : "white"} fillOpacity={interaction?.disliked ? 1 : 0.2} />
           </button>
-          <span className="text-[10px] font-black text-white drop-shadow-md">{dislikeCount > 0 ? dislikeCount : 'NO'}</span>
+          <span className="text-[10px] font-black text-white drop-shadow-md">{dislikeCount}</span>
         </div>
 
         <div className="flex flex-col items-center gap-1">
-          <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+          <button onClick={(e) => { e.stopPropagation(); setShowComments(true); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white transition-all active:scale-90">
              <MessageCircle size={26} fill="white" fillOpacity={0.2} />
           </button>
           <span className="text-[10px] font-black text-white drop-shadow-md">{comments.length}</span>
         </div>
 
-        <button onClick={(e) => { e.stopPropagation(); onOpenShare(video); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white">
+        <button onClick={(e) => { e.stopPropagation(); onOpenShare(video); }} className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md bg-black/40 text-white transition-all active:scale-90">
             <Share2 size={26} fill="white" fillOpacity={0.2} />
         </button>
       </div>
@@ -316,9 +350,22 @@ export default function Shorts() {
   
   const { getPrefs, markWatched, markCompleted, markLiked } = useUserPreferences(user?.id);
   
+  const sessionSeed = useMemo(() => Math.random(), []);
+  
   const sortVideosByRelevance = useCallback((allVideos: Video[]): Video[] => {
     const prefs = getPrefs();
     const { watchedIds, likedFolders, completedFolders, likedCreators } = prefs;
+    
+    const getVideoRandomness = (videoId: string): number => {
+        let hash = 0;
+        const combined = videoId + sessionSeed.toString();
+        for (let i = 0; i < combined.length; i++) {
+            const char = combined.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return (Math.abs(hash) % 1000) / 1000;
+    };
     
     const scoredVideos = allVideos.map(video => {
         let score = 0;
@@ -326,7 +373,7 @@ export default function Shorts() {
         
         const wasWatched = watchedIds.includes(video.id);
         if (wasWatched) {
-            score -= 100;
+            score -= 50;
         }
         
         if (folder && completedFolders[folder]) {
@@ -344,18 +391,19 @@ export default function Shorts() {
         const likes = Number(video.likes || 0);
         const views = Number(video.views || 1);
         const engagementRatio = likes / views;
-        score += engagementRatio * 50;
+        score += engagementRatio * 30;
         
-        score += Math.min(likes * 0.5, 30);
+        score += Math.min(likes * 0.3, 20);
         
         const ageInDays = (Date.now() / 1000 - video.createdAt) / 86400;
         if (ageInDays < 7) {
             score += (7 - ageInDays) * 2;
         }
         
-        score += (Math.random() - 0.5) * (Math.abs(score) * 0.2);
+        const randomBase = getVideoRandomness(video.id) * 40;
+        score += randomBase;
         
-        return { video, score, wasWatched };
+        return { video, score, wasWatched, randomBase };
     });
     
     scoredVideos.sort((a, b) => b.score - a.score);
@@ -364,16 +412,21 @@ export default function Shorts() {
     const notWatched = scoredVideos.filter(s => !s.wasWatched);
     const watched = scoredVideos.filter(s => s.wasWatched);
     
-    result.push(...notWatched.map(s => s.video));
+    const chunkSize = 5;
+    for (let i = 0; i < notWatched.length; i += chunkSize) {
+        const chunk = notWatched.slice(i, i + chunkSize);
+        chunk.sort(() => sessionSeed - 0.5 + (Math.random() - 0.5) * 0.3);
+        result.push(...chunk.map(s => s.video));
+    }
     
     const rewatchCandidates = watched
-        .sort((a, b) => b.score - a.score)
+        .sort(() => sessionSeed - 0.5)
         .slice(0, Math.ceil(watched.length * 0.3))
         .map(s => s.video);
     result.push(...rewatchCandidates);
     
     return result;
-  }, [getPrefs]);
+  }, [getPrefs, sessionSeed]);
   
   useEffect(() => {
     db.getAllVideos().then((all: Video[]) => {
