@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, X, Send, Loader2, Bot, MessageSquare, ArrowDown } from 'lucide-react';
 import { aiService } from '../services/ai';
