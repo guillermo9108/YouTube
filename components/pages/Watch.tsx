@@ -1,570 +1,150 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Video, Comment, UserInteraction, Category } from '../../types';
-import { db } from '../../services/db';
-import { useAuth } from '../../context/AuthContext';
-import { useParams, Link, useNavigate } from '../Router';
-import { 
-    Loader2, Heart, ThumbsDown, MessageCircle, Lock, 
-    ChevronRight, Home, Play, Info, ExternalLink, AlertTriangle, Send, CheckCircle2, Clock, Share2, X, Search, UserCheck, PlusCircle, ArrowRightCircle, Wallet, ShoppingCart, Music, ChevronDown, Bell, BellOff, Download
-} from 'lucide-react';
-import VideoCard from '../VideoCard';
-import { useToast } from '../../context/ToastContext';
-import { useGrid } from '../../context/GridContext';
-import { generateThumbnail } from '../../utils/videoGenerator';
+import React, { useState, useRef, useEffect } from 'react';
+import { Sparkles, X, Send, Loader2, Bot, MessageSquare, ArrowDown } from 'lucide-react';
+import { aiService } from '../services/ai';
+import { Video } from '../types';
 
-const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+interface Message {
+    role: 'user' | 'model';
+    text: string;
+    timestamp: number;
+}
 
-export default function Watch() {
-    const { id } = useParams();
-    const { user, refreshUser } = useAuth();
-    const { setThrottled } = useGrid();
-    const navigate = useNavigate();
-    const toast = useToast();
-    
-    const [video, setVideo] = useState<Video | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [isUnlocked, setIsUnlocked] = useState(false);
-    const [isPurchasing, setIsPurchasing] = useState(false);
-    const [interaction, setInteraction] = useState<UserInteraction | null>(null);
-    const [relatedVideos, setRelatedVideos] = useState<Video[]>([]);
-    const [seriesQueue, setSeriesQueue] = useState<Video[]>([]);
-    const [visibleRelated, setVisibleRelated] = useState(12);
-    
-    const [likes, setLikes] = useState<number>(0);
-    const [dislikes, setDislikes] = useState<number>(0);
-    const [comments, setComments] = useState<Comment[]>([]);
-    const [showComments, setShowComments] = useState(false); 
-    const [newComment, setNewComment] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [isSubscribed, setIsSubscribed] = useState(false);
+export default function AIConcierge({ videos, isVisible }: { videos: Video[], isVisible: boolean }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [messages, setMessages] = useState<Message[]>([
+        { 
+            role: 'model', 
+            text: '¡Bienvenido a StreamPay! Soy su conserje personal. ¿En qué puedo asistirle hoy? Puedo recomendarle los mejores estrenos del catálogo.',
+            timestamp: Date.now()
+        }
+    ]);
+    const [input, setInput] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const scrollRef = useRef<HTMLDivElement>(null);
 
-    const [extractionAttempted, setExtractionAttempted] = useState(false);
-
-    const [showShareModal, setShowShareModal] = useState(false);
-    const [shareSearch, setShareSearch] = useState('');
-    const [shareSuggestions, setShareSuggestions] = useState<any[]>([]);
-    const shareTimeout = useRef<any>(null);
-
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const viewMarkedRef = useRef(false);
-
-    useEffect(() => { 
-        window.scrollTo(0, 0); 
-        refreshUser(); 
-        viewMarkedRef.current = false;
-        setThrottled(true);
-        setVisibleRelated(12);
-        setShowComments(false);
-        setExtractionAttempted(false); 
-        return () => { setThrottled(false); };
-    }, [id]);
-
+    // Auto-scroll al recibir mensajes
     useEffect(() => {
-        if (!id) return;
-        setLoading(true);
-        
-        const fetchData = async () => {
-            try {
-                const [v, settings, all] = await Promise.all([
-                    db.getVideo(id),
-                    db.getSystemSettings(),
-                    db.getAllVideos()
-                ]);
+        if (scrollRef.current) {
+            scrollRef.current.scrollTo({
+                top: scrollRef.current.scrollHeight,
+                behavior: 'smooth'
+            });
+        }
+    }, [messages, isLoading]);
 
-                if (v) {
-                    setVideo(v); 
-                    setLikes(Number(v.likes || 0));
-                    setDislikes(Number(v.dislikes || 0));
+    // Early return DESPUÉS de los hooks (regla de React)
+    if (!isVisible) return null;
 
-                    const currentPath = ((v as any).rawPath || v.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                    
-                    const series = all.filter(ov => {
-                        const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                        return ovPath === currentPath;
-                    }).sort((a, b) => naturalCollator.compare(a.title, b.title));
-
-                    setSeriesQueue(series);
-
-                    // Encontrar índice del video actual en la serie
-                    const currentIndex = series.findIndex(sv => sv.id === v.id);
-                    
-                    // Videos SIGUIENTES en la serie (desde el actual hacia adelante)
-                    const nextInSeries = series.slice(currentIndex + 1);
-                    
-                    // Videos ANTERIORES en la serie (para "volver a ver")
-                    const previousInSeries = series.slice(0, currentIndex);
-                    
-                    // Contenido de otras carpetas (descubrimiento aleatorio)
-                    const others = all.filter(ov => {
-                        const ovPath = ((ov as any).rawPath || ov.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                        return ovPath !== currentPath;
-                    }).sort(() => Math.random() - 0.5);
-
-                    // Orden final: Siguientes → Anteriores → Otros
-                    setRelatedVideos([...nextInSeries, ...previousInSeries, ...others]);
-                    db.getComments(v.id).then(setComments);
-
-                    if (user) {
-                        const [access, interact, sub] = await Promise.all([
-                            db.hasPurchased(user.id, v.id),
-                            db.getInteraction(user.id, v.id),
-                            db.checkSubscription(user.id, v.creatorId)
-                        ]);
-                        const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-                        const isVipActive = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-                        setIsUnlocked(Boolean(access || isAdmin || (isVipActive && v.creatorRole === 'ADMIN') || user.id === v.creatorId));
-                        setInteraction(interact);
-                        setIsSubscribed(sub);
-                    }
-                }
-            } catch (e) {} finally { setLoading(false); }
-        };
-        fetchData();
-    }, [id, user?.id]);
-
-    const handleRate = async (type: 'like' | 'dislike') => {
-        if (!user || !video) return;
-        try {
-            const res = await db.rateVideo(user.id, video.id, type);
-            setInteraction(res);
-            if (res.newLikeCount !== undefined) setLikes(res.newLikeCount);
-            if (res.newDislikeCount !== undefined) setDislikes(res.newDislikeCount);
-        } catch(e) {}
-    };
-
-    const handleAddComment = async (e: React.FormEvent) => {
+    const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!user || !video || !newComment.trim() || isSubmitting) return;
-        setIsSubmitting(true);
+        if (!input.trim() || isLoading) return;
+
+        const userMsg = input.trim();
+        setInput('');
+        setMessages(prev => [...prev, { role: 'user', text: userMsg, timestamp: Date.now() }]);
+        setIsLoading(true);
+
         try {
-            const c = await db.addComment(user.id, video.id, newComment.trim());
-            setComments(prev => [c, ...prev]);
-            setNewComment('');
-            toast.success("Comentario publicado");
-        } catch(e) { toast.error("Error al comentar"); }
-        finally { setIsSubmitting(false); }
-    };
-
-    const handleToggleSubscribe = async () => {
-        if (!user || !video) return;
-        try {
-            const res = await db.toggleSubscribe(user.id, video.creatorId);
-            setIsSubscribed(res.isSubscribed);
-            toast.success(res.isSubscribed ? "Suscrito al canal" : "Suscripción cancelada");
-        } catch(e) {}
-    };
-
-    const handleShareSearch = (val: string) => {
-        setShareSearch(val);
-        if (shareTimeout.current) clearTimeout(shareTimeout.current);
-        if (val.length < 2) { setShareSuggestions([]); return; }
-        shareTimeout.current = setTimeout(async () => {
-            if (!user) return;
-            const hits = await db.searchUsers(user.id, val);
-            setShareSuggestions(hits);
-        }, 300);
-    };
-
-    const sendVideoToUser = async (targetUsername: string) => {
-        if (!user || !video) return;
-        try {
-            await db.request(`action=share_video`, {
-                method: 'POST',
-                body: JSON.stringify({ videoId: video.id, senderId: user.id, targetUsername })
-            });
-            toast.success(`Video enviado a @${targetUsername}`);
-            setShowShareModal(false);
-            setShareSearch('');
-            setShareSuggestions([]);
-        } catch (e: any) { toast.error(e.message); }
-    };
-
-    const handlePurchase = async () => {
-        if (!user || !video || isPurchasing) return;
-        if (Number(user.balance) < Number(video.price)) { toast.error("Saldo insuficiente"); navigate('/vip'); return; }
-        setIsPurchasing(true);
-        try {
-            await db.purchaseVideo(user.id, video.id);
-            setIsUnlocked(true); toast.success("¡Desbloqueado!"); refreshUser();
-        } catch (e: any) { toast.error(e.message); } finally { setIsPurchasing(false); }
-    };
-
-    const handleDownloadVideo = () => {
-        if (!video || !isUnlocked) return;
-        
-        const filename = `${video.title.replace(/[^a-zA-Z0-9\s]/g, '').trim()}.mp4`;
-        
-        const baseUrl = window.location.origin;
-        const downloadUrl = `${baseUrl}/${streamUrl}`;
-        
-        if ((window as any).ReactNativeWebView) {
-            (window as any).ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'download',
-                url: downloadUrl,
-                filename: filename
-            }));
-            toast.success("Descarga iniciada en la app");
-        } else {
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.download = filename;
-            link.target = '_blank';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            toast.success("Descarga iniciada");
+            const response = await aiService.chatWithConcierge(userMsg, videos);
+            setMessages(prev => [...prev, { role: 'model', text: response, timestamp: Date.now() }]);
+        } catch (e) {
+            setMessages(prev => [...prev, { role: 'model', text: "Mis disculpas, he perdido la conexión con el servidor central.", timestamp: Date.now() }]);
+        } finally {
+            setIsLoading(false);
         }
     };
-
-    const handleTimeUpdate = async () => {
-        const el = videoRef.current;
-        if (!el || !video || extractionAttempted || !isUnlocked) return;
-
-        const isDefault = video.thumbnailUrl.includes('default.jpg') || video.thumbnailUrl.includes('defaultaudio.jpg');
-        if (!isDefault) return;
-
-        if (!video.is_audio && el.currentTime > 2 && el.videoWidth > 0) {
-            setExtractionAttempted(true);
-            try {
-                const canvas = document.createElement('canvas');
-                canvas.width = el.videoWidth;
-                canvas.height = el.videoHeight;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                    ctx.drawImage(el, 0, 0);
-                    canvas.toBlob(async (blob) => {
-                        if (blob) {
-                            const file = new File([blob], "thumb_auto.jpg", { type: "image/jpeg" });
-                            await db.updateVideoMetadata(video.id, Math.floor(el.duration), file);
-                            setVideo(prev => prev ? { ...prev, thumbnailUrl: URL.createObjectURL(blob) } : null);
-                        }
-                    }, 'image/jpeg', 0.8);
-                }
-            } catch (e) { console.warn("Lazy extraction failed for video", e); }
-        }
-        
-        if (video.is_audio && el.currentTime > 0.5) {
-            setExtractionAttempted(true);
-            try {
-                const result = await generateThumbnail(streamUrl, true, false); 
-                if (result.thumbnail) {
-                    await db.updateVideoMetadata(video.id, Math.floor(el.duration || video.duration), result.thumbnail);
-                    setVideo(prev => prev ? { ...prev, thumbnailUrl: URL.createObjectURL(result.thumbnail!) } : null);
-                }
-            } catch (e) { console.warn("Lazy extraction failed for audio", e); }
-        }
-    };
-
-    const handleVideoEnded = async () => {
-        if (!video || !user) return;
-
-        const currentIndex = seriesQueue.findIndex(v => v.id === video.id);
-        
-        let nextVid = seriesQueue[currentIndex + 1];
-
-        if (!nextVid && relatedVideos.length > 0) {
-            const externalVids = relatedVideos.filter(rv => {
-                const rvPath = ((rv as any).rawPath || rv.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                const curPath = ((video as any).rawPath || video.videoUrl || '').split(/[\\/]/).slice(0, -1).join('/');
-                return rvPath !== curPath;
-            });
-            nextVid = externalVids[0];
-        }
-
-        if (!nextVid) return;
-
-        const isAdmin = user.role?.trim().toUpperCase() === 'ADMIN';
-        const isVip = !!(user.vipExpiry && user.vipExpiry > Date.now() / 1000);
-        const hasAccess = isAdmin || (isVip && nextVid.creatorRole === 'ADMIN') || user.id === nextVid.creatorId;
-
-        if (hasAccess) { navigate(`/watch/${nextVid.id}`); return; }
-        
-        const purchased = await db.hasPurchased(user.id, nextVid.id);
-        if (purchased) { navigate(`/watch/${nextVid.id}`); return; }
-
-        if (Number(nextVid.price) <= Number(user.autoPurchaseLimit) && Number(user.balance) >= Number(nextVid.price)) {
-            try {
-                await db.purchaseVideo(user.id, nextVid.id);
-                refreshUser(); navigate(`/watch/${nextVid.id}`);
-            } catch (e) { navigate(`/watch/${nextVid.id}`); }
-        } else {
-            navigate(`/watch/${nextVid.id}`); 
-        }
-    };
-
-    const streamUrl = useMemo(() => {
-        if (!video) return '';
-        const token = localStorage.getItem('sp_session_token') || '';
-        return `api/index.php?action=stream&id=${video.id}&token=${token}&cb=${Date.now()}`;
-    }, [video?.id]);
-
-    if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-indigo-500" size={48}/></div>;
 
     return (
-        <div className="flex flex-col bg-slate-950 min-h-screen animate-in fade-in relative">
-            <div className="w-full bg-black sticky top-0 md:top-[74px] z-40 shadow-2xl border-b border-white/5">
-                <div className="relative aspect-video max-w-[1600px] mx-auto bg-black overflow-hidden">
-                    {isUnlocked ? (
-                        <div className={`relative z-10 w-full h-full flex flex-col items-center justify-center ${video?.is_audio ? 'bg-slate-900/40 backdrop-blur-md' : ''}`}>
-                            {video?.is_audio && video?.thumbnailUrl && !video.thumbnailUrl.includes('default.jpg') && (
-                                <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover blur-3xl opacity-30 scale-110" />
-                            )}
-                            <video 
-                                ref={videoRef} 
-                                src={streamUrl} 
-                                controls 
-                                autoPlay 
-                                poster={video?.thumbnailUrl} 
-                                className="w-full h-full object-contain" 
-                                onEnded={handleVideoEnded} 
-                                crossOrigin="anonymous" 
-                                onPlay={() => setThrottled(true)} 
-                                onPause={() => setThrottled(false)}
-                                onTimeUpdate={handleTimeUpdate}
-                            />
-                        </div>
-                    ) : (
-                        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
-                            {video && <img src={video.thumbnailUrl} className="absolute inset-0 w-full h-full object-cover blur-3xl opacity-30 scale-110"/>}
-                            <div className="relative z-10 bg-slate-900/60 backdrop-blur-xl border border-white/10 p-8 rounded-[48px] shadow-2xl flex flex-col items-center text-center max-w-md animate-in zoom-in-95">
-                                <Lock size={24} className="text-amber-500 mb-4"/>
-                                <h2 className="text-xl font-black text-white uppercase tracking-tighter mb-6">Contenido Premium</h2>
-                                <button onClick={handlePurchase} disabled={isPurchasing} className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-3xl transition-all shadow-xl active:scale-95">
-                                    {isPurchasing ? 'PROCESANDO...' : `DESBLOQUEAR POR ${video?.price} $`}
-                                </button>
-                                <div className="mt-4 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Saldo: {Number(user?.balance || 0).toFixed(2)} $</div>
+        <div className="fixed bottom-24 md:bottom-8 left-4 z-[100] font-sans">
+            {!isOpen ? (
+                <button 
+                    onClick={() => setIsOpen(true)}
+                    className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 text-white shadow-[0_10px_30px_rgba(79,70,229,0.4)] flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-300 group border border-white/20"
+                >
+                    <Sparkles className="group-hover:rotate-12 transition-transform" size={28} />
+                    <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-4 w-4 bg-indigo-500 border-2 border-black"></span>
+                    </span>
+                </button>
+            ) : (
+                <div className="w-[340px] md:w-[400px] h-[550px] bg-slate-900 border border-white/10 rounded-[32px] shadow-[0_20px_60px_rgba(0,0,0,0.6)] flex flex-col overflow-hidden animate-in slide-in-from-bottom-8 fade-in duration-500 backdrop-blur-xl">
+                    {/* Header Premium */}
+                    <div className="p-5 bg-slate-950/80 border-b border-white/5 flex justify-between items-center backdrop-blur-md">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg border border-white/20">
+                                <Bot size={22} className="text-white"/>
                             </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            <div className="max-w-7xl mx-auto w-full p-4 lg:p-8 flex flex-col lg:flex-row gap-8">
-                <div className="flex-1">
-                    <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">{video?.title}</h1>
-                    <div className="text-[10px] text-slate-500 font-bold uppercase mb-6">{video?.views} vistas • {new Date(video!.createdAt * 1000).toLocaleDateString()}</div>
-                    
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-white/5 pb-8 mb-8">
-                        <div className="flex items-center gap-4">
-                            <Link to={`/channel/${video?.creatorId}`} className="w-12 h-12 rounded-2xl bg-slate-800 overflow-hidden shrink-0 border border-white/10">
-                                {video?.creatorAvatarUrl ? <img src={video.creatorAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{video?.creatorName?.[0]}</div>}
-                            </Link>
-                            <div className="min-w-0">
-                                <Link to={`/channel/${video?.creatorId}`} className="font-black text-white hover:text-indigo-400 block truncate">@{video?.creatorName}</Link>
-                                <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Creador Verificado</div>
-                            </div>
-                            {user?.id !== video?.creatorId && (
-                                <button 
-                                    onClick={handleToggleSubscribe}
-                                    className={`ml-2 px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${isSubscribed ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-black hover:bg-slate-200 shadow-lg'}`}
-                                >
-                                    {isSubscribed ? 'Suscrito' : 'Suscribirse'}
-                                </button>
-                            )}
-                        </div>
-
-                        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-                            <div className="flex bg-slate-900 rounded-2xl p-1 border border-white/5">
-                                <button onClick={() => handleRate('like')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.liked ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
-                                    <Heart size={18} fill={interaction?.liked ? "currentColor" : "none"} />
-                                    <span className="text-xs font-black">{likes}</span>
-                                </button>
-                                <div className="w-px h-6 bg-white/5 self-center"></div>
-                                <button onClick={() => handleRate('dislike')} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${interaction?.disliked ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
-                                    <ThumbsDown size={18} fill={interaction?.disliked ? "currentColor" : "none"} />
-                                    <span className="text-xs font-black">{dislikes}</span>
-                                </button>
-                            </div>
-
-                            <button onClick={() => setShowShareModal(true)} className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95" title="Compartir">
-                                <Share2 size={18}/>
-                            </button>
-
-                            {isUnlocked && (
-                                <button 
-                                    onClick={handleDownloadVideo} 
-                                    className="flex items-center justify-center bg-slate-900 border border-white/5 p-3.5 rounded-2xl text-slate-300 hover:text-emerald-400 transition-all active:scale-95" 
-                                    title="Descargar video"
-                                >
-                                    <Download size={18}/>
-                                </button>
-                            )}
-
-                            <button onClick={() => setShowComments(true)} className="flex items-center gap-2 bg-slate-900 border border-white/5 px-5 py-3 rounded-2xl text-slate-300 hover:text-white transition-all active:scale-95">
-                                <MessageCircle size={18}/>
-                                <span className="text-[10px] font-black uppercase tracking-widest">{comments.length}</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    {video?.description && (
-                        <div className="bg-slate-900/50 p-6 rounded-[32px] border border-white/5 text-sm text-slate-300 leading-relaxed whitespace-pre-wrap mb-8">
-                            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Descripción del Contenido</h3>
-                            {video.description}
-                        </div>
-                    )}
-
-                    <div className="hidden lg:block">
-                        <div className="flex items-center gap-3 mb-6">
-                            <MessageCircle size={20} className="text-indigo-400"/>
-                            <h3 className="text-sm font-black text-white uppercase tracking-widest">Conversación ({comments.length})</h3>
-                        </div>
-                        <form onSubmit={handleAddComment} className="flex gap-4 mb-8">
-                            <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
-                                {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center font-black text-white bg-indigo-600">{user?.username?.[0]}</div>}
-                            </div>
-                            <div className="flex-1 flex gap-2">
-                                <input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Escribe un comentario público..." className="flex-1 bg-transparent border-b border-white/10 focus:border-indigo-500 outline-none text-sm text-white py-2 transition-all" />
-                                <button type="submit" disabled={!newComment.trim() || isSubmitting} className="p-3 bg-indigo-600 text-white rounded-2xl disabled:opacity-30 active:scale-90 transition-all shadow-lg"><Send size={18}/></button>
-                            </div>
-                        </form>
-                        <div className="space-y-6">
-                            {comments.map(c => (
-                                <div key={c.id} className="flex gap-4 group">
-                                    <div className="w-10 h-10 rounded-full bg-slate-800 shrink-0 overflow-hidden">
-                                        {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-500">{c.username?.[0]}</div>}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="text-xs font-black text-slate-200">@{c.username}</span>
-                                            <span className="text-[9px] text-slate-600 font-bold uppercase">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
-                                        </div>
-                                        <p className="text-sm text-slate-400 leading-relaxed">{c.text}</p>
-                                    </div>
+                            <div>
+                                <h3 className="text-sm font-black text-white uppercase tracking-widest leading-none">Concierge IA</h3>
+                                <div className="flex items-center gap-1.5 mt-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                    <p className="text-[9px] text-emerald-500 font-black uppercase tracking-tighter">Asistente en vivo</p>
                                 </div>
-                            ))}
-                            {comments.length === 0 && <p className="text-center py-10 text-slate-600 italic text-xs">Sé el primero en comentar...</p>}
+                            </div>
                         </div>
-                    </div>
-                </div>
-
-                <div className="lg:w-80 space-y-4 shrink-0">
-                    <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-2 flex items-center gap-2">
-                        <Play size={12} className="text-indigo-500"/> Recomendados
-                    </h3>
-                    <div className="space-y-4">
-                        {relatedVideos.slice(0, visibleRelated).map((v, idx) => {
-                            const isNextInSeries = seriesQueue.findIndex(sq => sq.id === video?.id) + 1 === seriesQueue.findIndex(sq => sq.id === v.id);
-                            return (
-                                <Link key={v.id} to={`/watch/${v.id}`} className="group flex gap-3 p-2 hover:bg-white/5 rounded-2xl transition-all">
-                                    <div className="w-32 aspect-video bg-slate-900 rounded-xl overflow-hidden relative border border-white/5 shrink-0">
-                                        <img src={v.thumbnailUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" loading="lazy" />
-                                        {isNextInSeries && (
-                                            <div className="absolute inset-0 bg-indigo-600/30 flex items-center justify-center animate-in fade-in">
-                                                <div className="flex flex-col items-center">
-                                                    <Play size={20} className="text-white fill-current"/>
-                                                    <span className="text-[8px] font-black text-white uppercase mt-1">Siguiente</span>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="flex-1 min-w-0 py-1">
-                                        <h4 className="text-[11px] font-black text-white line-clamp-2 uppercase leading-tight group-hover:text-indigo-400 transition-colors">{v.title}</h4>
-                                        <div className="text-[9px] text-slate-500 font-bold uppercase mt-1">@{v.creatorName}</div>
-                                    </div>
-                                </Link>
-                            );
-                        })}
-                    </div>
-
-                    {relatedVideos.length > visibleRelated && (
                         <button 
-                            onClick={() => setVisibleRelated(prev => prev + 12)}
-                            className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-slate-400 font-black text-[10px] uppercase tracking-widest rounded-3xl border border-slate-800 transition-all flex items-center justify-center gap-2 shadow-xl"
+                            onClick={() => setIsOpen(false)} 
+                            className="p-2.5 hover:bg-white/10 rounded-full text-slate-500 hover:text-white transition-all"
                         >
-                            <ChevronDown size={14}/> Cargar más contenido
+                            <X size={20}/>
                         </button>
-                    )}
-                </div>
-            </div>
+                    </div>
 
-            {showComments && (
-                <div className="fixed inset-0 z-[100] flex items-end bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="w-full lg:max-w-md lg:absolute lg:right-0 lg:top-0 lg:h-full bg-slate-900 rounded-t-[40px] lg:rounded-none h-[80%] flex flex-col border-t lg:border-t-0 lg:border-l border-white/10 shadow-2xl animate-in slide-in-from-bottom lg:slide-in-from-right duration-500">
-                        <div className="p-6 border-b border-white/5 flex justify-between items-center bg-slate-950/50">
-                            <div>
-                                <h3 className="font-black text-white uppercase text-xs tracking-widest flex items-center gap-2"><MessageCircle size={14}/> Comentarios</h3>
-                                <p className="text-[9px] text-indigo-400 font-bold uppercase mt-0.5">{comments.length} Mensajes</p>
-                            </div>
-                            <button onClick={() => setShowComments(false)} className="text-slate-400 bg-slate-800 p-2.5 rounded-2xl hover:text-white transition-all"><X size={20} /></button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-                            {comments.map(c => (
-                                <div key={c.id} className="flex gap-4 animate-in fade-in slide-in-from-bottom-2">
-                                    <div className="w-10 h-10 rounded-2xl bg-slate-800 shrink-0 border border-white/5 overflow-hidden">
-                                        {c.userAvatarUrl ? <img src={c.userAvatarUrl} className="w-full h-full object-cover"/> : <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-400">{c.username?.[0]}</div>}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-baseline justify-between gap-2 mb-1">
-                                            <span className="text-xs font-black text-slate-200">@{c.username}</span>
-                                            <span className="text-[8px] text-slate-600 uppercase font-bold">{new Date(c.timestamp * 1000).toLocaleDateString()}</span>
-                                        </div>
-                                        <p className="text-sm text-slate-400 leading-snug">{c.text}</p>
+                    {/* Chat Body */}
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-gradient-to-b from-slate-900/50 to-slate-950/50">
+                        {messages.map((m, i) => (
+                            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
+                                <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-[13px] leading-relaxed shadow-sm ${
+                                    m.role === 'user' 
+                                    ? 'bg-indigo-600 text-white rounded-tr-none' 
+                                    : 'bg-slate-800 text-slate-200 border border-white/5 rounded-tl-none'
+                                }`}>
+                                    {m.text}
+                                    <div className={`text-[8px] mt-1.5 opacity-40 font-bold uppercase ${m.role === 'user' ? 'text-right' : 'text-left'}`}>
+                                        {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </div>
                                 </div>
-                            ))}
-                            {comments.length === 0 && <p className="text-center py-20 text-slate-600 italic uppercase text-[9px] font-bold tracking-widest">Sin comentarios aún</p>}
-                        </div>
-                        <form onSubmit={handleAddComment} className="p-6 bg-slate-950 border-t border-white/5 flex gap-3 pb-safe">
-                            <input type="text" value={newComment} onChange={e => setNewComment(e.target.value)} className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-3.5 text-sm text-white focus:outline-none focus:border-indigo-500 transition-all shadow-inner" placeholder="Escribe un comentario..." />
-                            <button type="submit" disabled={!newComment.trim() || isSubmitting} className="bg-indigo-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center disabled:opacity-30 shadow-xl active:scale-90 transition-all">
-                                {isSubmitting ? <Loader2 className="animate-spin" size={18}/> : <Send size={20} />}
-                            </button>
-                        </form>
-                    </div>
-                    <div className="hidden lg:block flex-1" onClick={() => setShowComments(false)}></div>
-                </div>
-            )}
-
-            {showShareModal && (
-                <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-                    <div className="bg-slate-900 border border-white/10 rounded-[40px] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
-                        <div className="p-8 bg-slate-950 border-b border-white/5 flex justify-between items-center">
-                            <div>
-                                <h3 className="font-black text-white uppercase tracking-widest text-sm flex items-center gap-2"><Share2 size={18} className="text-indigo-400"/> Compartir Video</h3>
-                                <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">Recomendar a un amigo</p>
                             </div>
-                            <button onClick={() => { setShowShareModal(false); setShareSearch(''); setShareSuggestions([]); }} className="p-2.5 bg-slate-800 text-slate-500 hover:text-white rounded-2xl transition-all"><X/></button>
-                        </div>
-                        <div className="p-8 space-y-6">
-                            <div className="relative">
-                                <Search className="absolute left-4 top-4 text-slate-500" size={18}/>
-                                <input 
-                                    type="text" value={shareSearch} onChange={e => handleShareSearch(e.target.value)}
-                                    placeholder="Buscar por @nombre_usuario..."
-                                    className="w-full bg-slate-950 border border-white/5 rounded-[24px] pl-12 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all shadow-inner font-bold"
-                                />
-                            </div>
-                            
-                            <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-2">
-                                {shareSuggestions.map(s => (
-                                    <button 
-                                        key={s.username} 
-                                        onClick={() => sendVideoToUser(s.username)}
-                                        className="w-full p-4 flex items-center gap-4 hover:bg-indigo-600 rounded-[24px] transition-all group active:scale-95"
-                                    >
-                                        <div className="w-12 h-12 rounded-2xl overflow-hidden bg-slate-800 shrink-0 border border-white/5 shadow-lg">
-                                            {s.avatarUrl ? <img src={s.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-black text-white bg-slate-700">{s.username?.[0]}</div>}
-                                        </div>
-                                        <div className="text-left flex-1 min-w-0">
-                                            <span className="text-sm font-black text-white group-hover:text-white block truncate">@{s.username}</span>
-                                            <span className="text-[9px] text-slate-500 group-hover:text-indigo-200 uppercase font-black tracking-widest">Enviar instantáneo</span>
-                                        </div>
-                                        <ArrowRightCircle size={20} className="text-white opacity-0 group-hover:opacity-100 transition-opacity"/>
-                                    </button>
-                                ))}
-                                {shareSearch.length >= 2 && shareSuggestions.length === 0 && (
-                                    <p className="text-center py-10 text-slate-600 font-bold uppercase text-[9px] tracking-widest">No se encontraron usuarios</p>
-                                )}
-                                {shareSearch.length < 2 && (
-                                    <div className="flex flex-col items-center justify-center py-10 text-slate-700">
-                                        <Search size={40} className="mb-3 opacity-20"/>
-                                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-center">Escribe el nombre del destinatario</p>
+                        ))}
+                        
+                        {isLoading && (
+                            <div className="flex justify-start animate-pulse">
+                                <div className="bg-slate-800 px-4 py-3 rounded-2xl rounded-tl-none flex items-center gap-3 border border-white/5 shadow-sm">
+                                    <div className="flex gap-1">
+                                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                                        <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"></div>
                                     </div>
-                                )}
+                                    <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">Consultando catálogo...</span>
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
+
+                    {/* Input Area */}
+                    <form onSubmit={handleSend} className="p-4 bg-slate-950/90 border-t border-white/5 flex gap-3 items-center">
+                        <div className="relative flex-1">
+                            <input 
+                                type="text" 
+                                value={input}
+                                onChange={e => setInput(e.target.value)}
+                                placeholder="¿Qué películas de acción hay?"
+                                className="w-full bg-slate-900 border border-white/10 rounded-2xl px-5 py-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all shadow-inner"
+                                autoComplete="off"
+                            />
+                            {!input && (
+                                <MessageSquare className="absolute right-4 top-3.5 text-slate-700 pointer-events-none" size={16} />
+                            )}
+                        </div>
+                        <button 
+                            type="submit"
+                            disabled={!input.trim() || isLoading}
+                            className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-30 disabled:grayscale transition-all active:scale-90 shadow-[0_5px_15px_rgba(79,70,229,0.3)] hover:bg-indigo-500"
+                        >
+                            <Send size={20} />
+                        </button>
+                    </form>
                 </div>
             )}
         </div>
