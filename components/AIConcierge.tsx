@@ -11,8 +11,6 @@ interface Message {
 }
 
 export default function AIConcierge({ videos, isVisible }: { videos: Video[], isVisible: boolean }) {
-    if (!isVisible) return null;
-
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
         { 
@@ -34,6 +32,9 @@ export default function AIConcierge({ videos, isVisible }: { videos: Video[], is
             });
         }
     }, [messages, isLoading]);
+
+    // Early return DESPUÉS de los hooks (regla de React)
+    if (!isVisible) return null;
 
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
