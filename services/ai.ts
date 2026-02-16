@@ -7,8 +7,9 @@ import { Video } from "../types";
  */
 
 const getAIClient = () => {
-    if (!process.env.API_KEY) return null;
-    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = (import.meta as any).env?.VITE_GEMINI_KEY;
+    if (!apiKey) return null;
+    return new GoogleGenAI({ apiKey });
 };
 
 export const aiService = {
